@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>PELICULA</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 0;
+        }
+
+        /* ── Header / Masthead ─────────────────── */
+        .masthead {
+            background: linear-gradient(180deg, #111 0%, #0a0a0a 100%);
+            border-bottom: 1px solid #1a1a1a;
+            padding: 1.5rem 2rem 1.25rem;
+        }
+        .masthead-inner {
+            max-width: 720px;
+            margin: 0 auto;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: nowrap;
+        }
+        .logo, .logo:visited {
+            text-decoration: none;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-weight: 700;
+            font-size: 2.4rem;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            line-height: 1;
+            color: #fff;
+            font-stretch: condensed;
+            position: relative;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .logo span {
+            display: inline-block;
+        }
+        .logo .accent {
+            color: #c8a2ff;
+        }
+        .logo-sub {
+            font-size: 0.55rem;
+            letter-spacing: 0.5em;
+            text-transform: uppercase;
+            color: #555;
+            margin-top: 0.3rem;
+            font-weight: 400;
+        }
+
+        /* Telemetry strip */
+        .telemetry {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+            padding-bottom: 0.15rem;
+            flex-shrink: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .telem-item {
+            text-align: right;
+        }
+        .telem-label {
+            font-size: 0.6rem;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.1rem;
+        }
+        .telem-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            font-family: "SF Mono", "Menlo", "Consolas", monospace;
+            color: #ccc;
+        }
+        .telem-value.loading { color: #333; }
+        .telem-value.vpn-ok { color: #7dda93; }
+        .telem-value.vpn-err { color: #f87171; }
+
+        /* ── Toast / Alert ─────────────────────── */
+        .toast {
+            padding: 0.65rem 1rem;
+            background: #1a1708;
+            border: 1px solid #3a3210;
+            border-radius: 8px;
+            color: #d4b33a;
+            font-size: 0.82rem;
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+        }
+        .toast.visible { display: flex; }
+        .toast-icon { flex-shrink: 0; }
+        .toast a { color: #d4b33a; }
+
+        /* ── Main content ──────────────────────── */
+        .main {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem 2rem;
+        }
+
+        /* Search */
+        .search-box {
+            margin-bottom: 1.25rem;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 0.85rem 1.25rem;
+            background: #131313;
+            border: 1px solid #222;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .search-box input:focus { border-color: #444; }
+        .search-box input::placeholder { color: #444; }
+        .search-box input:disabled { opacity: 0.4; cursor: not-allowed; }
+        .search-box input:disabled::placeholder { color: #444; }
+        .search-warning {
+            font-size: 0.75rem; margin-top: 0.4rem; padding: 0.4rem 0.7rem;
+            border-radius: 6px; display: none;
+        }
+        .search-warning.warn { display: block; background: #1a1708; border: 1px solid #3a3210; color: #d4b33a; }
+        .search-warning.err { display: block; background: #1a0808; border: 1px solid #3a1010; color: #f87171; }
+        .search-filters {
+            display: none;
+            gap: 0.35rem;
+            margin-top: 0.5rem;
+        }
+        .search-filters.visible { display: flex; }
+        .filter-btn {
+            padding: 0.3rem 0.7rem;
+            background: #131313;
+            border: 1px solid #222;
+            border-radius: 5px;
+            color: #666;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .filter-btn:hover { color: #aaa; border-color: #333; }
+        .filter-btn.active { color: #ccc; border-color: #444; background: #1e1e1e; }
+
+        .search-results { margin-bottom: 1.25rem; display: none; max-height: 60vh; overflow-y: auto; }
+        .search-results.visible { display: block; }
+        .search-results.collapsed .search-result:not(:first-child) { display: none; }
+        .search-results.collapsed { display: block; }
+        .search-show-more {
+            padding: 0.5rem 1rem; background: #131313; border: 1px solid #1e1e1e;
+            border-radius: 8px; color: #666; font-size: 0.8rem; text-align: center;
+            cursor: pointer; transition: all 0.15s;
+        }
+        .search-show-more:hover { color: #aaa; border-color: #333; background: #181818; }
+        .search-show-more .count { color: #888; }
+        .search-result {
+            display: flex;
+            gap: 1rem;
+            padding: 0.85rem 1rem;
+            background: #131313;
+            border: 1px solid #1e1e1e;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            align-items: flex-start;
+        }
+        .search-result img { width: 45px; height: 67px; object-fit: cover; border-radius: 4px; background: #1a1a1a; flex-shrink: 0; }
+        .search-result .no-poster { width: 45px; height: 67px; background: #1a1a1a; border-radius: 4px; flex-shrink: 0; }
+        .search-info { flex: 1; min-width: 0; }
+        .search-title { font-weight: 500; font-size: 0.95rem; }
+        .search-meta { font-size: 0.8rem; color: #666; margin-top: 0.15rem; }
+        .search-overview { font-size: 0.8rem; color: #555; margin-top: 0.3rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .search-add {
+            padding: 0.4rem 0.85rem;
+            background: #1e1e1e;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            color: #ccc;
+            font-size: 0.8rem;
+            cursor: pointer;
+            white-space: nowrap;
+            align-self: center;
+            transition: background 0.15s;
+        }
+        .search-add:hover { background: #282828; }
+        .search-add.added { background: #1a2e1e; border-color: #2a4a30; color: #7dda93; cursor: default; }
+        .search-add:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Downloads */
+        .section { margin-bottom: 1.25rem; }
+        .section-header {
+            font-size: 0.65rem;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+        }
+        .download-item {
+            padding: 0.65rem 1rem;
+            background: #131313;
+            border: 1px solid #1e1e1e;
+            border-radius: 8px;
+            margin-bottom: 0.4rem;
+        }
+        .download-header { display: flex; align-items: center; gap: 0.5rem; }
+        .download-name { font-size: 0.82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+        .download-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+        .dl-btn {
+            width: 24px; height: 24px; border: 1px solid #2a2a2a; border-radius: 4px;
+            background: #1a1a1a; color: #666; font-size: 0.7rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+            padding: 0; line-height: 1;
+        }
+        .dl-btn:hover { border-color: #444; color: #ccc; background: #222; }
+        .dl-btn.pause:hover { color: #f0c060; border-color: #5a4a20; }
+        .dl-btn.resume:hover { color: #7dda93; border-color: #2a4a30; }
+        .dl-btn.cancel:hover { color: #f87171; border-color: #5a2020; }
+        .dl-btn.blocklist:hover { color: #f87171; border-color: #5a2020; }
+        .download-bar-bg { height: 3px; background: #1e1e1e; border-radius: 2px; margin: 0.4rem 0 0.3rem; }
+        .download-bar { height: 100%; border-radius: 2px; transition: width 0.3s; }
+        .download-bar.active { background: #7dda93; }
+        .download-bar.paused { background: #f0c060; }
+        .download-bar.seeding { background: #6db3f2; }
+        .download-meta { font-size: 0.7rem; color: #666; display: flex; justify-content: space-between; }
+        .download-meta .paused-label { color: #f0c060; }
+        .no-items { padding: 0.65rem 1rem; background: #131313; border: 1px solid #1e1e1e; border-radius: 8px; color: #444; font-size: 0.82rem; text-align: center; }
+
+        /* Blocklist modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+            display: flex; align-items: center; justify-content: center; z-index: 100;
+        }
+        .modal-overlay.hidden { display: none; }
+        .modal {
+            background: #131313; border: 1px solid #222; border-radius: 12px;
+            padding: 1.5rem; width: 340px;
+        }
+        .modal h3 { font-weight: 500; margin-bottom: 0.25rem; color: #fff; font-size: 0.95rem; }
+        .modal .modal-sub { font-size: 0.8rem; color: #666; margin-bottom: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .modal label { font-size: 0.8rem; color: #999; display: block; margin-bottom: 0.35rem; }
+        .modal select {
+            width: 100%; padding: 0.6rem 0.75rem; background: #0a0a0a; border: 1px solid #222;
+            border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; outline: none; margin-bottom: 1rem;
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 0l6 6 6-6' fill='%23666'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 0.75rem center;
+        }
+        .modal-buttons { display: flex; gap: 0.5rem; }
+        .modal-buttons button {
+            flex: 1; padding: 0.6rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer; border: 1px solid #2a2a2a;
+        }
+        .modal-btn-cancel { background: #1a1a1a; color: #999; }
+        .modal-btn-cancel:hover { background: #222; color: #ccc; }
+        .modal-btn-confirm { background: #3a1515; color: #f87171; border-color: #5a2020; }
+        .modal-btn-confirm:hover { background: #4a1a1a; }
+
+        /* Services */
+        .services { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+        @media (max-width: 560px) { .services { grid-template-columns: 1fr; } }
+        a.service {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.85rem 1rem;
+            background: #131313;
+            border: 1px solid #1e1e1e;
+            border-radius: 8px;
+            color: #ccc;
+            text-decoration: none;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        a.service:hover { border-color: #333; background: #181818; }
+        .service-left { display: flex; align-items: center; gap: 0.6rem; }
+        .service-name { font-weight: 500; font-size: 0.9rem; }
+        .service-desc { font-size: 0.75rem; color: #555; }
+        .service-arrow { color: #333; font-size: 1rem; }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #222; flex-shrink: 0; transition: background 0.3s; }
+        .status-dot.up { background: #7dda93; }
+        .status-dot.down { background: #f87171; }
+        .status-dot.checking { background: #f87171; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* Login overlay */
+        .login-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100;
+        }
+        .login-overlay.hidden { display: none; }
+        .login-box {
+            background: #131313;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 320px;
+        }
+        .login-box h2 { font-weight: 400; margin-bottom: 1rem; color: #fff; letter-spacing: 0.2em; text-transform: uppercase; font-size: 1.1rem; }
+        .login-box input {
+            width: 100%; padding: 0.75rem 1rem;
+            background: #0a0a0a; border: 1px solid #222; border-radius: 6px;
+            color: #e0e0e0; font-size: 1rem; outline: none; margin-bottom: 1rem;
+        }
+        .login-box button {
+            width: 100%; padding: 0.75rem;
+            background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 6px;
+            color: #ccc; font-size: 1rem; cursor: pointer;
+        }
+        .login-box button:hover { background: #282828; }
+        .login-error { color: #f87171; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
+
+        .footer { margin-top: 1.5rem; text-align: center; font-size: 0.65rem; color: #333; letter-spacing: 0.05em; }
+    </style>
+</head>
+<body>
+    <!-- Login overlay -->
+    <div class="login-overlay hidden" id="login-overlay">
+        <div class="login-box">
+            <h2>Pelicula</h2>
+            <div class="login-error" id="login-error">Invalid password</div>
+            <input type="password" id="login-password" placeholder="Password" autofocus>
+            <button onclick="doLogin()">Log in</button>
+        </div>
+    </div>
+
+    <!-- Blocklist modal -->
+    <div class="modal-overlay hidden" id="blocklist-modal">
+        <div class="modal">
+            <h3>Remove &amp; Blocklist</h3>
+            <div class="modal-sub" id="blocklist-name"></div>
+            <label for="blocklist-reason">Reason</label>
+            <select id="blocklist-reason">
+                <option value="quality">Wrong quality or format</option>
+                <option value="language">Wrong language or subtitles</option>
+                <option value="corrupt">Corrupt or incomplete file</option>
+                <option value="slow">Too slow / no seeders</option>
+                <option value="wrong">Wrong content entirely</option>
+                <option value="other">Other</option>
+            </select>
+            <div class="modal-buttons">
+                <button class="modal-btn-cancel" onclick="closeBlocklistModal()">Cancel</button>
+                <button class="modal-btn-confirm" onclick="confirmBlocklist()">Blocklist</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Masthead -->
+    <div class="masthead">
+        <div class="masthead-inner">
+            <div>
+                <a href="/" class="logo">
+                    <span>P</span><span class="accent">E</span><span>L</span><span>I</span><span>C</span><span>U</span><span>L</span><span>A</span>
+                </a>
+                <div class="logo-sub">Media Acquisition System</div>
+            </div>
+            <div class="telemetry">
+                <div class="telem-item">
+                    <div class="telem-label">VPN</div>
+                    <div class="telem-value loading" id="t-vpn">---</div>
+                </div>
+                <div class="telem-item">
+                    <div class="telem-label">Region</div>
+                    <div class="telem-value loading" id="t-region">---</div>
+                </div>
+                <div class="telem-item">
+                    <div class="telem-label">Port</div>
+                    <div class="telem-value loading" id="t-port">---</div>
+                </div>
+                <div class="telem-item">
+                    <div class="telem-label">DL</div>
+                    <div class="telem-value loading" id="t-dl">---</div>
+                </div>
+                <div class="telem-item">
+                    <div class="telem-label">UL</div>
+                    <div class="telem-value loading" id="t-ul">---</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main -->
+    <div class="main">
+        <!-- Toast -->
+        <div class="toast" id="toast">
+            <span class="toast-icon">&#9888;</span>
+            <span>No indexers configured — you can browse titles, but downloads won't work. <a href="/prowlarr/" target="_blank" rel="noopener">Add indexers in Prowlarr</a></span>
+        </div>
+
+        <!-- Search -->
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="Search movies &amp; TV shows...">
+            <div class="search-warning" id="search-warning"></div>
+            <div class="search-filters" id="search-filters">
+                <button class="filter-btn active" data-type="" onclick="setFilter(this)">All</button>
+                <button class="filter-btn" data-type="movie" onclick="setFilter(this)">Movies</button>
+                <button class="filter-btn" data-type="series" onclick="setFilter(this)">TV Shows</button>
+            </div>
+        </div>
+        <div class="search-results" id="search-results"></div>
+
+        <!-- Downloads -->
+        <div class="section">
+            <div class="section-header">
+                <span>Downloads</span>
+                <span id="dl-stats"></span>
+            </div>
+            <div id="downloads-list">
+                <div class="no-items">No active downloads</div>
+            </div>
+        </div>
+
+        <!-- Services -->
+        <div class="section">
+            <div class="section-header"><span>Services</span></div>
+            <div class="services">
+                <a class="service" target="_blank" rel="noopener" href="/sonarr/" data-check="/sonarr/ping">
+                    <div class="service-left">
+                        <span class="status-dot checking"></span>
+                        <div><div class="service-name">Sonarr</div><div class="service-desc">TV Shows</div></div>
+                    </div>
+                    <span class="service-arrow">&rarr;</span>
+                </a>
+                <a class="service" target="_blank" rel="noopener" href="/radarr/" data-check="/radarr/ping">
+                    <div class="service-left">
+                        <span class="status-dot checking"></span>
+                        <div><div class="service-name">Radarr</div><div class="service-desc">Movies</div></div>
+                    </div>
+                    <span class="service-arrow">&rarr;</span>
+                </a>
+                <a class="service" target="_blank" rel="noopener" href="/prowlarr/" data-check="/prowlarr/ping">
+                    <div class="service-left">
+                        <span class="status-dot checking"></span>
+                        <div><div class="service-name">Prowlarr</div><div class="service-desc">Indexers</div></div>
+                    </div>
+                    <span class="service-arrow">&rarr;</span>
+                </a>
+                <a class="service" target="_blank" rel="noopener" href="/qbt/" data-check="/qbt/">
+                    <div class="service-left">
+                        <span class="status-dot checking"></span>
+                        <div><div class="service-name">qBittorrent</div><div class="service-desc">Downloads</div></div>
+                    </div>
+                    <span class="service-arrow">&rarr;</span>
+                </a>
+                <a class="service" target="_blank" rel="noopener" href="/jellyfin/" data-check="/jellyfin/health">
+                    <div class="service-left">
+                        <span class="status-dot checking"></span>
+                        <div><div class="service-name">Jellyfin</div><div class="service-desc">Media Server</div></div>
+                    </div>
+                    <span class="service-arrow">&rarr;</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="footer" id="footer"></div>
+    </div>
+
+    <script>
+        // ── Auth ──────────────────────────────────
+        async function checkAuth() {
+            try {
+                const res = await fetch('/api/pelicula/auth/check');
+                const data = await res.json();
+                if (data.auth && !data.valid) document.getElementById('login-overlay').classList.remove('hidden');
+            } catch {}
+        }
+        async function doLogin() {
+            const pw = document.getElementById('login-password').value;
+            const errEl = document.getElementById('login-error');
+            try {
+                const res = await fetch('/api/pelicula/auth/login', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({password: pw})
+                });
+                if (res.ok) { document.getElementById('login-overlay').classList.add('hidden'); errEl.style.display = 'none'; refresh(); }
+                else { errEl.style.display = 'block'; }
+            } catch { errEl.style.display = 'block'; }
+        }
+        document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+        // ── Status + Indexer check ────────────────
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/pelicula/status', {});
+                if (!res.ok) return;
+                const data = await res.json();
+                const toast = document.getElementById('toast');
+                if (data.indexers === 0) {
+                    toast.classList.add('visible');
+                } else {
+                    toast.classList.remove('visible');
+                }
+            } catch {}
+        }
+
+        // ── Search ────────────────────────────────
+        let searchTimeout;
+        let searchType = '';
+        let lastResults = [];
+        const searchInput = document.getElementById('search-input');
+        const searchResults = document.getElementById('search-results');
+        const searchFilters = document.getElementById('search-filters');
+
+        function setFilter(btn) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            searchType = btn.dataset.type;
+            const q = searchInput.value.trim();
+            if (q.length >= 2) doSearch(q);
+        }
+
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            const q = searchInput.value.trim();
+            if (q.length < 2) {
+                searchResults.className = 'search-results'; searchResults.innerHTML = '';
+                searchFilters.classList.remove('visible');
+                lastResults = [];
+                return;
+            }
+            searchFilters.classList.add('visible');
+            searchTimeout = setTimeout(() => doSearch(q), 400);
+        });
+        async function doSearch(q) {
+            try {
+                const typeParam = searchType ? '&type=' + searchType : '';
+                const res = await fetch('/api/pelicula/search?q=' + encodeURIComponent(q) + typeParam);
+                const data = await res.json();
+                lastResults = data.results || [];
+                renderResults(lastResults, false);
+            } catch {
+                searchResults.innerHTML = '<div class="no-items">Search unavailable</div>';
+                searchResults.className = 'search-results visible';
+            }
+        }
+        function renderResultCard(r) {
+            const poster = r.poster ? `<img src="${r.poster}" alt="">` : '<div class="no-poster"></div>';
+            const badge = r.type === 'movie' ? 'Movie' : 'Series';
+            const id = r.type === 'movie' ? r.tmdbId : r.tvdbId;
+            const btnClass = r.added ? 'search-add added' : 'search-add';
+            const btnText = r.added ? 'Added' : 'Add';
+            const disabled = r.added ? 'disabled' : '';
+            return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div><button class="${btnClass}" ${disabled} onclick="addMedia('${r.type}', ${id}, this)">${btnText}</button></div>`;
+        }
+        function renderResults(results, collapsed) {
+            if (!results.length) {
+                searchResults.innerHTML = '<div class="no-items">No results found</div>';
+                searchResults.className = 'search-results visible';
+                return;
+            }
+            const items = results.slice(0, 10);
+            let html = items.map(r => renderResultCard(r)).join('');
+            if (collapsed && items.length > 1) {
+                html += `<div class="search-show-more" onclick="expandResults(); event.stopPropagation();">Show <span class="count">${items.length - 1}</span> more result${items.length > 2 ? 's' : ''}</div>`;
+            }
+            searchResults.innerHTML = html;
+            searchResults.className = collapsed ? 'search-results collapsed' : 'search-results visible';
+        }
+        function expandResults() {
+            searchResults.className = 'search-results visible';
+            // Re-render without the "show more" bar
+            if (lastResults.length) renderResults(lastResults, false);
+            searchFilters.classList.add('visible');
+        }
+        async function addMedia(type, id, btn) {
+            btn.disabled = true; btn.textContent = '...';
+            try {
+                const body = type === 'movie' ? {type, tmdbId: id} : {type, tvdbId: id};
+                const res = await fetch('/api/pelicula/search/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+                if (res.ok) { btn.textContent = 'Added'; btn.classList.add('added'); }
+                else { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
+            } catch { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
+        }
+        function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        // Collapse search results on click-away or scroll (show top result + "show more")
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.search-box') && !e.target.closest('.search-results')) {
+                if (searchResults.classList.contains('visible') && lastResults.length > 1) {
+                    renderResults(lastResults, true);
+                    searchFilters.classList.remove('visible');
+                } else if (searchResults.classList.contains('visible')) {
+                    searchResults.className = 'search-results collapsed';
+                }
+            }
+        });
+        let scrollTick = false;
+        window.addEventListener('scroll', () => {
+            if (scrollTick) return;
+            scrollTick = true;
+            requestAnimationFrame(() => {
+                if (searchResults.classList.contains('visible')) {
+                    const box = document.querySelector('.search-box').getBoundingClientRect();
+                    if (box.bottom < 0) {
+                        if (lastResults.length > 1) {
+                            renderResults(lastResults, true);
+                        } else {
+                            searchResults.className = 'search-results collapsed';
+                        }
+                        searchFilters.classList.remove('visible');
+                    }
+                }
+                scrollTick = false;
+            });
+        });
+        // Expand results when focusing search input
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.value.trim().length >= 2 && lastResults.length) {
+                renderResults(lastResults, false);
+                searchFilters.classList.add('visible');
+            }
+        });
+
+        // ── Downloads ─────────────────────────────
+        async function checkDownloads() {
+            try {
+                const res = await fetch('/api/pelicula/downloads', {});
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                renderDownloads(data);
+                // Update telemetry speed
+                var s = data.stats || {};
+                document.getElementById('t-dl').textContent = formatSpeed(s.dlspeed || 0);
+                document.getElementById('t-dl').classList.remove('loading');
+                document.getElementById('t-ul').textContent = formatSpeed(s.upspeed || 0);
+                document.getElementById('t-ul').classList.remove('loading');
+            } catch {}
+        }
+        function renderDownloads(data) {
+            const list = document.getElementById('downloads-list');
+            const statsEl = document.getElementById('dl-stats');
+            if (data.stats) { statsEl.textContent = `${data.stats.active} active / ${data.stats.queued} queued`; }
+            const shown = (data.torrents || []).filter(t => ['downloading','stalledDL','forcedDL','queuedDL','uploading','stalledUP','pausedDL','pausedUP','stoppedDL','stoppedUP','forcedUP'].includes(t.state));
+            if (!shown.length) { list.innerHTML = '<div class="no-items">No active downloads</div>'; return; }
+            list.innerHTML = shown.slice(0, 8).map(t => {
+                const pct = Math.round(t.progress * 100);
+                const speed = formatSpeed(t.dlspeed);
+                const eta = t.eta > 0 ? formatETA(t.eta) : '';
+                const isPaused = ['pausedDL','pausedUP','stoppedDL','stoppedUP'].includes(t.state);
+                const isSeeding = ['uploading','stalledUP','forcedUP','pausedUP','stoppedUP'].includes(t.state);
+                const barClass = isPaused ? 'paused' : isSeeding ? 'seeding' : 'active';
+                const pauseBtn = isPaused
+                    ? `<button class="dl-btn resume" title="Resume" onclick="dlPause('${t.hash}',false)">&#9654;</button>`
+                    : `<button class="dl-btn pause" title="Pause" onclick="dlPause('${t.hash}',true)">&#9646;&#9646;</button>`;
+                const statusText = isPaused ? '<span class="paused-label">paused</span>' : `${speed}${eta ? ' &middot; ' + eta : ''}`;
+                return `<div class="download-item"><div class="download-header"><div class="download-name">${esc(t.name)}</div><div class="download-actions">${pauseBtn}<button class="dl-btn cancel" title="Cancel download" onclick="dlCancel('${t.hash}','${t.category}','${esc(t.name)}',false)">&#10005;</button><button class="dl-btn blocklist" title="Remove &amp; blocklist" onclick="openBlocklistModal('${t.hash}','${t.category}','${esc(t.name)}')">&#8856;</button></div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${pct}% of ${formatSize(t.size)}</span><span>${statusText}</span></div></div>`;
+            }).join('');
+        }
+
+        // Download actions
+        async function dlPause(hash, paused) {
+            try {
+                await fetch('/api/pelicula/downloads/pause', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({hash, paused})
+                });
+                setTimeout(checkDownloads, 500);
+            } catch {}
+        }
+        async function dlCancel(hash, category, name, blocklist, reason) {
+            if (!blocklist && !confirm('Cancel download and unmonitor?\n\n' + name)) return;
+            try {
+                await fetch('/api/pelicula/downloads/cancel', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({hash, category, blocklist, reason: reason || ''})
+                });
+                setTimeout(checkDownloads, 500);
+            } catch {}
+        }
+
+        // Blocklist modal
+        let blocklistState = {};
+        function openBlocklistModal(hash, category, name) {
+            blocklistState = {hash, category, name};
+            document.getElementById('blocklist-name').textContent = name;
+            document.getElementById('blocklist-reason').value = 'quality';
+            document.getElementById('blocklist-modal').classList.remove('hidden');
+        }
+        function closeBlocklistModal() {
+            document.getElementById('blocklist-modal').classList.add('hidden');
+            blocklistState = {};
+        }
+        function confirmBlocklist() {
+            const reason = document.getElementById('blocklist-reason').value;
+            closeBlocklistModal();
+            dlCancel(blocklistState.hash, blocklistState.category, blocklistState.name, true, reason);
+        }
+        function formatSpeed(bps) { if (bps > 1048576) return (bps/1048576).toFixed(1)+' MB/s'; if (bps > 1024) return (bps/1024).toFixed(0)+' KB/s'; if (bps > 0) return bps+' B/s'; return 'idle'; }
+        function formatSize(b) { if (b > 1073741824) return (b/1073741824).toFixed(1)+' GB'; if (b > 1048576) return (b/1048576).toFixed(0)+' MB'; return (b/1024).toFixed(0)+' KB'; }
+        function formatETA(s) { if (s > 86400) return Math.floor(s/86400)+'d'; if (s > 3600) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m'; if (s > 60) return Math.floor(s/60)+'m'; return s+'s'; }
+
+        // ── Services ──────────────────────────────
+        async function checkServices() {
+            const warn = document.getElementById('search-warning');
+            try {
+                const res = await fetch('/api/pelicula/status', {});
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                const svcMap = data.services || {};
+                document.querySelectorAll('.service').forEach(el => {
+                    const dot = el.querySelector('.status-dot');
+                    const href = el.getAttribute('href');
+                    let name = '';
+                    if (href.includes('sonarr')) name = 'sonarr';
+                    else if (href.includes('radarr')) name = 'radarr';
+                    else if (href.includes('prowlarr')) name = 'prowlarr';
+                    else if (href.includes('qbt')) name = 'qbittorrent';
+                    else if (href.includes('jellyfin')) name = 'jellyfin';
+                    dot.className = 'status-dot ' + (svcMap[name] === 'up' ? 'up' : 'down');
+                });
+                // Search depends on Radarr + Sonarr
+                const radarrUp = svcMap['radarr'] === 'up';
+                const sonarrUp = svcMap['sonarr'] === 'up';
+                if (!radarrUp && !sonarrUp) {
+                    searchInput.disabled = true;
+                    searchInput.placeholder = 'Search unavailable';
+                    warn.textContent = 'Radarr and Sonarr are both down — search is disabled';
+                    warn.className = 'search-warning err';
+                } else if (!radarrUp || !sonarrUp) {
+                    searchInput.disabled = false;
+                    searchInput.placeholder = 'Search movies & TV shows...';
+                    const down = !radarrUp ? 'Radarr (movies)' : 'Sonarr (TV shows)';
+                    warn.textContent = down + ' is down — some results may be missing';
+                    warn.className = 'search-warning warn';
+                } else {
+                    searchInput.disabled = false;
+                    searchInput.placeholder = 'Search movies & TV shows...';
+                    warn.className = 'search-warning';
+                }
+            } catch {
+                document.querySelectorAll('.status-dot').forEach(d => d.className = 'status-dot down');
+                searchInput.disabled = true;
+                searchInput.placeholder = 'Search unavailable';
+                warn.textContent = 'Cannot reach services — search is disabled';
+                warn.className = 'search-warning err';
+            }
+        }
+
+        // ── VPN Telemetry ─────────────────────────
+        async function checkVPN() {
+            const vpnEl = document.getElementById('t-vpn');
+            const regionEl = document.getElementById('t-region');
+            const portEl = document.getElementById('t-port');
+            try {
+                const [ipRes, portRes] = await Promise.all([
+                    fetch('/api/vpn/v1/publicip/ip', {}),
+                    fetch('/api/vpn/v1/portforward', {})
+                ]);
+                if (ipRes.ok) {
+                    const data = await ipRes.json();
+                    vpnEl.textContent = data.public_ip || '?';
+                    vpnEl.className = 'telem-value vpn-ok';
+                    regionEl.textContent = data.country || '?';
+                    regionEl.classList.remove('loading');
+                }
+                if (portRes.ok) {
+                    const pd = await portRes.json();
+                    portEl.textContent = pd.port || '?';
+                    portEl.classList.remove('loading');
+                }
+            } catch {
+                vpnEl.textContent = 'DOWN';
+                vpnEl.className = 'telem-value vpn-err';
+                regionEl.textContent = '-'; regionEl.classList.remove('loading');
+                portEl.textContent = '-'; portEl.classList.remove('loading');
+            }
+        }
+
+        function updateTimestamp() { document.getElementById('footer').textContent = new Date().toLocaleTimeString(); }
+        async function refresh() {
+            console.log('[pelicula] refresh start');
+            try {
+                await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus()]);
+                console.log('[pelicula] refresh done');
+            } catch(e) {
+                console.error('[pelicula] refresh error:', e);
+            }
+            updateTimestamp();
+        }
+        checkAuth();
+        setTimeout(refresh, 500);
+        setInterval(refresh, 15000);
+    </script>
+</body>
+</html>

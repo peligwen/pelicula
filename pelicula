@@ -1,0 +1,466 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+# ── Colors ──────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+pass() { echo -e "  ${GREEN}✓${NC} $1"; }
+fail() { echo -e "  ${RED}✗${NC} $1"; }
+info() { echo -e "${CYAN}→${NC} $1"; }
+warn() { echo -e "${YELLOW}!${NC} $1"; }
+
+# ── Platform Detection ──────────────────────────────
+
+PLATFORM="mac"
+NEEDS_SUDO=""
+
+detect_platform() {
+    if [[ -f /proc/syno_platform ]] || [[ -d /volume1 ]]; then
+        PLATFORM="synology"
+        NEEDS_SUDO="sudo"
+    fi
+}
+
+detect_platform
+
+# ── Helpers ─────────────────────────────────────────
+
+compose_cmd() {
+    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+docker_cmd() {
+    $NEEDS_SUDO docker "$@"
+}
+
+load_env() {
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo -e "${RED}No .env file found.${NC} Run ${BOLD}./pelicula setup${NC} first."
+        exit 1
+    fi
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+    set +a
+}
+
+seed_config() {
+    local file="$1" content="$2"
+    if [[ ! -f "$file" ]]; then
+        echo "$content" > "$file"
+    fi
+}
+
+# Enforce auth bypass in *arr config.xml files even if the app overwrote the seed.
+# The *arr apps rewrite config.xml on first boot with auth enabled; this patches it back.
+enforce_arr_auth() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    if grep -q '<AuthenticationRequired>Enabled</AuthenticationRequired>' "$file" 2>/dev/null; then
+        sed -i.bak \
+            -e 's|<AuthenticationMethod>[^<]*</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' \
+            -e 's|<AuthenticationRequired>[^<]*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' \
+            "$file" && rm -f "${file}.bak"
+    fi
+}
+
+prompt() {
+    local var_name="$1" prompt_text="$2" default="${3:-}"
+    if [[ -n "$default" ]]; then
+        echo -en "${BOLD}${prompt_text}${NC} [${default}]: "
+        read -r value
+        eval "$var_name=\"${value:-$default}\""
+    else
+        echo -en "${BOLD}${prompt_text}${NC}: "
+        read -r value
+        while [[ -z "$value" ]]; do
+            echo -en "  ${RED}Required.${NC} ${prompt_text}: "
+            read -r value
+        done
+        eval "$var_name=\"$value\""
+    fi
+}
+
+# ── Commands ────────────────────────────────────────
+
+cmd_setup() {
+    echo -e "${BOLD}pelicula setup${NC}"
+    echo ""
+
+    # Platform
+    if [[ "$PLATFORM" == "synology" ]]; then
+        info "Detected platform: ${BOLD}Synology NAS${NC}"
+        default_config="/volume1/docker/media-stack/config"
+        default_media="/volume1/media"
+    else
+        info "Detected platform: ${BOLD}macOS${NC}"
+        default_config="$SCRIPT_DIR/config"
+        default_media="$HOME/media"
+    fi
+    echo ""
+
+    # Wireguard key
+    echo -e "${CYAN}You need a Wireguard private key from ProtonVPN.${NC}"
+    echo "  1. Log in at https://account.proton.me"
+    echo "  2. Downloads → WireGuard configuration"
+    echo "  3. Platform: GNU/Linux, enable NAT-PMP (Port Forwarding)"
+    echo "  4. Do NOT enable Moderate NAT"
+    echo "  5. Copy the PrivateKey value"
+    echo ""
+    prompt WIREGUARD_PRIVATE_KEY "Wireguard private key"
+
+    # Validate key looks like base64
+    if [[ ${#WIREGUARD_PRIVATE_KEY} -ne 44 ]] || [[ "${WIREGUARD_PRIVATE_KEY: -1}" != "=" ]]; then
+        warn "Key doesn't look like a standard Wireguard key (expected 44 chars ending in =)"
+        echo -en "  Continue anyway? [y/N]: "
+        read -r confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "Aborted."
+            exit 1
+        fi
+    fi
+    echo ""
+
+    # Server country
+    echo "P2P-friendly countries: Netherlands, Switzerland, Sweden, Iceland, Romania"
+    prompt SERVER_COUNTRIES "VPN server country" "Netherlands"
+    echo ""
+
+    # Timezone
+    detected_tz=""
+    if [[ -L /etc/localtime ]]; then
+        detected_tz="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
+    elif [[ -f /etc/timezone ]]; then
+        detected_tz="$(cat /etc/timezone)"
+    fi
+    prompt TZ "Timezone" "${detected_tz:-America/New_York}"
+    echo ""
+
+    # User/group IDs
+    detected_uid="$(id -u)"
+    detected_gid="$(id -g)"
+    prompt PUID "User ID (PUID)" "$detected_uid"
+    prompt PGID "Group ID (PGID)" "$detected_gid"
+    echo ""
+
+    # Paths
+    prompt CONFIG_DIR "Config directory" "$default_config"
+    prompt MEDIA_DIR "Media directory" "$default_media"
+    echo ""
+
+    # Expand ~ in paths
+    CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+    MEDIA_DIR="${MEDIA_DIR/#\~/$HOME}"
+
+    # Write .env
+    cat > "$ENV_FILE" <<EOF
+# Generated by ./pelicula setup
+CONFIG_DIR=${CONFIG_DIR}
+MEDIA_DIR=${MEDIA_DIR}
+PUID=${PUID}
+PGID=${PGID}
+TZ=${TZ}
+WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+SERVER_COUNTRIES=${SERVER_COUNTRIES}
+EOF
+    pass "Wrote ${ENV_FILE}"
+
+    # Create directories
+    mkdir -p \
+        "$CONFIG_DIR/gluetun" \
+        "$CONFIG_DIR/qbittorrent" \
+        "$CONFIG_DIR/prowlarr" \
+        "$CONFIG_DIR/sonarr" \
+        "$CONFIG_DIR/radarr" \
+        "$CONFIG_DIR/jellyfin" \
+        "$CONFIG_DIR/certs" \
+        "$MEDIA_DIR/downloads" \
+        "$MEDIA_DIR/movies" \
+        "$MEDIA_DIR/tv"
+    pass "Created directory structure"
+
+    # Generate self-signed TLS certificate (first run only)
+    if [[ ! -f "$CONFIG_DIR/certs/pelicula.crt" ]]; then
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+            -keyout "$CONFIG_DIR/certs/pelicula.key" \
+            -out "$CONFIG_DIR/certs/pelicula.crt" \
+            -subj "/CN=pelicula" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            2>/dev/null
+        pass "Generated self-signed TLS certificate (valid 10 years)"
+    else
+        pass "TLS certificate exists"
+    fi
+
+    # Synology-specific: TUN device + override file
+    if [[ "$PLATFORM" == "synology" ]]; then
+        # TUN device
+        if [[ ! -c /dev/net/tun ]]; then
+            warn "/dev/net/tun not found (required for VPN)"
+            echo -en "  Create it now with sudo? [Y/n]: "
+            read -r confirm
+            if [[ "$confirm" != "n" && "$confirm" != "N" ]]; then
+                sudo mkdir -p /dev/net
+                sudo mknod /dev/net/tun c 10 200
+                sudo chmod 600 /dev/net/tun
+                pass "Created /dev/net/tun"
+                warn "Add a boot-up task in DSM to recreate this on reboot:"
+                echo "    Control Panel → Task Scheduler → Triggered Task (Boot-up, root)"
+                echo "    Script: mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 600 /dev/net/tun"
+            fi
+        else
+            pass "/dev/net/tun exists"
+        fi
+
+        # Docker Compose override for TUN device
+        cat > "$SCRIPT_DIR/docker-compose.override.yml" <<'OVERRIDE'
+services:
+  gluetun:
+    devices:
+      - /dev/net/tun:/dev/net/tun
+OVERRIDE
+        pass "Wrote docker-compose.override.yml (TUN device mapping)"
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}Setup complete!${NC}"
+    echo -e "Run ${BOLD}./pelicula up${NC} to start the stack."
+}
+
+cmd_up() {
+    load_env
+    info "Starting media stack..."
+
+    # Ensure directories exist
+    mkdir -p \
+        "$CONFIG_DIR/gluetun" \
+        "$CONFIG_DIR/qbittorrent" \
+        "$CONFIG_DIR/prowlarr" \
+        "$CONFIG_DIR/sonarr" \
+        "$CONFIG_DIR/radarr" \
+        "$CONFIG_DIR/jellyfin" \
+        "$CONFIG_DIR/certs" \
+        "$MEDIA_DIR/downloads" \
+        "$MEDIA_DIR/movies" \
+        "$MEDIA_DIR/tv"
+
+    # Generate TLS cert if missing
+    if [[ ! -f "$CONFIG_DIR/certs/pelicula.crt" ]]; then
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+            -keyout "$CONFIG_DIR/certs/pelicula.key" \
+            -out "$CONFIG_DIR/certs/pelicula.crt" \
+            -subj "/CN=pelicula" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            2>/dev/null
+        pass "Generated TLS certificate"
+    fi
+
+    # Synology: verify TUN device
+    if [[ "$PLATFORM" == "synology" ]] && [[ ! -c /dev/net/tun ]]; then
+        echo -e "${RED}/dev/net/tun not found.${NC} Run ${BOLD}./pelicula setup${NC} to create it."
+        exit 1
+    fi
+
+    # Seed UrlBase configs for reverse proxy (first run only)
+    seed_config "$CONFIG_DIR/sonarr/config.xml" \
+        '<Config><UrlBase>/sonarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
+    seed_config "$CONFIG_DIR/radarr/config.xml" \
+        '<Config><UrlBase>/radarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
+    seed_config "$CONFIG_DIR/prowlarr/config.xml" \
+        '<Config><UrlBase>/prowlarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
+    # Enforce auth bypass on existing configs (fixes *arr overwriting seed on first boot)
+    enforce_arr_auth "$CONFIG_DIR/sonarr/config.xml"
+    enforce_arr_auth "$CONFIG_DIR/radarr/config.xml"
+    enforce_arr_auth "$CONFIG_DIR/prowlarr/config.xml"
+
+    seed_config "$CONFIG_DIR/jellyfin/network.xml" \
+        '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>'
+    # Seed qBittorrent config: auth bypass for Docker subnet so *arr apps can connect
+    mkdir -p "$CONFIG_DIR/qbittorrent/qBittorrent"
+    seed_config "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" \
+'[Preferences]
+WebUI\AuthSubnetWhitelistEnabled=true
+WebUI\AuthSubnetWhitelist=172.16.0.0/12, 192.168.0.0/16, 10.0.0.0/8
+WebUI\LocalHostAuth=false
+
+[BitTorrent]
+Session\DefaultSavePath=/downloads/'
+
+    compose_cmd up -d
+
+    # Wait for gluetun health
+    info "Waiting for VPN connection..."
+    local attempts=0
+    while [[ $attempts -lt 30 ]]; do
+        local health
+        health="$(docker_cmd inspect --format='{{.State.Health.Status}}' gluetun 2>/dev/null || echo "unknown")"
+        if [[ "$health" == "healthy" ]]; then
+            pass "Gluetun VPN connected"
+            break
+        fi
+        sleep 2
+        attempts=$((attempts + 1))
+    done
+    if [[ $attempts -ge 30 ]]; then
+        warn "Gluetun did not become healthy within 60s. Check logs: ./pelicula logs gluetun"
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}Stack is running!${NC}"
+    echo ""
+    echo "  Service         URL"
+    echo "  ─────────────── ──────────────────────────"
+    local port="${PELICULA_PORT:-7354}"
+    echo "  Dashboard       http://localhost:${port}/"
+    echo "  Sonarr          http://localhost:${port}/sonarr/"
+    echo "  Radarr          http://localhost:${port}/radarr/"
+    echo "  Prowlarr        http://localhost:${port}/prowlarr/"
+    echo "  qBittorrent     http://localhost:${port}/qbt/"
+    echo "  Jellyfin        http://localhost:${port}/jellyfin/"
+    echo ""
+    echo -e "Get qBittorrent temp password: ${BOLD}./pelicula logs qbittorrent${NC} (look for 'temporary password')"
+}
+
+cmd_down() {
+    load_env
+    info "Stopping media stack..."
+    compose_cmd down
+    pass "Stack stopped"
+}
+
+cmd_status() {
+    load_env
+    compose_cmd ps
+}
+
+cmd_logs() {
+    load_env
+    local service="${1:-}"
+    if [[ -n "$service" ]]; then
+        compose_cmd logs -f "$service"
+    else
+        compose_cmd logs -f
+    fi
+}
+
+cmd_update() {
+    load_env
+    info "Pulling latest images..."
+    compose_cmd pull
+    info "Recreating containers..."
+    compose_cmd up -d
+    pass "Update complete"
+}
+
+cmd_check_vpn() {
+    load_env
+    local checks_passed=0
+    local checks_total=8
+
+    echo -e "${BOLD}VPN & Service Health Check${NC}"
+    echo ""
+
+    # 1. Gluetun health
+    local health
+    health="$(docker_cmd inspect --format='{{.State.Health.Status}}' gluetun 2>/dev/null || echo "not running")"
+    if [[ "$health" == "healthy" ]]; then
+        pass "Gluetun: healthy"
+        checks_passed=$((checks_passed + 1))
+    else
+        fail "Gluetun: $health"
+    fi
+
+    # 2. VPN tunnel — verify IP is not the host's
+    local vpn_info host_ip vpn_ip vpn_country
+    vpn_info="$(docker_cmd exec gluetun wget -qO- https://ipinfo.io 2>/dev/null || echo "{}")"
+    vpn_ip="$(echo "$vpn_info" | grep -o '"ip": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+    vpn_country="$(echo "$vpn_info" | grep -o '"country": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+    host_ip="$(curl -s --max-time 5 https://ipinfo.io/ip 2>/dev/null || echo "unknown")"
+
+    if [[ -n "$vpn_ip" ]] && [[ "$vpn_ip" != "$host_ip" ]]; then
+        pass "VPN tunnel: ${vpn_ip} (${vpn_country})"
+        checks_passed=$((checks_passed + 1))
+    elif [[ -n "$vpn_ip" ]]; then
+        fail "VPN tunnel: IP matches host (${vpn_ip}) — VPN may not be active!"
+    else
+        fail "VPN tunnel: could not determine IP"
+    fi
+
+    # 3. Port forwarding
+    local fwd_port
+    fwd_port="$(docker_cmd exec gluetun cat /tmp/gluetun/forwarded_port 2>/dev/null || echo "")"
+    if [[ -n "$fwd_port" ]] && [[ "$fwd_port" != "0" ]]; then
+        pass "Port forwarding: port ${fwd_port}"
+        checks_passed=$((checks_passed + 1))
+    else
+        fail "Port forwarding: not active"
+    fi
+
+    # 4-8. Service reachability (via nginx reverse proxy)
+    local svc
+    for svc in "qBittorrent:/qbt/" "Prowlarr:/prowlarr/" "Sonarr:/sonarr/" "Radarr:/radarr/" "Jellyfin:/jellyfin/"; do
+        local name="${svc%%:*}"
+        local path="${svc##*:}"
+        local code
+        local port="${PELICULA_PORT:-7354}"
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${port}${path}" 2>/dev/null || echo "000")"
+        if [[ "$code" != "000" ]]; then
+            pass "${name}: reachable (HTTP ${code})"
+            checks_passed=$((checks_passed + 1))
+        else
+            fail "${name}: not reachable at ${path}"
+        fi
+    done
+
+    # Summary
+    echo ""
+    if [[ $checks_passed -eq $checks_total ]]; then
+        echo -e "${GREEN}${BOLD}${checks_passed}/${checks_total} checks passed${NC}"
+    elif [[ $checks_passed -gt 0 ]]; then
+        echo -e "${YELLOW}${BOLD}${checks_passed}/${checks_total} checks passed${NC}"
+    else
+        echo -e "${RED}${BOLD}${checks_passed}/${checks_total} checks passed${NC}"
+    fi
+}
+
+# ── Usage ───────────────────────────────────────────
+
+usage() {
+    echo -e "${BOLD}pelicula${NC} — media stack manager"
+    echo ""
+    echo "Usage: ./pelicula <command> [args]"
+    echo ""
+    echo "Commands:"
+    echo "  setup       Interactive first-time setup (generates .env)"
+    echo "  up          Start all services"
+    echo "  down        Stop all services"
+    echo "  status      Show container status"
+    echo "  logs [svc]  Tail logs (optionally for one service)"
+    echo "  check-vpn   Verify VPN and service health"
+    echo "  update      Pull latest images and recreate containers"
+    echo ""
+    echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, nginx"
+}
+
+# ── Dispatch ────────────────────────────────────────
+
+case "${1:-}" in
+    setup)     cmd_setup ;;
+    up)        cmd_up ;;
+    down)      cmd_down ;;
+    status)    cmd_status ;;
+    logs)      cmd_logs "${2:-}" ;;
+    check-vpn) cmd_check_vpn ;;
+    update)    cmd_update ;;
+    -h|--help) usage ;;
+    *)         usage ;;
+esac

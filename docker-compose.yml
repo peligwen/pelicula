@@ -1,0 +1,194 @@
+services:
+
+  # ═══════════════════════════════════════════════════
+  # VPN — ProtonVPN via Wireguard with port forwarding
+  # ═══════════════════════════════════════════════════
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.0
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES}
+      - VPN_PORT_FORWARDING=on
+      - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      - PORT_FORWARD_ONLY=on
+      - TZ=${TZ}
+    ports:
+      # Torrent incoming connections
+      - "6881:6881"
+      - "6881:6881/udp"
+    volumes:
+      - ${CONFIG_DIR}/gluetun:/gluetun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Torrent Client — all traffic through VPN
+  # ═══════════════════════════════════════════════════
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+    volumes:
+      - ${CONFIG_DIR}/qbittorrent:/config
+      - ${MEDIA_DIR}/downloads:/downloads
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Indexer Manager
+  # ═══════════════════════════════════════════════════
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_DIR}/prowlarr:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9696/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # TV Show Manager
+  # ═══════════════════════════════════════════════════
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_DIR}/sonarr:/config
+      - ${MEDIA_DIR}/tv:/tv
+      - ${MEDIA_DIR}/downloads:/downloads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8989/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Movie Manager
+  # ═══════════════════════════════════════════════════
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_DIR}/radarr:/config
+      - ${MEDIA_DIR}/movies:/movies
+      - ${MEDIA_DIR}/downloads:/downloads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Media Server
+  # ═══════════════════════════════════════════════════
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_DIR}/jellyfin:/config
+      - ${MEDIA_DIR}/tv:/data/tv
+      - ${MEDIA_DIR}/movies:/data/movies
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8096/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Middleware — auto-wiring, search, downloads API
+  # ═══════════════════════════════════════════════════
+  pelicula-api:
+    build: ./middleware
+    container_name: pelicula-api
+    environment:
+      - TZ=${TZ}
+      - PELICULA_AUTH=${PELICULA_AUTH:-false}
+      - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
+    volumes:
+      - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
+      - ${CONFIG_DIR}/radarr:/config/radarr:ro
+      - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
+      - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
+    depends_on:
+      - sonarr
+      - radarr
+      - prowlarr
+      - gluetun
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/api/pelicula/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Reverse Proxy — single entry point (HTTPS)
+  # ═══════════════════════════════════════════════════
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
+      - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
+    ports:
+      - "${PELICULA_PORT:-7354}:80"
+    depends_on:
+      - gluetun
+      - prowlarr
+      - sonarr
+      - radarr
+      - jellyfin
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

@@ -1,0 +1,4 @@
+.env
+config/
+docker-compose.override.yml
+*.tar.gz
