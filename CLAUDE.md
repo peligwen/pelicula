@@ -58,10 +58,19 @@ nginx (:7354) ─── /                → dashboard (static HTML)
 
 ## Platform Detection
 
-The `detect_platform()` function checks for `/proc/syno_platform` or `/volume1` to determine Synology vs other. This affects:
-- Whether `sudo` is prepended to docker commands
-- Default paths (`./config` + `~/media` vs `/volume1/...` on Synology)
-- Whether `docker-compose.override.yml` is generated (TUN device mapping)
+The `detect_platform()` function:
+1. Checks for Synology (`/proc/syno_platform` or `/volume1`) to set Synology-specific default paths
+2. Auto-detects whether `docker` needs `sudo` by trying `docker info` without it first
+
+Platform affects:
+- Default paths during setup (`./config` + `~/media` generically, `/volume1/...` on Synology)
+- The setup display label (macOS, Linux, WSL, Synology NAS)
+- TUN device handling: checked and created on Linux/Synology/WSL, skipped on macOS (Docker Desktop uses utun)
+- `docker-compose.override.yml` with TUN device mapping is generated on all non-macOS platforms
+
+## Future: Go CLI (Move 2)
+
+The bash CLI could be rewritten as a single Go binary for true cross-platform support including native Windows (no WSL). The middleware already demonstrates the stdlib-only Go pattern. The Go CLI would handle `.env` generation, Docker Compose orchestration, and platform detection as a single distributable binary. This would eliminate the bash dependency and make `pelicula setup` / `pelicula up` work identically on Windows, macOS, and Linux without any shell.
 
 ## Key Constraints
 

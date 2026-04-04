@@ -15,8 +15,9 @@ Open `http://localhost:7354` — that's it.
 
 ## Prerequisites
 
-- **Docker** with Compose v2
+- **Docker** with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine on Linux)
 - **ProtonVPN** paid plan (Plus or higher) with a Wireguard private key
+- **bash** (macOS, Linux, WSL — the CLI auto-detects your platform)
 
 ## What Happens Automatically
 

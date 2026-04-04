@@ -20,13 +20,19 @@ warn() { echo -e "${YELLOW}!${NC} $1"; }
 
 # ── Platform Detection ──────────────────────────────
 
-PLATFORM="mac"
+PLATFORM="generic"
 NEEDS_SUDO=""
 
 detect_platform() {
     if [[ -f /proc/syno_platform ]] || [[ -d /volume1 ]]; then
         PLATFORM="synology"
-        NEEDS_SUDO="sudo"
+    fi
+
+    # Auto-detect whether docker needs sudo
+    if ! docker info &>/dev/null; then
+        if sudo docker info &>/dev/null; then
+            NEEDS_SUDO="sudo"
+        fi
     fi
 }
 
@@ -102,7 +108,10 @@ cmd_setup() {
         default_config="/volume1/docker/media-stack/config"
         default_media="/volume1/media"
     else
-        info "Detected platform: ${BOLD}macOS${NC}"
+        local os_label="Linux"
+        [[ "$(uname)" == "Darwin" ]] && os_label="macOS"
+        [[ -n "${WSL_DISTRO_NAME:-}" ]] && os_label="WSL ($WSL_DISTRO_NAME)"
+        info "Detected platform: ${BOLD}${os_label}${NC}"
         default_config="$SCRIPT_DIR/config"
         default_media="$HOME/media"
     fi
@@ -201,9 +210,8 @@ EOF
         pass "TLS certificate exists"
     fi
 
-    # Synology-specific: TUN device + override file
-    if [[ "$PLATFORM" == "synology" ]]; then
-        # TUN device
+    # TUN device check (needed for VPN on Linux/Synology, macOS uses utun)
+    if [[ "$(uname)" != "Darwin" ]]; then
         if [[ ! -c /dev/net/tun ]]; then
             warn "/dev/net/tun not found (required for VPN)"
             echo -en "  Create it now with sudo? [Y/n]: "
@@ -213,15 +221,19 @@ EOF
                 sudo mknod /dev/net/tun c 10 200
                 sudo chmod 600 /dev/net/tun
                 pass "Created /dev/net/tun"
-                warn "Add a boot-up task in DSM to recreate this on reboot:"
-                echo "    Control Panel → Task Scheduler → Triggered Task (Boot-up, root)"
-                echo "    Script: mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 600 /dev/net/tun"
+                if [[ "$PLATFORM" == "synology" ]]; then
+                    warn "Add a boot-up task in DSM to recreate this on reboot:"
+                    echo "    Control Panel → Task Scheduler → Triggered Task (Boot-up, root)"
+                    echo "    Script: mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 600 /dev/net/tun"
+                else
+                    warn "This device node may not persist across reboots on some systems"
+                fi
             fi
         else
             pass "/dev/net/tun exists"
         fi
 
-        # Docker Compose override for TUN device
+        # Docker Compose override to map TUN device into gluetun container
         cat > "$SCRIPT_DIR/docker-compose.override.yml" <<'OVERRIDE'
 services:
   gluetun:
@@ -264,8 +276,8 @@ cmd_up() {
         pass "Generated TLS certificate"
     fi
 
-    # Synology: verify TUN device
-    if [[ "$PLATFORM" == "synology" ]] && [[ ! -c /dev/net/tun ]]; then
+    # Verify TUN device on Linux (macOS uses utun via Docker Desktop)
+    if [[ "$(uname)" != "Darwin" ]] && [[ ! -c /dev/net/tun ]]; then
         echo -e "${RED}/dev/net/tun not found.${NC} Run ${BOLD}./pelicula setup${NC} to create it."
         exit 1
     fi
