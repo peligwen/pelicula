@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // ffprobeOutput is the subset of ffprobe's JSON output we care about.
@@ -82,6 +84,9 @@ func Validate(job *Job) (result ValidationResult, failReason string) {
 }
 
 func runFFprobe(path string) (*ffprobeOutput, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
 	args := []string{
 		"-v", "quiet",
 		"-print_format", "json",
@@ -89,7 +94,7 @@ func runFFprobe(path string) (*ffprobeOutput, error) {
 		"-show_streams",
 		path,
 	}
-	cmd := exec.Command("ffprobe", args...)
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

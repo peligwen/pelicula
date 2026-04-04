@@ -148,6 +148,8 @@ services:
     build: ./procula
     container_name: procula
     restart: unless-stopped
+    depends_on:
+      - pelicula-api
     environment:
       - PUID=${PUID}
       - PGID=${PGID}

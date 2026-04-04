@@ -342,6 +342,7 @@ Session\DefaultSavePath=/downloads/'
     echo "  Prowlarr        http://localhost:${port}/prowlarr/"
     echo "  qBittorrent     http://localhost:${port}/qbt/"
     echo "  Jellyfin        http://localhost:${port}/jellyfin/"
+    echo "  Procula API     http://localhost:${port}/api/procula/status"
     echo ""
     echo -e "Get qBittorrent temp password: ${BOLD}./pelicula logs qbittorrent${NC} (look for 'temporary password')"
 }
@@ -464,7 +465,7 @@ usage() {
     echo "  check-vpn   Verify VPN and service health"
     echo "  update      Pull latest images and recreate containers"
     echo ""
-    echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, nginx"
+    echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, procula, nginx"
 }
 
 # ── Dispatch ────────────────────────────────────────

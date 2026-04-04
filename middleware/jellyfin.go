@@ -69,7 +69,9 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		return fmt.Errorf("set startup config: %w", err)
 	}
 
-	// Step 2: create admin user with no password (matches stack's no-auth-by-default)
+	// Step 2: create admin user with no password (matches stack's no-auth-by-default).
+	// Warning: if you expose Jellyfin beyond the Docker network, set a password via the UI.
+	log.Println("[autowire] Jellyfin: creating admin user with no password — set one in the UI if Jellyfin is publicly accessible")
 	_, err = jellyfinPost(s, "/Startup/User", "", map[string]any{
 		"Name":     "admin",
 		"Password": "",

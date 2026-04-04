@@ -53,8 +53,8 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[hooks] import webhook: %s %q (%s) path=%s", source.ArrType, source.Title, source.Type, source.Path)
 
 	// Forward to Procula
-	procuaURL := procuaBaseURL() + "/api/procula/jobs"
-	if err := forwardToProcula(procuaURL, source); err != nil {
+	proculaURL := proculaBaseURL() + "/api/procula/jobs"
+	if err := forwardToProcula(proculaURL, source); err != nil {
 		log.Printf("[hooks] failed to forward to Procula: %v", err)
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
 		writeJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
@@ -131,7 +131,7 @@ func forwardToProcula(url string, source ProculaJobSource) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+	resp, err := services.client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("reach procula: %w", err)
 	}
@@ -150,7 +150,7 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := http.Get(procuaBaseURL() + "/api/procula/status")
+	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/status")
 	if err != nil {
 		writeError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -168,7 +168,7 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-func procuaBaseURL() string {
+func proculaBaseURL() string {
 	if v := strings.TrimSpace(os.Getenv("PROCULA_URL")); v != "" {
 		return v
 	}

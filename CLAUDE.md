@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## About This Repository
 
-**Pelicula** is a clone-and-run media stack. The `./pelicula` bash CLI handles setup, lifecycle, and health checks for a Docker Compose stack of 8 services behind an nginx reverse proxy on port **7354** (PELI on a phone keypad).
+**Pelicula** is a clone-and-run media stack. The `./pelicula` bash CLI handles setup, lifecycle, and health checks for a Docker Compose stack of 9 services behind an nginx reverse proxy on port **7354** (PELI on a phone keypad).
 
 ## Key Files
 
@@ -62,7 +62,7 @@ nginx (:7354) ─── /                → dashboard (static HTML)
 
 **Procula (`procula/`)** — separate Go service on port 8282, proxied at `/api/procula/`. Alpine + FFmpeg container.
 - `procula/queue.go` — JSON file job queue at `/config/jobs/`. One file per job, persisted across restarts.
-- `procula/validate.go` — FFprobe-based validation: integrity, duration sanity, codec extraction, sample detection. On failure: deletes bad file + calls `/api/pelicula/downloads/cancel` with `blocklist:true`.
+- `procula/validate.go` — FFprobe-based validation: integrity, duration sanity, codec extraction, sample detection. On failure: deletes bad file (only if path is under `/downloads`, `/movies`, `/tv`, or `/processing`) + calls `/api/pelicula/downloads/cancel` with `blocklist:true`.
 - `procula/pipeline.go` — single goroutine worker. Stages: validate → process (stub) → catalog (stub).
 - Procula never calls *arr directly; all coordination is through `pelicula-api`.
 
@@ -92,6 +92,6 @@ The bash CLI could be rewritten as a single Go binary for true cross-platform su
 - LinuxServer.io images are Alpine-based — healthchecks use `wget` (not `curl`)
 - All volume paths in docker-compose.yml are env vars — never hardcode paths
 - **Self-signed HTTPS breaks Chrome** — Chrome blocks JS on self-signed cert pages. Default to HTTP for LAN.
-- The middleware has no external Go dependencies (stdlib only) — `go.mod` has no requires
+- Both `middleware/` and `procula/` have no external Go dependencies (stdlib only) — neither `go.mod` has requires
 - **qBittorrent v5** renamed pause/resume API to stop/start — middleware uses the v5 endpoints
 - Dashboard serves with `Cache-Control: no-store` to avoid stale HTML during development

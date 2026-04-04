@@ -94,7 +94,10 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath string
 	}
 
 	var clients []map[string]any
-	json.Unmarshal(data, &clients)
+	if err := json.Unmarshal(data, &clients); err != nil {
+		log.Printf("[autowire] %s: failed to parse download clients response: %v", name, err)
+		return false
+	}
 
 	for _, c := range clients {
 		if impl, _ := c["implementation"].(string); impl == "QBittorrent" {
@@ -139,7 +142,10 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 	}
 
 	var folders []map[string]any
-	json.Unmarshal(data, &folders)
+	if err := json.Unmarshal(data, &folders); err != nil {
+		log.Printf("[autowire] %s: failed to parse root folders response: %v", name, err)
+		return false
+	}
 
 	for _, f := range folders {
 		if path, _ := f["path"].(string); path == folderPath {
@@ -172,7 +178,10 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 	}
 
 	var existing []map[string]any
-	json.Unmarshal(data, &existing)
+	if err := json.Unmarshal(data, &existing); err != nil {
+		log.Printf("[autowire] %s: failed to parse notifications response: %v", name, err)
+		return
+	}
 
 	for _, n := range existing {
 		if n, _ := n["name"].(string); n == "Procula" {
@@ -216,7 +225,10 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 	}
 
 	var apps []map[string]any
-	json.Unmarshal(data, &apps)
+	if err := json.Unmarshal(data, &apps); err != nil {
+		log.Printf("[autowire] Prowlarr: failed to parse applications response: %v", err)
+		return false
+	}
 
 	for _, a := range apps {
 		if n, _ := a["name"].(string); n == appName {

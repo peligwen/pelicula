@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -15,7 +17,14 @@ import (
 func RunWorker(q *Queue, peliculaAPI string) {
 	log.Println("[pipeline] worker started")
 	for id := range q.pending {
-		processJob(q, id, peliculaAPI)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[pipeline] panic in job %s: %v — worker continuing", id, r)
+				}
+			}()
+			processJob(q, id, peliculaAPI)
+		}()
 	}
 }
 
@@ -58,7 +67,9 @@ func processJob(q *Queue, id, peliculaAPI string) {
 
 		// Remove the bad file from the library
 		if job.Source.Path != "" {
-			if err := os.Remove(job.Source.Path); err == nil {
+			if !isAllowedPath(job.Source.Path) {
+				log.Printf("[pipeline] refusing to remove file outside allowed directories: %s", job.Source.Path)
+			} else if err := os.Remove(job.Source.Path); err == nil {
 				log.Printf("[pipeline] removed bad file: %s", job.Source.Path)
 			} else if !os.IsNotExist(err) {
 				log.Printf("[pipeline] could not remove bad file: %v", err)
@@ -76,6 +87,9 @@ func processJob(q *Queue, id, peliculaAPI string) {
 		id, result.Checks.Codecs.Video, result.Checks.Codecs.Audio)
 
 	// ── Stage 2: Process (Phase 5 — stub) ────────────────────────────────
+	if job, _ = q.Get(id); job.State == StateCancelled {
+		return
+	}
 	_ = q.Update(id, func(j *Job) {
 		j.Stage = StageProcess
 		j.Progress = 0.5
@@ -83,6 +97,9 @@ func processJob(q *Queue, id, peliculaAPI string) {
 	// TODO: transcoding, extraction, audio normalization
 
 	// ── Stage 3: Catalog (Phase 3 — stub) ────────────────────────────────
+	if job, _ = q.Get(id); job.State == StateCancelled {
+		return
+	}
 	_ = q.Update(id, func(j *Job) {
 		j.Stage = StageCatalog
 		j.Progress = 0.9
@@ -97,6 +114,18 @@ func processJob(q *Queue, id, peliculaAPI string) {
 	})
 
 	log.Printf("[pipeline] completed job %s: %s", id, job.Source.Title)
+}
+
+// isAllowedPath checks that path is under one of the expected media directories.
+// This prevents accidental deletion of files outside the media library.
+func isAllowedPath(path string) bool {
+	clean := filepath.Clean(path)
+	for _, prefix := range []string{"/downloads", "/movies", "/tv", "/processing"} {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // blocklist asks pelicula-api to remove the download from the *arr queue
@@ -118,9 +147,10 @@ func blocklist(job *Job, peliculaAPI, reason string) {
 
 	url := fmt.Sprintf("%s/api/pelicula/downloads/cancel", peliculaAPI)
 
+	httpClient := &http.Client{Timeout: 10 * time.Second}
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+		resp, err := httpClient.Post(url, "application/json", bytes.NewReader(data))
 		if err != nil {
 			lastErr = err
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)

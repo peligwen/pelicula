@@ -61,11 +61,7 @@ func handleListJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateJob(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
 	var source JobSource
 	if err := json.NewDecoder(r.Body).Decode(&source); err != nil {
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
@@ -99,10 +95,6 @@ func handleGetJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRetryJob(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	if err := queue.Retry(id); err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
@@ -114,10 +106,6 @@ func handleRetryJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCancelJob(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	if err := queue.Cancel(id); err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)

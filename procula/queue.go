@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -131,6 +133,7 @@ func (q *Queue) loadExisting() error {
 			select {
 			case q.pending <- job.ID:
 			default:
+				log.Printf("[queue] warning: pending channel full, job %s will not run until retried or restarted", job.ID)
 			}
 		}
 	}
@@ -160,6 +163,7 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	select {
 	case q.pending <- id:
 	default:
+		log.Printf("[queue] warning: pending channel full, job %s will not run until retried or restarted", id)
 	}
 
 	return job, nil
@@ -183,6 +187,9 @@ func (q *Queue) List() []Job {
 	for _, j := range q.jobs {
 		out = append(out, *j)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	return out
 }
 
@@ -197,7 +204,11 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 	job.UpdatedAt = time.Now().UTC()
 	cp := *job
 	q.mu.Unlock()
-	return q.persist(&cp)
+	if err := q.persist(&cp); err != nil {
+		log.Printf("[queue] warning: failed to persist job %s: %v", id, err)
+		return err
+	}
+	return nil
 }
 
 func (q *Queue) Retry(id string) error {
@@ -221,6 +232,7 @@ func (q *Queue) Retry(id string) error {
 	select {
 	case q.pending <- id:
 	default:
+		log.Printf("[queue] warning: pending channel full, retry of job %s will not run until restart", id)
 	}
 	return nil
 }

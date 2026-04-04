@@ -40,17 +40,24 @@ func NewServiceClients(configDir string) *ServiceClients {
 }
 
 func (s *ServiceClients) loadKeys() {
-	s.SonarrKey = readAPIKey(s.configDir + "/sonarr/config.xml")
-	s.RadarrKey = readAPIKey(s.configDir + "/radarr/config.xml")
-	s.ProwlarrKey = readAPIKey(s.configDir + "/prowlarr/config.xml")
+	// Read outside the lock to avoid holding it during file I/O
+	sonarr := readAPIKey(s.configDir + "/sonarr/config.xml")
+	radarr := readAPIKey(s.configDir + "/radarr/config.xml")
+	prowlarr := readAPIKey(s.configDir + "/prowlarr/config.xml")
 
-	if s.SonarrKey != "" {
+	s.mu.Lock()
+	s.SonarrKey = sonarr
+	s.RadarrKey = radarr
+	s.ProwlarrKey = prowlarr
+	s.mu.Unlock()
+
+	if sonarr != "" {
 		log.Printf("[services] loaded Sonarr API key")
 	}
-	if s.RadarrKey != "" {
+	if radarr != "" {
 		log.Printf("[services] loaded Radarr API key")
 	}
-	if s.ProwlarrKey != "" {
+	if prowlarr != "" {
 		log.Printf("[services] loaded Prowlarr API key")
 	}
 }
@@ -232,7 +239,7 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 			status := "down"
 			if err == nil {
 				resp.Body.Close()
-				if resp.StatusCode < 500 {
+				if resp.StatusCode < 400 {
 					status = "up"
 				}
 			}
