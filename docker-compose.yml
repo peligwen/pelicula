@@ -127,6 +127,8 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+    ports:
+      - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
       - ${MEDIA_DIR}/tv:/data/tv

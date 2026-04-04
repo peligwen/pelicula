@@ -43,6 +43,9 @@ func AutoWire(s *ServiceClients) error {
 	wireImportWebhook(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
 	wireImportWebhook(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
 
+	// Auto-configure Jellyfin: complete wizard, add media libraries
+	wireJellyfin(s)
+
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
 		log.Println("[autowire] all services wired successfully")
@@ -59,6 +62,7 @@ func waitForServices(s *ServiceClients) error {
 		"radarr":       radarrURL + "/ping",
 		"prowlarr":     prowlarrURL + "/ping",
 		"qbittorrent":  "http://gluetun:8080/",
+		"jellyfin":     jellyfinURL + "/System/Info/Public",
 	}
 
 	deadline := time.Now().Add(120 * time.Second)

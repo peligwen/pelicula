@@ -44,7 +44,7 @@ nginx (:7354) ─── /                → dashboard (static HTML)
 **Go middleware (`pelicula-api`)** runs on port 8181 internally, proxied at `/api/pelicula/`. On startup it:
 1. Reads API keys from mounted *arr config.xml files
 2. Waits for all services to be healthy
-3. Auto-wires: adds qBittorrent as download client in Sonarr/Radarr, sets root folders, connects Prowlarr to both
+3. Auto-wires: adds qBittorrent as download client in Sonarr/Radarr, sets root folders, connects Prowlarr to both, completes Jellyfin setup wizard, adds Movies+TV libraries
 4. Starts a missing content watcher (every 2 min) that auto-searches monitored items with no files
 5. Serves: unified search, download management (pause/resume/cancel/blocklist), status, optional session auth
 
