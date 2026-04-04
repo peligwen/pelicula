@@ -359,6 +359,20 @@ cmd_restart() {
     cmd_up
 }
 
+# Services that can be restarted without affecting playback.
+# Order matters: gluetun must come up before qbittorrent (network_mode dependency).
+ACQUIRE_SERVICES="gluetun qbittorrent prowlarr sonarr radarr pelicula-api procula"
+
+cmd_restart_acquire() {
+    load_env
+    info "Restarting acquisition services (jellyfin and nginx stay up)..."
+    # shellcheck disable=SC2086
+    compose_cmd stop $ACQUIRE_SERVICES
+    # shellcheck disable=SC2086
+    compose_cmd start $ACQUIRE_SERVICES
+    pass "Acquisition services restarted"
+}
+
 cmd_status() {
     load_env
     compose_cmd ps
@@ -465,7 +479,8 @@ usage() {
     echo "  setup       Interactive first-time setup (generates .env)"
     echo "  up          Start all services"
     echo "  down        Stop all services"
-    echo "  restart     Stop and restart all services"
+    echo "  restart          Stop and restart all services
+  restart-acquire  Restart acquisition services only (jellyfin/nginx stay up)"
     echo "  status      Show container status"
     echo "  logs [svc]  Tail logs (optionally for one service)"
     echo "  check-vpn   Verify VPN and service health"
@@ -480,7 +495,8 @@ case "${1:-}" in
     setup)     cmd_setup ;;
     up)        cmd_up ;;
     down)      cmd_down ;;
-    restart)   cmd_restart ;;
+    restart)          cmd_restart ;;
+    restart-acquire)  cmd_restart_acquire ;;
     status)    cmd_status ;;
     logs)      cmd_logs "${2:-}" ;;
     check-vpn) cmd_check_vpn ;;
