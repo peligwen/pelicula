@@ -36,6 +36,9 @@ func main() {
 	mux.HandleFunc("/api/pelicula/auth/login", auth.HandleLogin)
 	mux.HandleFunc("/api/pelicula/auth/logout", auth.HandleLogout)
 	mux.HandleFunc("/api/pelicula/auth/check", auth.HandleCheck)
+	// Webhook receiver must be accessible without session auth — *arr services
+	// call this endpoint and cannot send a session cookie.
+	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
 
 	// Protected endpoints
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(handleStatus)))
@@ -45,6 +48,9 @@ func main() {
 	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(handleDownloadStats)))
 	mux.Handle("/api/pelicula/downloads/pause", auth.Guard(http.HandlerFunc(handleDownloadPause)))
 	mux.Handle("/api/pelicula/downloads/cancel", auth.Guard(http.HandlerFunc(handleDownloadCancel)))
+
+	// Procula integration
+	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
 
 	log.Println("[server] listening on :8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
@@ -59,9 +65,13 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check indexer count from Prowlarr
+	services.mu.RLock()
+	prowlarrKey := services.ProwlarrKey
+	services.mu.RUnlock()
+
 	indexerCount := 0
-	if services.ProwlarrKey != "" {
-		data, err := services.ArrGet(prowlarrURL, services.ProwlarrKey, "/api/v1/indexer")
+	if prowlarrKey != "" {
+		data, err := services.ArrGet(prowlarrURL, prowlarrKey, "/api/v1/indexer")
 		if err == nil {
 			var indexers []map[string]any
 			if json.Unmarshal(data, &indexers) == nil {

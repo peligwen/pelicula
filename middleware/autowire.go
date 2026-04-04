@@ -39,6 +39,13 @@ func AutoWire(s *ServiceClients) error {
 	prowlarrWired := wireProwlarrApp(s, "Sonarr", sonarrURL, s.SonarrKey) &&
 		wireProwlarrApp(s, "Radarr", radarrURL, s.RadarrKey)
 
+	// Wire Procula import webhooks into Radarr and Sonarr
+	wireImportWebhook(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
+	wireImportWebhook(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
+
+	// Auto-configure Jellyfin: complete wizard, add media libraries
+	wireJellyfin(s)
+
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
 		log.Println("[autowire] all services wired successfully")
@@ -55,6 +62,7 @@ func waitForServices(s *ServiceClients) error {
 		"radarr":       radarrURL + "/ping",
 		"prowlarr":     prowlarrURL + "/ping",
 		"qbittorrent":  "http://gluetun:8080/",
+		"jellyfin":     jellyfinURL + "/System/Info/Public",
 	}
 
 	deadline := time.Now().Add(120 * time.Second)
@@ -86,7 +94,10 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath string
 	}
 
 	var clients []map[string]any
-	json.Unmarshal(data, &clients)
+	if err := json.Unmarshal(data, &clients); err != nil {
+		log.Printf("[autowire] %s: failed to parse download clients response: %v", name, err)
+		return false
+	}
 
 	for _, c := range clients {
 		if impl, _ := c["implementation"].(string); impl == "QBittorrent" {
@@ -131,7 +142,10 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 	}
 
 	var folders []map[string]any
-	json.Unmarshal(data, &folders)
+	if err := json.Unmarshal(data, &folders); err != nil {
+		log.Printf("[autowire] %s: failed to parse root folders response: %v", name, err)
+		return false
+	}
 
 	for _, f := range folders {
 		if path, _ := f["path"].(string); path == folderPath {
@@ -154,6 +168,54 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 	return true
 }
 
+// wireImportWebhook adds a Procula import webhook notification to a *arr app.
+// It is idempotent — won't add a second "Procula" webhook if one already exists.
+func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
+	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/notification")
+	if err != nil {
+		log.Printf("[autowire] %s: failed to check notifications: %v", name, err)
+		return
+	}
+
+	var existing []map[string]any
+	if err := json.Unmarshal(data, &existing); err != nil {
+		log.Printf("[autowire] %s: failed to parse notifications response: %v", name, err)
+		return
+	}
+
+	for _, n := range existing {
+		if n, _ := n["name"].(string); n == "Procula" {
+			log.Printf("[autowire] %s: Procula webhook already configured, skipping", name)
+			return
+		}
+	}
+
+	hookURL := "http://pelicula-api:8181/api/pelicula/hooks/import"
+	payload := map[string]any{
+		"name":           "Procula",
+		"implementation": "Webhook",
+		"configContract": "WebhookSettings",
+		"fields": []map[string]any{
+			{"name": "url", "value": hookURL},
+			{"name": "method", "value": 1}, // 1 = POST
+			{"name": "username", "value": ""},
+			{"name": "password", "value": ""},
+		},
+		"onGrab":       false,
+		"onDownload":   true,
+		"onUpgrade":    true,
+		"onHealthIssue": false,
+		"onApplicationUpdate": false,
+	}
+
+	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
+	if err != nil {
+		log.Printf("[autowire] %s: failed to add Procula webhook: %v", name, err)
+		return
+	}
+	log.Printf("[autowire] %s: added Procula import webhook → %s", name, hookURL)
+}
+
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
 	// Check existing applications
 	data, err := s.ArrGet(prowlarrURL, s.ProwlarrKey, "/api/v1/applications")
@@ -163,7 +225,10 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 	}
 
 	var apps []map[string]any
-	json.Unmarshal(data, &apps)
+	if err := json.Unmarshal(data, &apps); err != nil {
+		log.Printf("[autowire] Prowlarr: failed to parse applications response: %v", err)
+		return false
+	}
 
 	for _, a := range apps {
 		if n, _ := a["name"].(string); n == appName {

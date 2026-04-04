@@ -191,10 +191,12 @@ EOF
         "$CONFIG_DIR/sonarr" \
         "$CONFIG_DIR/radarr" \
         "$CONFIG_DIR/jellyfin" \
+        "$CONFIG_DIR/procula/jobs" \
         "$CONFIG_DIR/certs" \
         "$MEDIA_DIR/downloads" \
         "$MEDIA_DIR/movies" \
-        "$MEDIA_DIR/tv"
+        "$MEDIA_DIR/tv" \
+        "$MEDIA_DIR/processing"
     pass "Created directory structure"
 
     # Generate self-signed TLS certificate (first run only)
@@ -260,10 +262,12 @@ cmd_up() {
         "$CONFIG_DIR/sonarr" \
         "$CONFIG_DIR/radarr" \
         "$CONFIG_DIR/jellyfin" \
+        "$CONFIG_DIR/procula/jobs" \
         "$CONFIG_DIR/certs" \
         "$MEDIA_DIR/downloads" \
         "$MEDIA_DIR/movies" \
-        "$MEDIA_DIR/tv"
+        "$MEDIA_DIR/tv" \
+        "$MEDIA_DIR/processing"
 
     # Generate TLS cert if missing
     if [[ ! -f "$CONFIG_DIR/certs/pelicula.crt" ]]; then
@@ -338,6 +342,7 @@ Session\DefaultSavePath=/downloads/'
     echo "  Prowlarr        http://localhost:${port}/prowlarr/"
     echo "  qBittorrent     http://localhost:${port}/qbt/"
     echo "  Jellyfin        http://localhost:${port}/jellyfin/"
+    echo "  Procula API     http://localhost:${port}/api/procula/status"
     echo ""
     echo -e "Get qBittorrent temp password: ${BOLD}./pelicula logs qbittorrent${NC} (look for 'temporary password')"
 }
@@ -460,7 +465,7 @@ usage() {
     echo "  check-vpn   Verify VPN and service health"
     echo "  update      Pull latest images and recreate containers"
     echo ""
-    echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, nginx"
+    echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, procula, nginx"
 }
 
 # ── Dispatch ────────────────────────────────────────

@@ -127,6 +127,8 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+    ports:
+      - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
       - ${MEDIA_DIR}/tv:/data/tv
@@ -138,6 +140,34 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Procula — media processing pipeline
+  # ═══════════════════════════════════════════════════
+  procula:
+    build: ./procula
+    container_name: procula
+    restart: unless-stopped
+    depends_on:
+      - pelicula-api
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - CONFIG_DIR=/config
+      - PELICULA_API_URL=http://pelicula-api:8181
+    volumes:
+      - ${CONFIG_DIR}/procula:/config
+      - ${MEDIA_DIR}/downloads:/downloads:ro
+      - ${MEDIA_DIR}/movies:/movies
+      - ${MEDIA_DIR}/tv:/tv
+      - ${MEDIA_DIR}/processing:/processing
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8282/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ═══════════════════════════════════════════════════
   # Middleware — auto-wiring, search, downloads API
