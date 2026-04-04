@@ -206,6 +206,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx/styles.css:/usr/share/nginx/html/styles.css:ro
+      - ./nginx/dashboard.js:/usr/share/nginx/html/dashboard.js:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"
