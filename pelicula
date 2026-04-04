@@ -370,6 +370,10 @@ cmd_restart_acquire() {
     compose_cmd stop $ACQUIRE_SERVICES
     # shellcheck disable=SC2086
     compose_cmd start $ACQUIRE_SERVICES
+    # *arr apps rewrite config.xml on startup with auth enabled; patch it back.
+    enforce_arr_auth "$CONFIG_DIR/sonarr/config.xml"
+    enforce_arr_auth "$CONFIG_DIR/radarr/config.xml"
+    enforce_arr_auth "$CONFIG_DIR/prowlarr/config.xml"
     pass "Acquisition services restarted"
 }
 
