@@ -91,6 +91,7 @@
         .telem-value.loading { color: #333; }
         .telem-value.vpn-ok { color: #7dda93; }
         .telem-value.vpn-err { color: #f87171; }
+        #t-vpn { cursor: pointer; }
 
         /* ── Toast / Alert ─────────────────────── */
         .toast {
@@ -774,7 +775,8 @@
                 ]);
                 if (ipRes.ok) {
                     const data = await ipRes.json();
-                    vpnEl.textContent = data.public_ip || '?';
+                    vpnEl.setAttribute('data-ip', data.public_ip || '?');
+                    vpnEl.textContent = '***.***';
                     vpnEl.className = 'telem-value vpn-ok';
                     regionEl.textContent = data.country || '?';
                     regionEl.classList.remove('loading');
@@ -803,6 +805,11 @@
             }
             updateTimestamp();
         }
+        document.getElementById('t-vpn').addEventListener('click', function() {
+            const ip = this.getAttribute('data-ip');
+            if (!ip) return;
+            this.textContent = this.textContent === ip ? '***.***' : ip;
+        });
         checkAuth();
         setTimeout(refresh, 500);
         setInterval(refresh, 15000);
