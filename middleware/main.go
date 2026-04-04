@@ -46,6 +46,10 @@ func main() {
 	mux.Handle("/api/pelicula/downloads/pause", auth.Guard(http.HandlerFunc(handleDownloadPause)))
 	mux.Handle("/api/pelicula/downloads/cancel", auth.Guard(http.HandlerFunc(handleDownloadCancel)))
 
+	// Procula integration
+	mux.Handle("/api/pelicula/hooks/import", auth.Guard(http.HandlerFunc(handleImportHook)))
+	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
+
 	log.Println("[server] listening on :8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
 		log.Fatal(err)

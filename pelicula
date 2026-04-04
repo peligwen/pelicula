@@ -191,10 +191,12 @@ EOF
         "$CONFIG_DIR/sonarr" \
         "$CONFIG_DIR/radarr" \
         "$CONFIG_DIR/jellyfin" \
+        "$CONFIG_DIR/procula/jobs" \
         "$CONFIG_DIR/certs" \
         "$MEDIA_DIR/downloads" \
         "$MEDIA_DIR/movies" \
-        "$MEDIA_DIR/tv"
+        "$MEDIA_DIR/tv" \
+        "$MEDIA_DIR/processing"
     pass "Created directory structure"
 
     # Generate self-signed TLS certificate (first run only)
@@ -260,10 +262,12 @@ cmd_up() {
         "$CONFIG_DIR/sonarr" \
         "$CONFIG_DIR/radarr" \
         "$CONFIG_DIR/jellyfin" \
+        "$CONFIG_DIR/procula/jobs" \
         "$CONFIG_DIR/certs" \
         "$MEDIA_DIR/downloads" \
         "$MEDIA_DIR/movies" \
-        "$MEDIA_DIR/tv"
+        "$MEDIA_DIR/tv" \
+        "$MEDIA_DIR/processing"
 
     # Generate TLS cert if missing
     if [[ ! -f "$CONFIG_DIR/certs/pelicula.crt" ]]; then

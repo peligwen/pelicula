@@ -467,6 +467,13 @@
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
+                <a class="service" target="_blank" rel="noopener" href="/api/procula/status" data-check="/api/procula/ping">
+                    <div class="service-left">
+                        <span class="status-dot checking"></span>
+                        <div><div class="service-name">Procula</div><div class="service-desc">Processing</div></div>
+                    </div>
+                    <span class="service-arrow">&rarr;</span>
+                </a>
             </div>
         </div>
 
@@ -724,6 +731,7 @@
                     else if (href.includes('prowlarr')) name = 'prowlarr';
                     else if (href.includes('qbt')) name = 'qbittorrent';
                     else if (href.includes('jellyfin')) name = 'jellyfin';
+                    else if (href.includes('procula')) name = 'procula';
                     dot.className = 'status-dot ' + (svcMap[name] === 'up' ? 'up' : 'down');
                 });
                 // Search depends on Radarr + Sonarr

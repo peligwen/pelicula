@@ -39,6 +39,10 @@ func AutoWire(s *ServiceClients) error {
 	prowlarrWired := wireProwlarrApp(s, "Sonarr", sonarrURL, s.SonarrKey) &&
 		wireProwlarrApp(s, "Radarr", radarrURL, s.RadarrKey)
 
+	// Wire Procula import webhooks into Radarr and Sonarr
+	wireImportWebhook(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
+	wireImportWebhook(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
+
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
 		log.Println("[autowire] all services wired successfully")
@@ -152,6 +156,51 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 
 	log.Printf("[autowire] %s: added root folder %s", name, folderPath)
 	return true
+}
+
+// wireImportWebhook adds a Procula import webhook notification to a *arr app.
+// It is idempotent — won't add a second "Procula" webhook if one already exists.
+func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
+	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/notification")
+	if err != nil {
+		log.Printf("[autowire] %s: failed to check notifications: %v", name, err)
+		return
+	}
+
+	var existing []map[string]any
+	json.Unmarshal(data, &existing)
+
+	for _, n := range existing {
+		if n, _ := n["name"].(string); n == "Procula" {
+			log.Printf("[autowire] %s: Procula webhook already configured, skipping", name)
+			return
+		}
+	}
+
+	hookURL := "http://pelicula-api:8181/api/pelicula/hooks/import"
+	payload := map[string]any{
+		"name":           "Procula",
+		"implementation": "Webhook",
+		"configContract": "WebhookSettings",
+		"fields": []map[string]any{
+			{"name": "url", "value": hookURL},
+			{"name": "method", "value": 1}, // 1 = POST
+			{"name": "username", "value": ""},
+			{"name": "password", "value": ""},
+		},
+		"onGrab":       false,
+		"onDownload":   true,
+		"onUpgrade":    true,
+		"onHealthIssue": false,
+		"onApplicationUpdate": false,
+	}
+
+	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
+	if err != nil {
+		log.Printf("[autowire] %s: failed to add Procula webhook: %v", name, err)
+		return
+	}
+	log.Printf("[autowire] %s: added Procula import webhook → %s", name, hookURL)
 }
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
