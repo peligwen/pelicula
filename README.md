@@ -1,121 +1,126 @@
 # pelicula
 
-Automated media stack — search for shows and movies by name, download via torrent through a VPN, stream with Jellyfin. Runs on macOS or Synology NAS.
+Search for movies and TV shows by name, download via torrent through a VPN, stream with Jellyfin. One command to set up, one command to run.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-user/pelicula.git
+git clone https://github.com/peligwen/pelicula.git
 cd pelicula
-./pelicula setup    # answer a few prompts (~30 seconds)
+./pelicula setup    # answer a few prompts
 ./pelicula up       # pulls images, builds middleware, starts everything
 ```
 
-Open `http://localhost:7354` — that's it. Services are auto-wired on first boot.
+Open `http://localhost:7354` — that's it.
 
 ## Prerequisites
 
-- **Docker** (Docker Desktop on Mac, Container Manager on Synology)
-- **ProtonVPN** paid plan (Plus or higher) — free tier doesn't support P2P or port forwarding
-- A **Wireguard private key** from ProtonVPN (the setup wizard walks you through this)
+- **Docker** with Compose v2
+- **ProtonVPN** paid plan (Plus or higher) with a Wireguard private key
 
-## What You Get
+## What Happens Automatically
 
-Everything runs behind an nginx reverse proxy on port **7354** (PELI on a phone keypad):
+On `./pelicula up`, the stack:
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Dashboard | `http://localhost:7354/` | Unified search, downloads, VPN telemetry, service status |
-| Sonarr | `http://localhost:7354/sonarr/` | TV show search & automation |
-| Radarr | `http://localhost:7354/radarr/` | Movie search & automation |
-| Prowlarr | `http://localhost:7354/prowlarr/` | Torrent indexer manager |
-| qBittorrent | `http://localhost:7354/qbt/` | Torrent client (VPN-only traffic) |
-| Jellyfin | `http://localhost:7354/jellyfin/` | Media server & streaming |
+1. Seeds service configs (URL bases, auth bypass, download paths)
+2. Starts 8 containers behind an nginx reverse proxy on port 7354
+3. Waits for VPN connection and port forwarding
+4. Auto-wires qBittorrent as the download client in Sonarr and Radarr
+5. Connects Prowlarr indexers to both Sonarr and Radarr
+6. Watches for newly added content and triggers searches automatically
+7. Enforces auth bypass on every start (services can't lock you out)
 
-Port is configurable via `PELICULA_PORT` in `.env`.
-
-All torrent traffic is routed through ProtonVPN Wireguard with automatic port forwarding. If the VPN drops, qBittorrent loses internet (kill-switch).
-
-## Auto-Wiring
-
-On first `./pelicula up`, the Go middleware automatically:
-- Adds qBittorrent as the download client in Sonarr and Radarr
-- Sets root folders (`/tv` for Sonarr, `/movies` for Radarr)
-- Connects Prowlarr to Sonarr and Radarr
-- Configures URL bases and auth bypass for all services
-
-The only manual step is **adding indexers in Prowlarr** — the dashboard shows a warning if none are configured.
+The only manual step is **adding indexers in Prowlarr** — the dashboard warns if none are configured.
 
 ## Dashboard
 
-The dashboard at `http://localhost:7354/` includes:
-- **VPN telemetry** — IP, country, forwarded port, download/upload speeds
-- **Unified search** — searches both Sonarr (TV) and Radarr (movies) simultaneously, with type filter tabs
-- **One-click add** — add movies or shows to your library directly from search results
-- **Download progress** — active torrents with progress bars, speeds, ETA
-- **Service status** — green/red indicators for all services
-- **Indexer warning** — yellow toast if no indexers are configured
+The dashboard at `http://localhost:7354/` is the single interface for the whole stack:
 
-## CLI Reference
+- **Unified search** — searches Sonarr and Radarr in parallel, interleaved results, type filter tabs
+- **One-click add** — add movies or shows and search starts immediately
+- **Download management** — pause, resume, cancel, or blocklist with reason selection
+- **Service awareness** — search disables with a red/yellow warning when Radarr or Sonarr are down
+- **VPN telemetry** — IP, country, forwarded port, transfer speeds
+- **Service status** — red until confirmed up, green when healthy
+
+When you click away from search results, they collapse to the top result with a "Show N more" bar. Click back to expand.
+
+## Services
+
+Everything runs behind nginx on one port:
+
+| Path | Service | Purpose |
+|------|---------|---------|
+| `/` | Dashboard | Search, downloads, status |
+| `/api/pelicula/` | Go middleware | Auto-wiring, search API, download actions |
+| `/api/vpn/` | Gluetun | VPN telemetry |
+| `/sonarr/` | Sonarr | TV show automation |
+| `/radarr/` | Radarr | Movie automation |
+| `/prowlarr/` | Prowlarr | Indexer management |
+| `/qbt/` | qBittorrent | Torrent client (VPN-only traffic) |
+| `/jellyfin/` | Jellyfin | Media server and streaming |
+
+All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, qBittorrent loses internet (kill-switch).
+
+## CLI
 
 ```
-./pelicula setup       # Interactive first-time setup
+./pelicula setup       # Interactive first-time configuration
 ./pelicula up          # Start all services
 ./pelicula down        # Stop all services
 ./pelicula status      # Show container status
 ./pelicula logs [svc]  # Tail logs (optionally for one service)
-./pelicula check-vpn   # Verify VPN tunnel, port forwarding, service health
-./pelicula update      # Pull latest images and recreate containers
+./pelicula check-vpn   # Verify VPN tunnel and service health
+./pelicula update      # Pull latest images and recreate
 ```
 
 ## Architecture
 
 ```
   http://localhost:7354
-        │
+        |
   nginx reverse proxy
-        │
-        ├── /                → Dashboard (search, downloads, status)
-        ├── /api/pelicula/   → Go middleware (auto-wiring, search API, downloads API)
-        ├── /api/vpn/        → Gluetun control API (VPN telemetry)
-        ├── /sonarr/         → Sonarr ── TV show automation ──┐
-        ├── /radarr/         → Radarr ── movie automation ────┤
-        ├── /prowlarr/       → Prowlarr ◄── indexer search ◄──┘
-        ├── /qbt/            → qBittorrent
-        │                          │
-        │                          ▼ all traffic through VPN
-        │                    Gluetun (ProtonVPN Wireguard)
-        │                          │
-        │                          ▼ downloads to
-        │                    /downloads → moved to /movies or /tv
-        │                          │
-        └── /jellyfin/       → Jellyfin ◄── streams your library
+        |
+        +-- /                -> Dashboard (static HTML)
+        +-- /api/pelicula/   -> Go middleware (search, downloads, auto-wire)
+        +-- /api/vpn/        -> Gluetun control API
+        +-- /sonarr/         -> Sonarr --+
+        +-- /radarr/         -> Radarr --+--> Prowlarr (indexers)
+        +-- /qbt/            -> qBittorrent
+        |                         |
+        |                    Gluetun (VPN tunnel)
+        |                         |
+        |                    /downloads -> /movies, /tv
+        |
+        +-- /jellyfin/       -> Jellyfin (streams your library)
 ```
 
-## Platform Notes
+## Download Management
 
-| | macOS | Synology NAS |
-|---|---|---|
-| Config location | `./config` | `/volume1/docker/media-stack/config` |
-| Media location | `~/media` | `/volume1/media` |
-| Docker sudo | no | yes (handled automatically) |
-| TUN device | not needed | created during setup |
+The dashboard download panel supports:
 
-All paths are configurable during `./pelicula setup`.
+| Action | What it does |
+|--------|-------------|
+| **Pause** | Stops the torrent in qBittorrent. Reversible. |
+| **Resume** | Resumes a paused torrent. |
+| **Cancel** | Removes torrent + files, unmonitors in Radarr/Sonarr so the watcher won't re-grab it. |
+| **Blocklist** | Removes and blocklists the release with a reason (wrong quality, wrong language, corrupt, slow, wrong content, other). |
+
+Progress bars are green (active), amber (paused), or blue (seeding).
+
+## Missing Content Watcher
+
+A background process checks every 2 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
 
 ## Optional Auth
 
-Set `PELICULA_AUTH=true` and `PELICULA_PASSWORD=yourpassword` in `.env` to require a password for the dashboard and API. Services are still accessible directly via their paths.
+Set `PELICULA_AUTH=true` and `PELICULA_PASSWORD=yourpassword` in `.env` to require a password for the dashboard and API.
 
 ## Post-Setup: Add Indexers
 
-The only manual step after `./pelicula up` is adding torrent indexers:
-
 1. Open Prowlarr at `http://localhost:7354/prowlarr/`
-2. Go to **Indexers** → **Add Indexer**
+2. Go to **Indexers** > **Add Indexer**
 3. Add your preferred torrent indexers
 4. Indexers automatically sync to Sonarr and Radarr
 
-Once indexers are configured, you can search and download directly from the dashboard.
-
-See [synology-media-stack.md](synology-media-stack.md) for detailed manual setup reference.
+Once indexers are configured, search and download from the dashboard.
