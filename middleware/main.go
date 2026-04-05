@@ -45,6 +45,9 @@ func main() {
 	}
 	auth := NewAuth(authMode, os.Getenv("PELICULA_PASSWORD"), "/config/pelicula/users.json")
 
+	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
+	mux.HandleFunc("/api/pelicula/health", handleHealth)
+
 	// Auth endpoints (always accessible)
 	mux.HandleFunc("/api/pelicula/auth/login", auth.HandleLogin)
 	mux.HandleFunc("/api/pelicula/auth/logout", auth.HandleLogout)
