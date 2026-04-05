@@ -297,8 +297,12 @@ func (q *Queue) persist(job *Job) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(q.configDir, "jobs", job.ID+".json")
-	return os.WriteFile(path, data, 0644)
+	final := filepath.Join(q.configDir, "jobs", job.ID+".json")
+	tmp := final + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, final)
 }
 
 const randChars = "abcdefghijklmnopqrstuvwxyz0123456789"
