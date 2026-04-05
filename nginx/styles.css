@@ -212,6 +212,10 @@ body {
 .search-results.visible { display: block; }
 .search-results.collapsed .search-result:not(:first-child) { display: none; }
 .search-results.collapsed { display: block; }
+.search-results.searching { display: block; }
+.search-searching-msg { padding: 0.85rem 1rem; color: #444; font-size: 0.88rem; }
+.search-searching-msg::after { content: ''; animation: ellipsis 1.2s steps(3, end) infinite; }
+@keyframes ellipsis { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
 .search-show-more {
     padding: 0.5rem 1rem; background: #131313; border: 1px solid #1e1e1e;
     border-radius: 8px; color: #666; font-size: 0.8rem; text-align: center;

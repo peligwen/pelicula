@@ -128,6 +128,8 @@ searchInput.addEventListener('input', () => {
     searchTimeout = setTimeout(() => doSearch(q), 400);
 });
 async function doSearch(q) {
+    searchResults.innerHTML = '<div class="search-searching-msg">Searching</div>';
+    searchResults.className = 'search-results searching';
     try {
         const typeParam = searchType ? '&type=' + searchType : '';
         const res = await fetch('/api/pelicula/search?q=' + encodeURIComponent(q) + typeParam);
