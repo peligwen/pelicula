@@ -73,6 +73,10 @@ func main() {
 	// admin only: destructive actions
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
+	// admin only: backup export / import
+	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
+	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))
+
 	slog.Info("listening", "component", "main", "addr", ":8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
 		slog.Error("server exited", "component", "main", "error", err)
