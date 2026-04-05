@@ -280,7 +280,12 @@ func exportSeries(apiKey string) ([]SeriesExport, error) {
 			Path:           strVal(s, "path"),
 			QualityProfile: profMap[int(floatVal(s, "qualityProfileId"))],
 			Monitored:      boolField(s, "monitored"),
-			HasFile:        boolField(s, "statistics.hasFile"),
+			HasFile: func() bool {
+				if stats, ok := s["statistics"].(map[string]any); ok {
+					return boolField(stats, "hasFile")
+				}
+				return false
+			}(),
 			Tags:           resolveTagLabels(s, tagMap),
 			Seasons:        extractSeasons(s),
 		}

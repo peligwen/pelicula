@@ -195,6 +195,8 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	result := &LibraryApplyResult{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	// Semaphore: max 5 concurrent Radarr/Sonarr add calls.
+	sem := make(chan struct{}, 5)
 
 	for _, item := range req.Items {
 		var k dedupeKey
@@ -223,9 +225,11 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		sem <- struct{}{}
 		wg.Add(1)
 		go func(it ApplyItem) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			var err error
 			if it.Type == "movie" {
 				err = applyMovie(radarrKey, it, movieProfiles)
