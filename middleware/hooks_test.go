@@ -161,7 +161,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 		}
 	})
 
-	t.Run("missing movieFile still works (no path error)", func(t *testing.T) {
+	t.Run("missing movieFile returns error", func(t *testing.T) {
 		raw := map[string]any{
 			"movie": map[string]any{
 				"title": "Alien",

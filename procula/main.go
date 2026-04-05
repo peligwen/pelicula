@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+// configDir is the global config directory used by settings.go.
+// Set once at startup from CONFIG_DIR env var.
+var configDir string
+
 // Server holds the dependencies for HTTP handlers.
 type Server struct {
 	queue     *Queue
@@ -201,7 +205,3 @@ func env(key, fallback string) string {
 	}
 	return fallback
 }
-
-// configDir is the global config directory used by settings.go.
-// Set once at startup from CONFIG_DIR env var.
-var configDir string

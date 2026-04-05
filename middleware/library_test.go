@@ -106,7 +106,7 @@ func TestScoreMatch(t *testing.T) {
 		// true substring: "Dark Knight" is in "The Dark Knight Rises" after normalize
 		{"substring match year ok", "Dark Knight", 2012, "The Dark Knight Rises", 2012, "medium"},
 		{"substring match year bad", "Dark Knight", 2000, "The Dark Knight Rises", 2012, "low"},
-		{"80% word overlap year ok", "Dark Knight Rises", 2012, "The Dark Knight Rises", 2012, "high"}, // exact after normalize
+		{"exact after normalize year ok", "Dark Knight Rises", 2012, "The Dark Knight Rises", 2012, "high"},
 		{"no overlap", "Star Wars", 1977, "Alien", 1979, "unmatched"},
 		{"empty title", "", 2008, "The Dark Knight", 2008, "unmatched"},
 		{"empty match title", "The Dark Knight", 2008, "", 2008, "unmatched"},
