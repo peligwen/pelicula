@@ -98,3 +98,26 @@ Push notifications to phone, email, Telegram, etc.
 - **Jellyfin/Plex SSO**: layer on top of the Phase B user model. Delegates auth to Jellyfin or Plex; Pelicula user model is the standalone fallback.
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
+
+---
+
+## Pelicula for Windows
+
+Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `pelicula.exe`) for true cross-platform support including native Windows without WSL.
+
+**Why:** The bash script is the only Windows-incompatible piece. All containers run fine on Docker Desktop for Windows. A Go CLI removes the bash + python3 dependencies entirely.
+
+**Scope:**
+- [ ] New `cmd/pelicula/` package — compiles to a single binary per platform
+- [ ] All setup/configure prompts in Go (`bufio.Scanner`) — no bash required
+- [ ] `.env` generation and config file writes in pure Go
+- [ ] User management (`configure_users`) in Go — removes python3 dependency
+- [ ] `docker compose` orchestration via `os/exec` (same as bash today)
+- [ ] Platform detection in Go: Windows, macOS, Linux, Synology NAS
+- [ ] TUN device handling on Linux/Synology; skip on macOS/Windows (Docker Desktop handles it)
+- [ ] `docker-compose.override.yml` generation on non-macOS
+- [ ] Distribute as a single binary — no shell, no interpreter, no dependencies
+
+**What does NOT change:** middleware, procula, nginx, docker-compose.yml, all containers. The Go CLI is purely the operator tool that wraps `docker compose` and manages configuration.
+
+**Note:** The current bash script remains authoritative until this is complete. Build after Phases D–F.
