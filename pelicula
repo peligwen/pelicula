@@ -380,8 +380,8 @@ configure_auth() {
     echo "  Current mode: ${current}"
     echo ""
     echo "  1) off      — no auth required (single-user LAN)"
-    echo "  2) password — single shared password"
-    echo "  3) users    — multi-user with roles (Phase B — coming soon)"
+    echo "  2) password — single shared password (admin only)"
+    echo "  3) users    — multi-user with roles (viewer / manager / admin)"
     echo ""
     echo -en "Select [1-3]: "
     read -r choice
@@ -406,12 +406,185 @@ configure_auth() {
             warn "Restart services: ./pelicula restart"
             ;;
         3)
-            warn "User model (Phase B) not yet implemented"
+            set_env_var PELICULA_AUTH users
+            set_env_var PELICULA_PASSWORD ""
+            pass "Auth mode set to users"
+            configure_users
             ;;
         *)
             warn "Unknown option"
             ;;
     esac
+}
+
+# Hash a password using SHA-256 with username as salt: hex(sha256("username:password"))
+hash_password() {
+    local username="$1" password="$2"
+    printf '%s:%s' "$username" "$password" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}'
+}
+
+configure_users() {
+    load_env
+    local users_file="${CONFIG_DIR}/pelicula/users.json"
+    mkdir -p "$(dirname "$users_file")"
+
+    # Initialize empty array if file doesn't exist
+    [[ ! -f "$users_file" ]] && echo '[]' > "$users_file"
+
+    while true; do
+        echo ""
+        echo -e "${BOLD}User Management${NC}"
+        echo ""
+
+        # List current users
+        if command -v python3 &>/dev/null; then
+            python3 -c "
+import json, sys
+try:
+    users = json.load(open('$users_file'))
+    if not users:
+        print('  (no users)')
+    for u in users:
+        print(f\"  {u['username']:20s} {u.get('role','?')}\")
+except: print('  (could not read users file)')
+"
+        else
+            info "Users file: ${users_file}"
+        fi
+
+        echo ""
+        echo "  1) Add user"
+        echo "  2) Remove user"
+        echo "  3) Change password"
+        echo "  4) Change role"
+        echo "  b) Back"
+        echo ""
+        echo -en "Select [1-4, b]: "
+        read -r choice
+        case "$choice" in
+            1) add_user "$users_file" ;;
+            2) remove_user "$users_file" ;;
+            3) change_user_password "$users_file" ;;
+            4) change_user_role "$users_file" ;;
+            b|B) break ;;
+            *) warn "Unknown option" ;;
+        esac
+    done
+    warn "Restart pelicula-api for user changes to take effect: ./pelicula restart-acquire"
+}
+
+add_user() {
+    local users_file="$1"
+    echo ""
+    prompt username "Username"
+    echo -en "${BOLD}Password${NC}: "
+    read -rs pw
+    echo ""
+    if [[ -z "$pw" ]]; then warn "Password cannot be empty"; return; fi
+    echo ""
+    echo "  Roles:"
+    echo "    viewer  — read-only dashboard, can request via Jellyseerr"
+    echo "    manager — search + add content, pause/resume downloads"
+    echo "    admin   — full access including cancel and blocklist"
+    echo ""
+    echo -en "Role [viewer/manager/admin, default admin]: "
+    read -r role
+    case "$role" in
+        viewer|manager|admin) ;;
+        "") role="admin" ;;
+        *) warn "Invalid role — must be viewer, manager, or admin"; return ;;
+    esac
+    local hash
+    hash="$(hash_password "$username" "$pw")"
+    if [[ -z "$hash" ]]; then
+        warn "Could not hash password (openssl required)"
+        return
+    fi
+    # Append user to JSON array using python3 if available, otherwise manual
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+users = json.load(open('$users_file'))
+users = [u for u in users if u['username'] != '$username']
+users.append({'username': '$username', 'password': '$hash', 'role': '$role'})
+json.dump(users, open('$users_file', 'w'), indent=2)
+print('ok')
+" | grep -q ok && pass "User '${username}' added (${role})" || warn "Failed to write users file"
+    else
+        warn "python3 not found — cannot update users.json automatically"
+        info "Manually add to ${users_file}:"
+        echo "  {\"username\": \"${username}\", \"password\": \"${hash}\", \"role\": \"${role}\"}"
+    fi
+}
+
+remove_user() {
+    local users_file="$1"
+    echo ""
+    prompt username "Username to remove"
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+users = json.load(open('$users_file'))
+before = len(users)
+users = [u for u in users if u['username'] != '$username']
+json.dump(users, open('$users_file', 'w'), indent=2)
+print('removed' if len(users) < before else 'notfound')
+" | grep -q removed && pass "User '${username}' removed" || warn "User '${username}' not found"
+    else
+        warn "python3 not found — edit ${users_file} manually"
+    fi
+}
+
+change_user_password() {
+    local users_file="$1"
+    echo ""
+    prompt username "Username"
+    echo -en "${BOLD}New password${NC}: "
+    read -rs pw
+    echo ""
+    if [[ -z "$pw" ]]; then warn "Password cannot be empty"; return; fi
+    local hash
+    hash="$(hash_password "$username" "$pw")"
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+users = json.load(open('$users_file'))
+found = False
+for u in users:
+    if u['username'] == '$username':
+        u['password'] = '$hash'; found = True
+json.dump(users, open('$users_file', 'w'), indent=2)
+print('ok' if found else 'notfound')
+" | grep -q ok && pass "Password updated for '${username}'" || warn "User '${username}' not found"
+    else
+        warn "python3 not found — edit ${users_file} manually"
+    fi
+}
+
+change_user_role() {
+    local users_file="$1"
+    echo ""
+    prompt username "Username"
+    echo -en "New role [viewer/manager/admin]: "
+    read -r role
+    case "$role" in
+        viewer|manager|admin) ;;
+        *) warn "Invalid role"; return ;;
+    esac
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+users = json.load(open('$users_file'))
+found = False
+for u in users:
+    if u['username'] == '$username':
+        u['role'] = '$role'; found = True
+json.dump(users, open('$users_file', 'w'), indent=2)
+print('ok' if found else 'notfound')
+" | grep -q ok && pass "Role for '${username}' set to ${role}" || warn "User '${username}' not found"
+    else
+        warn "python3 not found — edit ${users_file} manually"
+    fi
 }
 
 configure_notifications() {

@@ -20,13 +20,13 @@ Reduce friction on first run. Add runtime configuration menu.
 
 Multi-user access to the dashboard with role-based visibility.
 
-- [ ] Pelicula user model: `users.json` at `/config/pelicula/users.json`
-- [ ] Three roles: `viewer` (read-only + Jellyseerr requests), `manager` (search + add + pause/resume), `admin` (everything)
-- [ ] Rewrite `middleware/auth.go`: session stores username + role; `Guard` checks role per endpoint
-- [ ] `PELICULA_AUTH=users` mode in `middleware/main.go`
-- [ ] Dashboard login form: username + password fields
-- [ ] Dashboard hides destructive controls (cancel, blocklist) based on role
-- [ ] `./pelicula configure` → Auth section: create/edit/delete users
+- [x] Pelicula user model: `users.json` at `/config/pelicula/users.json`
+- [x] Three roles: `viewer` (read-only + Jellyseerr requests), `manager` (search + add + pause/resume), `admin` (everything)
+- [x] Rewrite `middleware/auth.go`: session stores username + role; `Guard` checks role per endpoint
+- [x] `PELICULA_AUTH=users` mode in `middleware/main.go`
+- [x] Dashboard login form: username + password fields (users mode shows username field)
+- [x] Dashboard hides destructive controls (cancel, blocklist) based on role
+- [x] `./pelicula configure` → Auth section: create/edit/delete users
 
 **Security boundaries:**
 - Destructive actions (cancel + delete files, blocklist) → admin only

@@ -27,10 +27,21 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Auth middleware wraps all handlers when enabled
-	authEnabled := os.Getenv("PELICULA_AUTH") == "true"
-	password := os.Getenv("PELICULA_PASSWORD")
-	auth := NewAuth(authEnabled, password)
+	// Determine auth mode:
+	//   PELICULA_AUTH=off (or empty/false) — no auth
+	//   PELICULA_AUTH=true or =password    — single shared password (legacy)
+	//   PELICULA_AUTH=users                — user model from /config/pelicula/users.json
+	authEnv := os.Getenv("PELICULA_AUTH")
+	var authMode string
+	switch authEnv {
+	case "users":
+		authMode = "users"
+	case "true", "password":
+		authMode = "password"
+	default:
+		authMode = "off"
+	}
+	auth := NewAuth(authMode, os.Getenv("PELICULA_PASSWORD"), "/config/pelicula/users.json")
 
 	// Auth endpoints (always accessible)
 	mux.HandleFunc("/api/pelicula/auth/login", auth.HandleLogin)
@@ -40,17 +51,19 @@ func main() {
 	// call this endpoint and cannot send a session cookie.
 	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
 
-	// Protected endpoints
+	// viewer+: read-only dashboard data
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(handleStatus)))
-	mux.Handle("/api/pelicula/search", auth.Guard(http.HandlerFunc(handleSearch)))
-	mux.Handle("/api/pelicula/search/add", auth.Guard(http.HandlerFunc(handleSearchAdd)))
 	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(handleDownloads)))
 	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(handleDownloadStats)))
-	mux.Handle("/api/pelicula/downloads/pause", auth.Guard(http.HandlerFunc(handleDownloadPause)))
-	mux.Handle("/api/pelicula/downloads/cancel", auth.Guard(http.HandlerFunc(handleDownloadCancel)))
-
-	// Procula integration
 	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
+
+	// manager+: search and add content, pause/resume downloads
+	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(handleSearch)))
+	mux.Handle("/api/pelicula/search/add", auth.GuardManager(http.HandlerFunc(handleSearchAdd)))
+	mux.Handle("/api/pelicula/downloads/pause", auth.GuardManager(http.HandlerFunc(handleDownloadPause)))
+
+	// admin only: destructive actions
+	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
 	log.Println("[server] listening on :8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {

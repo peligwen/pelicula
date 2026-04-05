@@ -1,23 +1,67 @@
 // ── Auth ──────────────────────────────────
+let currentRole = 'admin'; // default when auth is off
+
 async function checkAuth() {
     try {
         const res = await fetch('/api/pelicula/auth/check');
         const data = await res.json();
-        if (data.auth && !data.valid) document.getElementById('login-overlay').classList.remove('hidden');
+        if (!data.auth) {
+            // Auth is off — no login needed, full access
+            applyRole('admin');
+            return;
+        }
+        if (!data.valid) {
+            // Show username field only in users mode
+            if (data.mode === 'users') {
+                document.getElementById('login-username').classList.remove('hidden');
+            }
+            document.getElementById('login-overlay').classList.remove('hidden');
+        } else {
+            applyRole(data.role || 'admin');
+        }
     } catch {}
 }
+
 async function doLogin() {
+    const username = document.getElementById('login-username').value;
     const pw = document.getElementById('login-password').value;
     const errEl = document.getElementById('login-error');
     try {
         const res = await fetch('/api/pelicula/auth/login', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({password: pw})
+            body: JSON.stringify({username, password: pw})
         });
-        if (res.ok) { document.getElementById('login-overlay').classList.add('hidden'); errEl.style.display = 'none'; refresh(); }
-        else { errEl.style.display = 'block'; }
+        const data = await res.json();
+        if (res.ok) {
+            document.getElementById('login-overlay').classList.add('hidden');
+            errEl.style.display = 'none';
+            applyRole(data.role || 'admin');
+            refresh();
+        } else {
+            errEl.style.display = 'block';
+        }
     } catch { errEl.style.display = 'block'; }
 }
+
+// Apply role-based visibility to UI elements.
+// viewer:  no search, no download actions
+// manager: search + add, pause/resume; no cancel/blocklist
+// admin:   everything
+function applyRole(role) {
+    currentRole = role;
+    const isManager = role === 'manager' || role === 'admin';
+    const isAdmin = role === 'admin';
+
+    // Search section
+    const searchSection = document.querySelector('.search-section');
+    if (searchSection) searchSection.style.display = isManager ? '' : 'none';
+
+    // Download action buttons (rendered dynamically — use a data attribute approach)
+    // Store role for use in renderDownloads
+    document.body.dataset.role = role;
+}
+
+document.getElementById('login-username').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-password').focus(); });
 document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
 // ── Status + Indexer check ────────────────
@@ -174,6 +218,9 @@ function renderDownloads(data) {
     if (data.stats) { statsEl.textContent = `${data.stats.active} active / ${data.stats.queued} queued`; }
     const shown = (data.torrents || []).filter(t => ['downloading','stalledDL','forcedDL','queuedDL','uploading','stalledUP','pausedDL','pausedUP','stoppedDL','stoppedUP','forcedUP'].includes(t.state));
     if (!shown.length) { list.innerHTML = '<div class="no-items">No active downloads</div>'; return; }
+    const role = document.body.dataset.role || currentRole;
+    const canPause = role === 'manager' || role === 'admin';
+    const canCancel = role === 'admin';
     list.innerHTML = shown.slice(0, 8).map(t => {
         const pct = Math.round(t.progress * 100);
         const speed = formatSpeed(t.dlspeed);
@@ -181,11 +228,13 @@ function renderDownloads(data) {
         const isPaused = ['pausedDL','pausedUP','stoppedDL','stoppedUP'].includes(t.state);
         const isSeeding = ['uploading','stalledUP','forcedUP','pausedUP','stoppedUP'].includes(t.state);
         const barClass = isPaused ? 'paused' : isSeeding ? 'seeding' : 'active';
-        const pauseBtn = isPaused
+        const pauseBtn = !canPause ? '' : isPaused
             ? `<button class="dl-btn resume" title="Resume" onclick="dlPause('${t.hash}',false)">&#9654;</button>`
             : `<button class="dl-btn pause" title="Pause" onclick="dlPause('${t.hash}',true)">&#9646;&#9646;</button>`;
+        const cancelBtn = canCancel ? `<button class="dl-btn cancel" title="Cancel download" onclick="dlCancel('${t.hash}','${t.category}','${esc(t.name)}',false)">&#10005;</button>` : '';
+        const blocklistBtn = canCancel ? `<button class="dl-btn blocklist" title="Remove &amp; blocklist" onclick="openBlocklistModal('${t.hash}','${t.category}','${esc(t.name)}')">&#8856;</button>` : '';
         const statusText = isPaused ? '<span class="paused-label">paused</span>' : `${speed}${eta ? ' &middot; ' + eta : ''}`;
-        return `<div class="download-item"><div class="download-header"><div class="download-name">${esc(t.name)}</div><div class="download-actions">${pauseBtn}<button class="dl-btn cancel" title="Cancel download" onclick="dlCancel('${t.hash}','${t.category}','${esc(t.name)}',false)">&#10005;</button><button class="dl-btn blocklist" title="Remove &amp; blocklist" onclick="openBlocklistModal('${t.hash}','${t.category}','${esc(t.name)}')">&#8856;</button></div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${pct}% of ${formatSize(t.size)}</span><span>${statusText}</span></div></div>`;
+        return `<div class="download-item"><div class="download-header"><div class="download-name">${esc(t.name)}</div><div class="download-actions">${pauseBtn}${cancelBtn}${blocklistBtn}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${pct}% of ${formatSize(t.size)}</span><span>${statusText}</span></div></div>`;
     }).join('');
 }
 
