@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 )
 
@@ -11,7 +11,7 @@ import (
 func removeFromArrQueue(baseURL, apiKey, apiVer, hash string, blocklist bool) {
 	records, err := services.ArrGetAllQueueRecords(baseURL, apiKey, apiVer, "&includeUnknownMovieItems=true&includeUnknownSeriesItems=true")
 	if err != nil {
-		log.Printf("[downloads] failed to fetch %s queue: %v", baseURL, err)
+		slog.Error("failed to fetch arr queue", "component", "downloads", "url", baseURL, "error", err)
 		return
 	}
 
@@ -28,13 +28,13 @@ func removeFromArrQueue(baseURL, apiKey, apiVer, hash string, blocklist bool) {
 		path := fmt.Sprintf("%s/queue/%d?removeFromClient=true&blocklist=%s", apiVer, queueID, blockParam)
 		_, err := services.ArrDelete(baseURL, apiKey, path)
 		if err != nil {
-			log.Printf("[downloads] failed to remove queue item %d: %v", queueID, err)
+			slog.Error("failed to remove arr queue item", "component", "downloads", "queue_id", queueID, "error", err)
 		} else {
-			log.Printf("[downloads] removed queue item %d from %s (blocklist=%s)", queueID, baseURL, blockParam)
+			slog.Info("removed arr queue item", "component", "downloads", "queue_id", queueID, "url", baseURL, "blocklist", blockParam)
 		}
 		return
 	}
-	log.Printf("[downloads] hash %s not found in %s queue", shortHash(hash), baseURL)
+	slog.Warn("hash not found in arr queue", "component", "downloads", "hash", shortHash(hash), "url", baseURL)
 }
 
 // unmonitorArrItem finds the movie/series associated with a download hash and unmonitors it.
@@ -77,9 +77,9 @@ func unmonitorMovie(baseURL, apiKey, apiVer string, movieID int) {
 	movie["monitored"] = false
 	_, err = services.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/movie/%d", apiVer, movieID), movie)
 	if err != nil {
-		log.Printf("[downloads] failed to unmonitor movie %d: %v", movieID, err)
+		slog.Error("failed to unmonitor movie", "component", "downloads", "movie_id", movieID, "error", err)
 	} else {
-		log.Printf("[downloads] unmonitored movie %d", movieID)
+		slog.Info("unmonitored movie", "component", "downloads", "movie_id", movieID)
 	}
 }
 
@@ -95,8 +95,8 @@ func unmonitorEpisode(baseURL, apiKey, apiVer string, episodeID int) {
 	episode["monitored"] = false
 	_, err = services.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/episode/%d", apiVer, episodeID), episode)
 	if err != nil {
-		log.Printf("[downloads] failed to unmonitor episode %d: %v", episodeID, err)
+		slog.Error("failed to unmonitor episode", "component", "downloads", "episode_id", episodeID, "error", err)
 	} else {
-		log.Printf("[downloads] unmonitored episode %d", episodeID)
+		slog.Info("unmonitored episode", "component", "downloads", "episode_id", episodeID)
 	}
 }

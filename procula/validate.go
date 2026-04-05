@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -117,8 +117,7 @@ func runFFprobe(path string) (*ffprobeOutput, error) {
 		return nil, fmt.Errorf("ffprobe returned empty format")
 	}
 
-	log.Printf("[validate] ffprobe ok: duration=%s size=%s streams=%d",
-		out.Format.Duration, out.Format.Size, len(out.Streams))
+	slog.Info("ffprobe ok", "component", "validate", "duration", out.Format.Duration, "size", out.Format.Size, "streams", len(out.Streams))
 	return &out, nil
 }
 

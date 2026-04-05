@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -16,7 +16,7 @@ func StartMissingWatcher(s *ServiceClients, interval time.Duration) {
 		time.Sleep(5 * time.Second)
 	}
 
-	log.Printf("[watcher] started — checking for missing content every %s", interval)
+	slog.Info("started", "component", "watcher", "interval", interval.String())
 
 	for {
 		time.Sleep(interval)
@@ -33,7 +33,7 @@ func searchMissingMovies(s *ServiceClients) {
 
 	data, err := s.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
 	if err != nil {
-		log.Printf("[watcher] radarr: failed to fetch movies: %v", err)
+		slog.Error("failed to fetch movies", "component", "watcher", "service", "radarr", "error", err)
 		return
 	}
 
@@ -61,13 +61,13 @@ func searchMissingMovies(s *ServiceClients) {
 		return
 	}
 
-	log.Printf("[watcher] radarr: found %d missing movie(s), triggering search", len(missing))
+	slog.Info("triggering search for missing movies", "component", "watcher", "service", "radarr", "count", len(missing))
 	_, err = s.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
 		"name":     "MoviesSearch",
 		"movieIds": missing,
 	})
 	if err != nil {
-		log.Printf("[watcher] radarr: search command failed: %v", err)
+		slog.Error("search command failed", "component", "watcher", "service", "radarr", "error", err)
 	}
 }
 
@@ -94,7 +94,7 @@ func searchMissingSeries(s *ServiceClients) {
 
 	data, err := s.ArrGet(sonarrURL, sonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
 	if err != nil {
-		log.Printf("[watcher] sonarr: failed to fetch missing episodes: %v", err)
+		slog.Error("failed to fetch missing episodes", "component", "watcher", "service", "sonarr", "error", err)
 		return
 	}
 
@@ -121,13 +121,13 @@ func searchMissingSeries(s *ServiceClients) {
 		return
 	}
 
-	log.Printf("[watcher] sonarr: found %d missing episode(s), triggering search", len(missing))
+	slog.Info("triggering search for missing episodes", "component", "watcher", "service", "sonarr", "count", len(missing))
 	_, err = s.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
 		"name":       "EpisodeSearch",
 		"episodeIds": missing,
 	})
 	if err != nil {
-		log.Printf("[watcher] sonarr: search command failed: %v", err)
+		slog.Error("search command failed", "component", "watcher", "service", "sonarr", "error", err)
 	}
 }
 

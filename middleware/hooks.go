@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"sort"
@@ -41,24 +41,24 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !strings.EqualFold(eventType, "download") {
-		log.Printf("[hooks] ignoring %s event", eventType)
+		slog.Info("ignoring webhook event", "component", "hooks", "event_type", eventType)
 		writeJSON(w, map[string]string{"status": "ignored"})
 		return
 	}
 
 	source, err := normalizeHookPayload(raw)
 	if err != nil {
-		log.Printf("[hooks] failed to normalize webhook: %v", err)
+		slog.Error("failed to normalize webhook", "component", "hooks", "error", err)
 		writeError(w, "invalid webhook payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("[hooks] import webhook: %s %q (%s) path=%s", source.ArrType, source.Title, source.Type, source.Path)
+	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path)
 
 	// Forward to Procula
 	proculaURL := proculaBaseURL() + "/api/procula/jobs"
 	if err := forwardToProcula(proculaURL, source); err != nil {
-		log.Printf("[hooks] failed to forward to Procula: %v", err)
+		slog.Error("failed to forward to Procula", "component", "hooks", "error", err)
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
 		writeJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
 		return
@@ -214,7 +214,7 @@ func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := TriggerLibraryRefresh(services); err != nil {
-		log.Printf("[jellyfin] library refresh failed: %v", err)
+		slog.Error("library refresh failed", "component", "jellyfin", "error", err)
 		writeError(w, "refresh failed", http.StatusInternalServerError)
 		return
 	}

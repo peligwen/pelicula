@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -121,12 +121,12 @@ func (q *Queue) loadExisting() error {
 		}
 		data, err := os.ReadFile(filepath.Join(jobsDir, entry.Name()))
 		if err != nil {
-			log.Printf("[queue] warning: could not read job file %s: %v", entry.Name(), err)
+			slog.Warn("could not read job file", "component", "queue", "file", entry.Name(), "error", err)
 			continue
 		}
 		var job Job
 		if err := json.Unmarshal(data, &job); err != nil {
-			log.Printf("[queue] warning: corrupt job file %s (skipping): %v", entry.Name(), err)
+			slog.Warn("corrupt job file, skipping", "component", "queue", "file", entry.Name(), "error", err)
 			continue
 		}
 		// Re-queue jobs that were processing when we died
@@ -141,7 +141,7 @@ func (q *Queue) loadExisting() error {
 			select {
 			case q.pending <- job.ID:
 			default:
-				log.Printf("[queue] warning: pending channel full, job %s will not run until retried or restarted", job.ID)
+				slog.Warn("pending channel full, job will not run until retried or restarted", "component", "queue", "job_id", job.ID)
 			}
 		}
 	}
@@ -155,7 +155,7 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 		if j.Source.Path == source.Path && (j.State == StateQueued || j.State == StateProcessing) {
 			cp := *j
 			q.mu.RUnlock()
-			log.Printf("[queue] duplicate job for %s, returning existing %s", source.Path, cp.ID)
+			slog.Info("duplicate job, returning existing", "component", "queue", "path", source.Path, "existing_id", cp.ID)
 			return &cp, nil
 		}
 	}
@@ -183,7 +183,7 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	select {
 	case q.pending <- id:
 	default:
-		log.Printf("[queue] warning: pending channel full, job %s will not run until retried or restarted", id)
+		slog.Warn("pending channel full, job will not run until retried or restarted", "component", "queue", "job_id", id)
 	}
 
 	return job, nil
@@ -225,7 +225,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 	cp := *job
 	q.mu.Unlock()
 	if err := q.persist(&cp); err != nil {
-		log.Printf("[queue] warning: failed to persist job %s: %v", id, err)
+		slog.Warn("failed to persist job", "component", "queue", "job_id", id, "error", err)
 		return err
 	}
 	return nil
@@ -252,7 +252,7 @@ func (q *Queue) Retry(id string) error {
 	select {
 	case q.pending <- id:
 	default:
-		log.Printf("[queue] warning: pending channel full, retry of job %s will not run until restart", id)
+		slog.Warn("pending channel full, retry will not run until restart", "component", "queue", "job_id", id)
 	}
 	return nil
 }

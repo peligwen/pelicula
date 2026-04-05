@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -22,13 +22,13 @@ func wireJellyfin(s *ServiceClients) {
 	// Check if startup wizard is complete
 	data, err := jellyfinGet(s, "/System/Info/Public", "")
 	if err != nil {
-		log.Printf("[autowire] Jellyfin: not reachable, skipping auto-config: %v", err)
+		slog.Warn("Jellyfin not reachable, skipping auto-config", "component", "autowire", "error", err)
 		return
 	}
 
 	var info map[string]any
 	if json.Unmarshal(data, &info) != nil {
-		log.Printf("[autowire] Jellyfin: could not parse system info")
+		slog.Error("could not parse Jellyfin system info", "component", "autowire")
 		return
 	}
 
@@ -36,20 +36,20 @@ func wireJellyfin(s *ServiceClients) {
 
 	if !wizardDone {
 		if err := completeJellyfinWizard(s); err != nil {
-			log.Printf("[autowire] Jellyfin: wizard setup failed: %v", err)
+			slog.Error("Jellyfin wizard setup failed", "component", "autowire", "error", err)
 			return
 		}
 		// Give Jellyfin a moment to settle after wizard completion
 		time.Sleep(2 * time.Second)
 	} else {
-		log.Println("[autowire] Jellyfin: startup wizard already completed")
+		slog.Info("Jellyfin startup wizard already completed", "component", "autowire")
 	}
 
 	// Authenticate to get an API token
 	token, err := jellyfinAuth(s)
 	if err != nil {
-		log.Printf("[autowire] Jellyfin: auth failed, skipping library setup (%v)", err)
-		log.Println("[autowire] Jellyfin: if you set a password, add libraries manually via the Jellyfin UI")
+		slog.Error("Jellyfin auth failed, skipping library setup", "component", "autowire", "error", err)
+		slog.Info("if you set a Jellyfin password, add libraries manually via the Jellyfin UI", "component", "autowire")
 		return
 	}
 
@@ -58,7 +58,7 @@ func wireJellyfin(s *ServiceClients) {
 }
 
 func completeJellyfinWizard(s *ServiceClients) error {
-	log.Println("[autowire] Jellyfin: completing startup wizard...")
+	slog.Info("completing Jellyfin startup wizard", "component", "autowire")
 
 	// Step 1: initial config
 	_, err := jellyfinPost(s, "/Startup/Configuration", "", map[string]any{
@@ -71,7 +71,7 @@ func completeJellyfinWizard(s *ServiceClients) error {
 
 	// Step 2: create admin user with no password (matches stack's no-auth-by-default).
 	// Warning: if you expose Jellyfin beyond the Docker network, set a password via the UI.
-	log.Println("[autowire] Jellyfin: creating admin user with no password — set one in the UI if Jellyfin is publicly accessible")
+	slog.Info("creating Jellyfin admin user with no password — set one in the UI if Jellyfin is publicly accessible", "component", "autowire")
 	_, err = jellyfinPost(s, "/Startup/User", "", map[string]any{
 		"Name":     "admin",
 		"Password": "",
@@ -86,7 +86,7 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		return fmt.Errorf("complete wizard: %w", err)
 	}
 
-	log.Println("[autowire] Jellyfin: wizard completed (admin user, no password)")
+	slog.Info("Jellyfin wizard completed (admin user, no password)", "component", "autowire")
 	return nil
 }
 
@@ -109,7 +109,7 @@ func jellyfinAuth(s *ServiceClients) (string, error) {
 		return "", fmt.Errorf("no access token in response")
 	}
 
-	log.Println("[autowire] Jellyfin: authenticated as admin")
+	slog.Info("Jellyfin authenticated as admin", "component", "autowire")
 	return token, nil
 }
 
@@ -117,7 +117,7 @@ func wireJellyfinLibrary(s *ServiceClients, token, name, collectionType, path st
 	// Check existing libraries
 	data, err := jellyfinGet(s, "/Library/VirtualFolders", token)
 	if err != nil {
-		log.Printf("[autowire] Jellyfin: failed to list libraries: %v", err)
+		slog.Error("failed to list Jellyfin libraries", "component", "autowire", "error", err)
 		return
 	}
 
@@ -125,7 +125,7 @@ func wireJellyfinLibrary(s *ServiceClients, token, name, collectionType, path st
 	if json.Unmarshal(data, &libraries) == nil {
 		for _, lib := range libraries {
 			if n, _ := lib["Name"].(string); n == name {
-				log.Printf("[autowire] Jellyfin: library %q already exists, skipping", name)
+				slog.Info("Jellyfin library already exists, skipping", "component", "autowire", "library", name)
 				return
 			}
 		}
@@ -145,11 +145,11 @@ func wireJellyfinLibrary(s *ServiceClients, token, name, collectionType, path st
 
 	_, err = jellyfinPost(s, endpoint, token, body)
 	if err != nil {
-		log.Printf("[autowire] Jellyfin: failed to create library %q: %v", name, err)
+		slog.Error("failed to create Jellyfin library", "component", "autowire", "library", name, "error", err)
 		return
 	}
 
-	log.Printf("[autowire] Jellyfin: added library %q → %s", name, path)
+	slog.Info("added Jellyfin library", "component", "autowire", "library", name, "path", path)
 }
 
 // TriggerLibraryRefresh asks Jellyfin to scan all libraries.
@@ -163,7 +163,7 @@ func TriggerLibraryRefresh(s *ServiceClients) error {
 	if err != nil {
 		return fmt.Errorf("refresh failed: %w", err)
 	}
-	log.Println("[jellyfin] library refresh triggered")
+	slog.Info("library refresh triggered", "component", "jellyfin")
 	return nil
 }
 

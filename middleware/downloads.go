@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 )
@@ -152,7 +152,7 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 	if req.Paused {
 		action = "paused"
 	}
-	log.Printf("[downloads] %s torrent %s", action, shortHash(req.Hash))
+	slog.Info("torrent state changed", "component", "downloads", "action", action, "hash", shortHash(req.Hash))
 	writeJSON(w, map[string]string{"status": action})
 }
 
@@ -194,17 +194,14 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 
 	// Delete torrent + files from qBittorrent
 	if err := services.QbtPost("/api/v2/torrents/delete", "hashes="+url.QueryEscape(req.Hash)+"&deleteFiles=true"); err != nil {
-		log.Printf("[downloads] failed to delete torrent from qBittorrent: %v", err)
+		slog.Error("failed to delete torrent from qBittorrent", "component", "downloads", "error", err)
 	}
 
 	action := "cancelled"
 	if req.Blocklist {
 		action = "cancelled+blocklisted"
-		if req.Reason != "" {
-			action += " (" + req.Reason + ")"
-		}
 	}
-	log.Printf("[downloads] %s torrent %s (%s)", action, shortHash(req.Hash), req.Category)
+	slog.Info("torrent cancelled", "component", "downloads", "action", action, "hash", shortHash(req.Hash), "category", req.Category, "blocklist", req.Blocklist, "reason", req.Reason)
 	writeJSON(w, map[string]string{"status": "removed"})
 }
 

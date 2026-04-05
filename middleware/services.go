@@ -6,7 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -53,13 +53,13 @@ func (s *ServiceClients) loadKeys() {
 	s.mu.Unlock()
 
 	if sonarr != "" {
-		log.Printf("[services] loaded Sonarr API key")
+		slog.Info("loaded API key", "component", "services", "service", "sonarr")
 	}
 	if radarr != "" {
-		log.Printf("[services] loaded Radarr API key")
+		slog.Info("loaded API key", "component", "services", "service", "radarr")
 	}
 	if prowlarr != "" {
-		log.Printf("[services] loaded Prowlarr API key")
+		slog.Info("loaded API key", "component", "services", "service", "prowlarr")
 	}
 }
 
