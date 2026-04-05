@@ -97,10 +97,11 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := map[string]any{
-		"status":   "ok",
-		"services": services.CheckHealth(),
-		"wired":    services.IsWired(),
-		"indexers": indexerCount,
+		"status":             "ok",
+		"services":           services.CheckHealth(),
+		"wired":              services.IsWired(),
+		"indexers":           indexerCount,
+		"jellyseerr_enabled": os.Getenv("JELLYSEERR_ENABLED") == "true",
 	}
 	writeJSON(w, status)
 }

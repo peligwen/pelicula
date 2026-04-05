@@ -238,6 +238,7 @@ PELICULA_PASSWORD=${PELICULA_PASSWORD}
 JELLYSEERR_ENABLED=false
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
+NOTIFICATIONS_MODE=internal
 EOF
     pass "Wrote ${ENV_FILE}"
 
@@ -335,35 +336,38 @@ cmd_configure() {
         echo -e "${BOLD}Pelicula Configuration${NC}"
         echo ""
 
-        local auth_mode notifications transcoding port vpn_country
+        local auth_mode notifications transcoding jellyseerr port vpn_country
         auth_mode="$(get_env_var PELICULA_AUTH off)"
         [[ "$auth_mode" == "true" ]] && auth_mode="password"
-        notifications="$(get_env_var NOTIFICATIONS_ENABLED false)"
+        notifications="$(get_env_var NOTIFICATIONS_MODE internal)"
         transcoding="$(get_env_var TRANSCODING_ENABLED false)"
+        jellyseerr="$(get_env_var JELLYSEERR_ENABLED false)"
         port="$(get_env_var PELICULA_PORT 7354)"
         vpn_country="$(get_env_var SERVER_COUNTRIES Netherlands)"
 
-        local notif_label transcode_label
-        [[ "$notifications" == "true" ]] && notif_label="enabled" || notif_label="off"
+        local transcode_label jellyseerr_label
         [[ "$transcoding" == "true" ]] && transcode_label="enabled" || transcode_label="off"
+        [[ "$jellyseerr" == "true" ]] && jellyseerr_label="enabled" || jellyseerr_label="off"
 
         echo "  1) Auth          mode: ${auth_mode}"
-        echo "  2) Notifications ${notif_label}"
+        echo "  2) Notifications mode: ${notifications}"
         echo "  3) Transcoding   ${transcode_label}"
-        echo "  4) Network       port ${port}, ${vpn_country}"
-        echo "  5) Paths"
-        echo "  6) VPN Key"
+        echo "  4) Jellyseerr    ${jellyseerr_label}"
+        echo "  5) Network       port ${port}, ${vpn_country}"
+        echo "  6) Paths"
+        echo "  7) VPN Key"
         echo "  q) Quit"
         echo ""
-        echo -en "Select [1-6, q]: "
+        echo -en "Select [1-7, q]: "
         read -r choice
         case "$choice" in
             1) configure_auth ;;
             2) configure_notifications ;;
             3) configure_transcoding ;;
-            4) configure_network ;;
-            5) configure_paths ;;
-            6) configure_vpn_key ;;
+            4) configure_jellyseerr ;;
+            5) configure_network ;;
+            6) configure_paths ;;
+            7) configure_vpn_key ;;
             q|Q) echo ""; break ;;
             *) warn "Unknown option" ;;
         esac
@@ -591,37 +595,138 @@ configure_notifications() {
     echo ""
     echo -e "${BOLD}Notifications${NC}"
     echo ""
-    local current
-    current="$(get_env_var NOTIFICATIONS_ENABLED false)"
-    echo "  Current: ${current}"
+    local mode
+    mode="$(get_env_var NOTIFICATIONS_MODE internal)"
+    echo "  Current mode: ${mode}"
     echo ""
-    echo "  In-dashboard notification feed (bell icon, no external service required)"
-    echo "  is always available once Phase C is implemented."
+    echo "  The in-dashboard bell feed is always on (zero config)."
+    echo "  Choose an external provider to also push to your phone, email, etc."
     echo ""
-    echo "  External providers via Apprise (Phase F):"
-    echo "    ntfy, Gotify, email/SMTP, Pushover, Telegram, and 85+ others"
+    echo "  1) Internal only  — dashboard bell, no external service"
+    echo "  2) Apprise        — ntfy, Gotify, email/SMTP, Pushover, Telegram, and 85+ others"
+    echo "  3) Direct webhook — HTTP POST to any URL (ntfy, Gotify, custom receiver)"
+    echo "  b) Back"
     echo ""
-    echo "  1) Disable notifications"
-    echo "  2) Enable (in-dashboard feed — Phase C required)"
-    echo "  3) Enable with external provider (Phase F required)"
-    echo ""
-    echo -en "Select [1-3]: "
+    echo -en "Select [1-3, b]: "
     read -r choice
     case "$choice" in
         1)
+            set_env_var NOTIFICATIONS_MODE internal
             set_env_var NOTIFICATIONS_ENABLED false
-            pass "Notifications disabled"
+            pass "External notifications disabled (dashboard feed still active)"
             ;;
         2)
-            set_env_var NOTIFICATIONS_ENABLED true
-            pass "Notifications enabled (in-dashboard feed)"
+            setup_apprise_notifications
             ;;
         3)
-            set_env_var NOTIFICATIONS_ENABLED true
-            info "External notification config goes in ${CONFIG_DIR}/procula/notifications.json"
-            info "See ROADMAP.md Phase F for provider setup instructions"
-            pass "Notifications enabled"
+            setup_direct_notifications
             ;;
+        b|B) return ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+}
+
+setup_apprise_notifications() {
+    echo ""
+    echo "  Apprise URLs — one provider URL per line (empty line to finish)."
+    echo "  Examples:"
+    echo "    ntfy://my-server.com/my-topic"
+    echo "    gotify://hostname/AppToken"
+    echo "    mailto://user:pass@gmail.com"
+    echo ""
+    local notif_cfg
+    notif_cfg="${CONFIG_DIR}/procula/notifications.json"
+    local urls_json="[]"
+    local line
+    local urls_raw=""
+    while true; do
+        echo -en "  URL (or Enter to finish): "
+        read -r line
+        [[ -z "$line" ]] && break
+        if [[ -z "$urls_raw" ]]; then
+            urls_raw="\"${line}\""
+        else
+            urls_raw="${urls_raw}, \"${line}\""
+        fi
+    done
+    if [[ -n "$urls_raw" ]]; then
+        urls_json="[${urls_raw}]"
+    fi
+    mkdir -p "$(dirname "$notif_cfg")"
+    cat > "$notif_cfg" <<EOF
+{
+  "mode": "apprise",
+  "apprise_urls": ${urls_json},
+  "direct_url": ""
+}
+EOF
+    set_env_var NOTIFICATIONS_MODE apprise
+    set_env_var NOTIFICATIONS_ENABLED true
+    pass "Apprise notifications configured"
+    info "Start the Apprise container with: docker compose --profile apprise up -d"
+    warn "Restart services: ./pelicula restart"
+}
+
+setup_direct_notifications() {
+    echo ""
+    echo "  Direct webhook — Procula will POST JSON to this URL:"
+    echo "  Body: {\"title\": \"...\", \"message\": \"...\", \"type\": \"...\"}"
+    echo ""
+    echo -en "  Webhook URL: "
+    local direct_url
+    read -r direct_url
+    if [[ -z "$direct_url" ]]; then
+        warn "No URL entered — no changes made"
+        return
+    fi
+    local notif_cfg
+    notif_cfg="${CONFIG_DIR}/procula/notifications.json"
+    mkdir -p "$(dirname "$notif_cfg")"
+    cat > "$notif_cfg" <<EOF
+{
+  "mode": "direct",
+  "apprise_urls": [],
+  "direct_url": "${direct_url}"
+}
+EOF
+    set_env_var NOTIFICATIONS_MODE direct
+    set_env_var NOTIFICATIONS_ENABLED true
+    pass "Direct webhook configured → ${direct_url}"
+    warn "Restart services: ./pelicula restart"
+}
+
+configure_jellyseerr() {
+    echo ""
+    echo -e "${BOLD}Jellyseerr${NC}"
+    echo ""
+    local current
+    current="$(get_env_var JELLYSEERR_ENABLED false)"
+    echo "  Current: ${current}"
+    echo ""
+    echo "  Jellyseerr adds multi-user request management. Dashboard search routes"
+    echo "  add requests through Jellyseerr for tracking and approval workflows."
+    echo ""
+    echo "  1) Enable Jellyseerr"
+    echo "  2) Disable Jellyseerr"
+    echo "  b) Back"
+    echo ""
+    echo -en "Select [1-2, b]: "
+    read -r choice
+    case "$choice" in
+        1)
+            set_env_var JELLYSEERR_ENABLED true
+            pass "Jellyseerr enabled"
+            info "Jellyseerr starts with the 'jellyseerr' Docker Compose profile"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        2)
+            set_env_var JELLYSEERR_ENABLED false
+            pass "Jellyseerr disabled"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        b|B) return ;;
         *)
             warn "Unknown option"
             ;;
@@ -865,7 +970,10 @@ WebUI\LocalHostAuth=false
 [BitTorrent]
 Session\DefaultSavePath=/downloads/'
 
-    compose_cmd up -d
+    local -a profile_args=()
+    [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
+    [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
+    compose_cmd "${profile_args[@]}" up -d
 
     # Wait for gluetun health
     info "Waiting for VPN connection..."
@@ -951,7 +1059,10 @@ cmd_update() {
     info "Pulling latest images..."
     compose_cmd pull
     info "Recreating containers..."
-    compose_cmd up -d
+    local -a profile_args=()
+    [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
+    [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
+    compose_cmd "${profile_args[@]}" up -d
     pass "Update complete"
 }
 

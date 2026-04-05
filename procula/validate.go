@@ -26,9 +26,11 @@ type ffprobeFormat struct {
 }
 
 type ffprobeStream struct {
-	CodecType    string `json:"codec_type"` // "video", "audio", "subtitle"
-	CodecName    string `json:"codec_name"`
-	Tags         map[string]string `json:"tags"`
+	CodecType string            `json:"codec_type"` // "video", "audio", "subtitle"
+	CodecName string            `json:"codec_name"`
+	Width     int               `json:"width"`
+	Height    int               `json:"height"`
+	Tags      map[string]string `json:"tags"`
 }
 
 // Validate runs all validation checks on a job's source file.
@@ -127,6 +129,8 @@ func extractCodecs(probe *ffprobeOutput) CodecInfo {
 		case "video":
 			if info.Video == "" {
 				info.Video = s.CodecName
+				info.Width = s.Width
+				info.Height = s.Height
 			}
 		case "audio":
 			if info.Audio == "" {

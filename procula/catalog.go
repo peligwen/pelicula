@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -23,6 +25,14 @@ type NotificationEvent struct {
 
 const maxFeedEvents = 50
 
+// NotificationConfig controls how Procula sends external notifications.
+// Written to /config/procula/notifications.json by `./pelicula configure`.
+type NotificationConfig struct {
+	Mode        string   `json:"mode"`         // "internal", "apprise", "direct"
+	AppriseURLs []string `json:"apprise_urls"` // provider URLs passed to the Apprise container
+	DirectURL   string   `json:"direct_url"`   // single webhook URL for "direct" mode
+}
+
 // Catalog runs after processing completes: triggers Jellyfin library refresh
 // via pelicula-api and writes a "content ready" notification to the feed.
 func Catalog(job *Job, configDir, peliculaAPI string) {
@@ -36,6 +46,10 @@ func Catalog(job *Job, configDir, peliculaAPI string) {
 	// Write "content ready" notification to the dashboard feed
 	event := buildEvent(job, "content_ready", contentReadyMessage(job))
 	appendToFeed(configDir, event)
+
+	// Send external notification if configured
+	cfg := loadNotificationConfig(configDir)
+	sendExternalNotification(cfg, event)
 }
 
 // WriteValidationFailedNotification writes a failed notification from the pipeline.
@@ -95,6 +109,73 @@ func appendToFeed(configDir string, event NotificationEvent) {
 		return
 	}
 	log.Printf("[catalog] notification written: %s", event.Message)
+}
+
+func loadNotificationConfig(configDir string) *NotificationConfig {
+	path := filepath.Join(configDir, "procula", "notifications.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return &NotificationConfig{Mode: "internal"}
+	}
+	var cfg NotificationConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return &NotificationConfig{Mode: "internal"}
+	}
+	return &cfg
+}
+
+func sendExternalNotification(cfg *NotificationConfig, event NotificationEvent) {
+	switch cfg.Mode {
+	case "apprise":
+		if len(cfg.AppriseURLs) == 0 {
+			return
+		}
+		sendApprise(cfg.AppriseURLs, event)
+	case "direct":
+		if cfg.DirectURL == "" {
+			return
+		}
+		sendDirect(cfg.DirectURL, event)
+	}
+}
+
+// sendApprise sends a notification via the Apprise container at http://apprise:8000.
+// AppriseURLs are provider URLs like "ntfy://topic", "gotify://host/token", etc.
+func sendApprise(urls []string, event NotificationEvent) {
+	payload := map[string]any{
+		"title": event.Title,
+		"body":  event.Message,
+		"type":  "info",
+		"urls":  strings.Join(urls, ","),
+	}
+	data, _ := json.Marshal(payload)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post("http://apprise:8000/notify", "application/json", bytes.NewReader(data))
+	if err != nil {
+		log.Printf("[catalog] Apprise notification failed: %v", err)
+		return
+	}
+	resp.Body.Close()
+	log.Printf("[catalog] Apprise notification sent (%d URLs)", len(urls))
+}
+
+// sendDirect sends a notification as a JSON HTTP POST to an arbitrary webhook URL.
+// Compatible with ntfy HTTP API, Gotify, and generic webhook receivers.
+func sendDirect(webhookURL string, event NotificationEvent) {
+	payload := map[string]any{
+		"title":   event.Title,
+		"message": event.Message,
+		"type":    event.Type,
+	}
+	data, _ := json.Marshal(payload)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(data))
+	if err != nil {
+		log.Printf("[catalog] direct notification failed: %v", err)
+		return
+	}
+	resp.Body.Close()
+	log.Printf("[catalog] direct notification sent to webhook")
 }
 
 func triggerJellyfinRefresh(peliculaAPI string) error {

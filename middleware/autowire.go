@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/http/cookiejar"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -45,6 +51,9 @@ func AutoWire(s *ServiceClients) error {
 
 	// Auto-configure Jellyfin: complete wizard, add media libraries
 	wireJellyfin(s)
+
+	// Wire Jellyseerr if enabled (opt-in via JELLYSEERR_ENABLED=true)
+	wireJellyseerr(s)
 
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
@@ -214,6 +223,191 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 		return
 	}
 	log.Printf("[autowire] %s: added Procula import webhook → %s", name, hookURL)
+}
+
+// ── Jellyseerr ─────────────────────────────────────────────────────────────
+
+func wireJellyseerr(s *ServiceClients) {
+	if os.Getenv("JELLYSEERR_ENABLED") != "true" {
+		return
+	}
+	log.Println("[autowire] Jellyseerr: checking...")
+
+	// Check initialization status
+	data, err := jsGet(s, "/api/v1/settings/public", "")
+	if err != nil {
+		log.Printf("[autowire] Jellyseerr: not reachable (%v)", err)
+		return
+	}
+
+	var pub map[string]any
+	json.Unmarshal(data, &pub) //nolint:errcheck
+	initialized, _ := pub["initialized"].(bool)
+
+	if !initialized {
+		log.Println("[autowire] Jellyseerr: not initialized — open /jellyseerr to complete the setup wizard")
+		return
+	}
+
+	// Authenticate via Jellyfin (admin/no-password, matches our default Jellyfin setup)
+	apiKey, err := jellyseerrGetAPIKey()
+	if err != nil {
+		log.Printf("[autowire] Jellyseerr: can't get API key (%v)", err)
+		return
+	}
+
+	s.mu.Lock()
+	s.JellyseerrKey = apiKey
+	s.mu.Unlock()
+	log.Println("[autowire] Jellyseerr: API key loaded")
+
+	// Wire Radarr and Sonarr into Jellyseerr
+	s.mu.RLock()
+	radarrKey := s.RadarrKey
+	sonarrKey := s.SonarrKey
+	s.mu.RUnlock()
+
+	wireJellyseerrService(s, apiKey, "radarr", "radarr", 7878, "/radarr", radarrKey, "/movies")
+	wireJellyseerrService(s, apiKey, "sonarr", "sonarr", 8989, "/sonarr", sonarrKey, "/tv")
+	log.Println("[autowire] Jellyseerr: wired")
+}
+
+func jellyseerrGetAPIKey() (string, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Timeout: 10 * time.Second, Jar: jar}
+
+	// Auth via Jellyfin — admin account with no password (our default Jellyfin setup)
+	payload, _ := json.Marshal(map[string]any{
+		"username": "admin",
+		"password": "",
+		"hostname": "http://jellyfin:8096/jellyfin",
+	})
+	resp, err := client.Post("http://jellyseerr:5055/api/v1/auth/jellyfin",
+		"application/json", bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("auth request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("auth HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Get main settings — session cookie is carried by the jar
+	req, _ := http.NewRequest("GET", "http://jellyseerr:5055/api/v1/settings/main", nil)
+	resp2, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("get settings: %w", err)
+	}
+	defer resp2.Body.Close()
+	body, _ := io.ReadAll(resp2.Body)
+
+	var settings map[string]any
+	if err := json.Unmarshal(body, &settings); err != nil {
+		return "", fmt.Errorf("parse settings: %w", err)
+	}
+	apiKey, _ := settings["apiKey"].(string)
+	if apiKey == "" {
+		return "", fmt.Errorf("no apiKey in settings response")
+	}
+	return apiKey, nil
+}
+
+func wireJellyseerrService(s *ServiceClients, apiKey, svcType, hostname string, port int, urlBase, svcAPIKey, mediaDir string) {
+	// Check if already configured
+	data, err := jsGet(s, "/api/v1/settings/"+svcType, apiKey)
+	if err != nil {
+		log.Printf("[autowire] Jellyseerr: can't check %s: %v", svcType, err)
+		return
+	}
+
+	var existing []map[string]any
+	if json.Unmarshal(data, &existing) == nil && len(existing) > 0 {
+		log.Printf("[autowire] Jellyseerr: %s already configured, skipping", svcType)
+		return
+	}
+
+	name := strings.ToUpper(svcType[:1]) + svcType[1:]
+	payload := map[string]any{
+		"name":               name,
+		"hostname":           hostname,
+		"port":               port,
+		"apiKey":             svcAPIKey,
+		"urlBase":            urlBase,
+		"useSsl":             false,
+		"isDefault":          true,
+		"syncEnabled":        false,
+		"preventSearch":      false,
+		"activeProfileId":    1,
+		"activeProfileName":  "Any",
+		"activeDirectory":    mediaDir,
+	}
+	if svcType == "sonarr" {
+		payload["activeAnimeProfileId"] = 1
+		payload["activeAnimeDirectory"] = mediaDir
+		payload["enableSeasonFolders"]  = true
+	}
+
+	_, err = jsPost(s, "/api/v1/settings/"+svcType, apiKey, payload)
+	if err != nil {
+		log.Printf("[autowire] Jellyseerr: failed to add %s: %v", svcType, err)
+		return
+	}
+	log.Printf("[autowire] Jellyseerr: added %s", svcType)
+}
+
+func jsGet(s *ServiceClients, path, apiKey string) ([]byte, error) {
+	req, err := http.NewRequest("GET", "http://jellyseerr:5055"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("X-Api-Key", apiKey)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+func jsPost(s *ServiceClients, path, apiKey string, payload any) ([]byte, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest("POST", "http://jellyseerr:5055"+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("X-Api-Key", apiKey)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return body, nil
 }
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {

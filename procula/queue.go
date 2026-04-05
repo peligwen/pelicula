@@ -47,6 +47,8 @@ type CodecInfo struct {
 	Video     string   `json:"video"`
 	Audio     string   `json:"audio"`
 	Subtitles []string `json:"subtitles"`
+	Width     int      `json:"width,omitempty"`
+	Height    int      `json:"height,omitempty"`
 }
 
 type ValidationChecks struct {

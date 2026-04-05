@@ -76,6 +76,15 @@ async function checkStatus() {
         } else {
             toast.classList.remove('visible');
         }
+        // Show Jellyseerr service card when enabled
+        const jsCard = document.getElementById('service-jellyseerr');
+        if (jsCard) {
+            if (data.jellyseerr_enabled) {
+                jsCard.classList.remove('hidden');
+            } else {
+                jsCard.classList.add('hidden');
+            }
+        }
     } catch {}
 }
 
@@ -298,6 +307,7 @@ async function checkServices() {
             else if (href.includes('qbt')) name = 'qbittorrent';
             else if (href.includes('jellyfin')) name = 'jellyfin';
             else if (href.includes('procula')) name = 'procula';
+            else if (href.includes('jellyseerr')) name = 'jellyseerr';
             dot.className = 'status-dot ' + (svcMap[name] === 'up' ? 'up' : 'down');
         });
         // Search depends on Radarr + Sonarr

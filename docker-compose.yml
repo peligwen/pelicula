@@ -198,6 +198,40 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
+  # Request Management — opt-in (profile: jellyseerr)
+  # Enable: set JELLYSEERR_ENABLED=true in .env
+  # ═══════════════════════════════════════════════════
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    profiles: [jellyseerr]
+    environment:
+      - TZ=${TZ}
+      - LOG_LEVEL=info
+    volumes:
+      - ${CONFIG_DIR}/jellyseerr:/app/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5055/api/v1/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Push Notifications — opt-in (profile: apprise)
+  # Enable: set NOTIFICATIONS_MODE=apprise in .env
+  # Supports ntfy, Gotify, email, Pushover, Telegram, etc.
+  # ═══════════════════════════════════════════════════
+  apprise:
+    image: caronc/apprise:latest
+    container_name: apprise
+    profiles: [apprise]
+    volumes:
+      - ${CONFIG_DIR}/apprise:/config
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
   # Reverse Proxy — single entry point (HTTPS)
   # ═══════════════════════════════════════════════════
   nginx:

@@ -89,7 +89,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	log.Printf("[pipeline] validation passed for job %s (video=%s audio=%s)",
 		id, result.Checks.Codecs.Video, result.Checks.Codecs.Audio)
 
-	// ── Stage 2: Process (Phase 5 — stub) ────────────────────────────────
+	// ── Stage 2: Process ─────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
@@ -97,7 +97,13 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Stage = StageProcess
 		j.Progress = 0.5
 	})
-	// TODO: transcoding, extraction, audio normalization
+	job, _ = q.Get(id)
+	if outputPath, err := maybeTranscode(q, job, configDir); err != nil {
+		log.Printf("[pipeline] transcoding failed for job %s: %v (proceeding with original)", id, err)
+	} else if outputPath != "" {
+		_ = q.Update(id, func(j *Job) { j.Source.Path = outputPath })
+		job, _ = q.Get(id)
+	}
 
 	// ── Stage 3: Catalog ─────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
@@ -118,6 +124,39 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	})
 
 	log.Printf("[pipeline] completed job %s: %s", id, job.Source.Title)
+}
+
+// maybeTranscode runs FFmpeg if TRANSCODING_ENABLED=true and a matching profile
+// exists for the job's video codec/resolution. Returns the output path (or "" to
+// skip transcoding) and any non-fatal error.
+func maybeTranscode(q *Queue, job *Job, configDir string) (string, error) {
+	if os.Getenv("TRANSCODING_ENABLED") != "true" {
+		return "", nil
+	}
+
+	if job.Validation == nil || job.Validation.Checks.Codecs == nil {
+		return "", nil
+	}
+	codecs := job.Validation.Checks.Codecs
+
+	profiles, err := LoadProfiles(configDir)
+	if err != nil || len(profiles) == 0 {
+		return "", nil
+	}
+
+	profile := FindMatchingProfile(profiles, codecs.Video, codecs.Height)
+	if profile == nil {
+		return "", nil // no matching profile → skip transcoding
+	}
+
+	log.Printf("[pipeline] transcoding job %s with profile %q", job.ID, profile.Name)
+
+	outputPath, err := Process(job, profile, func(pct float64) {
+		// Map pct (0–1) into the 50–90% progress window
+		progress := 0.5 + pct*0.4
+		q.Update(job.ID, func(j *Job) { j.Progress = progress }) //nolint:errcheck
+	})
+	return outputPath, err
 }
 
 // isAllowedPath checks that path is under one of the expected media directories.

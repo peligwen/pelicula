@@ -55,13 +55,13 @@ Zero-config "content ready" signal. No external services required.
 
 Multi-user request management. Dashboard search wraps Jellyseerr API.
 
-- [ ] Add `jellyseerr` service to `docker-compose.yml` (Docker Compose profile, opt-in)
-- [ ] Add nginx proxy at `/jellyseerr`
-- [ ] Implement `wireJellyseerr` in `middleware/autowire.go`: connect to Jellyfin auth backend, add Radarr+Sonarr
-- [ ] `middleware/search.go`: when `JELLYSEERR_ENABLED=true`, route add requests through Jellyseerr's `/api/v1/request`; fall back to direct *arr calls when disabled
-- [ ] Add Jellyseerr to `middleware/services.go` health checks
-- [ ] Add Jellyseerr card to dashboard services grid
-- [ ] `./pelicula configure` → Auth section: enable/disable Jellyseerr
+- [x] Add `jellyseerr` service to `docker-compose.yml` (Docker Compose profile, opt-in)
+- [x] Add nginx proxy at `/jellyseerr`
+- [x] Implement `wireJellyseerr` in `middleware/autowire.go`: connect to Jellyfin auth backend, add Radarr+Sonarr
+- [x] `middleware/search.go`: when `JELLYSEERR_ENABLED=true`, route add requests through Jellyseerr's `/api/v1/request`; fall back to direct *arr calls when disabled
+- [x] Add Jellyseerr to `middleware/services.go` health checks
+- [x] Add Jellyseerr card to dashboard services grid
+- [x] `./pelicula configure` → Jellyseerr section: enable/disable
 
 ---
 
@@ -69,13 +69,13 @@ Multi-user request management. Dashboard search wraps Jellyseerr API.
 
 Available but dormant by default. Only runs when a matching profile is enabled.
 
-- [ ] Implement `procula/process.go`: FFmpeg invocation with progress tracking (parse `frame=` / `time=` / `speed=` from stderr)
-- [ ] New `procula/profiles.go`: profile CRUD API, load profiles from `/config/procula/profiles/`
-- [ ] Ship two default profile templates (disabled by default):
+- [x] Implement `procula/process.go`: FFmpeg invocation with progress tracking (parse `time=` from stderr)
+- [x] New `procula/profiles.go`: load profiles from `/config/procula/profiles/`; match on codec or resolution
+- [x] Ship two default profile templates (disabled by default):
   - `compatibility-h264.json` — HEVC/AV1 → H.264 for max device compatibility
   - `mobile-1080p.json` — 4K → 1080p with stereo audio
-- [ ] `procula/pipeline.go`: wire process stage (validate → process → catalog)
-- [ ] `./pelicula configure` → Transcoding section: enable/disable, list profiles
+- [x] `procula/pipeline.go`: wire process stage (validate → process → catalog)
+- [x] `./pelicula configure` → Transcoding section: enable/disable, list profiles
 
 ---
 
@@ -83,11 +83,11 @@ Available but dormant by default. Only runs when a matching profile is enabled.
 
 Push notifications to phone, email, Telegram, etc.
 
-- [ ] Add `apprise` service to `docker-compose.yml` (Docker Compose profile, opt-in)
-- [ ] Extend `procula/catalog.go`: POST to `http://apprise:8000/notify` when configured
-- [ ] `direct` mode: single HTTP POST without Apprise container (ntfy / Gotify / any webhook URL)
-- [ ] Config in `/config/procula/notifications.json`: mode, apprise_urls, direct_url
-- [ ] `./pelicula configure` → Notifications section: choose provider, enter credentials, test
+- [x] Add `apprise` service to `docker-compose.yml` (Docker Compose profile, opt-in)
+- [x] Extend `procula/catalog.go`: POST to `http://apprise:8000/notify` when configured
+- [x] `direct` mode: single HTTP POST without Apprise container (ntfy / Gotify / any webhook URL)
+- [x] Config in `/config/procula/notifications.json`: mode, apprise_urls, direct_url
+- [x] `./pelicula configure` → Notifications section: choose provider, enter URLs
 
 **Providers via Apprise:** ntfy, Gotify, email/SMTP, Pushover, Telegram, and 85+ others. Discord is not a supported option.
 

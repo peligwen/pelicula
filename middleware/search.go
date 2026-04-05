@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
+	"time"
 )
 
 type SearchResult struct {
@@ -125,6 +128,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		for _, s := range shows {
 			tvdbID := int(floatVal(s, "tvdbId"))
+			tmdbID := int(floatVal(s, "tmdbId")) // present in Sonarr for many shows; used for Jellyseerr routing
 			poster := ""
 			if images, ok := s["images"].([]any); ok {
 				for _, img := range images {
@@ -143,6 +147,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 				Overview: strVal(s, "overview"),
 				Poster:   poster,
 				TvdbID:   tvdbID,
+				TmdbID:   tmdbID,
 				Added:    existingIDs[tvdbID],
 			})
 		}
@@ -185,6 +190,19 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// When Jellyseerr is enabled and configured, route add requests through it.
+	// This gives request tracking, approval workflow, and per-user attribution.
+	// Falls back to direct *arr if Jellyseerr has no key yet or TMDB ID is unavailable.
+	if os.Getenv("JELLYSEERR_ENABLED") == "true" {
+		services.mu.RLock()
+		jsKey := services.JellyseerrKey
+		services.mu.RUnlock()
+		if jsKey != "" && req.TmdbID != 0 {
+			requestViaJellyseerr(w, req.Type, req.TmdbID, jsKey)
+			return
+		}
+	}
+
 	switch req.Type {
 	case "movie":
 		addMovie(w, req.TmdbID)
@@ -193,6 +211,38 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
 	}
+}
+
+func requestViaJellyseerr(w http.ResponseWriter, mediaType string, tmdbID int, apiKey string) {
+	jType := "movie"
+	if mediaType == "series" {
+		jType = "tv"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"mediaType": jType,
+		"mediaId":   tmdbID,
+	})
+	req, err := http.NewRequest("POST", "http://jellyseerr:5055/api/v1/request",
+		bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, "request build failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("X-Api-Key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeError(w, "Jellyseerr unreachable: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		writeError(w, fmt.Sprintf("Jellyseerr returned HTTP %d", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "requested"})
 }
 
 func addMovie(w http.ResponseWriter, tmdbID int) {
