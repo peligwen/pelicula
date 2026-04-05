@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,7 +15,9 @@ var (
 )
 
 func main() {
-	log.SetFlags(log.Ltime)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
 
 	configDir = env("CONFIG_DIR", "/config")
 	peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
@@ -23,9 +25,10 @@ func main() {
 	var err error
 	queue, err = NewQueue(configDir)
 	if err != nil {
-		log.Fatalf("[queue] failed to initialize: %v", err)
+		slog.Error("queue initialization failed", "component", "main", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("[queue] loaded %d jobs from disk", len(queue.jobs))
+	slog.Info("queue loaded", "component", "queue", "job_count", len(queue.jobs))
 
 	// Single worker processes jobs sequentially
 	go RunWorker(queue, configDir, peliculaAPI)
@@ -46,9 +49,10 @@ func main() {
 	mux.HandleFunc("GET /", handleUI)
 	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 
-	log.Println("[server] listening on :8282")
+	slog.Info("listening", "component", "main", "addr", ":8282")
 	if err := http.ListenAndServe(":8282", mux); err != nil {
-		log.Fatal(err)
+		slog.Error("server exited", "component", "main", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -92,7 +96,7 @@ func handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[api] created job %s for %s: %s", job.ID, job.Source.ArrType, job.Source.Title)
+	slog.Info("job created", "component", "api", "job_id", job.ID, "arr_type", job.Source.ArrType, "title", job.Source.Title)
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, job)
 }
@@ -114,7 +118,7 @@ func handleRetryJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job, _ := queue.Get(id)
-	log.Printf("[api] retrying job %s (attempt %d)", id, job.RetryCount)
+	slog.Info("job retry", "component", "api", "job_id", id, "attempt", job.RetryCount)
 	writeJSON(w, job)
 }
 
@@ -125,7 +129,7 @@ func handleCancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job, _ := queue.Get(id)
-	log.Printf("[api] cancelled job %s", id)
+	slog.Info("job cancelled", "component", "api", "job_id", id)
 	writeJSON(w, job)
 }
 
@@ -155,8 +159,7 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[settings] saved: validation=%v transcoding=%v catalog=%v notif=%s",
-		s.ValidationEnabled, s.TranscodingEnabled, s.CatalogEnabled, s.NotifMode)
+	slog.Info("settings saved", "component", "settings", "validation", s.ValidationEnabled, "transcoding", s.TranscodingEnabled, "catalog", s.CatalogEnabled, "notif_mode", s.NotifMode)
 	writeJSON(w, s)
 }
 

@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -62,7 +62,7 @@ func NewAuth(mode, password, usersFile string) *Auth {
 	}
 	if mode == "users" {
 		if err := a.loadUsers(); err != nil {
-			log.Printf("[auth] warning: could not load users from %s: %v", usersFile, err)
+			slog.Warn("could not load users", "component", "auth", "path", usersFile, "error", err)
 		}
 	}
 	go a.cleanupSessions()
@@ -89,7 +89,7 @@ func (a *Auth) loadUsers() error {
 	data, err := os.ReadFile(a.usersFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("[auth] no users file at %s — all requests will be rejected until users are created", a.usersFile)
+			slog.Warn("no users file found — all requests will be rejected until users are created", "component", "auth", "path", a.usersFile)
 			return nil
 		}
 		return err

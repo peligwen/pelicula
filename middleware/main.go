@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -11,14 +11,16 @@ import (
 var services *ServiceClients
 
 func main() {
-	log.SetFlags(log.Ltime)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
 
 	services = NewServiceClients("/config")
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
 		if err := AutoWire(services); err != nil {
-			log.Printf("[autowire] error: %v", err)
+			slog.Error("autowire failed", "component", "main", "error", err)
 		}
 	}()
 
@@ -42,6 +44,9 @@ func main() {
 		authMode = "off"
 	}
 	auth := NewAuth(authMode, os.Getenv("PELICULA_PASSWORD"), "/config/pelicula/users.json")
+
+	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
+	mux.HandleFunc("/api/pelicula/health", handleHealth)
 
 	// Auth endpoints (always accessible)
 	mux.HandleFunc("/api/pelicula/auth/login", auth.HandleLogin)
@@ -68,9 +73,10 @@ func main() {
 	// admin only: destructive actions
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
-	log.Println("[server] listening on :8181")
+	slog.Info("listening", "component", "main", "addr", ":8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
-		log.Fatal(err)
+		slog.Error("server exited", "component", "main", "error", err)
+		os.Exit(1)
 	}
 }
 

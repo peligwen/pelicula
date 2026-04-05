@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -20,7 +20,7 @@ const (
 )
 
 func AutoWire(s *ServiceClients) error {
-	log.Println("[autowire] waiting for services to be ready...")
+	slog.Info("waiting for services to be ready", "component", "autowire")
 
 	if err := waitForServices(s); err != nil {
 		return fmt.Errorf("services not ready: %w", err)
@@ -34,7 +34,7 @@ func AutoWire(s *ServiceClients) error {
 			s.SonarrKey != "", s.RadarrKey != "", s.ProwlarrKey != "")
 	}
 
-	log.Println("[autowire] services ready, checking configuration...")
+	slog.Info("services ready, checking configuration", "component", "autowire")
 
 	sonarrWired := wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3") &&
 		wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "/tv")
@@ -57,9 +57,9 @@ func AutoWire(s *ServiceClients) error {
 
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
-		log.Println("[autowire] all services wired successfully")
+		slog.Info("all services wired successfully", "component", "autowire")
 	} else {
-		log.Println("[autowire] some wiring failed — check logs above")
+		slog.Warn("some wiring failed — check logs above", "component", "autowire")
 	}
 
 	return nil
@@ -102,19 +102,19 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath string
 	// Check existing download clients
 	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/downloadclient")
 	if err != nil {
-		log.Printf("[autowire] %s: failed to check download clients: %v", name, err)
+		slog.Error("failed to check download clients", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
 	var clients []map[string]any
 	if err := json.Unmarshal(data, &clients); err != nil {
-		log.Printf("[autowire] %s: failed to parse download clients response: %v", name, err)
+		slog.Error("failed to parse download clients response", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
 	for _, c := range clients {
 		if impl, _ := c["implementation"].(string); impl == "QBittorrent" {
-			log.Printf("[autowire] %s: qBittorrent already configured, skipping", name)
+			slog.Info("qBittorrent already configured, skipping", "component", "autowire", "service", name)
 			return true
 		}
 	}
@@ -138,11 +138,11 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath string
 
 	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/downloadclient", payload)
 	if err != nil {
-		log.Printf("[autowire] %s: failed to add qBittorrent: %v", name, err)
+		slog.Error("failed to add qBittorrent download client", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
-	log.Printf("[autowire] %s: added qBittorrent download client", name)
+	slog.Info("added qBittorrent download client", "component", "autowire", "service", name)
 	return true
 }
 
@@ -150,19 +150,19 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 	// Check existing root folders
 	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/rootfolder")
 	if err != nil {
-		log.Printf("[autowire] %s: failed to check root folders: %v", name, err)
+		slog.Error("failed to check root folders", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
 	var folders []map[string]any
 	if err := json.Unmarshal(data, &folders); err != nil {
-		log.Printf("[autowire] %s: failed to parse root folders response: %v", name, err)
+		slog.Error("failed to parse root folders response", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
 	for _, f := range folders {
 		if path, _ := f["path"].(string); path == folderPath {
-			log.Printf("[autowire] %s: root folder %s already configured, skipping", name, folderPath)
+			slog.Info("root folder already configured, skipping", "component", "autowire", "service", name, "path", folderPath)
 			return true
 		}
 	}
@@ -173,11 +173,11 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 
 	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/rootfolder", payload)
 	if err != nil {
-		log.Printf("[autowire] %s: failed to add root folder %s: %v", name, folderPath, err)
+		slog.Error("failed to add root folder", "component", "autowire", "service", name, "path", folderPath, "error", err)
 		return false
 	}
 
-	log.Printf("[autowire] %s: added root folder %s", name, folderPath)
+	slog.Info("added root folder", "component", "autowire", "service", name, "path", folderPath)
 	return true
 }
 
@@ -186,19 +186,19 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
 	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/notification")
 	if err != nil {
-		log.Printf("[autowire] %s: failed to check notifications: %v", name, err)
+		slog.Error("failed to check notifications", "component", "autowire", "service", name, "error", err)
 		return
 	}
 
 	var existing []map[string]any
 	if err := json.Unmarshal(data, &existing); err != nil {
-		log.Printf("[autowire] %s: failed to parse notifications response: %v", name, err)
+		slog.Error("failed to parse notifications response", "component", "autowire", "service", name, "error", err)
 		return
 	}
 
 	for _, n := range existing {
 		if n, _ := n["name"].(string); n == "Procula" {
-			log.Printf("[autowire] %s: Procula webhook already configured, skipping", name)
+			slog.Info("Procula webhook already configured, skipping", "component", "autowire", "service", name)
 			return
 		}
 	}
@@ -223,10 +223,10 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 
 	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
 	if err != nil {
-		log.Printf("[autowire] %s: failed to add Procula webhook: %v", name, err)
+		slog.Error("failed to add Procula webhook", "component", "autowire", "service", name, "error", err)
 		return
 	}
-	log.Printf("[autowire] %s: added Procula import webhook → %s", name, hookURL)
+	slog.Info("added Procula import webhook", "component", "autowire", "service", name, "url", hookURL)
 }
 
 // ── Jellyseerr ─────────────────────────────────────────────────────────────
@@ -235,12 +235,12 @@ func wireJellyseerr(s *ServiceClients) {
 	if os.Getenv("JELLYSEERR_ENABLED") != "true" {
 		return
 	}
-	log.Println("[autowire] Jellyseerr: checking...")
+	slog.Info("checking Jellyseerr", "component", "autowire")
 
 	// Check initialization status
 	data, err := jsGet(s, "/api/v1/settings/public", "")
 	if err != nil {
-		log.Printf("[autowire] Jellyseerr: not reachable (%v)", err)
+		slog.Warn("Jellyseerr not reachable", "component", "autowire", "error", err)
 		return
 	}
 
@@ -249,21 +249,21 @@ func wireJellyseerr(s *ServiceClients) {
 	initialized, _ := pub["initialized"].(bool)
 
 	if !initialized {
-		log.Println("[autowire] Jellyseerr: not initialized — open /jellyseerr to complete the setup wizard")
+		slog.Info("Jellyseerr not initialized — open /jellyseerr to complete the setup wizard", "component", "autowire")
 		return
 	}
 
 	// Authenticate via Jellyfin (admin/no-password, matches our default Jellyfin setup)
 	apiKey, err := jellyseerrGetAPIKey()
 	if err != nil {
-		log.Printf("[autowire] Jellyseerr: can't get API key (%v)", err)
+		slog.Error("can't get Jellyseerr API key", "component", "autowire", "error", err)
 		return
 	}
 
 	s.mu.Lock()
 	s.JellyseerrKey = apiKey
 	s.mu.Unlock()
-	log.Println("[autowire] Jellyseerr: API key loaded")
+	slog.Info("Jellyseerr API key loaded", "component", "autowire")
 
 	// Wire Radarr and Sonarr into Jellyseerr
 	s.mu.RLock()
@@ -273,7 +273,7 @@ func wireJellyseerr(s *ServiceClients) {
 
 	wireJellyseerrService(s, apiKey, "radarr", "radarr", 7878, "/radarr", radarrKey, "/movies")
 	wireJellyseerrService(s, apiKey, "sonarr", "sonarr", 8989, "/sonarr", sonarrKey, "/tv")
-	log.Println("[autowire] Jellyseerr: wired")
+	slog.Info("Jellyseerr wired", "component", "autowire")
 }
 
 func jellyseerrGetAPIKey() (string, error) {
@@ -323,13 +323,13 @@ func wireJellyseerrService(s *ServiceClients, apiKey, svcType, hostname string, 
 	// Check if already configured
 	data, err := jsGet(s, "/api/v1/settings/"+svcType, apiKey)
 	if err != nil {
-		log.Printf("[autowire] Jellyseerr: can't check %s: %v", svcType, err)
+		slog.Error("can't check Jellyseerr service", "component", "autowire", "service_type", svcType, "error", err)
 		return
 	}
 
 	var existing []map[string]any
 	if json.Unmarshal(data, &existing) == nil && len(existing) > 0 {
-		log.Printf("[autowire] Jellyseerr: %s already configured, skipping", svcType)
+		slog.Info("Jellyseerr service already configured, skipping", "component", "autowire", "service_type", svcType)
 		return
 	}
 
@@ -356,10 +356,10 @@ func wireJellyseerrService(s *ServiceClients, apiKey, svcType, hostname string, 
 
 	_, err = jsPost(s, "/api/v1/settings/"+svcType, apiKey, payload)
 	if err != nil {
-		log.Printf("[autowire] Jellyseerr: failed to add %s: %v", svcType, err)
+		slog.Error("failed to add Jellyseerr service", "component", "autowire", "service_type", svcType, "error", err)
 		return
 	}
-	log.Printf("[autowire] Jellyseerr: added %s", svcType)
+	slog.Info("added Jellyseerr service", "component", "autowire", "service_type", svcType)
 }
 
 func jsGet(s *ServiceClients, path, apiKey string) ([]byte, error) {
@@ -417,19 +417,19 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 	// Check existing applications
 	data, err := s.ArrGet(prowlarrURL, s.ProwlarrKey, "/api/v1/applications")
 	if err != nil {
-		log.Printf("[autowire] Prowlarr: failed to check applications: %v", err)
+		slog.Error("failed to check Prowlarr applications", "component", "autowire", "error", err)
 		return false
 	}
 
 	var apps []map[string]any
 	if err := json.Unmarshal(data, &apps); err != nil {
-		log.Printf("[autowire] Prowlarr: failed to parse applications response: %v", err)
+		slog.Error("failed to parse Prowlarr applications response", "component", "autowire", "error", err)
 		return false
 	}
 
 	for _, a := range apps {
 		if n, _ := a["name"].(string); n == appName {
-			log.Printf("[autowire] Prowlarr: %s already connected, skipping", appName)
+			slog.Info("Prowlarr app already connected, skipping", "component", "autowire", "app", appName)
 			return true
 		}
 	}
@@ -448,10 +448,10 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 
 	_, err = s.ArrPost(prowlarrURL, s.ProwlarrKey, "/api/v1/applications", payload)
 	if err != nil {
-		log.Printf("[autowire] Prowlarr: failed to add %s: %v", appName, err)
+		slog.Error("failed to connect Prowlarr app", "component", "autowire", "app", appName, "error", err)
 		return false
 	}
 
-	log.Printf("[autowire] Prowlarr: connected to %s", appName)
+	slog.Info("connected Prowlarr app", "component", "autowire", "app", appName)
 	return true
 }

@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,12 +16,12 @@ import (
 // RunWorker processes jobs from the queue sequentially.
 // It runs forever and should be called in a goroutine.
 func RunWorker(q *Queue, configDir, peliculaAPI string) {
-	log.Println("[pipeline] worker started")
+	slog.Info("worker started", "component", "pipeline")
 	for id := range q.pending {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("[pipeline] panic in job %s: %v — worker continuing", id, r)
+					slog.Error("panic in job — worker continuing", "component", "pipeline", "job_id", id, "panic", r)
 				}
 			}()
 			processJob(q, id, configDir, peliculaAPI)
@@ -32,7 +32,7 @@ func RunWorker(q *Queue, configDir, peliculaAPI string) {
 func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	job, ok := q.Get(id)
 	if !ok {
-		log.Printf("[pipeline] job %s not found, skipping", id)
+		slog.Warn("job not found, skipping", "component", "pipeline", "job_id", id)
 		return
 	}
 
@@ -47,7 +47,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	q.registerCancel(id, cancel)
 	defer q.unregisterCancel(id)
 
-	log.Printf("[pipeline] starting job %s: %s (%s)", id, job.Source.Title, job.Source.Type)
+	slog.Info("starting job", "component", "pipeline", "job_id", id, "title", job.Source.Title, "type", job.Source.Type)
 
 	// Mark as processing
 	_ = q.Update(id, func(j *Job) {
@@ -68,7 +68,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		})
 
 		if !result.Passed {
-			log.Printf("[pipeline] validation FAILED for job %s: %s", id, failReason)
+			slog.Warn("validation failed", "component", "pipeline", "job_id", id, "reason", failReason)
 			_ = q.Update(id, func(j *Job) {
 				j.State = StateFailed
 				j.Stage = StageValidate
@@ -78,11 +78,11 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 			// Remove the bad file from the library
 			if job.Source.Path != "" {
 				if !isAllowedPath(job.Source.Path) {
-					log.Printf("[pipeline] refusing to remove file outside allowed directories: %s", job.Source.Path)
+					slog.Warn("refusing to remove file outside allowed directories", "component", "pipeline", "path", job.Source.Path)
 				} else if err := os.Remove(job.Source.Path); err == nil {
-					log.Printf("[pipeline] removed bad file: %s", job.Source.Path)
+					slog.Info("removed bad file", "component", "pipeline", "path", job.Source.Path)
 				} else if !os.IsNotExist(err) {
-					log.Printf("[pipeline] could not remove bad file: %v", err)
+					slog.Error("could not remove bad file", "component", "pipeline", "error", err)
 				}
 			}
 
@@ -96,10 +96,9 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 			return
 		}
 
-		log.Printf("[pipeline] validation passed for job %s (video=%s audio=%s)",
-			id, result.Checks.Codecs.Video, result.Checks.Codecs.Audio)
+		slog.Info("validation passed", "component", "pipeline", "job_id", id, "video", result.Checks.Codecs.Video, "audio", result.Checks.Codecs.Audio)
 	} else {
-		log.Printf("[pipeline] validation skipped for job %s (disabled in settings)", id)
+		slog.Info("validation skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 		_ = q.Update(id, func(j *Job) { j.Progress = 0.33 })
 	}
 
@@ -113,7 +112,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	})
 	job, _ = q.Get(id)
 	if outputPath, err := maybeTranscode(ctx, q, job, configDir); err != nil {
-		log.Printf("[pipeline] transcoding failed for job %s: %v (proceeding with original)", id, err)
+		slog.Warn("transcoding failed, proceeding with original", "component", "pipeline", "job_id", id, "error", err)
 	} else if outputPath != "" {
 		_ = q.Update(id, func(j *Job) { j.Source.Path = outputPath })
 		job, _ = q.Get(id)
@@ -131,7 +130,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if settings.CatalogEnabled {
 		Catalog(job, configDir, peliculaAPI)
 	} else {
-		log.Printf("[pipeline] catalog skipped for job %s (disabled in settings)", id)
+		slog.Info("catalog skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 	}
 
 	// ── Done ──────────────────────────────────────────────────────────────
@@ -144,7 +143,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Progress = 1.0
 	})
 
-	log.Printf("[pipeline] completed job %s: %s", id, job.Source.Title)
+	slog.Info("job completed", "component", "pipeline", "job_id", id, "title", job.Source.Title)
 }
 
 // maybeTranscode runs FFmpeg if TRANSCODING_ENABLED=true and a matching profile
@@ -170,7 +169,7 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) (
 		return "", nil // no matching profile → skip transcoding
 	}
 
-	log.Printf("[pipeline] transcoding job %s with profile %q", job.ID, profile.Name)
+	slog.Info("transcoding job", "component", "pipeline", "job_id", job.ID, "profile", profile.Name)
 
 	outputPath, err := Process(ctx, job, profile, func(pct float64) {
 		// Map pct (0–1) into the 50–90% progress window
@@ -205,7 +204,7 @@ func blocklist(job *Job, peliculaAPI, reason string) {
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[pipeline] blocklist marshal error: %v", err)
+		slog.Error("blocklist marshal error", "component", "pipeline", "error", err)
 		return
 	}
 
@@ -230,8 +229,8 @@ func blocklist(job *Job, peliculaAPI, reason string) {
 		if len(hash) > 8 {
 			hash = hash[:8]
 		}
-		log.Printf("[pipeline] blocklisted %s/%s (reason: %s)", category, hash, reason)
+		slog.Info("blocklisted release", "component", "pipeline", "category", category, "hash", hash, "reason", reason)
 		return
 	}
-	log.Printf("[pipeline] failed to blocklist after 3 attempts: %v", lastErr)
+	slog.Error("failed to blocklist after 3 attempts", "component", "pipeline", "error", lastErr)
 }

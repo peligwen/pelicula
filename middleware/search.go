@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -51,7 +51,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
 		if err != nil {
-			log.Printf("[search] radarr error: %v", err)
+			slog.Error("radarr search error", "component", "search", "error", err)
 			return
 		}
 
@@ -107,7 +107,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
 		if err != nil {
-			log.Printf("[search] sonarr error: %v", err)
+			slog.Error("sonarr search error", "component", "search", "error", err)
 			return
 		}
 

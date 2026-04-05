@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +32,7 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 	outputPath := filepath.Join("/processing", base+profile.Output.Suffix+".mkv")
 
 	args := buildFFmpegArgs(input, outputPath, profile)
-	log.Printf("[process] FFmpeg: %s → %s (profile: %s)", input, outputPath, profile.Name)
+	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", outputPath, "profile", profile.Name)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	stderr, err := cmd.StderrPipe()
@@ -66,7 +66,7 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 		return "", fmt.Errorf("FFmpeg exited with error: %w", err)
 	}
 
-	log.Printf("[process] transcoding complete: %s", outputPath)
+	slog.Info("transcoding complete", "component", "process", "output", outputPath)
 	return outputPath, nil
 }
 

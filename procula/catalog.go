@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -36,11 +36,11 @@ type NotificationConfig struct {
 // Catalog runs after processing completes: triggers Jellyfin library refresh
 // via pelicula-api and writes a "content ready" notification to the feed.
 func Catalog(job *Job, configDir, peliculaAPI string) {
-	log.Printf("[catalog] starting for job %s: %s", job.ID, job.Source.Title)
+	slog.Info("cataloging job", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
 
 	// Trigger Jellyfin library refresh via pelicula-api
 	if err := triggerJellyfinRefresh(peliculaAPI); err != nil {
-		log.Printf("[catalog] Jellyfin refresh failed (non-fatal): %v", err)
+		slog.Warn("Jellyfin refresh failed (non-fatal)", "component", "catalog", "error", err)
 	}
 
 	// Write "content ready" notification to the dashboard feed
@@ -101,14 +101,14 @@ func appendToFeed(configDir string, event NotificationEvent) {
 
 	data, err := json.MarshalIndent(events, "", "  ")
 	if err != nil {
-		log.Printf("[catalog] failed to marshal notifications: %v", err)
+		slog.Error("failed to marshal notifications", "component", "catalog", "error", err)
 		return
 	}
 	if err := os.WriteFile(feedPath, data, 0644); err != nil {
-		log.Printf("[catalog] failed to write notifications feed: %v", err)
+		slog.Error("failed to write notifications feed", "component", "catalog", "error", err)
 		return
 	}
-	log.Printf("[catalog] notification written: %s", event.Message)
+	slog.Info("notification written", "component", "catalog", "message", event.Message)
 }
 
 func loadNotificationConfig(configDir string) *NotificationConfig {
@@ -152,11 +152,11 @@ func sendApprise(urls []string, event NotificationEvent) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post("http://apprise:8000/notify", "application/json", bytes.NewReader(data))
 	if err != nil {
-		log.Printf("[catalog] Apprise notification failed: %v", err)
+		slog.Error("Apprise notification failed", "component", "catalog", "error", err)
 		return
 	}
 	resp.Body.Close()
-	log.Printf("[catalog] Apprise notification sent (%d URLs)", len(urls))
+	slog.Info("Apprise notification sent", "component", "catalog", "url_count", len(urls))
 }
 
 // sendDirect sends a notification as a JSON HTTP POST to an arbitrary webhook URL.
@@ -171,11 +171,11 @@ func sendDirect(webhookURL string, event NotificationEvent) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(data))
 	if err != nil {
-		log.Printf("[catalog] direct notification failed: %v", err)
+		slog.Error("direct notification failed", "component", "catalog", "error", err)
 		return
 	}
 	resp.Body.Close()
-	log.Printf("[catalog] direct notification sent to webhook")
+	slog.Info("direct notification sent", "component", "catalog")
 }
 
 func triggerJellyfinRefresh(peliculaAPI string) error {
@@ -189,6 +189,6 @@ func triggerJellyfinRefresh(peliculaAPI string) error {
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	log.Printf("[catalog] triggered Jellyfin library refresh")
+	slog.Info("triggered Jellyfin library refresh", "component", "catalog")
 	return nil
 }
