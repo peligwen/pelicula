@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -20,7 +21,7 @@ var (
 // Process runs FFmpeg to transcode the job's source file using the given profile.
 // Progress is reported via progressFn (0.0–1.0) as transcoding proceeds.
 // Returns the output file path on success.
-func Process(job *Job, profile *TranscodeProfile, progressFn func(float64)) (string, error) {
+func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(float64)) (string, error) {
 	input := job.Source.Path
 	if input == "" {
 		return "", fmt.Errorf("no input path")
@@ -33,7 +34,7 @@ func Process(job *Job, profile *TranscodeProfile, progressFn func(float64)) (str
 	args := buildFFmpegArgs(input, outputPath, profile)
 	log.Printf("[process] FFmpeg: %s → %s (profile: %s)", input, outputPath, profile.Name)
 
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", fmt.Errorf("stderr pipe: %w", err)

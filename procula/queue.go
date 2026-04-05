@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -81,6 +82,8 @@ type Queue struct {
 	mu        sync.RWMutex
 	jobs      map[string]*Job
 	pending   chan string
+	cancelsMu sync.Mutex
+	cancels   map[string]context.CancelFunc
 }
 
 func NewQueue(configDir string) (*Queue, error) {
@@ -93,6 +96,7 @@ func NewQueue(configDir string) (*Queue, error) {
 		configDir: configDir,
 		jobs:      make(map[string]*Job),
 		pending:   make(chan string, 256),
+		cancels:   make(map[string]context.CancelFunc),
 	}
 
 	if err := q.loadExisting(); err != nil {
@@ -240,11 +244,36 @@ func (q *Queue) Retry(id string) error {
 }
 
 func (q *Queue) Cancel(id string) error {
-	return q.Update(id, func(j *Job) {
+	err := q.Update(id, func(j *Job) {
 		if j.State == StateQueued || j.State == StateProcessing {
 			j.State = StateCancelled
 		}
 	})
+	if err != nil {
+		return err
+	}
+	// Kill any running FFmpeg process for this job
+	q.cancelsMu.Lock()
+	if fn, ok := q.cancels[id]; ok {
+		fn()
+		delete(q.cancels, id)
+	}
+	q.cancelsMu.Unlock()
+	return nil
+}
+
+// registerCancel stores a context cancel func for a running job.
+// The caller must call unregisterCancel (or defer it) when the job finishes.
+func (q *Queue) registerCancel(id string, fn context.CancelFunc) {
+	q.cancelsMu.Lock()
+	q.cancels[id] = fn
+	q.cancelsMu.Unlock()
+}
+
+func (q *Queue) unregisterCancel(id string) {
+	q.cancelsMu.Lock()
+	delete(q.cancels, id)
+	q.cancelsMu.Unlock()
 }
 
 func (q *Queue) Status() map[string]int {

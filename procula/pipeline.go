@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -39,6 +40,12 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if job.State == StateCancelled {
 		return
 	}
+
+	// Create a cancellable context so Cancel() can kill a running FFmpeg
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	q.registerCancel(id, cancel)
+	defer q.unregisterCancel(id)
 
 	log.Printf("[pipeline] starting job %s: %s (%s)", id, job.Source.Title, job.Source.Type)
 
@@ -98,7 +105,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Progress = 0.5
 	})
 	job, _ = q.Get(id)
-	if outputPath, err := maybeTranscode(q, job, configDir); err != nil {
+	if outputPath, err := maybeTranscode(ctx, q, job, configDir); err != nil {
 		log.Printf("[pipeline] transcoding failed for job %s: %v (proceeding with original)", id, err)
 	} else if outputPath != "" {
 		_ = q.Update(id, func(j *Job) { j.Source.Path = outputPath })
@@ -117,6 +124,9 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	Catalog(job, configDir, peliculaAPI)
 
 	// ── Done ──────────────────────────────────────────────────────────────
+	if job, _ = q.Get(id); job.State == StateCancelled {
+		return
+	}
 	_ = q.Update(id, func(j *Job) {
 		j.State = StateCompleted
 		j.Stage = StageDone
@@ -129,7 +139,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 // maybeTranscode runs FFmpeg if TRANSCODING_ENABLED=true and a matching profile
 // exists for the job's video codec/resolution. Returns the output path (or "" to
 // skip transcoding) and any non-fatal error.
-func maybeTranscode(q *Queue, job *Job, configDir string) (string, error) {
+func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) (string, error) {
 	if os.Getenv("TRANSCODING_ENABLED") != "true" {
 		return "", nil
 	}
@@ -151,7 +161,7 @@ func maybeTranscode(q *Queue, job *Job, configDir string) (string, error) {
 
 	log.Printf("[pipeline] transcoding job %s with profile %q", job.ID, profile.Name)
 
-	outputPath, err := Process(job, profile, func(pct float64) {
+	outputPath, err := Process(ctx, job, profile, func(pct float64) {
 		// Map pct (0–1) into the 50–90% progress window
 		progress := 0.5 + pct*0.4
 		q.Update(job.ID, func(j *Job) { j.Progress = progress }) //nolint:errcheck
