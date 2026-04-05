@@ -147,6 +147,18 @@ func (q *Queue) loadExisting() error {
 }
 
 func (q *Queue) Create(source JobSource) (*Job, error) {
+	// Deduplicate: return existing job if the same path is already active
+	q.mu.RLock()
+	for _, j := range q.jobs {
+		if j.Source.Path == source.Path && (j.State == StateQueued || j.State == StateProcessing) {
+			cp := *j
+			q.mu.RUnlock()
+			log.Printf("[queue] duplicate job for %s, returning existing %s", source.Path, cp.ID)
+			return &cp, nil
+		}
+	}
+	q.mu.RUnlock()
+
 	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
 	now := time.Now().UTC()
 	job := &Job{
