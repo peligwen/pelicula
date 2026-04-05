@@ -1237,6 +1237,323 @@ cmd_rebuild() {
     done
 }
 
+cmd_import() {
+    load_env
+
+    # --complete-bridge replaces symlinks in LIBRARY_DIR with real files.
+    if [[ "${1:-}" == "--complete-bridge" ]]; then
+        _import_complete_bridge
+        return
+    fi
+
+    local source_path="${1:-}"
+    if [[ -z "$source_path" ]]; then
+        fail "Usage: ./pelicula import <directory>"
+        echo "       ./pelicula import --complete-bridge"
+        exit 1
+    fi
+    if [[ ! -d "$source_path" ]]; then
+        fail "Directory not found: ${source_path}"
+        exit 1
+    fi
+
+    source_path="$(cd "$source_path" && pwd)"
+    local port="${PELICULA_PORT:-7354}"
+
+    echo -e "${BOLD}Library Import${NC}"
+    echo ""
+    info "Scanning ${source_path} for media files..."
+
+    # Collect media files; skip extras folders and small sample files.
+    local file_json
+    file_json="$(python3 - "$source_path" <<'PYEOF'
+import json, os, sys
+
+VIDEO_EXTS = {'.mkv', '.mp4', '.avi', '.m4v', '.ts', '.wmv', '.mov', '.flv'}
+SAMPLE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
+SKIP_DIRS = {'extras', 'featurettes', 'behind the scenes', 'interviews',
+             'deleted scenes', 'trailers', 'shorts', 'samples'}
+
+source = sys.argv[1]
+files = []
+for root, dirs, filenames in os.walk(source):
+    dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS]
+    for fname in filenames:
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in VIDEO_EXTS:
+            continue
+        path = os.path.join(root, fname)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if 'sample' in fname.lower() and size < SAMPLE_THRESHOLD:
+            continue
+        files.append({'path': path, 'size': size})
+
+print(json.dumps({'files': files}))
+PYEOF
+)"
+
+    local count
+    count="$(echo "$file_json" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['files']))")"
+
+    if [[ "$count" -eq 0 ]]; then
+        warn "No media files found in ${source_path}"
+        return
+    fi
+    pass "Found ${count} media files"
+
+    info "Matching against Radarr/Sonarr catalog (this may take a minute)..."
+
+    local scan_resp scan_code scan_body
+    scan_resp="$(echo "$file_json" | curl -s --max-time 600 -w "\n%{http_code}" \
+        -X POST -H "Content-Type: application/json" \
+        --data-binary @- \
+        "http://localhost:${port}/api/pelicula/library/scan" 2>/dev/null)"
+    scan_code="$(echo "$scan_resp" | tail -1)"
+    scan_body="$(echo "$scan_resp" | head -n -1)"
+
+    if [[ "$scan_code" == "000" ]] || [[ -z "$scan_code" ]]; then
+        fail "Could not reach pelicula-api — is the stack running?"
+        exit 1
+    fi
+    if [[ "$scan_code" != "200" ]]; then
+        fail "Scan failed (HTTP ${scan_code}): ${scan_body}"
+        exit 1
+    fi
+
+    pass "Scan complete"
+    echo ""
+
+    # Display summary and strategy menu.
+    SCAN_JSON="$scan_body" python3 - <<'PYEOF'
+import json, os
+
+data = json.loads(os.environ["SCAN_JSON"])
+
+counts = {'high': 0, 'medium': 0, 'low': 0, 'unmatched': 0, 'exists': 0}
+new_movies, new_series = 0, 0
+for item in data:
+    if item.get('status') == 'exists':
+        counts['exists'] += 1
+        continue
+    m = item.get('match')
+    if not m:
+        counts['unmatched'] += 1
+        continue
+    counts[m.get('confidence', 'unmatched')] += 1
+    if m['type'] == 'movie':
+        new_movies += 1
+    else:
+        new_series += 1
+
+print(f"  {counts['high']:4d} high-confidence matches")
+print(f"  {counts['medium']:4d} medium-confidence (review recommended)")
+print(f"  {counts['low']:4d} low-confidence")
+print(f"  {counts['unmatched']:4d} unmatched")
+print(f"  {counts['exists']:4d} already in library (will be skipped)")
+print(f"\n  New items to import: {new_movies + new_series}  ({new_movies} movies, {new_series} series)")
+PYEOF
+
+    echo ""
+    echo -e "  Choose migration strategy:"
+    echo "    1) Migrate     — move files into library (frees original location)"
+    echo "    2) Symlink     — create symlinks in library pointing to originals"
+    echo "    3) Keep        — register with Sonarr/Radarr, leave files in place"
+    echo "    q) Quit"
+    echo ""
+    local choice
+    read -rp "  Enter choice [1-3/q]: " choice
+
+    case "$choice" in
+        q|Q) info "Cancelled."; return ;;
+        1) _import_apply "migrate"  "$scan_body" ;;
+        2) _import_apply "symlink"  "$scan_body" ;;
+        3) _import_apply "keep"     "$scan_body" ;;
+        *) fail "Invalid choice"; exit 1 ;;
+    esac
+}
+
+# _import_apply <strategy> <scan_json>
+_import_apply() {
+    local strategy="$1" scan_body="$2"
+    local port="${PELICULA_PORT:-7354}"
+
+    echo ""
+    info "Preparing ${strategy} migration..."
+
+    # Python performs filesystem ops and builds the apply payload.
+    # Outputs JSON with {ops_done, ops_failed, errors[], applyPayload}.
+    local result
+    result="$(SCAN_JSON="$scan_body" STRATEGY="$strategy" \
+        LIBRARY_DIR="$LIBRARY_DIR" python3 - <<'PYEOF'
+import json, os, sys, shutil
+
+data  = json.loads(os.environ["SCAN_JSON"])
+strat = os.environ["STRATEGY"]
+lib   = os.environ["LIBRARY_DIR"]
+
+# Collect unique items by (type, id) for registration.
+apply_items = {}
+ops_done    = 0
+ops_failed  = 0
+errors      = []
+
+for item in data:
+    if item.get("status") != "new":
+        continue
+    m = item.get("match")
+    if not m:
+        continue
+    suggested = item.get("suggestedPath", "")
+    if not suggested:
+        continue
+
+    # Map container path → host path.
+    if suggested.startswith("/movies/"):
+        host_dst = os.path.join(lib, "movies", suggested[len("/movies/"):])
+    elif suggested.startswith("/tv/"):
+        host_dst = os.path.join(lib, "tv", suggested[len("/tv/"):])
+    else:
+        errors.append(f"unknown path prefix for {item['file']}")
+        continue
+
+    # Filesystem operation.
+    if strat in ("migrate", "symlink"):
+        try:
+            os.makedirs(os.path.dirname(host_dst), exist_ok=True)
+            if strat == "migrate":
+                shutil.move(item["file"], host_dst)
+            else:
+                if not os.path.lexists(host_dst):
+                    os.symlink(item["file"], host_dst)
+            ops_done += 1
+        except Exception as e:
+            ops_failed += 1
+            errors.append(f"{item['file']}: {e}")
+            continue
+
+    # Build apply item (deduplicated).
+    mtype = m["type"]
+    mid   = m.get("tmdbId") if mtype == "movie" else m.get("tvdbId")
+    if not mid:
+        continue
+    key = (mtype, mid)
+    if key not in apply_items:
+        apply_items[key] = {
+            "type":           mtype,
+            "tmdbId":         m.get("tmdbId", 0),
+            "tvdbId":         m.get("tvdbId", 0),
+            "title":          m["title"],
+            "year":           m.get("year", 0),
+            "rootFolderPath": "/movies" if mtype == "movie" else "/tv",
+            "monitored":      strat != "keep",
+        }
+
+print(json.dumps({
+    "ops_done":     ops_done,
+    "ops_failed":   ops_failed,
+    "errors":       errors,
+    "applyPayload": {"items": list(apply_items.values()), "strategy": strat},
+}))
+PYEOF
+)"
+
+    if [[ "$strategy" != "keep" ]]; then
+        local ops_done ops_failed
+        ops_done="$(echo "$result"   | python3 -c "import json,sys; print(json.load(sys.stdin)['ops_done'])")"
+        ops_failed="$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin)['ops_failed'])")"
+        pass "Files processed: ${ops_done} succeeded, ${ops_failed} failed"
+        # Print any fs errors.
+        echo "$result" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for e in (d.get('errors') or [])[:5]:
+    print(f'    ! {e}')
+" 2>/dev/null || true
+    fi
+
+    info "Registering items in Radarr/Sonarr..."
+
+    local apply_payload
+    apply_payload="$(echo "$result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['applyPayload']))")"
+
+    local resp code body
+    resp="$(echo "$apply_payload" | curl -s --max-time 120 -w "\n%{http_code}" \
+        -X POST -H "Content-Type: application/json" \
+        --data-binary @- \
+        "http://localhost:${port}/api/pelicula/library/apply" 2>/dev/null)"
+    code="$(echo "$resp" | tail -1)"
+    body="$(echo "$resp" | head -n -1)"
+
+    if [[ "$code" != "200" ]]; then
+        fail "Apply failed (HTTP ${code}): ${body}"
+        return
+    fi
+
+    APPLY_JSON="$body" python3 - <<'PYEOF'
+import json, os
+
+d     = json.loads(os.environ["APPLY_JSON"])
+GREEN = "\033[0;32m"
+BOLD  = "\033[1m"
+NC    = "\033[0m"
+
+print(f"  Added: {d.get('added',0)}, Skipped: {d.get('skipped',0)}, Failed: {d.get('failed',0)}")
+for e in (d.get("errors") or [])[:5]:
+    print(f"  ! {e}")
+if d.get("added", 0) > 0:
+    print(f"\n  {GREEN}{BOLD}Import complete{NC}")
+PYEOF
+}
+
+# _import_complete_bridge replaces symlinks in LIBRARY_DIR with the real files
+# they point to — the final step when cutting over from a bridged Plex library.
+_import_complete_bridge() {
+    echo -e "${BOLD}Complete Bridge Migration${NC}"
+    echo ""
+    info "Replacing symlinks in ${LIBRARY_DIR} with real files..."
+    echo ""
+
+    LIBRARY_DIR="$LIBRARY_DIR" python3 - <<'PYEOF'
+import os, shutil
+
+lib   = os.environ["LIBRARY_DIR"]
+done  = 0
+broken = 0
+failed = 0
+
+for root, dirs, files in os.walk(lib):
+    for fname in files:
+        path = os.path.join(root, fname)
+        if not os.path.islink(path):
+            continue
+        target = os.readlink(path)
+        if not os.path.isabs(target):
+            target = os.path.join(root, target)
+        if not os.path.exists(target):
+            print(f"  ! Broken symlink: {path} → {target}")
+            broken += 1
+            continue
+        try:
+            os.remove(path)
+            shutil.move(target, path)
+            done += 1
+        except Exception as e:
+            print(f"  ✗ {path}: {e}")
+            failed += 1
+
+GREEN = "\033[0;32m"
+BOLD  = "\033[1m"
+NC    = "\033[0m"
+
+print(f"\n  Replaced: {done}  |  Broken (skipped): {broken}  |  Failed: {failed}")
+if done > 0:
+    print(f"  {GREEN}{BOLD}Bridge migration complete — Plex library can now be retired{NC}")
+PYEOF
+}
+
 cmd_export() {
     load_env
     local port="${PELICULA_PORT:-7354}"
@@ -1436,6 +1753,8 @@ usage() {
     echo "  update              Pull latest images and recreate containers"
     echo "  export [file]       Export library metadata to JSON (default: pelicula-backup-YYYY-MM-DD.json)"
     echo "  import-backup <f>   Restore library metadata from a backup JSON file"
+    echo "  import <path>       Scan a media directory and import into Sonarr/Radarr"
+    echo "  import --complete-bridge  Replace symlinks in LIBRARY_DIR with real files"
     echo ""
     echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, procula, nginx"
 }
@@ -1457,6 +1776,7 @@ case "${1:-}" in
     update)          cmd_update ;;
     export)          cmd_export "${2:-}" ;;
     import-backup)   cmd_import_backup "${2:-}" ;;
+    import)          cmd_import "${2:-}" ;;
     -h|--help)       usage ;;
     *)               usage ;;
 esac
