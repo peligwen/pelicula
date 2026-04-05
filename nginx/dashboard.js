@@ -19,7 +19,10 @@ async function checkAuth() {
         } else {
             applyRole(data.role || 'admin');
         }
-    } catch {}
+    } catch {
+        // Network error — default to locked state rather than granting admin
+        document.getElementById('login-overlay').classList.remove('hidden');
+    }
 }
 
 async function doLogin() {
@@ -135,7 +138,7 @@ function renderResultCard(r) {
     const btnClass = r.added ? 'search-add added' : 'search-add';
     const btnText = r.added ? 'Added' : 'Add';
     const disabled = r.added ? 'disabled' : '';
-    return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div><button class="${btnClass}" ${disabled} onclick="addMedia('${r.type}', ${id}, this)">${btnText}</button></div>`;
+    return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div><button class="${btnClass}" ${disabled} data-type="${esc(r.type)}" data-id="${id}" onclick="addMedia(this.dataset.type, parseInt(this.dataset.id), this)">${btnText}</button></div>`;
 }
 function renderResults(results, collapsed) {
     if (!results.length) {
@@ -238,14 +241,20 @@ function renderDownloads(data) {
         const isSeeding = ['uploading','stalledUP','forcedUP','pausedUP','stoppedUP'].includes(t.state);
         const barClass = isPaused ? 'paused' : isSeeding ? 'seeding' : 'active';
         const pauseBtn = !canPause ? '' : isPaused
-            ? `<button class="dl-btn resume" title="Resume" onclick="dlPause('${t.hash}',false)">&#9654;</button>`
-            : `<button class="dl-btn pause" title="Pause" onclick="dlPause('${t.hash}',true)">&#9646;&#9646;</button>`;
-        const cancelBtn = canCancel ? `<button class="dl-btn cancel" title="Cancel download" onclick="dlCancel('${t.hash}','${t.category}','${esc(t.name)}',false)">&#10005;</button>` : '';
-        const blocklistBtn = canCancel ? `<button class="dl-btn blocklist" title="Remove &amp; blocklist" onclick="openBlocklistModal('${t.hash}','${t.category}','${esc(t.name)}')">&#8856;</button>` : '';
+            ? `<button class="dl-btn resume" title="Resume" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,false)">&#9654;</button>`
+            : `<button class="dl-btn pause" title="Pause" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>`;
+        const cancelBtn = canCancel ? `<button class="dl-btn cancel" title="Cancel download" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="dlCancelFromBtn(this,false)">&#10005;</button>` : '';
+        const blocklistBtn = canCancel ? `<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="openBlocklistFromBtn(this)">&#8856;</button>` : '';
         const statusText = isPaused ? '<span class="paused-label">paused</span>' : `${speed}${eta ? ' &middot; ' + eta : ''}`;
         return `<div class="download-item"><div class="download-header"><div class="download-name">${esc(t.name)}</div><div class="download-actions">${pauseBtn}${cancelBtn}${blocklistBtn}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${pct}% of ${formatSize(t.size)}</span><span>${statusText}</span></div></div>`;
     }).join('');
 }
+
+// data-* bridge helpers — keep user-controlled strings out of JS string literals in onclick
+function dlPauseFromBtn(btn, paused) { dlPause(btn.dataset.hash, paused); }
+function dlCancelFromBtn(btn, blocklist) { dlCancel(btn.dataset.hash, btn.dataset.category, btn.dataset.name, blocklist); }
+function openBlocklistFromBtn(btn) { openBlocklistModal(btn.dataset.hash, btn.dataset.category, btn.dataset.name); }
+function retryFromBtn(btn) { retryJob(btn.dataset.jobId); }
 
 // Download actions
 async function dlPause(hash, paused) {
@@ -281,9 +290,10 @@ function closeBlocklistModal() {
     blocklistState = {};
 }
 function confirmBlocklist() {
+    const {hash, category, name} = blocklistState;
     const reason = document.getElementById('blocklist-reason').value;
     closeBlocklistModal();
-    dlCancel(blocklistState.hash, blocklistState.category, blocklistState.name, true, reason);
+    dlCancel(hash, category, name, true, reason);
 }
 function formatSpeed(bps) { if (bps > 1048576) return (bps/1048576).toFixed(1)+' MB/s'; if (bps > 1024) return (bps/1024).toFixed(0)+' KB/s'; if (bps > 0) return bps+' B/s'; return 'idle'; }
 function formatSize(b) { if (b > 1073741824) return (b/1073741824).toFixed(1)+' GB'; if (b > 1048576) return (b/1048576).toFixed(0)+' MB'; return (b/1024).toFixed(0)+' KB'; }
@@ -489,7 +499,7 @@ function renderProcessing(data) {
         const stateClass = j.state === 'completed' ? 'proc-done' : j.state === 'failed' ? 'proc-failed' : 'proc-active';
         const barClass = j.state === 'completed' ? 'proc-bar-done' : j.state === 'failed' ? 'proc-bar-failed' : 'proc-bar-active';
         const retryBtn = j.state === 'failed'
-            ? `<button class="dl-btn resume" title="Retry" onclick="retryJob('${j.id}')">&#8635;</button>`
+            ? `<button class="dl-btn resume" title="Retry" data-job-id="${esc(j.id)}" onclick="retryFromBtn(this)">&#8635;</button>`
             : '';
         return `<div class="download-item">
             <div class="download-header">
