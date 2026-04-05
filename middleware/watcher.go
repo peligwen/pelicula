@@ -26,11 +26,12 @@ func StartMissingWatcher(s *ServiceClients, interval time.Duration) {
 }
 
 func searchMissingMovies(s *ServiceClients) {
-	if s.RadarrKey == "" {
+	_, radarrKey, _ := s.Keys()
+	if radarrKey == "" {
 		return
 	}
 
-	data, err := s.ArrGet(radarrURL, s.RadarrKey, "/api/v3/movie")
+	data, err := s.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
 	if err != nil {
 		log.Printf("[watcher] radarr: failed to fetch movies: %v", err)
 		return
@@ -61,7 +62,7 @@ func searchMissingMovies(s *ServiceClients) {
 	}
 
 	log.Printf("[watcher] radarr: found %d missing movie(s), triggering search", len(missing))
-	_, err = s.ArrPost(radarrURL, s.RadarrKey, "/api/v3/command", map[string]any{
+	_, err = s.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
 		"name":     "MoviesSearch",
 		"movieIds": missing,
 	})
@@ -71,8 +72,9 @@ func searchMissingMovies(s *ServiceClients) {
 }
 
 func radarrQueuedMovieIDs(s *ServiceClients) map[int]bool {
+	_, radarrKey, _ := s.Keys()
 	ids := make(map[int]bool)
-	data, err := s.ArrGet(radarrURL, s.RadarrKey, "/api/v3/queue?pageSize=100")
+	data, err := s.ArrGet(radarrURL, radarrKey, "/api/v3/queue?pageSize=100")
 	if err != nil {
 		return ids
 	}
@@ -90,11 +92,12 @@ func radarrQueuedMovieIDs(s *ServiceClients) map[int]bool {
 }
 
 func searchMissingSeries(s *ServiceClients) {
-	if s.SonarrKey == "" {
+	sonarrKey, _, _ := s.Keys()
+	if sonarrKey == "" {
 		return
 	}
 
-	data, err := s.ArrGet(sonarrURL, s.SonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
+	data, err := s.ArrGet(sonarrURL, sonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
 	if err != nil {
 		log.Printf("[watcher] sonarr: failed to fetch missing episodes: %v", err)
 		return
@@ -124,7 +127,7 @@ func searchMissingSeries(s *ServiceClients) {
 	}
 
 	log.Printf("[watcher] sonarr: found %d missing episode(s), triggering search", len(missing))
-	_, err = s.ArrPost(sonarrURL, s.SonarrKey, "/api/v3/command", map[string]any{
+	_, err = s.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
 		"name":       "EpisodeSearch",
 		"episodeIds": missing,
 	})
@@ -134,8 +137,9 @@ func searchMissingSeries(s *ServiceClients) {
 }
 
 func sonarrQueuedEpisodeIDs(s *ServiceClients) map[int]bool {
+	sonarrKey, _, _ := s.Keys()
 	ids := make(map[int]bool)
-	data, err := s.ArrGet(sonarrURL, s.SonarrKey, "/api/v3/queue?pageSize=100")
+	data, err := s.ArrGet(sonarrURL, sonarrKey, "/api/v3/queue?pageSize=100")
 	if err != nil {
 		return ids
 	}

@@ -77,14 +77,18 @@ func waitForServices(s *ServiceClients) error {
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
 		allReady := true
-		for name, url := range endpoints {
+		for _, url := range endpoints {
 			resp, err := s.client.Get(url)
-			if err != nil || resp.StatusCode >= 500 {
+			if err != nil {
 				allReady = false
 				break
 			}
+			notReady := resp.StatusCode >= 500
 			resp.Body.Close()
-			_ = name
+			if notReady {
+				allReady = false
+				break
+			}
 		}
 		if allReady {
 			return nil

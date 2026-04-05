@@ -40,7 +40,7 @@ func removeFromArrQueue(baseURL, apiKey, apiVer, hash string, blocklist bool) {
 		}
 		return
 	}
-	log.Printf("[downloads] hash %s not found in %s queue", hash[:8], baseURL)
+	log.Printf("[downloads] hash %s not found in %s queue", shortHash(hash), baseURL)
 }
 
 // unmonitorArrItem finds the movie/series associated with a download hash and unmonitors it.

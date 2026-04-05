@@ -152,7 +152,7 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 	if req.Paused {
 		action = "paused"
 	}
-	log.Printf("[downloads] %s torrent %s", action, req.Hash[:8])
+	log.Printf("[downloads] %s torrent %s", action, shortHash(req.Hash))
 	writeJSON(w, map[string]string{"status": action})
 }
 
@@ -175,20 +175,21 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine which *arr app owns this download
+	sonarrKey, radarrKey, _ := services.Keys()
 	var baseURL, apiKey, apiVer string
 	switch req.Category {
 	case "radarr":
-		baseURL, apiKey, apiVer = radarrURL, services.RadarrKey, "/api/v3"
+		baseURL, apiKey, apiVer = radarrURL, radarrKey, "/api/v3"
 	case "sonarr":
-		baseURL, apiKey, apiVer = sonarrURL, services.SonarrKey, "/api/v3"
+		baseURL, apiKey, apiVer = sonarrURL, sonarrKey, "/api/v3"
 	}
 
-	// Remove from *arr queue and optionally blocklist
+	// Unmonitor before removing from queue (unmonitor needs the queue entry to find the item ID)
 	if baseURL != "" && apiKey != "" {
-		removeFromArrQueue(baseURL, apiKey, apiVer, req.Hash, req.Blocklist)
 		if !req.Blocklist {
 			unmonitorArrItem(baseURL, apiKey, apiVer, req.Category, req.Hash)
 		}
+		removeFromArrQueue(baseURL, apiKey, apiVer, req.Hash, req.Blocklist)
 	}
 
 	// Delete torrent + files from qBittorrent
@@ -203,7 +204,7 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 			action += " (" + req.Reason + ")"
 		}
 	}
-	log.Printf("[downloads] %s torrent %s (%s)", action, req.Hash[:8], req.Category)
+	log.Printf("[downloads] %s torrent %s (%s)", action, shortHash(req.Hash), req.Category)
 	writeJSON(w, map[string]string{"status": "removed"})
 }
 

@@ -1,5 +1,12 @@
 package main
 
+func shortHash(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
+	}
+	return hash
+}
+
 func strEqualFold(a, b string) bool {
 	if len(a) != len(b) {
 		return false

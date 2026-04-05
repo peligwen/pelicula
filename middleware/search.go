@@ -42,19 +42,21 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	sonarrKey, radarrKey, _ := services.Keys()
+
 	// Search Radarr (movies)
 	if typeFilter != "series" {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		data, err := services.ArrGet(radarrURL, services.RadarrKey, "/api/v3/movie/lookup?term="+encoded)
+		data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
 		if err != nil {
 			log.Printf("[search] radarr error: %v", err)
 			return
 		}
 
 		// Get existing movies to check "added" status
-		existingData, _ := services.ArrGet(radarrURL, services.RadarrKey, "/api/v3/movie")
+		existingData, _ := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
 		existingIDs := make(map[int]bool)
 		var existing []map[string]any
 		if json.Unmarshal(existingData, &existing) == nil {
@@ -103,13 +105,13 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		data, err := services.ArrGet(sonarrURL, services.SonarrKey, "/api/v3/series/lookup?term="+encoded)
+		data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
 		if err != nil {
 			log.Printf("[search] sonarr error: %v", err)
 			return
 		}
 
-		existingData, _ := services.ArrGet(sonarrURL, services.SonarrKey, "/api/v3/series")
+		existingData, _ := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series")
 		existingIDs := make(map[int]bool)
 		var existing []map[string]any
 		if json.Unmarshal(existingData, &existing) == nil {
@@ -246,8 +248,9 @@ func requestViaJellyseerr(w http.ResponseWriter, mediaType string, tmdbID int, a
 }
 
 func addMovie(w http.ResponseWriter, tmdbID int) {
+	_, radarrKey, _ := services.Keys()
 	// Look up movie details first
-	data, err := services.ArrGet(radarrURL, services.RadarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
+	data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
 	if err != nil {
 		writeError(w, "failed to look up movie: "+err.Error(), http.StatusBadGateway)
 		return
@@ -261,7 +264,7 @@ func addMovie(w http.ResponseWriter, tmdbID int) {
 
 	// Get first quality profile
 	profileID := 1
-	profData, err := services.ArrGet(radarrURL, services.RadarrKey, "/api/v3/qualityprofile")
+	profData, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
 	if err == nil {
 		var profiles []map[string]any
 		if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
@@ -282,7 +285,7 @@ func addMovie(w http.ResponseWriter, tmdbID int) {
 		},
 	}
 
-	_, err = services.ArrPost(radarrURL, services.RadarrKey, "/api/v3/movie", payload)
+	_, err = services.ArrPost(radarrURL, radarrKey, "/api/v3/movie", payload)
 	if err != nil {
 		writeError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 		return
@@ -292,8 +295,9 @@ func addMovie(w http.ResponseWriter, tmdbID int) {
 }
 
 func addSeries(w http.ResponseWriter, tvdbID int) {
+	sonarrKey, _, _ := services.Keys()
 	// Look up series details
-	data, err := services.ArrGet(sonarrURL, services.SonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
+	data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
 	if err != nil {
 		writeError(w, "failed to look up series: "+err.Error(), http.StatusBadGateway)
 		return
@@ -308,7 +312,7 @@ func addSeries(w http.ResponseWriter, tvdbID int) {
 
 	// Get first quality profile
 	profileID := 1
-	profData, err := services.ArrGet(sonarrURL, services.SonarrKey, "/api/v3/qualityprofile")
+	profData, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
 	if err == nil {
 		var profiles []map[string]any
 		if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
@@ -330,7 +334,7 @@ func addSeries(w http.ResponseWriter, tvdbID int) {
 		},
 	}
 
-	_, err = services.ArrPost(sonarrURL, services.SonarrKey, "/api/v3/series", payload)
+	_, err = services.ArrPost(sonarrURL, sonarrKey, "/api/v3/series", payload)
 	if err != nil {
 		writeError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 		return

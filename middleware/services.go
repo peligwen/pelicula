@@ -67,6 +67,13 @@ func (s *ServiceClients) ReloadKeys() {
 	s.loadKeys()
 }
 
+// Keys returns a snapshot of the API keys under read lock.
+func (s *ServiceClients) Keys() (sonarr, radarr, prowlarr string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.SonarrKey, s.RadarrKey, s.ProwlarrKey
+}
+
 func (s *ServiceClients) SetWired(v bool) {
 	s.mu.Lock()
 	s.wired = v
