@@ -185,7 +185,7 @@ func jellyfinGet(s *ServiceClients, path, token string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }
@@ -220,7 +220,7 @@ func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, e
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }

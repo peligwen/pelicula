@@ -137,8 +137,7 @@ func forwardToProcula(url string, source ProculaJobSource) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("procula HTTP %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("procula HTTP %d", resp.StatusCode)
 	}
 	return nil
 }

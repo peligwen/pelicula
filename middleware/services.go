@@ -108,7 +108,7 @@ func (s *ServiceClients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }
@@ -135,7 +135,7 @@ func (s *ServiceClients) ArrPost(baseURL, apiKey, path string, payload any) ([]b
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }
@@ -185,7 +185,7 @@ func (s *ServiceClients) ArrDelete(baseURL, apiKey, path string) ([]byte, error)
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }
@@ -212,7 +212,7 @@ func (s *ServiceClients) ArrPut(baseURL, apiKey, path string, payload any) ([]by
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }

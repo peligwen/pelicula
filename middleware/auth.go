@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -169,7 +170,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var role UserRole
 	switch a.mode {
 	case "password":
-		if req.Password != a.password {
+		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.password)) == 0 {
 			writeError(w, "invalid password", http.StatusUnauthorized)
 			return
 		}

@@ -292,8 +292,7 @@ func jellyseerrGetAPIKey() (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("auth HTTP %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("auth HTTP %d", resp.StatusCode)
 	}
 
 	// Get main settings — session cookie is carried by the jar
@@ -377,7 +376,7 @@ func jsGet(s *ServiceClients, path, apiKey string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }
@@ -405,7 +404,7 @@ func jsPost(s *ServiceClients, path, apiKey string, payload any) ([]byte, error)
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
 }

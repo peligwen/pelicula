@@ -240,6 +240,7 @@ TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
 NOTIFICATIONS_MODE=internal
 EOF
+    chmod 600 "$ENV_FILE"
     pass "Wrote ${ENV_FILE}"
 
     setup_dirs "$CONFIG_DIR" "$MEDIA_DIR"
