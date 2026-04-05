@@ -78,37 +78,45 @@ func queryVPNStatus() VPNStatus {
 	vpn := VPNStatus{Status: "unknown"}
 
 	// Public IP and country
-	if resp, err := client.Get("http://gluetun:8000/v1/publicip/ip"); err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			var data struct {
-				PublicIP string `json:"public_ip"`
-				Country  string `json:"country"`
-			}
-			if body, err := io.ReadAll(resp.Body); err == nil {
-				if json.Unmarshal(body, &data) == nil && data.PublicIP != "" {
-					vpn.IP = data.PublicIP
-					vpn.Country = data.Country
-					vpn.Status = "healthy"
-				}
-			}
+	if body, ok := gluetunGet(client, "/v1/publicip/ip"); ok {
+		var data struct {
+			PublicIP string `json:"public_ip"`
+			Country  string `json:"country"`
+		}
+		if json.Unmarshal(body, &data) == nil && data.PublicIP != "" {
+			vpn.IP = data.PublicIP
+			vpn.Country = data.Country
+			vpn.Status = "healthy"
 		}
 	}
 
 	// Forwarded port
-	if resp, err := client.Get("http://gluetun:8000/v1/openvpn/portforwarded"); err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			var data struct {
-				Port int `json:"port"`
-			}
-			if body, err := io.ReadAll(resp.Body); err == nil {
-				if json.Unmarshal(body, &data) == nil {
-					vpn.Port = data.Port
-				}
-			}
+	if body, ok := gluetunGet(client, "/v1/openvpn/portforwarded"); ok {
+		var data struct {
+			Port int `json:"port"`
+		}
+		if json.Unmarshal(body, &data) == nil {
+			vpn.Port = data.Port
 		}
 	}
 
 	return vpn
+}
+
+// gluetunGet makes a GET request to the Gluetun control API and returns the
+// response body. Returns (nil, false) on any error or non-200 status.
+func gluetunGet(client *http.Client, path string) ([]byte, bool) {
+	resp, err := client.Get("http://gluetun:8000" + path)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false
+	}
+	return body, true
 }

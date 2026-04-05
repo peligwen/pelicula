@@ -25,7 +25,7 @@ func main() {
 	var err error
 	queue, err = NewQueue(configDir)
 	if err != nil {
-		slog.Error("queue initialization failed", "error", err)
+		slog.Error("queue initialization failed", "component", "main", "error", err)
 		os.Exit(1)
 	}
 	slog.Info("queue loaded", "component", "queue", "job_count", len(queue.jobs))
@@ -49,9 +49,9 @@ func main() {
 	mux.HandleFunc("GET /", handleUI)
 	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 
-	slog.Info("listening", "addr", ":8282")
+	slog.Info("listening", "component", "main", "addr", ":8282")
 	if err := http.ListenAndServe(":8282", mux); err != nil {
-		slog.Error("server exited", "error", err)
+		slog.Error("server exited", "component", "main", "error", err)
 		os.Exit(1)
 	}
 }

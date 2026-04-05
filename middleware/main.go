@@ -20,7 +20,7 @@ func main() {
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
 		if err := AutoWire(services); err != nil {
-			slog.Error("autowire failed", "error", err)
+			slog.Error("autowire failed", "component", "main", "error", err)
 		}
 	}()
 
@@ -73,9 +73,9 @@ func main() {
 	// admin only: destructive actions
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
-	slog.Info("listening", "addr", ":8181")
+	slog.Info("listening", "component", "main", "addr", ":8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
-		slog.Error("server exited", "error", err)
+		slog.Error("server exited", "component", "main", "error", err)
 		os.Exit(1)
 	}
 }
