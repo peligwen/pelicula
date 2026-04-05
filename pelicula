@@ -966,6 +966,7 @@ cmd_up() {
 WebUI\AuthSubnetWhitelistEnabled=true
 WebUI\AuthSubnetWhitelist=172.16.0.0/12, 192.168.0.0/16, 10.0.0.0/8
 WebUI\LocalHostAuth=false
+WebUI\CSRFProtection=false
 
 [BitTorrent]
 Session\DefaultSavePath=/downloads/'
@@ -973,7 +974,7 @@ Session\DefaultSavePath=/downloads/'
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
     [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
-    compose_cmd "${profile_args[@]}" up -d
+    compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
 
     # Wait for gluetun health
     info "Waiting for VPN connection..."
@@ -1062,7 +1063,7 @@ cmd_update() {
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
     [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
-    compose_cmd "${profile_args[@]}" up -d
+    compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
     pass "Update complete"
 }
 
