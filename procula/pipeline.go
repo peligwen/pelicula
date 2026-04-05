@@ -55,46 +55,53 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Stage = StageValidate
 	})
 
+	settings := GetSettings()
+
 	// ── Stage 1: Validate ─────────────────────────────────────────────────
 	job, _ = q.Get(id)
-	result, failReason := Validate(job)
+	if settings.ValidationEnabled {
+		result, failReason := Validate(job)
 
-	_ = q.Update(id, func(j *Job) {
-		j.Validation = &result
-		j.Progress = 0.33
-	})
-
-	if !result.Passed {
-		log.Printf("[pipeline] validation FAILED for job %s: %s", id, failReason)
 		_ = q.Update(id, func(j *Job) {
-			j.State = StateFailed
-			j.Stage = StageValidate
-			j.Error = failReason
+			j.Validation = &result
+			j.Progress = 0.33
 		})
 
-		// Remove the bad file from the library
-		if job.Source.Path != "" {
-			if !isAllowedPath(job.Source.Path) {
-				log.Printf("[pipeline] refusing to remove file outside allowed directories: %s", job.Source.Path)
-			} else if err := os.Remove(job.Source.Path); err == nil {
-				log.Printf("[pipeline] removed bad file: %s", job.Source.Path)
-			} else if !os.IsNotExist(err) {
-				log.Printf("[pipeline] could not remove bad file: %v", err)
+		if !result.Passed {
+			log.Printf("[pipeline] validation FAILED for job %s: %s", id, failReason)
+			_ = q.Update(id, func(j *Job) {
+				j.State = StateFailed
+				j.Stage = StageValidate
+				j.Error = failReason
+			})
+
+			// Remove the bad file from the library
+			if job.Source.Path != "" {
+				if !isAllowedPath(job.Source.Path) {
+					log.Printf("[pipeline] refusing to remove file outside allowed directories: %s", job.Source.Path)
+				} else if err := os.Remove(job.Source.Path); err == nil {
+					log.Printf("[pipeline] removed bad file: %s", job.Source.Path)
+				} else if !os.IsNotExist(err) {
+					log.Printf("[pipeline] could not remove bad file: %v", err)
+				}
 			}
+
+			// Ask pelicula-api to blocklist in *arr so the watcher re-searches
+			if job.Source.DownloadHash != "" {
+				blocklist(job, peliculaAPI, failReason)
+			}
+
+			// Notify the dashboard
+			WriteValidationFailedNotification(job, configDir, failReason)
+			return
 		}
 
-		// Ask pelicula-api to blocklist in *arr so the watcher re-searches
-		if job.Source.DownloadHash != "" {
-			blocklist(job, peliculaAPI, failReason)
-		}
-
-		// Notify the dashboard
-		WriteValidationFailedNotification(job, configDir, failReason)
-		return
+		log.Printf("[pipeline] validation passed for job %s (video=%s audio=%s)",
+			id, result.Checks.Codecs.Video, result.Checks.Codecs.Audio)
+	} else {
+		log.Printf("[pipeline] validation skipped for job %s (disabled in settings)", id)
+		_ = q.Update(id, func(j *Job) { j.Progress = 0.33 })
 	}
-
-	log.Printf("[pipeline] validation passed for job %s (video=%s audio=%s)",
-		id, result.Checks.Codecs.Video, result.Checks.Codecs.Audio)
 
 	// ── Stage 2: Process ─────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
@@ -121,7 +128,11 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Progress = 0.9
 	})
 	job, _ = q.Get(id)
-	Catalog(job, configDir, peliculaAPI)
+	if settings.CatalogEnabled {
+		Catalog(job, configDir, peliculaAPI)
+	} else {
+		log.Printf("[pipeline] catalog skipped for job %s (disabled in settings)", id)
+	}
 
 	// ── Done ──────────────────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
@@ -140,7 +151,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 // exists for the job's video codec/resolution. Returns the output path (or "" to
 // skip transcoding) and any non-fatal error.
 func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) (string, error) {
-	if os.Getenv("TRANSCODING_ENABLED") != "true" {
+	if !GetSettings().TranscodingEnabled {
 		return "", nil
 	}
 

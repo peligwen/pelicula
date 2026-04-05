@@ -96,6 +96,14 @@ let searchTimeout;
 let searchType = '';
 let lastResults = [];
 const searchInput = document.getElementById('search-input');
+
+// Persist "Added" state across re-renders using localStorage
+const addedIds = new Set(JSON.parse(localStorage.getItem('peliculaAdded') || '[]'));
+function markAdded(idKey, id) {
+    addedIds.add(idKey + ':' + id);
+    localStorage.setItem('peliculaAdded', JSON.stringify([...addedIds]));
+}
+function isAddedLocally(idKey, id) { return addedIds.has(idKey + ':' + id); }
 const searchResults = document.getElementById('search-results');
 const searchFilters = document.getElementById('search-filters');
 
@@ -136,9 +144,11 @@ function renderResultCard(r) {
     const poster = r.poster ? `<img src="${r.poster}" alt="">` : '<div class="no-poster"></div>';
     const badge = r.type === 'movie' ? 'Movie' : 'Series';
     const id = r.type === 'movie' ? r.tmdbId : r.tvdbId;
-    const btnClass = r.added ? 'search-add added' : 'search-add';
-    const btnText = r.added ? 'Added' : 'Add';
-    const disabled = r.added ? 'disabled' : '';
+    const idKey = r.type === 'movie' ? 'tmdb' : 'tvdb';
+    const added = r.added || isAddedLocally(idKey, id);
+    const btnClass = added ? 'search-add added' : 'search-add';
+    const btnText = added ? 'Added' : 'Add';
+    const disabled = added ? 'disabled' : '';
     return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div><button class="${btnClass}" ${disabled} data-type="${esc(r.type)}" data-id="${id}" onclick="addMedia(this.dataset.type, parseInt(this.dataset.id), this)">${btnText}</button></div>`;
 }
 function renderResults(results, collapsed) {
@@ -166,8 +176,10 @@ async function addMedia(type, id, btn) {
     try {
         const body = type === 'movie' ? {type, tmdbId: id} : {type, tvdbId: id};
         const res = await fetch('/api/pelicula/search/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-        if (res.ok) { btn.textContent = 'Added'; btn.classList.add('added'); }
-        else { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
+        if (res.ok) {
+            btn.textContent = 'Added'; btn.classList.add('added');
+            markAdded(type === 'movie' ? 'tmdb' : 'tvdb', id);
+        } else { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
     } catch { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -202,6 +214,11 @@ window.addEventListener('scroll', () => {
         scrollTick = false;
     });
 });
+// Escape blurs the search input (hides results without clearing query)
+searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') searchInput.blur();
+});
+
 // Expand results when focusing search input
 searchInput.addEventListener('focus', () => {
     if (searchInput.value.trim().length >= 2 && lastResults.length) {
@@ -240,14 +257,18 @@ function renderDownloads(data) {
         const eta = t.eta > 0 ? formatETA(t.eta) : '';
         const isPaused = ['pausedDL','pausedUP','stoppedDL','stoppedUP'].includes(t.state);
         const isSeeding = ['uploading','stalledUP','forcedUP','pausedUP','stoppedUP'].includes(t.state);
+        const isFetching = t.size === 0 && !isPaused;
         const barClass = isPaused ? 'paused' : isSeeding ? 'seeding' : 'active';
         const pauseBtn = !canPause ? '' : isPaused
             ? `<button class="dl-btn resume" title="Resume" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,false)">&#9654;</button>`
             : `<button class="dl-btn pause" title="Pause" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>`;
         const cancelBtn = canCancel ? `<button class="dl-btn cancel" title="Cancel download" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="dlCancelFromBtn(this,false)">&#10005;</button>` : '';
         const blocklistBtn = canCancel ? `<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="openBlocklistFromBtn(this)">&#8856;</button>` : '';
-        const statusText = isPaused ? '<span class="paused-label">paused</span>' : `${speed}${eta ? ' &middot; ' + eta : ''}`;
-        return `<div class="download-item"><div class="download-header"><div class="download-name">${esc(t.name)}</div><div class="download-actions">${pauseBtn}${cancelBtn}${blocklistBtn}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${pct}% of ${formatSize(t.size)}</span><span>${statusText}</span></div></div>`;
+        const statusText = isPaused ? '<span class="paused-label">paused</span>'
+            : isFetching ? '<span class="fetching-label">Fetching metadata\u2026</span>'
+            : `${speed}${eta ? ' \u00b7 ' + eta : ''}`;
+        const sizeText = isFetching ? '\u2014' : `${pct}% of ${formatSize(t.size)}`;
+        return `<div class="download-item"><div class="download-header"><div class="download-name" onclick="this.classList.toggle('expanded')" title="${esc(t.name)}">${esc(t.name)}</div><div class="download-actions">${pauseBtn}${cancelBtn}${blocklistBtn}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${sizeText}</span><span>${statusText}</span></div></div>`;
     }).join('');
 }
 

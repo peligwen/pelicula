@@ -8,7 +8,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // handleImportHook receives *arr import webhooks, normalizes the payload,
@@ -218,26 +221,186 @@ func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
-// handleNotificationsProxy proxies Procula's notification feed for the dashboard.
+// dashNotif is the shape the dashboard notification panel expects.
+type dashNotif struct {
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Type      string    `json:"type"`    // "content_ready", "download_failed", "validation_failed"
+	Message   string    `json:"message"`
+}
+
+// handleNotificationsProxy merges Procula's notification feed with recent
+// Sonarr and Radarr history events so the bell shows useful activity even
+// before Procula has processed anything.
 func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/notifications")
-	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
-		return
+
+	var all []dashNotif
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// ── Procula feed ──────────────────────────────────────────────────────────
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		resp, err := services.client.Get(proculaBaseURL() + "/api/procula/notifications")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return
+		}
+		defer resp.Body.Close()
+		// Procula uses its own NotificationEvent struct; we only need the shared fields.
+		var events []struct {
+			ID        string    `json:"id"`
+			Timestamp time.Time `json:"timestamp"`
+			Type      string    `json:"type"`
+			Message   string    `json:"message"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&events) == nil {
+			mu.Lock()
+			for _, e := range events {
+				all = append(all, dashNotif{ID: e.ID, Timestamp: e.Timestamp, Type: e.Type, Message: e.Message})
+			}
+			mu.Unlock()
+		}
+	}()
+
+	// ── Sonarr history ────────────────────────────────────────────────────────
+	sonarrKey, radarrKey, _ := services.Keys()
+	if sonarrKey != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			notifs := fetchArrHistory(sonarrURL, sonarrKey, "sonarr")
+			mu.Lock()
+			all = append(all, notifs...)
+			mu.Unlock()
+		}()
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		writeError(w, "failed to read response", http.StatusInternalServerError)
-		return
+
+	// ── Radarr history ────────────────────────────────────────────────────────
+	if radarrKey != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			notifs := fetchArrHistory(radarrURL, radarrKey, "radarr")
+			mu.Lock()
+			all = append(all, notifs...)
+			mu.Unlock()
+		}()
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+
+	wg.Wait()
+
+	// Deduplicate by ID, sort newest-first, cap at 30
+	seen := make(map[string]bool, len(all))
+	deduped := all[:0]
+	for _, n := range all {
+		if !seen[n.ID] {
+			seen[n.ID] = true
+			deduped = append(deduped, n)
+		}
+	}
+	sort.Slice(deduped, func(i, j int) bool {
+		return deduped[i].Timestamp.After(deduped[j].Timestamp)
+	})
+	if len(deduped) > 30 {
+		deduped = deduped[:30]
+	}
+
+	writeJSON(w, deduped)
+}
+
+// fetchArrHistory fetches the last 20 history records from a Sonarr or Radarr
+// instance and maps import/failure events into dashboard notifications.
+func fetchArrHistory(baseURL, apiKey, arrType string) []dashNotif {
+	data, err := services.ArrGet(baseURL, apiKey, "/api/v3/history?pageSize=20&sortKey=date&sortDir=desc")
+	if err != nil {
+		return nil
+	}
+	var resp struct {
+		Records []map[string]any `json:"records"`
+	}
+	if json.Unmarshal(data, &resp) != nil {
+		return nil
+	}
+
+	var notifs []dashNotif
+	for _, rec := range resp.Records {
+		eventType, _ := rec["eventType"].(string)
+		var nType, msg string
+		switch eventType {
+		case "downloadFolderImported":
+			nType = "content_ready"
+			msg = arrImportMessage(rec, arrType)
+		case "downloadFailed":
+			nType = "download_failed"
+			msg = arrFailedMessage(rec, arrType)
+		default:
+			continue
+		}
+		id := fmt.Sprintf("%s:%v", arrType, rec["id"])
+		ts := parseArrDate(strVal(rec, "date"))
+		notifs = append(notifs, dashNotif{ID: id, Timestamp: ts, Type: nType, Message: msg})
+	}
+	return notifs
+}
+
+func arrImportMessage(rec map[string]any, arrType string) string {
+	if arrType == "radarr" {
+		if movie, ok := rec["movie"].(map[string]any); ok {
+			title := strVal(movie, "title")
+			year := int(floatVal(movie, "year"))
+			if year > 0 {
+				return fmt.Sprintf("Movie ready: %s (%d)", title, year)
+			}
+			return "Movie ready: " + title
+		}
+	}
+	// Sonarr
+	seriesTitle := ""
+	if series, ok := rec["series"].(map[string]any); ok {
+		seriesTitle = strVal(series, "title")
+	}
+	epTitle := ""
+	if ep, ok := rec["episode"].(map[string]any); ok {
+		s := int(floatVal(ep, "seasonNumber"))
+		e := int(floatVal(ep, "episodeNumber"))
+		if s > 0 || e > 0 {
+			epTitle = fmt.Sprintf(" S%02dE%02d", s, e)
+		}
+	}
+	return fmt.Sprintf("Episode ready: %s%s", seriesTitle, epTitle)
+}
+
+func arrFailedMessage(rec map[string]any, arrType string) string {
+	title := ""
+	if arrType == "radarr" {
+		if movie, ok := rec["movie"].(map[string]any); ok {
+			title = strVal(movie, "title")
+		}
+	} else {
+		if series, ok := rec["series"].(map[string]any); ok {
+			title = strVal(series, "title")
+		}
+	}
+	if title == "" {
+		return "Download failed"
+	}
+	return "Download failed: " + title
+}
+
+func parseArrDate(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t, _ = time.Parse("2006-01-02T15:04:05Z", s)
+	}
+	return t
 }
 
 // isAllowedWebhookPath checks that the path from a webhook payload is under a

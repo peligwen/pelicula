@@ -41,6 +41,10 @@ func main() {
 	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", handleCancelJob)
 	mux.HandleFunc("GET /api/procula/storage", handleStorage)
 	mux.HandleFunc("GET /api/procula/notifications", handleNotifications)
+	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
+	mux.HandleFunc("POST /api/procula/settings", handleSaveSettings)
+	mux.HandleFunc("GET /", handleUI)
+	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 
 	log.Println("[server] listening on :8282")
 	if err := http.ListenAndServe(":8282", mux); err != nil {
@@ -128,6 +132,32 @@ func handleCancelJob(w http.ResponseWriter, r *http.Request) {
 func handleStorage(w http.ResponseWriter, r *http.Request) {
 	// Phase 2 — disk monitoring not yet implemented
 	writeJSON(w, map[string]string{"status": "not_implemented"})
+}
+
+func handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, GetSettings())
+}
+
+func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var s PipelineSettings
+	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Validate notification mode
+	switch s.NotifMode {
+	case "internal", "apprise", "direct":
+	default:
+		s.NotifMode = "internal"
+	}
+	if err := SaveSettings(s); err != nil {
+		writeError(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[settings] saved: validation=%v transcoding=%v catalog=%v notif=%s",
+		s.ValidationEnabled, s.TranscodingEnabled, s.CatalogEnabled, s.NotifMode)
+	writeJSON(w, s)
 }
 
 func handleNotifications(w http.ResponseWriter, r *http.Request) {

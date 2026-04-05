@@ -270,7 +270,8 @@ body {
     margin-bottom: 0.4rem;
 }
 .download-header { display: flex; align-items: center; gap: 0.5rem; }
-.download-name { font-size: 0.82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.download-name { font-size: 0.82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; cursor: pointer; }
+.download-name.expanded { white-space: normal; overflow: visible; text-overflow: unset; word-break: break-word; }
 .download-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
 .dl-btn {
     width: 24px; height: 24px; border: 1px solid #2a2a2a; border-radius: 4px;
@@ -290,6 +291,7 @@ body {
 .download-bar.seeding { background: #6db3f2; }
 .download-meta { font-size: 0.7rem; color: #666; display: flex; justify-content: space-between; }
 .download-meta .paused-label { color: #f0c060; }
+.download-meta .fetching-label { color: #666; font-style: italic; }
 .no-items { padding: 0.65rem 1rem; background: #131313; border: 1px solid #1e1e1e; border-radius: 8px; color: #444; font-size: 0.82rem; text-align: center; }
 
 /* Blocklist modal */
