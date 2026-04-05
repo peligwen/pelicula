@@ -41,7 +41,7 @@ services:
       - WEBUI_PORT=8080
     volumes:
       - ${CONFIG_DIR}/qbittorrent:/config
-      - ${MEDIA_DIR}/downloads:/downloads
+      - ${WORK_DIR}/downloads:/downloads
     depends_on:
       gluetun:
         condition: service_healthy
@@ -85,8 +85,8 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/sonarr:/config
-      - ${MEDIA_DIR}/tv:/tv
-      - ${MEDIA_DIR}/downloads:/downloads
+      - ${LIBRARY_DIR}/tv:/tv
+      - ${WORK_DIR}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8989/ping || exit 1"]
       interval: 30s
@@ -107,8 +107,8 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/radarr:/config
-      - ${MEDIA_DIR}/movies:/movies
-      - ${MEDIA_DIR}/downloads:/downloads
+      - ${LIBRARY_DIR}/movies:/movies
+      - ${WORK_DIR}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ping || exit 1"]
       interval: 30s
@@ -131,8 +131,8 @@ services:
       - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
-      - ${MEDIA_DIR}/tv:/data/tv
-      - ${MEDIA_DIR}/movies:/data/movies
+      - ${LIBRARY_DIR}/tv:/data/tv
+      - ${LIBRARY_DIR}/movies:/data/movies
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8096/health || exit 1"]
       interval: 30s
@@ -158,10 +158,10 @@ services:
       - PELICULA_API_URL=http://pelicula-api:8181
     volumes:
       - ${CONFIG_DIR}/procula:/config
-      - ${MEDIA_DIR}/downloads:/downloads:ro
-      - ${MEDIA_DIR}/movies:/movies
-      - ${MEDIA_DIR}/tv:/tv
-      - ${MEDIA_DIR}/processing:/processing
+      - ${WORK_DIR}/downloads:/downloads:ro
+      - ${LIBRARY_DIR}/movies:/movies
+      - ${LIBRARY_DIR}/tv:/tv
+      - ${WORK_DIR}/processing:/processing
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8282/ping || exit 1"]
       interval: 30s
