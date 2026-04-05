@@ -154,7 +154,14 @@ func (s *ServiceClients) QbtGet(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return body, nil
 }
 
 // QbtPost makes a form-encoded POST request to qBittorrent.
