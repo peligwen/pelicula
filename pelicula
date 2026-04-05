@@ -653,21 +653,18 @@ setup_apprise_notifications() {
     echo ""
     local notif_cfg
     notif_cfg="${CONFIG_DIR}/procula/notifications.json"
-    local urls_json="[]"
     local line
-    local urls_raw=""
+    local urls_collected=()
     while true; do
         echo -en "  URL (or Enter to finish): "
         read -r line
         [[ -z "$line" ]] && break
-        if [[ -z "$urls_raw" ]]; then
-            urls_raw="\"${line}\""
-        else
-            urls_raw="${urls_raw}, \"${line}\""
-        fi
+        urls_collected+=("$line")
     done
-    if [[ -n "$urls_raw" ]]; then
-        urls_json="[${urls_raw}]"
+    # JSON-encode the URL array via python3 to handle special characters safely
+    local urls_json="[]"
+    if [[ ${#urls_collected[@]} -gt 0 ]]; then
+        urls_json="$(printf '%s\n' "${urls_collected[@]}" | python3 -c "import json,sys; print(json.dumps([l.rstrip() for l in sys.stdin]))" 2>/dev/null || echo '[]')"
     fi
     mkdir -p "$(dirname "$notif_cfg")"
     cat > "$notif_cfg" <<EOF
@@ -696,14 +693,15 @@ setup_direct_notifications() {
         warn "No URL entered — no changes made"
         return
     fi
-    local notif_cfg
+    local notif_cfg direct_url_json
     notif_cfg="${CONFIG_DIR}/procula/notifications.json"
+    direct_url_json="$(printf '%s' "$direct_url" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || printf '"%s"' "$direct_url")"
     mkdir -p "$(dirname "$notif_cfg")"
     cat > "$notif_cfg" <<EOF
 {
   "mode": "direct",
   "apprise_urls": [],
-  "direct_url": "${direct_url}"
+  "direct_url": ${direct_url_json}
 }
 EOF
     set_env_var NOTIFICATIONS_MODE direct

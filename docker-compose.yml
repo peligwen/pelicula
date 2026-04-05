@@ -251,6 +251,8 @@ services:
       - sonarr
       - radarr
       - jellyfin
+      - pelicula-api
+      - procula
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:80 || exit 1"]
       interval: 30s

@@ -88,7 +88,7 @@ async function checkStatus() {
                 jsCard.classList.add('hidden');
             }
         }
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
 // ── Search ────────────────────────────────
@@ -126,7 +126,8 @@ async function doSearch(q) {
         const data = await res.json();
         lastResults = data.results || [];
         renderResults(lastResults, false);
-    } catch {
+    } catch (e) {
+        console.warn('[pelicula] search error:', e);
         searchResults.innerHTML = '<div class="no-items">Search unavailable</div>';
         searchResults.className = 'search-results visible';
     }
@@ -222,7 +223,7 @@ async function checkDownloads() {
         document.getElementById('t-dl').classList.remove('loading');
         document.getElementById('t-ul').textContent = formatSpeed(s.upspeed || 0);
         document.getElementById('t-ul').classList.remove('loading');
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 function renderDownloads(data) {
     const list = document.getElementById('downloads-list');
@@ -264,7 +265,7 @@ async function dlPause(hash, paused) {
             body: JSON.stringify({hash, paused})
         });
         setTimeout(checkDownloads, 500);
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 async function dlCancel(hash, category, name, blocklist, reason) {
     if (!blocklist && !confirm('Cancel download and unmonitor?\n\n' + name)) return;
@@ -274,7 +275,7 @@ async function dlCancel(hash, category, name, blocklist, reason) {
             body: JSON.stringify({hash, category, blocklist, reason: reason || ''})
         });
         setTimeout(checkDownloads, 500);
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
 // Blocklist modal
@@ -339,7 +340,8 @@ async function checkServices() {
             searchInput.placeholder = 'Search movies & TV shows...';
             warn.className = 'search-warning';
         }
-    } catch {
+    } catch (e) {
+        console.warn('[pelicula] status check error:', e);
         document.querySelectorAll('.status-dot').forEach(d => d.className = 'status-dot down');
         searchInput.disabled = true;
         searchInput.placeholder = 'Search unavailable';
@@ -371,7 +373,8 @@ async function checkVPN() {
             portEl.textContent = pd.port || '?';
             portEl.classList.remove('loading');
         }
-    } catch {
+    } catch (e) {
+        console.warn('[pelicula] VPN telemetry error:', e);
         vpnEl.textContent = 'DOWN';
         vpnEl.className = 'telem-value vpn-err';
         regionEl.textContent = '-'; regionEl.classList.remove('loading');
@@ -394,7 +397,7 @@ async function checkNotifications() {
         if (!res.ok) return;
         const events = await res.json();
         renderNotifications(events);
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
 function renderNotifications(events) {
@@ -470,7 +473,7 @@ async function checkProcessing() {
         if (!res.ok) return;
         const data = await res.json();
         renderProcessing(data);
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
 function renderProcessing(data) {
@@ -530,7 +533,7 @@ async function retryJob(id) {
     try {
         await fetch(`/api/procula/jobs/${id}/retry`, {method: 'POST'});
         setTimeout(checkProcessing, 500);
-    } catch {}
+    } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
 async function refresh() {

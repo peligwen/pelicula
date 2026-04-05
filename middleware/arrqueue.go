@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 )
 
 // removeFromArrQueue finds the download in the *arr queue and removes it.
@@ -16,7 +17,7 @@ func removeFromArrQueue(baseURL, apiKey, apiVer, hash string, blocklist bool) {
 
 	for _, rec := range records {
 		dlHash := strVal(rec, "downloadId")
-		if !strEqualFold(dlHash, hash) {
+		if !strings.EqualFold(dlHash, hash) {
 			continue
 		}
 		queueID := int(floatVal(rec, "id"))
@@ -44,7 +45,7 @@ func unmonitorArrItem(baseURL, apiKey, apiVer, category, hash string) {
 	}
 
 	for _, rec := range records {
-		if !strEqualFold(strVal(rec, "downloadId"), hash) {
+		if !strings.EqualFold(strVal(rec, "downloadId"), hash) {
 			continue
 		}
 

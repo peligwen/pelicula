@@ -121,10 +121,12 @@ func (q *Queue) loadExisting() error {
 		}
 		data, err := os.ReadFile(filepath.Join(jobsDir, entry.Name()))
 		if err != nil {
+			log.Printf("[queue] warning: could not read job file %s: %v", entry.Name(), err)
 			continue
 		}
 		var job Job
 		if err := json.Unmarshal(data, &job); err != nil {
+			log.Printf("[queue] warning: corrupt job file %s (skipping): %v", entry.Name(), err)
 			continue
 		}
 		// Re-queue jobs that were processing when we died
