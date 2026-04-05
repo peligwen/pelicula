@@ -14,7 +14,7 @@ import (
 
 // RunWorker processes jobs from the queue sequentially.
 // It runs forever and should be called in a goroutine.
-func RunWorker(q *Queue, peliculaAPI string) {
+func RunWorker(q *Queue, configDir, peliculaAPI string) {
 	log.Println("[pipeline] worker started")
 	for id := range q.pending {
 		func() {
@@ -23,12 +23,12 @@ func RunWorker(q *Queue, peliculaAPI string) {
 					log.Printf("[pipeline] panic in job %s: %v — worker continuing", id, r)
 				}
 			}()
-			processJob(q, id, peliculaAPI)
+			processJob(q, id, configDir, peliculaAPI)
 		}()
 	}
 }
 
-func processJob(q *Queue, id, peliculaAPI string) {
+func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	job, ok := q.Get(id)
 	if !ok {
 		log.Printf("[pipeline] job %s not found, skipping", id)
@@ -80,6 +80,9 @@ func processJob(q *Queue, id, peliculaAPI string) {
 		if job.Source.DownloadHash != "" {
 			blocklist(job, peliculaAPI, failReason)
 		}
+
+		// Notify the dashboard
+		WriteValidationFailedNotification(job, configDir, failReason)
 		return
 	}
 
@@ -96,7 +99,7 @@ func processJob(q *Queue, id, peliculaAPI string) {
 	})
 	// TODO: transcoding, extraction, audio normalization
 
-	// ── Stage 3: Catalog (Phase 3 — stub) ────────────────────────────────
+	// ── Stage 3: Catalog ─────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
@@ -104,7 +107,8 @@ func processJob(q *Queue, id, peliculaAPI string) {
 		j.Stage = StageCatalog
 		j.Progress = 0.9
 	})
-	// TODO: Jellyfin refresh, notification
+	job, _ = q.Get(id)
+	Catalog(job, configDir, peliculaAPI)
 
 	// ── Done ──────────────────────────────────────────────────────────────
 	_ = q.Update(id, func(j *Job) {

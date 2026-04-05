@@ -50,12 +50,15 @@ func main() {
 	// Webhook receiver must be accessible without session auth — *arr services
 	// call this endpoint and cannot send a session cookie.
 	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
+	// Jellyfin refresh is called by Procula internally — no session auth needed.
+	mux.HandleFunc("/api/pelicula/jellyfin/refresh", handleJellyfinRefresh)
 
 	// viewer+: read-only dashboard data
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(handleStatus)))
 	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(handleDownloads)))
 	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(handleDownloadStats)))
 	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
+	mux.Handle("/api/pelicula/notifications", auth.Guard(http.HandlerFunc(handleNotificationsProxy)))
 
 	// manager+: search and add content, pause/resume downloads
 	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(handleSearch)))

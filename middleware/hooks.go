@@ -143,26 +143,96 @@ func forwardToProcula(url string, source ProculaJobSource) error {
 	return nil
 }
 
-// handleProcessingProxy proxies Procula's status endpoint for the dashboard.
+// handleProcessingProxy proxies Procula's status + jobs for the dashboard Processing section.
 func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/status")
+	base := proculaBaseURL()
+
+	// Fetch status and jobs in parallel
+	type result struct {
+		body []byte
+		err  error
+	}
+	statusCh := make(chan result, 1)
+	jobsCh := make(chan result, 1)
+
+	go func() {
+		resp, err := services.client.Get(base + "/api/procula/status")
+		if err != nil {
+			statusCh <- result{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		statusCh <- result{body: b}
+	}()
+	go func() {
+		resp, err := services.client.Get(base + "/api/procula/jobs")
+		if err != nil {
+			jobsCh <- result{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		jobsCh <- result{body: b}
+	}()
+
+	statusRes := <-statusCh
+	jobsRes := <-jobsCh
+
+	if statusRes.err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+
+	// Merge into one response: {status: {...}, jobs: [...]}
+	var statusData, jobsData any
+	json.Unmarshal(statusRes.body, &statusData)
+	if jobsRes.err == nil {
+		json.Unmarshal(jobsRes.body, &jobsData)
+	}
+
+	writeJSON(w, map[string]any{
+		"status": statusData,
+		"jobs":   jobsData,
+	})
+}
+
+// handleJellyfinRefresh triggers a Jellyfin library scan. Called by Procula (internal only).
+func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := TriggerLibraryRefresh(services); err != nil {
+		log.Printf("[jellyfin] library refresh failed: %v", err)
+		writeError(w, "refresh failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleNotificationsProxy proxies Procula's notification feed for the dashboard.
+func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/notifications")
 	if err != nil {
 		writeError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		writeError(w, "failed to read procula response", http.StatusInternalServerError)
+		writeError(w, "failed to read response", http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)

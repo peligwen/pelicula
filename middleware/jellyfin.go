@@ -152,6 +152,21 @@ func wireJellyfinLibrary(s *ServiceClients, token, name, collectionType, path st
 	log.Printf("[autowire] Jellyfin: added library %q → %s", name, path)
 }
 
+// TriggerLibraryRefresh asks Jellyfin to scan all libraries.
+// Called by the middleware's /api/pelicula/jellyfin/refresh endpoint (invoked by Procula).
+func TriggerLibraryRefresh(s *ServiceClients) error {
+	token, err := jellyfinAuth(s)
+	if err != nil {
+		return fmt.Errorf("auth failed: %w", err)
+	}
+	_, err = jellyfinPost(s, "/Library/Refresh", token, nil)
+	if err != nil {
+		return fmt.Errorf("refresh failed: %w", err)
+	}
+	log.Println("[jellyfin] library refresh triggered")
+	return nil
+}
+
 // jellyfinGet makes a GET request to Jellyfin with the Emby authorization header.
 func jellyfinGet(s *ServiceClients, path, token string) ([]byte, error) {
 	req, err := http.NewRequest("GET", jellyfinURL+path, nil)

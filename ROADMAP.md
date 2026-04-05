@@ -39,12 +39,13 @@ Multi-user access to the dashboard with role-based visibility.
 
 Zero-config "content ready" signal. No external services required.
 
-- [ ] Implement `procula/catalog.go`: Jellyfin library refresh + poll until item appears
-- [ ] Write notification events to `/config/procula/notifications_feed.json` (ring buffer, 50 events)
-- [ ] New middleware endpoint `GET /api/pelicula/notifications` serves the feed
-- [ ] Dashboard: bell icon in masthead with unread count badge
-- [ ] Dashboard: notification dropdown with recent events
-- [ ] Dashboard: Processing section between Downloads and Services (job cards, progress bars, stage badges)
+- [x] Implement `procula/catalog.go`: Jellyfin library refresh + notification event on completion
+- [x] Write notification events to `/config/procula/notifications_feed.json` (ring buffer, 50 events)
+- [x] New middleware endpoint `GET /api/pelicula/notifications` proxies Procula feed
+- [x] New middleware endpoint `POST /api/pelicula/jellyfin/refresh` (internal, Procula calls this)
+- [x] Dashboard: bell icon in masthead with unread count badge
+- [x] Dashboard: notification dropdown with recent events (localStorage tracks last-seen)
+- [x] Dashboard: Processing section between Downloads and Services (job cards, progress bars, stage badges)
 
 **Events:** content ready, validation failed (blocklisted + re-searching), transcoding complete, storage warning
 

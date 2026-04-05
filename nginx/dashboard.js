@@ -360,21 +360,170 @@ async function checkVPN() {
 }
 
 function updateTimestamp() { document.getElementById('footer').textContent = new Date().toLocaleTimeString(); }
+document.getElementById('t-vpn').addEventListener('click', function() {
+    const ip = this.getAttribute('data-ip');
+    if (!ip || ip === '?') return;
+    this.textContent = this.textContent === ip ? '***.***' : ip;
+});
+// ── Notifications bell ────────────────────
+let lastSeenTs = localStorage.getItem('peliculaLastSeen') || '1970-01-01T00:00:00Z';
+
+async function checkNotifications() {
+    try {
+        const res = await fetch('/api/pelicula/notifications');
+        if (!res.ok) return;
+        const events = await res.json();
+        renderNotifications(events);
+    } catch {}
+}
+
+function renderNotifications(events) {
+    if (!Array.isArray(events)) return;
+    const badge = document.getElementById('bell-badge');
+    const dropdown = document.getElementById('notif-dropdown');
+
+    const unread = events.filter(e => e.timestamp > lastSeenTs);
+    if (unread.length > 0) {
+        badge.textContent = unread.length > 9 ? '9+' : String(unread.length);
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+
+    if (!events.length) {
+        dropdown.innerHTML = '<div class="notif-empty">No notifications</div>';
+        return;
+    }
+
+    dropdown.innerHTML = events.slice(0, 20).map(e => {
+        const isUnread = e.timestamp > lastSeenTs;
+        const typeClass = e.type === 'content_ready' ? 'notif-ready' : 'notif-failed';
+        const icon = e.type === 'content_ready' ? '&#10003;' : '&#9888;';
+        const time = formatNotifTime(e.timestamp);
+        return `<div class="notif-item ${isUnread ? 'unread' : ''} ${typeClass}">
+            <span class="notif-icon">${icon}</span>
+            <div class="notif-body">
+                <div class="notif-msg">${esc(e.message)}</div>
+                <div class="notif-time">${time}</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function formatNotifTime(ts) {
+    try {
+        const d = new Date(ts);
+        const now = new Date();
+        const diff = Math.floor((now - d) / 1000);
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+        return d.toLocaleDateString();
+    } catch { return ''; }
+}
+
+function toggleNotifications() {
+    const dropdown = document.getElementById('notif-dropdown');
+    const isHidden = dropdown.classList.contains('hidden');
+    if (isHidden) {
+        dropdown.classList.remove('hidden');
+        // Mark all as read
+        lastSeenTs = new Date().toISOString();
+        localStorage.setItem('peliculaLastSeen', lastSeenTs);
+        document.getElementById('bell-badge').classList.add('hidden');
+    } else {
+        dropdown.classList.add('hidden');
+    }
+}
+
+// Close notification dropdown on click outside
+document.addEventListener('click', e => {
+    if (!e.target.closest('#bell-wrap')) {
+        document.getElementById('notif-dropdown').classList.add('hidden');
+    }
+});
+
+// ── Processing section ────────────────────
+async function checkProcessing() {
+    try {
+        const res = await fetch('/api/pelicula/processing');
+        if (!res.ok) return;
+        const data = await res.json();
+        renderProcessing(data);
+    } catch {}
+}
+
+function renderProcessing(data) {
+    const section = document.getElementById('processing-section');
+    const list = document.getElementById('processing-list');
+    const statsEl = document.getElementById('processing-stats');
+
+    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    // Show section only if there are non-idle jobs
+    const activeJobs = jobs.filter(j => j.state !== 'completed' || wasRecentlyCompleted(j));
+    if (!activeJobs.length) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = '';
+
+    const status = data.status && data.status.queue ? data.status.queue : {};
+    const processing = status.processing || 0;
+    const pending = status.pending || 0;
+    const completed = status.completed || 0;
+    statsEl.textContent = `${pending} queued / ${processing} active / ${completed} done`;
+
+    list.innerHTML = activeJobs.slice(0, 10).map(j => {
+        const pct = Math.round((j.progress || 0) * 100);
+        const stageName = {validate:'Validating', process:'Processing', catalog:'Cataloging', done:'Done'}[j.stage] || j.stage;
+        const stateClass = j.state === 'completed' ? 'proc-done' : j.state === 'failed' ? 'proc-failed' : 'proc-active';
+        const barClass = j.state === 'completed' ? 'proc-bar-done' : j.state === 'failed' ? 'proc-bar-failed' : 'proc-bar-active';
+        const retryBtn = j.state === 'failed'
+            ? `<button class="dl-btn resume" title="Retry" onclick="retryJob('${j.id}')">&#8635;</button>`
+            : '';
+        return `<div class="download-item">
+            <div class="download-header">
+                <div class="download-name">${esc(j.source ? j.source.title : j.id)}</div>
+                <div class="download-actions">
+                    <span class="proc-badge ${stateClass}">${stageName}</span>
+                    ${retryBtn}
+                </div>
+            </div>
+            <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
+            <div class="download-meta">
+                <span>${pct}%</span>
+                <span>${j.error ? esc(j.error) : ''}</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function wasRecentlyCompleted(j) {
+    if (j.state !== 'completed') return false;
+    try {
+        const updated = new Date(j.updated_at);
+        return (Date.now() - updated) < 5 * 60 * 1000; // within last 5 minutes
+    } catch { return false; }
+}
+
+async function retryJob(id) {
+    try {
+        await fetch(`/api/procula/jobs/${id}/retry`, {method: 'POST'});
+        setTimeout(checkProcessing, 500);
+    } catch {}
+}
+
 async function refresh() {
     console.log('[pelicula] refresh start');
     try {
-        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus()]);
+        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus(), checkNotifications(), checkProcessing()]);
         console.log('[pelicula] refresh done');
     } catch(e) {
         console.error('[pelicula] refresh error:', e);
     }
     updateTimestamp();
 }
-document.getElementById('t-vpn').addEventListener('click', function() {
-    const ip = this.getAttribute('data-ip');
-    if (!ip || ip === '?') return;
-    this.textContent = this.textContent === ip ? '***.***' : ip;
-});
+
 checkAuth();
 setTimeout(refresh, 500);
 setInterval(refresh, 15000);

@@ -5,15 +5,19 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-var queue *Queue
+var (
+	queue     *Queue
+	configDir string
+)
 
 func main() {
 	log.SetFlags(log.Ltime)
 
-	configDir := env("CONFIG_DIR", "/config")
+	configDir = env("CONFIG_DIR", "/config")
 	peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
 
 	var err error
@@ -24,7 +28,7 @@ func main() {
 	log.Printf("[queue] loaded %d jobs from disk", len(queue.jobs))
 
 	// Single worker processes jobs sequentially
-	go RunWorker(queue, peliculaAPI)
+	go RunWorker(queue, configDir, peliculaAPI)
 
 	mux := http.NewServeMux()
 
@@ -36,6 +40,7 @@ func main() {
 	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", handleRetryJob)
 	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", handleCancelJob)
 	mux.HandleFunc("GET /api/procula/storage", handleStorage)
+	mux.HandleFunc("GET /api/procula/notifications", handleNotifications)
 
 	log.Println("[server] listening on :8282")
 	if err := http.ListenAndServe(":8282", mux); err != nil {
@@ -119,6 +124,25 @@ func handleCancelJob(w http.ResponseWriter, r *http.Request) {
 func handleStorage(w http.ResponseWriter, r *http.Request) {
 	// Phase 2 — disk monitoring not yet implemented
 	writeJSON(w, map[string]string{"status": "not_implemented"})
+}
+
+func handleNotifications(w http.ResponseWriter, r *http.Request) {
+	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
+	data, err := os.ReadFile(feedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, []NotificationEvent{})
+			return
+		}
+		writeError(w, "failed to read notifications", http.StatusInternalServerError)
+		return
+	}
+	var events []NotificationEvent
+	if err := json.Unmarshal(data, &events); err != nil {
+		writeJSON(w, []NotificationEvent{})
+		return
+	}
+	writeJSON(w, events)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
