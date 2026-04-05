@@ -108,6 +108,9 @@ func normalizeHookPayload(raw map[string]any) (source ProculaJobSource, err erro
 	if source.Path == "" {
 		return source, fmt.Errorf("no file path in webhook payload")
 	}
+	if !isAllowedWebhookPath(source.Path) {
+		return source, fmt.Errorf("path not under an allowed media directory: %s", source.Path)
+	}
 
 	source.DownloadHash = downloadHash
 	return source, nil
@@ -235,6 +238,18 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+// isAllowedWebhookPath checks that the path from a webhook payload is under a
+// known media directory, preventing path traversal to arbitrary filesystem locations.
+func isAllowedWebhookPath(p string) bool {
+	allowed := []string{"/downloads/", "/movies/", "/tv/", "/processing/"}
+	for _, prefix := range allowed {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func proculaBaseURL() string {

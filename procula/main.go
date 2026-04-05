@@ -77,6 +77,10 @@ func handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "path and arr_type are required", http.StatusBadRequest)
 		return
 	}
+	if !isAllowedPath(source.Path) {
+		writeError(w, "path not under an allowed media directory", http.StatusBadRequest)
+		return
+	}
 
 	job, err := queue.Create(source)
 	if err != nil {
