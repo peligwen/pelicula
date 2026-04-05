@@ -1080,6 +1080,40 @@ cmd_update() {
     pass "Update complete"
 }
 
+cmd_rebuild() {
+    load_env
+
+    local -a targets=("$@")
+    if [[ ${#targets[@]} -eq 0 ]]; then
+        targets=("pelicula-api" "procula")
+    fi
+
+    for svc in "${targets[@]}"; do
+        case "$svc" in
+            nginx)
+                info "Reloading nginx..."
+                docker_cmd exec nginx nginx -s reload
+                pass "nginx reloaded"
+                ;;
+            pelicula-api|middleware)
+                info "Rebuilding pelicula-api..."
+                compose_cmd build pelicula-api
+                compose_cmd up -d --no-deps pelicula-api
+                pass "pelicula-api rebuilt and restarted"
+                ;;
+            procula)
+                info "Rebuilding procula..."
+                compose_cmd build procula
+                compose_cmd up -d --no-deps procula
+                pass "procula rebuilt and restarted"
+                ;;
+            *)
+                warn "Unknown service '${svc}'. Known targets: pelicula-api, procula, nginx"
+                ;;
+        esac
+    done
+}
+
 cmd_check_vpn() {
     load_env
     local port="${PELICULA_PORT:-7354}"
@@ -1181,6 +1215,8 @@ usage() {
     echo "  restart-acquire     Restart acquisition services only (jellyfin/nginx stay up)"
     echo "  status              Show container status"
     echo "  logs [svc]          Tail logs (optionally for one service)"
+    echo "  rebuild [svc...]    Rebuild Go services in-place (default: pelicula-api procula)"
+    echo "                      Use 'nginx' to reload nginx config/static files"
     echo "  check-vpn           Verify VPN and service health"
     echo "  update              Pull latest images and recreate containers"
     echo ""
@@ -1196,6 +1232,7 @@ case "${1:-}" in
     down)            cmd_down ;;
     restart)         cmd_restart ;;
     restart-acquire) cmd_restart_acquire ;;
+    rebuild)         cmd_rebuild "${@:2}" ;;
     status)          cmd_status ;;
     logs)            cmd_logs "${2:-}" ;;
     check-vpn)       cmd_check_vpn ;;
