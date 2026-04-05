@@ -3,3 +3,5 @@ config/
 docker-compose.override.yml
 *.tar.gz
 /reviews
+middleware/pelicula-api
+procula/procula
