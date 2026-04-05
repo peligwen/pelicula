@@ -65,7 +65,24 @@ func NewAuth(mode, password, usersFile string) *Auth {
 			log.Printf("[auth] warning: could not load users from %s: %v", usersFile, err)
 		}
 	}
+	go a.cleanupSessions()
 	return a
+}
+
+// cleanupSessions periodically removes expired sessions to prevent unbounded memory growth.
+func (a *Auth) cleanupSessions() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		a.mu.Lock()
+		for token, sess := range a.sessions {
+			if now.After(sess.expiry) {
+				delete(a.sessions, token)
+			}
+		}
+		a.mu.Unlock()
+	}
 }
 
 func (a *Auth) loadUsers() error {
