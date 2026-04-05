@@ -74,18 +74,13 @@ func searchMissingMovies(s *ServiceClients) {
 func radarrQueuedMovieIDs(s *ServiceClients) map[int]bool {
 	_, radarrKey, _ := s.Keys()
 	ids := make(map[int]bool)
-	data, err := s.ArrGet(radarrURL, radarrKey, "/api/v3/queue?pageSize=100")
+	records, err := s.ArrGetAllQueueRecords(radarrURL, radarrKey, "/api/v3", "")
 	if err != nil {
 		return ids
 	}
-	var queue struct {
-		Records []map[string]any `json:"records"`
-	}
-	if json.Unmarshal(data, &queue) == nil {
-		for _, r := range queue.Records {
-			if id, ok := r["movieId"].(float64); ok {
-				ids[int(id)] = true
-			}
+	for _, r := range records {
+		if id, ok := r["movieId"].(float64); ok {
+			ids[int(id)] = true
 		}
 	}
 	return ids
@@ -139,18 +134,13 @@ func searchMissingSeries(s *ServiceClients) {
 func sonarrQueuedEpisodeIDs(s *ServiceClients) map[int]bool {
 	sonarrKey, _, _ := s.Keys()
 	ids := make(map[int]bool)
-	data, err := s.ArrGet(sonarrURL, sonarrKey, "/api/v3/queue?pageSize=100")
+	records, err := s.ArrGetAllQueueRecords(sonarrURL, sonarrKey, "/api/v3", "")
 	if err != nil {
 		return ids
 	}
-	var queue struct {
-		Records []map[string]any `json:"records"`
-	}
-	if json.Unmarshal(data, &queue) == nil {
-		for _, r := range queue.Records {
-			if id, ok := r["episodeId"].(float64); ok {
-				ids[int(id)] = true
-			}
+	for _, r := range records {
+		if id, ok := r["episodeId"].(float64); ok {
+			ids[int(id)] = true
 		}
 	}
 	return ids

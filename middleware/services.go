@@ -224,6 +224,33 @@ func (s *ServiceClients) ArrPut(baseURL, apiKey, path string, payload any) ([]by
 	return body, nil
 }
 
+// ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.
+func (s *ServiceClients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+	const pageSize = 100
+	var all []map[string]any
+	page := 1
+	for {
+		path := fmt.Sprintf("%s/queue?pageSize=%d&page=%d%s", apiVer, pageSize, page, extraParams)
+		data, err := s.ArrGet(baseURL, apiKey, path)
+		if err != nil {
+			return all, err
+		}
+		var resp struct {
+			TotalRecords int              `json:"totalRecords"`
+			Records      []map[string]any `json:"records"`
+		}
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return all, err
+		}
+		all = append(all, resp.Records...)
+		if len(all) >= resp.TotalRecords || len(resp.Records) == 0 {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
 // CheckHealth checks if each service is reachable.
 func (s *ServiceClients) CheckHealth() map[string]string {
 	results := make(map[string]string)

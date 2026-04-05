@@ -8,20 +8,13 @@ import (
 
 // removeFromArrQueue finds the download in the *arr queue and removes it.
 func removeFromArrQueue(baseURL, apiKey, apiVer, hash string, blocklist bool) {
-	data, err := services.ArrGet(baseURL, apiKey, apiVer+"/queue?pageSize=100&includeUnknownMovieItems=true&includeUnknownSeriesItems=true")
+	records, err := services.ArrGetAllQueueRecords(baseURL, apiKey, apiVer, "&includeUnknownMovieItems=true&includeUnknownSeriesItems=true")
 	if err != nil {
 		log.Printf("[downloads] failed to fetch %s queue: %v", baseURL, err)
 		return
 	}
 
-	var queue struct {
-		Records []map[string]any `json:"records"`
-	}
-	if json.Unmarshal(data, &queue) != nil {
-		return
-	}
-
-	for _, rec := range queue.Records {
+	for _, rec := range records {
 		dlHash := strVal(rec, "downloadId")
 		if !strEqualFold(dlHash, hash) {
 			continue
@@ -45,19 +38,12 @@ func removeFromArrQueue(baseURL, apiKey, apiVer, hash string, blocklist bool) {
 
 // unmonitorArrItem finds the movie/series associated with a download hash and unmonitors it.
 func unmonitorArrItem(baseURL, apiKey, apiVer, category, hash string) {
-	data, err := services.ArrGet(baseURL, apiKey, apiVer+"/queue?pageSize=100")
+	records, err := services.ArrGetAllQueueRecords(baseURL, apiKey, apiVer, "")
 	if err != nil {
 		return
 	}
 
-	var queue struct {
-		Records []map[string]any `json:"records"`
-	}
-	if json.Unmarshal(data, &queue) != nil {
-		return
-	}
-
-	for _, rec := range queue.Records {
+	for _, rec := range records {
 		if !strEqualFold(strVal(rec, "downloadId"), hash) {
 			continue
 		}
