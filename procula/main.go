@@ -9,10 +9,11 @@ import (
 	"strings"
 )
 
-var (
+// Server holds the dependencies for HTTP handlers.
+type Server struct {
 	queue     *Queue
 	configDir string
-)
+}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -22,28 +23,29 @@ func main() {
 	configDir = env("CONFIG_DIR", "/config")
 	peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
 
-	var err error
-	queue, err = NewQueue(configDir)
+	q, err := NewQueue(configDir)
 	if err != nil {
 		slog.Error("queue initialization failed", "component", "main", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("queue loaded", "component", "queue", "job_count", len(queue.jobs))
+	slog.Info("queue loaded", "component", "queue", "job_count", len(q.jobs))
 
 	// Single worker processes jobs sequentially
-	go RunWorker(queue, configDir, peliculaAPI)
+	go RunWorker(q, configDir, peliculaAPI)
+
+	srv := &Server{queue: q, configDir: configDir}
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /ping", handlePing)
-	mux.HandleFunc("GET /api/procula/status", handleStatus)
-	mux.HandleFunc("GET /api/procula/jobs", handleListJobs)
-	mux.HandleFunc("POST /api/procula/jobs", handleCreateJob)
-	mux.HandleFunc("GET /api/procula/jobs/{id}", handleGetJob)
-	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", handleRetryJob)
-	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", handleCancelJob)
+	mux.HandleFunc("GET /ping", srv.handlePing)
+	mux.HandleFunc("GET /api/procula/status", srv.handleStatus)
+	mux.HandleFunc("GET /api/procula/jobs", srv.handleListJobs)
+	mux.HandleFunc("POST /api/procula/jobs", srv.handleCreateJob)
+	mux.HandleFunc("GET /api/procula/jobs/{id}", srv.handleGetJob)
+	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", srv.handleRetryJob)
+	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", srv.handleCancelJob)
 	mux.HandleFunc("GET /api/procula/storage", handleStorage)
-	mux.HandleFunc("GET /api/procula/notifications", handleNotifications)
+	mux.HandleFunc("GET /api/procula/notifications", srv.handleNotifications)
 	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
 	mux.HandleFunc("POST /api/procula/settings", handleSaveSettings)
 	mux.HandleFunc("GET /", handleUI)
@@ -56,24 +58,24 @@ func main() {
 	}
 }
 
-func handlePing(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok"}`))
 }
 
-func handleStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"status": "ok",
-		"queue":  queue.Status(),
+		"queue":  s.queue.Status(),
 	})
 }
 
-func handleListJobs(w http.ResponseWriter, r *http.Request) {
-	jobs := queue.List()
+func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	jobs := s.queue.List()
 	writeJSON(w, jobs)
 }
 
-func handleCreateJob(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
 	var source JobSource
 	if err := json.NewDecoder(r.Body).Decode(&source); err != nil {
@@ -90,7 +92,7 @@ func handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := queue.Create(source)
+	job, err := s.queue.Create(source)
 	if err != nil {
 		writeError(w, "failed to create job: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -101,9 +103,9 @@ func handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, job)
 }
 
-func handleGetJob(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	job, ok := queue.Get(id)
+	job, ok := s.queue.Get(id)
 	if !ok {
 		writeError(w, "job not found", http.StatusNotFound)
 		return
@@ -111,26 +113,45 @@ func handleGetJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, job)
 }
 
-func handleRetryJob(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := queue.Retry(id); err != nil {
+	if err := s.queue.Retry(id); err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	job, _ := queue.Get(id)
+	job, _ := s.queue.Get(id)
 	slog.Info("job retry", "component", "api", "job_id", id, "attempt", job.RetryCount)
 	writeJSON(w, job)
 }
 
-func handleCancelJob(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := queue.Cancel(id); err != nil {
+	if err := s.queue.Cancel(id); err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	job, _ := queue.Get(id)
+	job, _ := s.queue.Get(id)
 	slog.Info("job cancelled", "component", "api", "job_id", id)
 	writeJSON(w, job)
+}
+
+func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
+	feedPath := filepath.Join(s.configDir, "procula", "notifications_feed.json")
+	data, err := os.ReadFile(feedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, []NotificationEvent{})
+			return
+		}
+		writeError(w, "failed to read notifications", http.StatusInternalServerError)
+		return
+	}
+	var events []NotificationEvent
+	if err := json.Unmarshal(data, &events); err != nil {
+		writeJSON(w, []NotificationEvent{})
+		return
+	}
+	writeJSON(w, events)
 }
 
 func handleStorage(w http.ResponseWriter, r *http.Request) {
@@ -163,25 +184,6 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s)
 }
 
-func handleNotifications(w http.ResponseWriter, r *http.Request) {
-	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
-	data, err := os.ReadFile(feedPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, []NotificationEvent{})
-			return
-		}
-		writeError(w, "failed to read notifications", http.StatusInternalServerError)
-		return
-	}
-	var events []NotificationEvent
-	if err := json.Unmarshal(data, &events); err != nil {
-		writeJSON(w, []NotificationEvent{})
-		return
-	}
-	writeJSON(w, events)
-}
-
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
@@ -199,3 +201,7 @@ func env(key, fallback string) string {
 	}
 	return fallback
 }
+
+// configDir is the global config directory used by settings.go.
+// Set once at startup from CONFIG_DIR env var.
+var configDir string
