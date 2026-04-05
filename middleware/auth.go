@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,7 +30,7 @@ func (r UserRole) atLeast(min UserRole) bool {
 
 type User struct {
 	Username string   `json:"username"`
-	Password string   `json:"password"` // hex(sha256(username + ":" + plaintext))
+	Password string   `json:"password"` // "sha256v2:HEXSALT:HEXHASH" (new) or legacy hex
 	Role     UserRole `json:"role"`
 }
 
@@ -81,18 +82,37 @@ func (a *Auth) loadUsers() error {
 	return json.Unmarshal(data, &a.users)
 }
 
-// HashPassword returns the stored hash for a given username and plaintext password.
+// HashPassword generates a salted SHA-256 hash in "sha256v2:SALT:HASH" format.
+// HASH = sha256(SALT + ":" + username + ":" + plaintext)
 func HashPassword(username, plaintext string) string {
+	salt := make([]byte, 16)
+	rand.Read(salt) //nolint:errcheck — always succeeds on Go 1.20+
+	saltHex := hex.EncodeToString(salt)
+	h := sha256.Sum256([]byte(saltHex + ":" + username + ":" + plaintext))
+	return "sha256v2:" + saltHex + ":" + hex.EncodeToString(h[:])
+}
+
+// verifyPassword checks plaintext against a stored hash.
+// Supports both "sha256v2:SALT:HASH" (salted) and the legacy unsalted format.
+func verifyPassword(username, plaintext, stored string) bool {
+	parts := strings.SplitN(stored, ":", 3)
+	if len(parts) == 3 && parts[0] == "sha256v2" {
+		saltHex, expectedHash := parts[1], parts[2]
+		h := sha256.Sum256([]byte(saltHex + ":" + username + ":" + plaintext))
+		computed := hex.EncodeToString(h[:])
+		return subtle.ConstantTimeCompare([]byte(computed), []byte(expectedHash)) == 1
+	}
+	// Legacy: unsalted sha256(username:password)
 	h := sha256.Sum256([]byte(fmt.Sprintf("%s:%s", username, plaintext)))
-	return hex.EncodeToString(h[:])
+	computed := hex.EncodeToString(h[:])
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(stored)) == 1
 }
 
 func (a *Auth) lookupUser(username, plaintext string) (User, bool) {
-	hash := HashPassword(username, plaintext)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	for _, u := range a.users {
-		if u.Username == username && u.Password == hash {
+		if u.Username == username && verifyPassword(username, plaintext, u.Password) {
 			return u, true
 		}
 	}

@@ -422,10 +422,20 @@ configure_auth() {
     esac
 }
 
-# Hash a password using SHA-256 with username as salt: hex(sha256("username:password"))
+# Hash a password using salted SHA-256: "sha256v2:SALT:hex(sha256(salt:username:password))"
+# Falls back to legacy unsalted format if openssl rand is unavailable.
 hash_password() {
     local username="$1" password="$2"
-    printf '%s:%s' "$username" "$password" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}'
+    local salt
+    salt="$(openssl rand -hex 16 2>/dev/null)"
+    if [[ -n "$salt" ]]; then
+        local hash
+        hash="$(printf '%s:%s:%s' "$salt" "$username" "$password" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')"
+        printf 'sha256v2:%s:%s' "$salt" "$hash"
+    else
+        # Legacy fallback (no salt) — older openssl without rand subcommand
+        printf '%s:%s' "$username" "$password" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}'
+    fi
 }
 
 configure_users() {
