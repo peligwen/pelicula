@@ -101,7 +101,7 @@ prompt() {
     if [[ -n "$default" ]]; then
         echo -en "${BOLD}${prompt_text}${NC} [${default}]: "
         read -r value
-        eval "$var_name=\"${value:-$default}\""
+        printf -v "$var_name" '%s' "${value:-$default}"
     else
         echo -en "${BOLD}${prompt_text}${NC}: "
         read -r value
@@ -109,7 +109,7 @@ prompt() {
             echo -en "  ${RED}Required.${NC} ${prompt_text}: "
             read -r value
         done
-        eval "$var_name=\"$value\""
+        printf -v "$var_name" '%s' "$value"
     fi
 }
 
@@ -443,10 +443,10 @@ configure_users() {
 
         # List current users
         if command -v python3 &>/dev/null; then
-            python3 -c "
-import json, sys
+            USERS_FILE="$users_file" python3 -c "
+import json, os, sys
 try:
-    users = json.load(open('$users_file'))
+    users = json.load(open(os.environ['USERS_FILE']))
     if not users:
         print('  (no users)')
     for u in users:
@@ -507,12 +507,13 @@ add_user() {
     fi
     # Append user to JSON array using python3 if available, otherwise manual
     if command -v python3 &>/dev/null; then
-        python3 -c "
-import json
-users = json.load(open('$users_file'))
-users = [u for u in users if u['username'] != '$username']
-users.append({'username': '$username', 'password': '$hash', 'role': '$role'})
-json.dump(users, open('$users_file', 'w'), indent=2)
+        USERS_FILE="$users_file" USERNAME="$username" HASH="$hash" ROLE="$role" python3 -c "
+import json, os
+e = os.environ
+users = json.load(open(e['USERS_FILE']))
+users = [u for u in users if u['username'] != e['USERNAME']]
+users.append({'username': e['USERNAME'], 'password': e['HASH'], 'role': e['ROLE']})
+json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
 print('ok')
 " | grep -q ok && pass "User '${username}' added (${role})" || warn "Failed to write users file"
     else
@@ -527,12 +528,13 @@ remove_user() {
     echo ""
     prompt username "Username to remove"
     if command -v python3 &>/dev/null; then
-        python3 -c "
-import json
-users = json.load(open('$users_file'))
+        USERS_FILE="$users_file" USERNAME="$username" python3 -c "
+import json, os
+e = os.environ
+users = json.load(open(e['USERS_FILE']))
 before = len(users)
-users = [u for u in users if u['username'] != '$username']
-json.dump(users, open('$users_file', 'w'), indent=2)
+users = [u for u in users if u['username'] != e['USERNAME']]
+json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
 print('removed' if len(users) < before else 'notfound')
 " | grep -q removed && pass "User '${username}' removed" || warn "User '${username}' not found"
     else
@@ -551,14 +553,15 @@ change_user_password() {
     local hash
     hash="$(hash_password "$username" "$pw")"
     if command -v python3 &>/dev/null; then
-        python3 -c "
-import json
-users = json.load(open('$users_file'))
+        USERS_FILE="$users_file" USERNAME="$username" HASH="$hash" python3 -c "
+import json, os
+e = os.environ
+users = json.load(open(e['USERS_FILE']))
 found = False
 for u in users:
-    if u['username'] == '$username':
-        u['password'] = '$hash'; found = True
-json.dump(users, open('$users_file', 'w'), indent=2)
+    if u['username'] == e['USERNAME']:
+        u['password'] = e['HASH']; found = True
+json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
 print('ok' if found else 'notfound')
 " | grep -q ok && pass "Password updated for '${username}'" || warn "User '${username}' not found"
     else
@@ -577,14 +580,15 @@ change_user_role() {
         *) warn "Invalid role"; return ;;
     esac
     if command -v python3 &>/dev/null; then
-        python3 -c "
-import json
-users = json.load(open('$users_file'))
+        USERS_FILE="$users_file" USERNAME="$username" ROLE="$role" python3 -c "
+import json, os
+e = os.environ
+users = json.load(open(e['USERS_FILE']))
 found = False
 for u in users:
-    if u['username'] == '$username':
-        u['role'] = '$role'; found = True
-json.dump(users, open('$users_file', 'w'), indent=2)
+    if u['username'] == e['USERNAME']:
+        u['role'] = e['ROLE']; found = True
+json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
 print('ok' if found else 'notfound')
 " | grep -q ok && pass "Role for '${username}' set to ${role}" || warn "User '${username}' not found"
     else
