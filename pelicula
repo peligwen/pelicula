@@ -1082,73 +1082,87 @@ cmd_update() {
 
 cmd_check_vpn() {
     load_env
-    local checks_passed=0
-    local checks_total=8
+    local port="${PELICULA_PORT:-7354}"
 
     echo -e "${BOLD}VPN & Service Health Check${NC}"
     echo ""
 
-    # 1. Gluetun health
-    local health
-    health="$(docker_cmd inspect --format='{{.State.Health.Status}}' gluetun 2>/dev/null || echo "not running")"
-    if [[ "$health" == "healthy" ]]; then
-        pass "Gluetun: healthy"
-        checks_passed=$((checks_passed + 1))
-    else
-        fail "Gluetun: $health"
+    local resp
+    resp="$(curl -s --max-time 10 "http://localhost:${port}/api/pelicula/health" 2>/dev/null)"
+    if [[ -z "$resp" ]]; then
+        fail "Could not reach middleware at http://localhost:${port} — is the stack running?"
+        echo ""
+        info "Run: ./pelicula up"
+        exit 1
     fi
 
-    # 2. VPN tunnel — verify IP is not the host's
-    local vpn_info host_ip vpn_ip vpn_country
-    vpn_info="$(docker_cmd exec gluetun wget -qO- https://ipinfo.io 2>/dev/null || echo "{}")"
-    vpn_ip="$(echo "$vpn_info" | grep -o '"ip": *"[^"]*"' | head -1 | cut -d'"' -f4)"
-    vpn_country="$(echo "$vpn_info" | grep -o '"country": *"[^"]*"' | head -1 | cut -d'"' -f4)"
-    host_ip="$(curl -s --max-time 5 https://ipinfo.io/ip 2>/dev/null || echo "unknown")"
+    # Parse JSON with python3 (already required for user management).
+    # Pass the response via env var to avoid bash quoting/escaping issues.
+    HEALTH_JSON="$resp" python3 - <<'PYEOF'
+import json, os, sys
 
-    if [[ -n "$vpn_ip" ]] && [[ "$vpn_ip" != "$host_ip" ]]; then
-        pass "VPN tunnel: ${vpn_ip} (${vpn_country})"
-        checks_passed=$((checks_passed + 1))
-    elif [[ -n "$vpn_ip" ]]; then
-        fail "VPN tunnel: IP matches host (${vpn_ip}) — VPN may not be active!"
-    else
-        fail "VPN tunnel: could not determine IP"
-    fi
+try:
+    data = json.loads(os.environ["HEALTH_JSON"])
+except (json.JSONDecodeError, KeyError) as e:
+    print(f"  error: could not parse health response: {e}", file=sys.stderr)
+    sys.exit(1)
 
-    # 3. Port forwarding
-    local fwd_port
-    fwd_port="$(docker_cmd exec gluetun cat /tmp/gluetun/forwarded_port 2>/dev/null || echo "")"
-    if [[ -n "$fwd_port" ]] && [[ "$fwd_port" != "0" ]]; then
-        pass "Port forwarding: port ${fwd_port}"
-        checks_passed=$((checks_passed + 1))
-    else
-        fail "Port forwarding: not active"
-    fi
+vpn      = data.get("vpn", {})
+services = data.get("services", {})
+passed   = data.get("checks_passed", 0)
+total    = data.get("checks_total", 0)
 
-    # 4-8. Service reachability (via nginx reverse proxy)
-    local svc
-    for svc in "qBittorrent:/qbt/" "Prowlarr:/prowlarr/" "Sonarr:/sonarr/" "Radarr:/radarr/" "Jellyfin:/jellyfin/"; do
-        local name="${svc%%:*}"
-        local path="${svc##*:}"
-        local code
-        local port="${PELICULA_PORT:-7354}"
-        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${port}${path}" 2>/dev/null || echo "000")"
-        if [[ "$code" != "000" ]]; then
-            pass "${name}: reachable (HTTP ${code})"
-            checks_passed=$((checks_passed + 1))
-        else
-            fail "${name}: not reachable at ${path}"
-        fi
-    done
+GREEN  = "\033[0;32m"
+RED    = "\033[0;31m"
+YELLOW = "\033[0;33m"
+BOLD   = "\033[1m"
+NC     = "\033[0m"
+CHECK  = GREEN  + "✓" + NC
+CROSS  = RED    + "✗" + NC
 
-    # Summary
-    echo ""
-    if [[ $checks_passed -eq $checks_total ]]; then
-        echo -e "${GREEN}${BOLD}${checks_passed}/${checks_total} checks passed${NC}"
-    elif [[ $checks_passed -gt 0 ]]; then
-        echo -e "${YELLOW}${BOLD}${checks_passed}/${checks_total} checks passed${NC}"
-    else
-        echo -e "${RED}${BOLD}${checks_passed}/${checks_total} checks passed${NC}"
-    fi
+def ok(msg):  print(f"  {CHECK} {msg}")
+def bad(msg): print(f"  {CROSS} {msg}")
+
+# VPN checks
+vpn_ip      = vpn.get("ip", "")
+vpn_country = vpn.get("country", "")
+vpn_port    = vpn.get("port", 0)
+
+if vpn.get("status") == "healthy" and vpn_ip:
+    label = f"{vpn_ip} ({vpn_country})" if vpn_country else vpn_ip
+    ok(f"VPN tunnel: {label}")
+else:
+    bad("VPN tunnel: not connected")
+
+if vpn_ip:
+    ok(f"VPN IP: {vpn_ip}")
+else:
+    bad("VPN IP: not available")
+
+if vpn_port and vpn_port > 0:
+    ok(f"Port forwarding: port {vpn_port}")
+else:
+    bad("Port forwarding: not active")
+
+# Service checks
+print()
+for name, status in sorted(services.items()):
+    label = name.capitalize()
+    if status == "up":
+        ok(f"{label}: reachable")
+    else:
+        bad(f"{label}: not reachable")
+
+# Summary
+print()
+if passed == total:
+    color = GREEN
+elif passed > 0:
+    color = YELLOW
+else:
+    color = RED
+print(f"  {color}{BOLD}{passed}/{total} checks passed{NC}")
+PYEOF
 }
 
 # ── Usage ───────────────────────────────────────────
