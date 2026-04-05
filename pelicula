@@ -66,6 +66,23 @@ seed_config() {
     fi
 }
 
+# Update or append a variable in .env (safe for values with special characters)
+set_env_var() {
+    local key="$1" value="$2"
+    local tmp="${ENV_FILE}.tmp"
+    grep -v "^${key}=" "$ENV_FILE" > "$tmp" 2>/dev/null || true
+    echo "${key}=${value}" >> "$tmp"
+    mv "$tmp" "$ENV_FILE"
+}
+
+# Read a variable directly from .env (not from the current environment)
+get_env_var() {
+    local key="$1" default="${2:-}"
+    local val
+    val="$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2-)"
+    echo "${val:-$default}"
+}
+
 # Enforce auth bypass in *arr config.xml files even if the app overwrote the seed.
 # The *arr apps rewrite config.xml on first boot with auth enabled; this patches it back.
 enforce_arr_auth() {
@@ -99,10 +116,15 @@ prompt() {
 # ── Commands ────────────────────────────────────────
 
 cmd_setup() {
+    local advanced=0
+    [[ "${1:-}" == "--advanced" ]] && advanced=1
+
     echo -e "${BOLD}pelicula setup${NC}"
+    [[ $advanced -eq 1 ]] && echo -e "  ${CYAN}Advanced mode${NC}"
     echo ""
 
-    # Platform
+    # Platform defaults
+    local default_config default_media
     if [[ "$PLATFORM" == "synology" ]]; then
         info "Detected platform: ${BOLD}Synology NAS${NC}"
         default_config="/volume1/docker/media-stack/config"
@@ -117,7 +139,7 @@ cmd_setup() {
     fi
     echo ""
 
-    # Wireguard key
+    # ── Required: WireGuard key ──────────────────────
     echo -e "${CYAN}You need a Wireguard private key from ProtonVPN.${NC}"
     echo "  1. Log in at https://account.proton.me"
     echo "  2. Downloads → WireGuard configuration"
@@ -127,7 +149,6 @@ cmd_setup() {
     echo ""
     prompt WIREGUARD_PRIVATE_KEY "Wireguard private key"
 
-    # Validate key looks like base64
     if [[ ${#WIREGUARD_PRIVATE_KEY} -ne 44 ]] || [[ "${WIREGUARD_PRIVATE_KEY: -1}" != "=" ]]; then
         warn "Key doesn't look like a standard Wireguard key (expected 44 chars ending in =)"
         echo -en "  Continue anyway? [y/N]: "
@@ -139,32 +160,63 @@ cmd_setup() {
     fi
     echo ""
 
-    # Server country
+    # ── Required: VPN country ────────────────────────
     echo "P2P-friendly countries: Netherlands, Switzerland, Sweden, Iceland, Romania"
     prompt SERVER_COUNTRIES "VPN server country" "Netherlands"
     echo ""
 
-    # Timezone
-    detected_tz=""
+    # ── Auto-detected in basic mode; prompted in advanced ──
+    local detected_tz=""
     if [[ -L /etc/localtime ]]; then
         detected_tz="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
     elif [[ -f /etc/timezone ]]; then
         detected_tz="$(cat /etc/timezone)"
     fi
-    prompt TZ "Timezone" "${detected_tz:-America/New_York}"
-    echo ""
 
-    # User/group IDs
-    detected_uid="$(id -u)"
-    detected_gid="$(id -g)"
-    prompt PUID "User ID (PUID)" "$detected_uid"
-    prompt PGID "Group ID (PGID)" "$detected_gid"
-    echo ""
+    if [[ $advanced -eq 1 ]]; then
+        prompt TZ "Timezone" "${detected_tz:-America/New_York}"
+        echo ""
+        prompt PUID "User ID (PUID)" "$(id -u)"
+        prompt PGID "Group ID (PGID)" "$(id -g)"
+        echo ""
+        prompt CONFIG_DIR "Config directory" "$default_config"
+        prompt MEDIA_DIR "Media directory" "$default_media"
+        echo ""
+        prompt PELICULA_PORT "Dashboard port" "7354"
+        echo ""
 
-    # Paths
-    prompt CONFIG_DIR "Config directory" "$default_config"
-    prompt MEDIA_DIR "Media directory" "$default_media"
-    echo ""
+        # Auth setup
+        echo -e "${BOLD}Auth${NC}"
+        echo "  1) Off — no auth required (single-user LAN)"
+        echo "  2) Password — single shared password"
+        echo ""
+        echo -en "Auth mode [1-2, default 1]: "
+        read -r auth_choice
+        local PELICULA_AUTH="off"
+        local PELICULA_PASSWORD=""
+        if [[ "$auth_choice" == "2" ]]; then
+            echo -en "${BOLD}Password${NC}: "
+            read -rs PELICULA_PASSWORD
+            echo ""
+            if [[ -z "$PELICULA_PASSWORD" ]]; then
+                warn "Empty password — auth disabled"
+            else
+                PELICULA_AUTH="true"
+            fi
+        fi
+        echo ""
+    else
+        TZ="${detected_tz:-America/New_York}"
+        PUID="$(id -u)"
+        PGID="$(id -g)"
+        CONFIG_DIR="$default_config"
+        MEDIA_DIR="$default_media"
+        PELICULA_PORT="7354"
+        PELICULA_AUTH="off"
+        PELICULA_PASSWORD=""
+        info "Using defaults: TZ=${TZ}, PUID=${PUID}, config=${CONFIG_DIR}"
+        echo ""
+    fi
 
     # Expand ~ in paths
     CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
@@ -180,30 +232,54 @@ PGID=${PGID}
 TZ=${TZ}
 WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
 SERVER_COUNTRIES=${SERVER_COUNTRIES}
+PELICULA_PORT=${PELICULA_PORT}
+PELICULA_AUTH=${PELICULA_AUTH}
+PELICULA_PASSWORD=${PELICULA_PASSWORD}
+JELLYSEERR_ENABLED=false
+TRANSCODING_ENABLED=false
+NOTIFICATIONS_ENABLED=false
 EOF
     pass "Wrote ${ENV_FILE}"
 
-    # Create directories
-    mkdir -p \
-        "$CONFIG_DIR/gluetun" \
-        "$CONFIG_DIR/qbittorrent" \
-        "$CONFIG_DIR/prowlarr" \
-        "$CONFIG_DIR/sonarr" \
-        "$CONFIG_DIR/radarr" \
-        "$CONFIG_DIR/jellyfin" \
-        "$CONFIG_DIR/procula/jobs" \
-        "$CONFIG_DIR/certs" \
-        "$MEDIA_DIR/downloads" \
-        "$MEDIA_DIR/movies" \
-        "$MEDIA_DIR/tv" \
-        "$MEDIA_DIR/processing"
-    pass "Created directory structure"
+    setup_dirs "$CONFIG_DIR" "$MEDIA_DIR"
+    setup_cert "$CONFIG_DIR"
+    setup_tun
+    echo ""
+    echo -e "${GREEN}${BOLD}Setup complete!${NC}"
+    if [[ $advanced -eq 0 ]]; then
+        echo -e "Run ${BOLD}./pelicula configure${NC} to set up auth, notifications, and more."
+    fi
+    echo -e "Run ${BOLD}./pelicula up${NC} to start the stack."
+}
 
-    # Generate self-signed TLS certificate (first run only)
-    if [[ ! -f "$CONFIG_DIR/certs/pelicula.crt" ]]; then
+# Create required directory structure
+setup_dirs() {
+    local config_dir="$1" media_dir="$2"
+    mkdir -p \
+        "$config_dir/gluetun" \
+        "$config_dir/qbittorrent" \
+        "$config_dir/prowlarr" \
+        "$config_dir/sonarr" \
+        "$config_dir/radarr" \
+        "$config_dir/jellyfin" \
+        "$config_dir/procula/jobs" \
+        "$config_dir/procula/profiles" \
+        "$config_dir/pelicula" \
+        "$config_dir/certs" \
+        "$media_dir/downloads" \
+        "$media_dir/movies" \
+        "$media_dir/tv" \
+        "$media_dir/processing"
+    pass "Created directory structure"
+}
+
+# Generate self-signed TLS cert if not present
+setup_cert() {
+    local config_dir="$1"
+    if [[ ! -f "$config_dir/certs/pelicula.crt" ]]; then
         openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-            -keyout "$CONFIG_DIR/certs/pelicula.key" \
-            -out "$CONFIG_DIR/certs/pelicula.crt" \
+            -keyout "$config_dir/certs/pelicula.key" \
+            -out "$config_dir/certs/pelicula.crt" \
             -subj "/CN=pelicula" \
             -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
             2>/dev/null
@@ -211,74 +287,379 @@ EOF
     else
         pass "TLS certificate exists"
     fi
+}
 
-    # TUN device check (needed for VPN on Linux/Synology, macOS uses utun)
-    if [[ "$(uname)" != "Darwin" ]]; then
-        if [[ ! -c /dev/net/tun ]]; then
-            warn "/dev/net/tun not found (required for VPN)"
-            echo -en "  Create it now with sudo? [Y/n]: "
-            read -r confirm
-            if [[ "$confirm" != "n" && "$confirm" != "N" ]]; then
-                sudo mkdir -p /dev/net
-                sudo mknod /dev/net/tun c 10 200
-                sudo chmod 600 /dev/net/tun
-                pass "Created /dev/net/tun"
-                if [[ "$PLATFORM" == "synology" ]]; then
-                    warn "Add a boot-up task in DSM to recreate this on reboot:"
-                    echo "    Control Panel → Task Scheduler → Triggered Task (Boot-up, root)"
-                    echo "    Script: mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 600 /dev/net/tun"
-                else
-                    warn "This device node may not persist across reboots on some systems"
-                fi
+# Check and create /dev/net/tun on Linux (macOS uses utun via Docker Desktop)
+setup_tun() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        return 0
+    fi
+
+    if [[ ! -c /dev/net/tun ]]; then
+        warn "/dev/net/tun not found (required for VPN)"
+        echo -en "  Create it now with sudo? [Y/n]: "
+        read -r confirm
+        if [[ "$confirm" != "n" && "$confirm" != "N" ]]; then
+            sudo mkdir -p /dev/net
+            sudo mknod /dev/net/tun c 10 200
+            sudo chmod 600 /dev/net/tun
+            pass "Created /dev/net/tun"
+            if [[ "$PLATFORM" == "synology" ]]; then
+                warn "Add a boot-up task in DSM to recreate this on reboot:"
+                echo "    Control Panel → Task Scheduler → Triggered Task (Boot-up, root)"
+                echo "    Script: mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 600 /dev/net/tun"
+            else
+                warn "This device node may not persist across reboots on some systems"
             fi
-        else
-            pass "/dev/net/tun exists"
         fi
+    else
+        pass "/dev/net/tun exists"
+    fi
 
-        # Docker Compose override to map TUN device into gluetun container
-        cat > "$SCRIPT_DIR/docker-compose.override.yml" <<'OVERRIDE'
+    cat > "$SCRIPT_DIR/docker-compose.override.yml" <<'OVERRIDE'
 services:
   gluetun:
     devices:
       - /dev/net/tun:/dev/net/tun
 OVERRIDE
-        pass "Wrote docker-compose.override.yml (TUN device mapping)"
+    pass "Wrote docker-compose.override.yml (TUN device mapping)"
+}
+
+# ── Configure ────────────────────────────────────────
+
+cmd_configure() {
+    load_env
+
+    while true; do
+        echo ""
+        echo -e "${BOLD}Pelicula Configuration${NC}"
+        echo ""
+
+        local auth_mode notifications transcoding port vpn_country
+        auth_mode="$(get_env_var PELICULA_AUTH off)"
+        [[ "$auth_mode" == "true" ]] && auth_mode="password"
+        notifications="$(get_env_var NOTIFICATIONS_ENABLED false)"
+        transcoding="$(get_env_var TRANSCODING_ENABLED false)"
+        port="$(get_env_var PELICULA_PORT 7354)"
+        vpn_country="$(get_env_var SERVER_COUNTRIES Netherlands)"
+
+        local notif_label transcode_label
+        [[ "$notifications" == "true" ]] && notif_label="enabled" || notif_label="off"
+        [[ "$transcoding" == "true" ]] && transcode_label="enabled" || transcode_label="off"
+
+        echo "  1) Auth          mode: ${auth_mode}"
+        echo "  2) Notifications ${notif_label}"
+        echo "  3) Transcoding   ${transcode_label}"
+        echo "  4) Network       port ${port}, ${vpn_country}"
+        echo "  5) Paths"
+        echo "  6) VPN Key"
+        echo "  q) Quit"
+        echo ""
+        echo -en "Select [1-6, q]: "
+        read -r choice
+        case "$choice" in
+            1) configure_auth ;;
+            2) configure_notifications ;;
+            3) configure_transcoding ;;
+            4) configure_network ;;
+            5) configure_paths ;;
+            6) configure_vpn_key ;;
+            q|Q) echo ""; break ;;
+            *) warn "Unknown option" ;;
+        esac
+    done
+}
+
+configure_auth() {
+    echo ""
+    echo -e "${BOLD}Auth${NC}"
+    echo ""
+    local current
+    current="$(get_env_var PELICULA_AUTH off)"
+    [[ "$current" == "true" ]] && current="password"
+    echo "  Current mode: ${current}"
+    echo ""
+    echo "  1) off      — no auth required (single-user LAN)"
+    echo "  2) password — single shared password"
+    echo "  3) users    — multi-user with roles (Phase B — coming soon)"
+    echo ""
+    echo -en "Select [1-3]: "
+    read -r choice
+    case "$choice" in
+        1)
+            set_env_var PELICULA_AUTH off
+            set_env_var PELICULA_PASSWORD ""
+            pass "Auth disabled"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        2)
+            echo -en "${BOLD}Password${NC}: "
+            read -rs pw
+            echo ""
+            if [[ -z "$pw" ]]; then
+                warn "Password cannot be empty — no changes made"
+                return
+            fi
+            set_env_var PELICULA_AUTH true
+            set_env_var PELICULA_PASSWORD "$pw"
+            pass "Password auth configured"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        3)
+            warn "User model (Phase B) not yet implemented"
+            ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+}
+
+configure_notifications() {
+    echo ""
+    echo -e "${BOLD}Notifications${NC}"
+    echo ""
+    local current
+    current="$(get_env_var NOTIFICATIONS_ENABLED false)"
+    echo "  Current: ${current}"
+    echo ""
+    echo "  In-dashboard notification feed (bell icon, no external service required)"
+    echo "  is always available once Phase C is implemented."
+    echo ""
+    echo "  External providers via Apprise (Phase F):"
+    echo "    ntfy, Gotify, email/SMTP, Pushover, Telegram, and 85+ others"
+    echo ""
+    echo "  1) Disable notifications"
+    echo "  2) Enable (in-dashboard feed — Phase C required)"
+    echo "  3) Enable with external provider (Phase F required)"
+    echo ""
+    echo -en "Select [1-3]: "
+    read -r choice
+    case "$choice" in
+        1)
+            set_env_var NOTIFICATIONS_ENABLED false
+            pass "Notifications disabled"
+            ;;
+        2)
+            set_env_var NOTIFICATIONS_ENABLED true
+            pass "Notifications enabled (in-dashboard feed)"
+            ;;
+        3)
+            set_env_var NOTIFICATIONS_ENABLED true
+            info "External notification config goes in ${CONFIG_DIR}/procula/notifications.json"
+            info "See ROADMAP.md Phase F for provider setup instructions"
+            pass "Notifications enabled"
+            ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+}
+
+configure_transcoding() {
+    echo ""
+    echo -e "${BOLD}Transcoding${NC}"
+    echo ""
+    local current
+    current="$(get_env_var TRANSCODING_ENABLED false)"
+    echo "  Current: ${current}"
+    echo ""
+    echo "  Transcoding runs FFmpeg on imports when a matching profile is enabled."
+    echo "  Profiles are JSON files in ${CONFIG_DIR}/procula/profiles/"
+    echo ""
+
+    local profiles_dir="${CONFIG_DIR}/procula/profiles"
+    if [[ -d "$profiles_dir" ]] && [[ -n "$(ls -A "$profiles_dir" 2>/dev/null)" ]]; then
+        echo "  Installed profiles:"
+        for f in "$profiles_dir"/*.json; do
+            [[ -f "$f" ]] || continue
+            local name enabled
+            name="$(basename "$f" .json)"
+            enabled="$(grep -o '"enabled": *[^,}]*' "$f" 2>/dev/null | head -1 | grep -o 'true\|false' || echo "unknown")"
+            echo "    • ${name} (${enabled})"
+        done
+        echo ""
     fi
 
+    echo "  1) Disable transcoding"
+    echo "  2) Enable transcoding"
+    echo "  3) Install default profile templates"
     echo ""
-    echo -e "${GREEN}${BOLD}Setup complete!${NC}"
-    echo -e "Run ${BOLD}./pelicula up${NC} to start the stack."
+    echo -en "Select [1-3]: "
+    read -r choice
+    case "$choice" in
+        1)
+            set_env_var TRANSCODING_ENABLED false
+            pass "Transcoding disabled"
+            ;;
+        2)
+            set_env_var TRANSCODING_ENABLED true
+            pass "Transcoding enabled (Phase E required for FFmpeg processing)"
+            if [[ -z "$(ls -A "$profiles_dir" 2>/dev/null)" ]]; then
+                info "No profiles installed — run option 3 to install defaults"
+            fi
+            ;;
+        3)
+            install_default_profiles "$profiles_dir"
+            ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+}
+
+install_default_profiles() {
+    local dir="$1"
+    mkdir -p "$dir"
+
+    if [[ ! -f "$dir/compatibility-h264.json" ]]; then
+        cat > "$dir/compatibility-h264.json" <<'EOF'
+{
+  "name": "compatibility-h264",
+  "enabled": false,
+  "description": "Convert HEVC/AV1 to H.264 for maximum device compatibility",
+  "conditions": {
+    "codecs_include": ["hevc", "h265", "av1"]
+  },
+  "output": {
+    "video_codec": "libx264",
+    "video_preset": "medium",
+    "video_crf": 20,
+    "audio_codec": "copy",
+    "suffix": "-h264"
+  }
+}
+EOF
+        pass "Installed compatibility-h264 profile (disabled)"
+    else
+        pass "compatibility-h264 already exists"
+    fi
+
+    if [[ ! -f "$dir/mobile-1080p.json" ]]; then
+        cat > "$dir/mobile-1080p.json" <<'EOF'
+{
+  "name": "mobile-1080p",
+  "enabled": false,
+  "description": "Downscale 4K to 1080p with stereo audio for mobile devices",
+  "conditions": {
+    "min_height": 2160
+  },
+  "output": {
+    "video_codec": "copy",
+    "max_height": 1080,
+    "audio_codec": "aac",
+    "audio_channels": 2,
+    "suffix": "-1080p"
+  }
+}
+EOF
+        pass "Installed mobile-1080p profile (disabled)"
+    else
+        pass "mobile-1080p already exists"
+    fi
+
+    info "To enable a profile, set \"enabled\": true in the JSON file"
+    info "Profiles directory: ${dir}"
+}
+
+configure_network() {
+    echo ""
+    echo -e "${BOLD}Network${NC}"
+    echo ""
+    local current_port current_country
+    current_port="$(get_env_var PELICULA_PORT 7354)"
+    current_country="$(get_env_var SERVER_COUNTRIES Netherlands)"
+    echo "  Dashboard port:  ${current_port}"
+    echo "  VPN country:     ${current_country}"
+    echo ""
+    echo "  1) Change dashboard port"
+    echo "  2) Change VPN country"
+    echo "  b) Back"
+    echo ""
+    echo -en "Select [1-2, b]: "
+    read -r choice
+    case "$choice" in
+        1)
+            prompt new_port "New dashboard port" "$current_port"
+            set_env_var PELICULA_PORT "$new_port"
+            pass "Port set to ${new_port}"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        2)
+            echo "P2P-friendly countries: Netherlands, Switzerland, Sweden, Iceland, Romania"
+            prompt new_country "VPN server country" "$current_country"
+            set_env_var SERVER_COUNTRIES "$new_country"
+            pass "VPN country set to ${new_country}"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        b|B) return ;;
+        *) warn "Unknown option" ;;
+    esac
+}
+
+configure_paths() {
+    echo ""
+    echo -e "${BOLD}Paths${NC}"
+    echo ""
+    local current_config current_media
+    current_config="$(get_env_var CONFIG_DIR)"
+    current_media="$(get_env_var MEDIA_DIR)"
+    echo "  Config dir:  ${current_config}"
+    echo "  Media dir:   ${current_media}"
+    echo ""
+    warn "Changing paths does not move existing data."
+    echo ""
+    echo "  1) Change config directory"
+    echo "  2) Change media directory"
+    echo "  b) Back"
+    echo ""
+    echo -en "Select [1-2, b]: "
+    read -r choice
+    case "$choice" in
+        1)
+            prompt new_config "Config directory" "$current_config"
+            new_config="${new_config/#\~/$HOME}"
+            set_env_var CONFIG_DIR "$new_config"
+            setup_dirs "$new_config" "$current_media"
+            pass "Config directory set to ${new_config}"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        2)
+            prompt new_media "Media directory" "$current_media"
+            new_media="${new_media/#\~/$HOME}"
+            set_env_var MEDIA_DIR "$new_media"
+            setup_dirs "$current_config" "$new_media"
+            pass "Media directory set to ${new_media}"
+            warn "Restart services: ./pelicula restart"
+            ;;
+        b|B) return ;;
+        *) warn "Unknown option" ;;
+    esac
+}
+
+configure_vpn_key() {
+    echo ""
+    echo -e "${BOLD}VPN Key${NC}"
+    echo ""
+    echo -e "${CYAN}Enter new WireGuard private key from ProtonVPN.${NC}"
+    echo ""
+    prompt new_key "WireGuard private key"
+    if [[ ${#new_key} -ne 44 ]] || [[ "${new_key: -1}" != "=" ]]; then
+        warn "Key doesn't look like a standard Wireguard key (expected 44 chars ending in =)"
+        echo -en "  Save anyway? [y/N]: "
+        read -r confirm
+        [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+    fi
+    set_env_var WIREGUARD_PRIVATE_KEY "$new_key"
+    pass "VPN key updated"
+    warn "Restart gluetun for the new key to take effect: ./pelicula restart"
 }
 
 cmd_up() {
     load_env
     info "Starting media stack..."
 
-    # Ensure directories exist
-    mkdir -p \
-        "$CONFIG_DIR/gluetun" \
-        "$CONFIG_DIR/qbittorrent" \
-        "$CONFIG_DIR/prowlarr" \
-        "$CONFIG_DIR/sonarr" \
-        "$CONFIG_DIR/radarr" \
-        "$CONFIG_DIR/jellyfin" \
-        "$CONFIG_DIR/procula/jobs" \
-        "$CONFIG_DIR/certs" \
-        "$MEDIA_DIR/downloads" \
-        "$MEDIA_DIR/movies" \
-        "$MEDIA_DIR/tv" \
-        "$MEDIA_DIR/processing"
-
-    # Generate TLS cert if missing
-    if [[ ! -f "$CONFIG_DIR/certs/pelicula.crt" ]]; then
-        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-            -keyout "$CONFIG_DIR/certs/pelicula.key" \
-            -out "$CONFIG_DIR/certs/pelicula.crt" \
-            -subj "/CN=pelicula" \
-            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-            2>/dev/null
-        pass "Generated TLS certificate"
-    fi
+    setup_dirs "$CONFIG_DIR" "$MEDIA_DIR"
+    setup_cert "$CONFIG_DIR"
 
     # Verify TUN device on Linux (macOS uses utun via Docker Desktop)
     if [[ "$(uname)" != "Darwin" ]] && [[ ! -c /dev/net/tun ]]; then
@@ -480,15 +861,16 @@ usage() {
     echo "Usage: ./pelicula <command> [args]"
     echo ""
     echo "Commands:"
-    echo "  setup       Interactive first-time setup (generates .env)"
-    echo "  up          Start all services"
-    echo "  down        Stop all services"
-    echo "  restart          Stop and restart all services
-  restart-acquire  Restart acquisition services only (jellyfin/nginx stay up)"
-    echo "  status      Show container status"
-    echo "  logs [svc]  Tail logs (optionally for one service)"
-    echo "  check-vpn   Verify VPN and service health"
-    echo "  update      Pull latest images and recreate containers"
+    echo "  setup [--advanced]  First-time setup (generates .env)"
+    echo "  configure           Interactive configuration menu"
+    echo "  up                  Start all services"
+    echo "  down                Stop all services"
+    echo "  restart             Stop and restart all services"
+    echo "  restart-acquire     Restart acquisition services only (jellyfin/nginx stay up)"
+    echo "  status              Show container status"
+    echo "  logs [svc]          Tail logs (optionally for one service)"
+    echo "  check-vpn           Verify VPN and service health"
+    echo "  update              Pull latest images and recreate containers"
     echo ""
     echo "Services: gluetun, qbittorrent, prowlarr, sonarr, radarr, jellyfin, pelicula-api, procula, nginx"
 }
@@ -496,15 +878,16 @@ usage() {
 # ── Dispatch ────────────────────────────────────────
 
 case "${1:-}" in
-    setup)     cmd_setup ;;
-    up)        cmd_up ;;
-    down)      cmd_down ;;
-    restart)          cmd_restart ;;
-    restart-acquire)  cmd_restart_acquire ;;
-    status)    cmd_status ;;
-    logs)      cmd_logs "${2:-}" ;;
-    check-vpn) cmd_check_vpn ;;
-    update)    cmd_update ;;
-    -h|--help) usage ;;
-    *)         usage ;;
+    setup)           cmd_setup "${2:-}" ;;
+    configure)       cmd_configure ;;
+    up)              cmd_up ;;
+    down)            cmd_down ;;
+    restart)         cmd_restart ;;
+    restart-acquire) cmd_restart_acquire ;;
+    status)          cmd_status ;;
+    logs)            cmd_logs "${2:-}" ;;
+    check-vpn)       cmd_check_vpn ;;
+    update)          cmd_update ;;
+    -h|--help)       usage ;;
+    *)               usage ;;
 esac
