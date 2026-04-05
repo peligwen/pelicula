@@ -5,3 +5,4 @@ docker-compose.override.yml
 /reviews
 middleware/pelicula-api
 procula/procula
+coverage.out
