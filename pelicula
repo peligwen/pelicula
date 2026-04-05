@@ -1030,6 +1030,100 @@ cmd_down() {
     pass "Stack stopped"
 }
 
+cmd_reset_config() {
+    load_env
+
+    echo -e "${BOLD}Reset configuration${NC}"
+    echo ""
+    echo "This wipes service config and databases so auto-wiring runs fresh."
+    echo "Your API keys, VPN config, TLS certs, and user auth are preserved."
+    echo ""
+    echo -e "${BOLD}What will be cleared:${NC}"
+    echo "  sonarr/    — all config except API key"
+    echo "  radarr/    — all config except API key"
+    echo "  prowlarr/  — config only (indexer database kept)"
+    echo "  jellyfin/  — full wipe (wizard re-runs on next up)"
+    echo "  qbittorrent/ — full wipe (re-seeded on next up)"
+    echo "  procula/jobs/ — pending job queue"
+    echo ""
+    echo -e "${BOLD}What is kept:${NC}"
+    echo "  gluetun/   — WireGuard config"
+    echo "  certs/     — TLS certificates"
+    echo "  pelicula/  — users and auth config"
+    echo "  procula/profiles/, procula/notifications.json"
+    echo ""
+    echo -en "${RED}Continue? [y/N]${NC} "
+    read -r confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; return; }
+
+    # Check stack is down
+    if compose_cmd ps --services --filter "status=running" 2>/dev/null | grep -q .; then
+        warn "Stack is running — stopping it first..."
+        compose_cmd down
+    fi
+
+    # Helper: extract <ApiKey> from a *arr config.xml
+    extract_api_key() {
+        local file="$1"
+        [[ -f "$file" ]] || { echo ""; return; }
+        grep -o '<ApiKey>[^<]*</ApiKey>' "$file" | sed 's|<[^>]*>||g'
+    }
+
+    local sonarr_key radarr_key prowlarr_key
+    sonarr_key="$(extract_api_key "$CONFIG_DIR/sonarr/config.xml")"
+    radarr_key="$(extract_api_key "$CONFIG_DIR/radarr/config.xml")"
+    prowlarr_key="$(extract_api_key "$CONFIG_DIR/prowlarr/config.xml")"
+
+    # Wipe *arr configs and re-seed with preserved key
+    reset_arr() {
+        local name="$1" dir="$2" urlbase="$3" key="$4"
+        info "Resetting ${name}..."
+        rm -rf "$dir"
+        mkdir -p "$dir"
+        local key_xml=""
+        [[ -n "$key" ]] && key_xml="<ApiKey>${key}</ApiKey>"
+        echo "<Config><UrlBase>${urlbase}</UrlBase>${key_xml}<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>" \
+            > "$dir/config.xml"
+    }
+
+    reset_arr "Sonarr"   "$CONFIG_DIR/sonarr"   "/sonarr"   "$sonarr_key"
+    reset_arr "Radarr"   "$CONFIG_DIR/radarr"   "/radarr"   "$radarr_key"
+
+    # Prowlarr: only reset config.xml — preserve the database (indexers live there)
+    info "Resetting Prowlarr config (keeping indexer database)..."
+    local key_xml=""
+    [[ -n "$prowlarr_key" ]] && key_xml="<ApiKey>${prowlarr_key}</ApiKey>"
+    echo "<Config><UrlBase>/prowlarr</UrlBase>${key_xml}<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>" \
+        > "$CONFIG_DIR/prowlarr/config.xml"
+
+    info "Resetting Jellyfin..."
+    rm -rf "$CONFIG_DIR/jellyfin"
+    mkdir -p "$CONFIG_DIR/jellyfin"
+    echo '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>' \
+        > "$CONFIG_DIR/jellyfin/network.xml"
+
+    info "Resetting qBittorrent..."
+    rm -rf "$CONFIG_DIR/qbittorrent"
+    mkdir -p "$CONFIG_DIR/qbittorrent/qBittorrent"
+    cat > "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" <<'EOF'
+[Preferences]
+WebUI\AuthSubnetWhitelistEnabled=true
+WebUI\AuthSubnetWhitelist=172.16.0.0/12, 192.168.0.0/16, 10.0.0.0/8
+WebUI\LocalHostAuth=false
+WebUI\CSRFProtection=false
+
+[BitTorrent]
+Session\DefaultSavePath=/downloads/
+EOF
+
+    info "Clearing Procula job queue..."
+    rm -rf "$CONFIG_DIR/procula/jobs"
+    mkdir -p "$CONFIG_DIR/procula/jobs"
+
+    echo ""
+    pass "Config reset — run ${BOLD}./pelicula up${NC} to start fresh with auto-wiring."
+}
+
 cmd_restart() {
     cmd_down
     cmd_up
@@ -1217,6 +1311,7 @@ usage() {
     echo "  logs [svc]          Tail logs (optionally for one service)"
     echo "  rebuild [svc...]    Rebuild Go services in-place (default: pelicula-api procula)"
     echo "                      Use 'nginx' to reload nginx config/static files"
+    echo "  reset-config        Wipe service config (keeps keys/VPN/certs) for a clean re-wire"
     echo "  check-vpn           Verify VPN and service health"
     echo "  update              Pull latest images and recreate containers"
     echo ""
@@ -1233,6 +1328,7 @@ case "${1:-}" in
     restart)         cmd_restart ;;
     restart-acquire) cmd_restart_acquire ;;
     rebuild)         cmd_rebuild "${@:2}" ;;
+    reset-config)    cmd_reset_config ;;
     status)          cmd_status ;;
     logs)            cmd_logs "${2:-}" ;;
     check-vpn)       cmd_check_vpn ;;
