@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>PELICULA - Import</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/import.css">
+</head>
+<body>
+    <!-- Masthead -->
+    <div class="masthead">
+        <div class="masthead-inner">
+            <div>
+                <a href="/" class="logo">
+                    <span>P</span><span class="accent">E</span><span>L</span><span>I</span><span>C</span><span>U</span><span>L</span><span>A</span>
+                </a>
+                <div class="logo-sub">Storage Manager</div>
+            </div>
+            <a href="/" class="back-btn">&larr; Dashboard</a>
+        </div>
+    </div>
+
+    <!-- Main -->
+    <div class="main">
+        <!-- Step indicator -->
+        <div class="import-steps" id="import-steps">
+            <div class="import-step active" data-step="browse">
+                <span class="step-num">1</span> Browse
+            </div>
+            <div class="step-divider"></div>
+            <div class="import-step" data-step="match">
+                <span class="step-num">2</span> Match
+            </div>
+            <div class="step-divider"></div>
+            <div class="import-step" data-step="configure">
+                <span class="step-num">3</span> Configure
+            </div>
+            <div class="step-divider"></div>
+            <div class="import-step" data-step="apply">
+                <span class="step-num">4</span> Apply
+            </div>
+        </div>
+
+        <!-- Step 1: Browse -->
+        <div class="import-panel" id="step-browse">
+            <div class="section-header">
+                <span>Select files to import</span>
+                <span class="import-selected-count" id="selected-count"></span>
+            </div>
+            <div class="browse-tree" id="browse-tree">
+                <div class="no-items">Loading directories...</div>
+            </div>
+            <div class="import-nav">
+                <div></div>
+                <button class="import-btn primary" id="btn-scan" onclick="doScan()" disabled>Scan Selected</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Match -->
+        <div class="import-panel hidden" id="step-match">
+            <div class="section-header">
+                <span>Match Results</span>
+                <span id="match-stats"></span>
+            </div>
+            <div id="match-results"></div>
+            <div class="import-nav">
+                <button class="import-btn" onclick="goToStep('browse')">Back</button>
+                <button class="import-btn primary" id="btn-configure" onclick="goToStep('configure')">Configure Import</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Configure -->
+        <div class="import-panel hidden" id="step-configure">
+            <div class="section-header"><span>Import Settings</span></div>
+            <div class="config-group">
+                <label class="config-label">Strategy</label>
+                <div class="strategy-options">
+                    <label class="strategy-option">
+                        <input type="radio" name="strategy" value="migrate" checked>
+                        <div class="strategy-card">
+                            <div class="strategy-name">Migrate</div>
+                            <div class="strategy-desc">Move files into the managed library structure</div>
+                        </div>
+                    </label>
+                    <label class="strategy-option">
+                        <input type="radio" name="strategy" value="symlink">
+                        <div class="strategy-card">
+                            <div class="strategy-name">Symlink</div>
+                            <div class="strategy-desc">Create symlinks to bridge existing files</div>
+                        </div>
+                    </label>
+                    <label class="strategy-option">
+                        <input type="radio" name="strategy" value="keep">
+                        <div class="strategy-card">
+                            <div class="strategy-name">Keep</div>
+                            <div class="strategy-desc">Register files in place without moving them</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="config-group">
+                <label class="config-label">
+                    <input type="checkbox" id="validate-toggle" checked>
+                    Validate through Procula
+                </label>
+                <div class="config-hint">Run FFprobe validation on imported files to catch corrupt or sample files</div>
+            </div>
+            <div class="import-nav">
+                <button class="import-btn" onclick="goToStep('match')">Back</button>
+                <button class="import-btn primary" onclick="doApply()">Apply Import</button>
+            </div>
+        </div>
+
+        <!-- Step 4: Apply -->
+        <div class="import-panel hidden" id="step-apply">
+            <div class="section-header"><span>Import Progress</span></div>
+            <div id="apply-content">
+                <div class="apply-progress">
+                    <div class="apply-spinner"></div>
+                    <span>Applying import...</span>
+                </div>
+            </div>
+            <div class="import-nav hidden" id="apply-nav">
+                <div></div>
+                <a href="/" class="import-btn primary">Back to Dashboard</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/import.js"></script>
+</body>
+</html>

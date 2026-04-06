@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 )
 
@@ -47,6 +49,7 @@ type MediaMatch struct {
 type ApplyRequest struct {
 	Items    []ApplyItem `json:"items"`
 	Strategy string      `json:"strategy"` // migrate / symlink / keep
+	Validate bool        `json:"validate"` // forward to Procula for validation after apply
 }
 
 type ApplyItem struct {
@@ -57,6 +60,7 @@ type ApplyItem struct {
 	Year           int    `json:"year"`
 	RootFolderPath string `json:"rootFolderPath"`
 	Monitored      bool   `json:"monitored"`
+	SourcePath     string `json:"sourcePath,omitempty"` // original file path, used for Procula validation
 }
 
 type LibraryApplyResult struct {
@@ -66,7 +70,156 @@ type LibraryApplyResult struct {
 	Errors  []string `json:"errors,omitempty"`
 }
 
+// ── Browse types ─────────────────────────────────────────────────────────────
+
+type BrowseEntry struct {
+	Name    string    `json:"name"`
+	Path    string    `json:"path"`
+	IsDir   bool      `json:"isDir"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"modTime"`
+}
+
+type BrowseResponse struct {
+	Entries   []BrowseEntry `json:"entries"`
+	Truncated bool          `json:"truncated"`
+}
+
+var videoExts = map[string]bool{
+	".mkv": true, ".mp4": true, ".avi": true, ".m4v": true,
+	".ts": true, ".wmv": true, ".mov": true, ".flv": true,
+}
+
+var skipDirs = map[string]bool{
+	"extras": true, "featurettes": true, "behind the scenes": true,
+	"interviews": true, "deleted scenes": true, "trailers": true,
+	"shorts": true, "samples": true,
+}
+
+// browseRoots returns the allowed top-level browse directories.
+func browseRoots() []string {
+	roots := []string{"/movies", "/tv", "/downloads"}
+	if src := strings.TrimSpace(os.Getenv("IMPORT_SOURCE_DIR")); src != "" {
+		roots = append(roots, "/import-source")
+	}
+	return roots
+}
+
+// isAllowedBrowsePath validates that a path is under one of the allowed roots,
+// preventing directory traversal attacks.
+func isAllowedBrowsePath(p string) bool {
+	clean := filepath.Clean(p)
+	for _, root := range browseRoots() {
+		if clean == root || strings.HasPrefix(clean, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
+
+// handleBrowse returns a directory listing for the server-side folder browser.
+// When called without a path, returns the allowed root directories.
+func handleBrowse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	dir := r.URL.Query().Get("path")
+
+	// No path — return top-level roots.
+	if dir == "" {
+		roots := browseRoots()
+		entries := make([]BrowseEntry, 0, len(roots))
+		for _, root := range roots {
+			info, err := os.Stat(root)
+			if err != nil {
+				continue // root doesn't exist on this host
+			}
+			entries = append(entries, BrowseEntry{
+				Name:    filepath.Base(root),
+				Path:    root,
+				IsDir:   true,
+				ModTime: info.ModTime(),
+			})
+		}
+		writeJSON(w, BrowseResponse{Entries: entries})
+		return
+	}
+
+	if !isAllowedBrowsePath(dir) {
+		writeError(w, "path not under an allowed directory", http.StatusForbidden)
+		return
+	}
+
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, "directory not found", http.StatusNotFound)
+		} else {
+			writeError(w, "failed to read directory", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	const maxEntries = 500
+	entries := make([]BrowseEntry, 0, len(dirEntries))
+	truncated := false
+
+	for _, de := range dirEntries {
+		name := de.Name()
+		// Skip hidden files/dirs.
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+
+		if de.IsDir() {
+			// Skip known extras/junk directories.
+			if skipDirs[strings.ToLower(name)] {
+				continue
+			}
+			info, err := de.Info()
+			if err != nil {
+				continue
+			}
+			entries = append(entries, BrowseEntry{
+				Name:    name,
+				Path:    filepath.Join(dir, name),
+				IsDir:   true,
+				ModTime: info.ModTime(),
+			})
+		} else {
+			ext := strings.ToLower(filepath.Ext(name))
+			if !videoExts[ext] {
+				continue
+			}
+			info, err := de.Info()
+			if err != nil {
+				continue
+			}
+			// Skip sample files (name contains "sample" and size < 100 MB).
+			if strings.Contains(strings.ToLower(name), "sample") && info.Size() < 100<<20 {
+				continue
+			}
+			entries = append(entries, BrowseEntry{
+				Name:    name,
+				Path:    filepath.Join(dir, name),
+				IsDir:   false,
+				Size:    info.Size(),
+				ModTime: info.ModTime(),
+			})
+		}
+
+		if len(entries) >= maxEntries {
+			truncated = true
+			break
+		}
+	}
+
+	writeJSON(w, BrowseResponse{Entries: entries, Truncated: truncated})
+}
 
 // handleLibraryScan receives a list of local media files and returns a match
 // plan — each file matched to a Radarr movie or Sonarr series with a
@@ -195,6 +348,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	seen := make(map[dedupeKey]bool)
 
 	result := &LibraryApplyResult{}
+	var addedItems []ApplyItem // tracks successfully added items for Procula forwarding
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	// Semaphore: max 5 concurrent Radarr/Sonarr add calls.
@@ -246,6 +400,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 					fmt.Sprintf("%s %q: %v", it.Type, it.Title, err))
 			} else {
 				result.Added++
+				addedItems = append(addedItems, it)
 			}
 		}(item)
 	}
@@ -253,6 +408,32 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("library apply complete", "component", "library",
 		"added", result.Added, "skipped", result.Skipped, "failed", result.Failed)
+
+	// Optionally forward successfully added items to Procula for validation.
+	if req.Validate && len(addedItems) > 0 {
+		proculaURL := proculaBaseURL() + "/api/procula/jobs"
+		for _, item := range addedItems {
+			if item.SourcePath == "" {
+				continue
+			}
+			arrType := "radarr"
+			if item.Type == "series" {
+				arrType = "sonarr"
+			}
+			source := ProculaJobSource{
+				Type:    item.Type,
+				Title:   item.Title,
+				Year:    item.Year,
+				Path:    item.SourcePath,
+				ArrType: arrType,
+			}
+			if err := forwardToProcula(proculaURL, source); err != nil {
+				slog.Warn("failed to forward import to Procula",
+					"component", "library", "title", item.Title, "error", err)
+			}
+		}
+	}
+
 	writeJSON(w, result)
 }
 

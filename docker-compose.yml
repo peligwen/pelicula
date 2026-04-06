@@ -191,6 +191,9 @@ services:
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
       - ${CONFIG_DIR}/jellyseerr:/config/jellyseerr:ro
+      - ${LIBRARY_DIR}/movies:/movies
+      - ${LIBRARY_DIR}/tv:/tv
+      - ${WORK_DIR}/downloads:/downloads:ro
     depends_on:
       - sonarr
       - radarr
@@ -253,6 +256,9 @@ services:
       - ./nginx/dashboard.js:/usr/share/nginx/html/dashboard.js:ro
       - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
       - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
+      - ./nginx/import.html:/usr/share/nginx/html/import.html:ro
+      - ./nginx/import.js:/usr/share/nginx/html/import.js:ro
+      - ./nginx/import.css:/usr/share/nginx/html/import.css:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"
