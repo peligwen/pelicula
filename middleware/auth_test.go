@@ -403,6 +403,24 @@ func TestCheck_NginxSubrequest_NoSession(t *testing.T) {
 	}
 }
 
+func TestCheck_NginxSubrequest_ValidSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+	// With ?nginx=1 and valid session, must return 200 so nginx allows the request
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["valid"] != true {
+		t.Errorf("valid = %v, want true", m["valid"])
+	}
+}
+
 func TestCheck_ExpiredSession(t *testing.T) {
 	a := newTestAuth("password", "secret", nil)
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(-time.Hour))

@@ -221,6 +221,10 @@ fail)
     echo "ffprobe error: invalid data" >&2
     exit 1
     ;;
+*)
+    echo "GO_TEST_FFPROBE not set or unknown: $GO_TEST_FFPROBE" >&2
+    exit 1
+    ;;
 esac
 `
 	os.WriteFile(script, []byte(content), 0755)

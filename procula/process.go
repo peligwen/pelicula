@@ -23,12 +23,16 @@ var (
 // Progress is reported via progressFn (0.0–1.0) as transcoding proceeds.
 // Returns the output file path on success.
 func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(float64)) (string, error) {
+	return processWithDir(ctx, job, profile, progressFn, "/processing")
+}
+
+func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(float64), processingDir string) (string, error) {
 	input := job.Source.Path
 	if input == "" {
 		return "", fmt.Errorf("no input path")
 	}
 
-	outputPath := resolveOutputPath(input, profile.Output.Suffix)
+	outputPath := resolveOutputPath(input, profile.Output.Suffix, processingDir)
 
 	args := buildFFmpegArgs(input, outputPath, profile)
 	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", outputPath, "profile", profile.Name)
@@ -71,12 +75,12 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 
 // resolveOutputPath computes the output path for a transcode job,
 // appending a counter suffix to avoid overwriting existing files.
-func resolveOutputPath(input, suffix string) string {
+func resolveOutputPath(input, suffix, processingDir string) string {
 	base := strings.TrimSuffix(filepath.Base(input), filepath.Ext(input))
-	outputPath := filepath.Join("/processing", base+suffix+".mkv")
+	outputPath := filepath.Join(processingDir, base+suffix+".mkv")
 	if _, err := os.Stat(outputPath); err == nil {
 		for i := 2; ; i++ {
-			candidate := filepath.Join("/processing", fmt.Sprintf("%s%s.%d.mkv", base, suffix, i))
+			candidate := filepath.Join(processingDir, fmt.Sprintf("%s%s.%d.mkv", base, suffix, i))
 			if _, err := os.Stat(candidate); os.IsNotExist(err) {
 				outputPath = candidate
 				break

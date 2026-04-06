@@ -144,42 +144,42 @@ func TestParseProgress(t *testing.T) {
 // ── resolveOutputPath ────────────────────────────────────────────────────────
 
 func TestResolveOutputPath_NoCollision(t *testing.T) {
-	got := resolveOutputPath("/input/movie.mkv", ".x264")
-	want := "/processing/movie.x264.mkv"
+	dir := t.TempDir()
+	got := resolveOutputPath("/input/movie.mkv", ".x264", dir)
+	want := filepath.Join(dir, "movie.x264.mkv")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
 func TestResolveOutputPath_Collisions(t *testing.T) {
-	// Create a temp dir to simulate /processing
 	dir := t.TempDir()
-	// Temporarily override resolveOutputPath's use of /processing by testing
-	// with a file that exists at the exact expected path. Since resolveOutputPath
-	// hardcodes /processing, we test the collision logic indirectly by exercising
-	// Process with the helper pattern below. Here we test the function directly
-	// by verifying the counter logic conceptually.
-	//
-	// For a direct test, create files at the paths and call resolveOutputPath
-	// with a custom processing dir. Since the function hardcodes /processing,
-	// we test the counter logic via a modified test that simulates collisions.
 
-	// We can test this by creating a temp file system and patching — but
-	// since resolveOutputPath hardcodes /processing, let's at least verify
-	// the no-collision case works and test collision via the suffix logic.
-	_ = dir
+	// Create the initial output file so the collision logic kicks in
+	base := filepath.Join(dir, "movie.x264.mkv")
+	os.WriteFile(base, []byte("v1"), 0644)
 
-	// Test that different inputs produce different output base names
-	out1 := resolveOutputPath("/input/movie.mkv", ".x264")
-	out2 := resolveOutputPath("/input/other.mkv", ".x264")
-	if out1 == out2 {
-		t.Errorf("different inputs should produce different output paths")
+	got := resolveOutputPath("/input/movie.mkv", ".x264", dir)
+	want := filepath.Join(dir, "movie.x264.2.mkv")
+	if got != want {
+		t.Errorf("single collision: got %q, want %q", got, want)
 	}
 
-	// Test suffix is included
-	out := resolveOutputPath("/input/movie.mkv", ".hevc")
-	if out != "/processing/movie.hevc.mkv" {
-		t.Errorf("got %q, want /processing/movie.hevc.mkv", out)
+	// Create .2 as well, should skip to .3
+	os.WriteFile(want, []byte("v2"), 0644)
+	got = resolveOutputPath("/input/movie.mkv", ".x264", dir)
+	want3 := filepath.Join(dir, "movie.x264.3.mkv")
+	if got != want3 {
+		t.Errorf("double collision: got %q, want %q", got, want3)
+	}
+}
+
+func TestResolveOutputPath_DifferentInputs(t *testing.T) {
+	dir := t.TempDir()
+	out1 := resolveOutputPath("/input/movie.mkv", ".x264", dir)
+	out2 := resolveOutputPath("/input/other.mkv", ".x264", dir)
+	if out1 == out2 {
+		t.Errorf("different inputs should produce different output paths")
 	}
 }
 
@@ -206,6 +206,10 @@ fail)
     echo "Error: something went wrong" >&2
     exit 1
     ;;
+*)
+    echo "GO_TEST_FFMPEG not set or unknown: $GO_TEST_FFMPEG" >&2
+    exit 1
+    ;;
 esac
 `
 	os.WriteFile(script, []byte(content), 0755)
@@ -225,11 +229,15 @@ func TestProcess_EmptyInput(t *testing.T) {
 
 func TestProcess_Success(t *testing.T) {
 	setupFakeFFmpeg(t)
+	t.Setenv("GO_TEST_FFMPEG", "success")
 
-	// Create a temp input file
+	// Create a temp input file and processing dir
 	dir := t.TempDir()
 	input := filepath.Join(dir, "movie.mkv")
 	os.WriteFile(input, []byte("input data"), 0644)
+
+	// Use a temp processing dir so we don't need /processing on the host
+	procDir := t.TempDir()
 
 	job := &Job{Source: JobSource{Path: input}}
 	profile := &TranscodeProfile{
@@ -248,37 +256,34 @@ func TestProcess_Success(t *testing.T) {
 		progressCalled = true
 	}
 
-	// Set env so the helper process knows to succeed
-	t.Setenv("GO_TEST_FFMPEG", "success")
-
-	out, err := Process(context.Background(), job, profile, progressFn)
+	out, err := processWithDir(context.Background(), job, profile, progressFn, procDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if out == "" {
 		t.Error("expected non-empty output path")
 	}
-	if progressCalled {
-		// Good — progress was reported
+	if !progressCalled {
+		t.Error("expected progress callback to be invoked")
 	}
 }
 
 func TestProcess_FFmpegFails(t *testing.T) {
 	setupFakeFFmpeg(t)
+	t.Setenv("GO_TEST_FFMPEG", "fail")
 
 	dir := t.TempDir()
 	input := filepath.Join(dir, "movie.mkv")
 	os.WriteFile(input, []byte("input data"), 0644)
 
+	procDir := t.TempDir()
 	job := &Job{Source: JobSource{Path: input}}
 	profile := &TranscodeProfile{
 		Name:   "test",
 		Output: TranscodeOutput{VideoCodec: "libx264", AudioCodec: "aac", Suffix: ".test"},
 	}
 
-	t.Setenv("GO_TEST_FFMPEG", "fail")
-
-	_, err := Process(context.Background(), job, profile, nil)
+	_, err := processWithDir(context.Background(), job, profile, nil, procDir)
 	if err == nil {
 		t.Fatal("expected error from failing FFmpeg")
 	}
