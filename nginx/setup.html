@@ -12,7 +12,7 @@
             <div class="logo">
                 <span>P</span><span class="accent">E</span><span>L</span><span>I</span><span>C</span><span>U</span><span>L</span><span>A</span>
             </div>
-            <div class="logo-sub">Setup</div>
+            <div class="logo-sub" id="page-subtitle">Setup</div>
         </div>
 
         <!-- Step indicators -->
@@ -23,7 +23,7 @@
             <div class="step-line"></div>
             <div class="step" data-step="3"><span class="step-num">3</span> Auth</div>
             <div class="step-line"></div>
-            <div class="step" data-step="4"><span class="step-num">4</span> Confirm</div>
+            <div class="step" data-step="4"><span class="step-num">4</span> <span id="step4-label">Confirm</span></div>
         </div>
 
         <div class="platform-badge" id="platform-badge"></div>
@@ -53,8 +53,15 @@
             </select>
 
             <div class="step-nav">
-                <span></span>
+                <a href="/" class="btn-secondary" id="back-to-dashboard" style="display:none">Dashboard</a>
+                <span id="setup-back-placeholder"></span>
                 <button onclick="goStep(2)" class="btn-primary">Next</button>
+            </div>
+
+            <!-- Reset All — settings mode only -->
+            <div id="reset-section" style="display:none; margin-top:1.5rem; padding-top:1.25rem; border-top: 1px solid #1a1a1a;">
+                <p class="field-help" style="margin-bottom:0.5rem">Want to start over completely?</p>
+                <button type="button" class="btn-danger" onclick="startReset()">Reset All Settings</button>
             </div>
         </div>
 
@@ -93,7 +100,7 @@
 
             <div id="auth-password-section">
                 <label for="auth-password">Password</label>
-                <p class="field-help">Leave blank to auto-generate a memorable password.</p>
+                <p class="field-help" id="auth-password-help">Leave blank to auto-generate a memorable password.</p>
                 <input type="text" id="auth-password" placeholder="Auto-generated" spellcheck="false" autocomplete="off">
             </div>
 
@@ -105,8 +112,8 @@
 
         <!-- Step 4: Confirm -->
         <div class="step-panel" id="panel-4">
-            <h2>Ready to Start</h2>
-            <p class="step-desc">Review your configuration. You can change any of these later with <code>./pelicula configure</code> or from the dashboard.</p>
+            <h2 id="confirm-heading">Ready to Start</h2>
+            <p class="step-desc" id="confirm-desc">Review your configuration. You can change any of these later from the dashboard Settings.</p>
 
             <div class="summary" id="summary"></div>
 
@@ -120,50 +127,135 @@
 
         <!-- Done screen -->
         <div class="step-panel" id="panel-done">
-            <h2>Starting Up</h2>
-            <p class="step-desc">Configuration saved. Pelicula is now starting all services — this takes about 30-60 seconds.</p>
+            <h2 id="done-heading">Starting Up</h2>
+            <p class="step-desc" id="done-desc">Configuration saved. Pelicula is now starting all services — this takes about 30-60 seconds.</p>
             <div class="done-password hidden" id="done-password">
                 <label>Your password</label>
                 <div class="password-display" id="display-password"></div>
                 <p class="field-help">Save this somewhere — you'll need it to log into the dashboard.</p>
             </div>
-            <div class="spinner"></div>
+            <div id="done-spinner" class="spinner"></div>
             <p class="step-desc" id="done-status">Waiting for services...</p>
+            <div id="done-restart" class="hidden">
+                <div class="restart-notice">
+                    Run <code>./pelicula restart</code> for changes to take effect.
+                </div>
+                <a href="/" class="btn-primary" style="display:inline-block; margin-top:1rem">Back to Dashboard</a>
+            </div>
+        </div>
+
+        <!-- Reset confirmation screen -->
+        <div class="step-panel" id="panel-reset">
+            <h2>Reset All Settings</h2>
+            <p class="step-desc">You'll re-enter all configuration from scratch. Your existing media and service databases are not affected — only the Pelicula configuration file is replaced.</p>
+            <div class="step-nav" style="margin-top:1.5rem">
+                <button onclick="cancelReset()" class="btn-secondary">Cancel</button>
+                <button onclick="confirmReset()" class="btn-danger">Continue with Reset</button>
+            </div>
         </div>
     </div>
 
 <script>
+let mode = 'setup'; // 'setup' | 'settings' | 'reset'
 let detected = {};
+let currentSettings = {};
 
-// Load auto-detected values on page load
+// Load state on page load
 (async function init() {
     try {
-        const r = await fetch('/api/pelicula/setup/detect');
-        detected = await r.json();
-        document.getElementById('path-config').value = detected.config_dir || '';
-        document.getElementById('path-library').value = detected.library_dir || '';
-        document.getElementById('path-work').value = detected.work_dir || '';
+        const h = await fetch('/api/pelicula/health', { cache: 'no-store' });
+        const health = await h.json();
 
-        const badge = document.getElementById('platform-badge');
-        const labels = { synology: 'Synology NAS', macos: 'macOS', wsl: 'WSL', linux: 'Linux' };
-        badge.textContent = labels[detected.platform] || detected.platform;
+        if (health.status === 'setup') {
+            // First-run setup mode
+            mode = 'setup';
+            const r = await fetch('/api/pelicula/setup/detect');
+            detected = await r.json();
+            document.getElementById('path-config').value = detected.config_dir || '';
+            document.getElementById('path-library').value = detected.library_dir || '';
+            document.getElementById('path-work').value = detected.work_dir || '';
+
+            const badge = document.getElementById('platform-badge');
+            const labels = { synology: 'Synology NAS', macos: 'macOS', wsl: 'WSL', linux: 'Linux' };
+            badge.textContent = labels[detected.platform] || detected.platform;
+        } else {
+            // Settings mode — editing existing config
+            mode = 'settings';
+            applySettingsMode();
+
+            const r = await fetch('/api/pelicula/settings');
+            if (!r.ok) {
+                // Not admin or not configured — just show empty form
+                return;
+            }
+            currentSettings = await r.json();
+            prefillSettings(currentSettings);
+        }
     } catch(e) {
-        console.error('detect failed', e);
+        console.error('init failed', e);
     }
 })();
+
+function applySettingsMode() {
+    document.getElementById('page-subtitle').textContent = 'Settings';
+    document.getElementById('step4-label').textContent = 'Review';
+    document.getElementById('confirm-heading').textContent = 'Review Changes';
+    document.getElementById('confirm-desc').textContent = 'Review your configuration changes. A restart is required for changes to take effect.';
+    document.getElementById('btn-submit').textContent = 'Save Settings';
+    document.getElementById('back-to-dashboard').style.display = '';
+    document.getElementById('setup-back-placeholder').style.display = 'none';
+    document.getElementById('reset-section').style.display = '';
+    document.getElementById('platform-badge').style.display = 'none';
+    document.getElementById('auth-password-help').textContent = 'Leave blank to keep the current password.';
+    document.getElementById('auth-password').placeholder = 'Unchanged';
+}
+
+function prefillSettings(s) {
+    // VPN key: show placeholder, don't fill the value
+    const keyEl = document.getElementById('vpn-key');
+    keyEl.placeholder = '••••••••  (leave blank to keep current)';
+
+    // Country
+    const countryEl = document.getElementById('vpn-country');
+    if (s.country) {
+        for (const opt of countryEl.options) {
+            if (opt.value === s.country) { opt.selected = true; break; }
+        }
+    }
+
+    // Paths
+    document.getElementById('path-config').value = s.config_dir || '';
+    document.getElementById('path-library').value = s.library_dir || '';
+    document.getElementById('path-work').value = s.work_dir || '';
+
+    // Auth
+    const authOn = s.auth_mode === 'true' || s.auth_mode === 'password' || s.auth_mode === 'users';
+    const toggleBtn = document.getElementById('auth-toggle');
+    if (!authOn) {
+        toggleBtn.dataset.on = 'false';
+        toggleBtn.textContent = 'Off';
+        toggleBtn.classList.add('off');
+        document.getElementById('auth-password-section').style.display = 'none';
+    }
+    // Password field: always leave blank (placeholder says "Unchanged")
+}
 
 function goStep(n) {
     // Validate current step before advancing
     if (n === 2) {
         const key = document.getElementById('vpn-key').value.trim();
-        if (!key || key.length !== 44 || !key.endsWith('=')) {
-            const el = document.getElementById('vpn-key');
-            el.focus();
-            el.classList.add('input-error');
-            if (key && (key.length !== 44 || !key.endsWith('='))) {
-                el.placeholder = 'Must be 44-character base64 key ending in =';
+        // In settings mode only, empty key means "keep current" — skip validation.
+        // In setup and reset mode, a valid key is always required.
+        if (mode === 'setup' || mode === 'reset' || key) {
+            if (!key || key.length !== 44 || !key.endsWith('=')) {
+                const el = document.getElementById('vpn-key');
+                el.focus();
+                el.classList.add('input-error');
+                if (key && (key.length !== 44 || !key.endsWith('='))) {
+                    el.placeholder = 'Must be 44-character base64 key ending in =';
+                }
+                return;
             }
-            return;
         }
         document.getElementById('vpn-key').classList.remove('input-error');
     }
@@ -216,19 +308,29 @@ function toggleAuth() {
 
 function buildSummary() {
     const country = document.getElementById('vpn-country').value;
-    const config = document.getElementById('path-config').value || detected.config_dir;
-    const library = document.getElementById('path-library').value || detected.library_dir;
-    const work = document.getElementById('path-work').value || detected.work_dir;
+    const config = document.getElementById('path-config').value;
+    const library = document.getElementById('path-library').value;
+    const work = document.getElementById('path-work').value;
     const authOn = document.getElementById('auth-toggle').dataset.on === 'true';
     const pwd = document.getElementById('auth-password').value;
+    const key = document.getElementById('vpn-key').value.trim();
+
+    const keyDisplay = key ? 'New key provided' : (mode === 'settings' ? 'Unchanged' : '—');
 
     let html = '<table>';
-    html += row('VPN Key', 'Configured');
+    html += row('VPN Key', keyDisplay);
     html += row('VPN Country', country);
     html += row('Config', config);
     html += row('Library', library);
     html += row('Work', work);
-    html += row('Auth', authOn ? 'Password' + (pwd ? ' (custom)' : ' (auto-generated)') : 'Off');
+    if (mode === 'settings') {
+        const authStatus = authOn
+            ? (pwd ? 'Password (new)' : 'Password (unchanged)')
+            : 'Off';
+        html += row('Auth', authStatus);
+    } else {
+        html += row('Auth', authOn ? 'Password' + (pwd ? ' (custom)' : ' (auto-generated)') : 'Off');
+    }
     html += '</table>';
     document.getElementById('summary').innerHTML = html;
 }
@@ -251,19 +353,35 @@ async function submitSetup() {
     const errEl = document.getElementById('setup-error');
     errEl.classList.add('hidden');
 
+    const authOn = document.getElementById('auth-toggle').dataset.on === 'true';
+    const key = document.getElementById('vpn-key').value.trim();
+
+    // For settings mode: send mask sentinel when key not changed (backend skips masked fields)
+    // For setup/reset mode: key is required
+    const wireguardKey = (mode === 'settings' && !key) ? '••••••••' : key;
+
     const body = {
-        wireguard_key: document.getElementById('vpn-key').value.trim(),
+        wireguard_key: wireguardKey,
         country: document.getElementById('vpn-country').value,
         config_dir: document.getElementById('path-config').value.trim(),
         library_dir: document.getElementById('path-library').value.trim(),
         work_dir: document.getElementById('path-work').value.trim(),
         port: '7354',
-        auth_enabled: document.getElementById('auth-toggle').dataset.on === 'true',
+        auth_enabled: authOn,
         password: document.getElementById('auth-password').value,
     };
 
+    let endpoint;
+    if (mode === 'settings') {
+        endpoint = '/api/pelicula/settings';
+    } else if (mode === 'reset') {
+        endpoint = '/api/pelicula/settings/reset';
+    } else {
+        endpoint = '/api/pelicula/setup';
+    }
+
     try {
-        const r = await fetch('/api/pelicula/setup', {
+        const r = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -284,14 +402,27 @@ async function submitSetup() {
             document.getElementById('done-password').classList.remove('hidden');
         }
 
-        // Poll until the full stack is up (redirect to dashboard)
-        pollForDashboard();
+        if (mode === 'settings' || mode === 'reset') {
+            // Settings saved/reset — show restart notice, no polling
+            showSettingsDone();
+        } else {
+            // First-run setup — poll for full stack to come up
+            pollForDashboard();
+        }
     } catch(e) {
-        errEl.textContent = 'Setup failed: ' + e.message;
+        errEl.textContent = (mode === 'settings' ? 'Save failed: ' : 'Setup failed: ') + e.message;
         errEl.classList.remove('hidden');
         btn.disabled = false;
-        btn.textContent = 'Start Pelicula';
+        btn.textContent = mode === 'settings' ? 'Save Settings' : 'Start Pelicula';
     }
+}
+
+function showSettingsDone() {
+    document.getElementById('done-heading').textContent = 'Settings Saved';
+    document.getElementById('done-desc').textContent = 'Your configuration has been updated.';
+    document.getElementById('done-spinner').style.display = 'none';
+    document.getElementById('done-status').style.display = 'none';
+    document.getElementById('done-restart').classList.remove('hidden');
 }
 
 async function pollForDashboard() {
@@ -317,6 +448,66 @@ async function pollForDashboard() {
     document.querySelector('.spinner').style.borderTopColor = '#555';
     status.textContent = 'Taking longer than expected. Check the terminal for details, or reload this page.';
 }
+
+// Reset All flow
+function startReset() {
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-reset').classList.add('active');
+}
+
+function cancelReset() {
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-1').classList.add('active');
+    document.querySelectorAll('.step').forEach(s => {
+        s.classList.toggle('active', parseInt(s.dataset.step) === 1);
+        s.classList.remove('done');
+    });
+}
+
+async function confirmReset() {
+    // Switch to reset mode: go through wizard steps normally, submit to /settings/reset
+    mode = 'reset';
+
+    // Clear all fields so user must fill from scratch
+    document.getElementById('vpn-key').value = '';
+    document.getElementById('vpn-key').placeholder = 'WireGuard private key';
+    document.getElementById('vpn-country').selectedIndex = 0;
+    document.getElementById('path-config').value = '';
+    document.getElementById('path-library').value = '';
+    document.getElementById('path-work').value = '';
+
+    // Reset auth toggle to On
+    const toggleBtn = document.getElementById('auth-toggle');
+    toggleBtn.dataset.on = 'true';
+    toggleBtn.textContent = 'On';
+    toggleBtn.classList.remove('off');
+    document.getElementById('auth-password-section').style.display = '';
+    document.getElementById('auth-password').value = '';
+
+    // Update UI for reset mode
+    document.getElementById('confirm-heading').textContent = 'Reset Configuration';
+    document.getElementById('confirm-desc').textContent = 'This will replace your entire Pelicula configuration. Existing media files and service databases are not affected.';
+    document.getElementById('btn-submit').textContent = 'Reset & Save';
+
+    // If we have detect data, pre-fill paths with defaults
+    try {
+        const r = await fetch('/api/pelicula/setup/detect');
+        if (r.ok) {
+            detected = await r.json();
+            document.getElementById('path-config').value = detected.config_dir || '';
+            document.getElementById('path-library').value = detected.library_dir || '';
+            document.getElementById('path-work').value = detected.work_dir || '';
+        }
+    } catch(e) { /* not critical */ }
+
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-1').classList.add('active');
+    document.querySelectorAll('.step').forEach(s => {
+        s.classList.toggle('active', parseInt(s.dataset.step) === 1);
+        s.classList.remove('done');
+    });
+}
+
 </script>
 </body>
 </html>
