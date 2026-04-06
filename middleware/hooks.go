@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, "failed to read body", http.StatusBadRequest)
@@ -137,7 +139,15 @@ func forwardToProcula(url string, source ProculaJobSource) error {
 	if err != nil {
 		return err
 	}
-	resp, err := services.client.Post(url, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+	resp, err := services.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("reach procula: %w", err)
 	}
@@ -406,9 +416,9 @@ func parseArrDate(s string) time.Time {
 // isAllowedWebhookPath checks that the path from a webhook payload is under a
 // known media directory, preventing path traversal to arbitrary filesystem locations.
 func isAllowedWebhookPath(p string) bool {
-	allowed := []string{"/downloads/", "/movies/", "/tv/", "/processing/"}
-	for _, prefix := range allowed {
-		if strings.HasPrefix(p, prefix) {
+	clean := filepath.Clean(p)
+	for _, prefix := range []string{"/downloads", "/movies", "/tv", "/processing"} {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return true
 		}
 	}

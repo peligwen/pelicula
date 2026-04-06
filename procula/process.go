@@ -28,8 +28,18 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 	}
 
 	// Build output path: /processing/<basename><suffix>.mkv
+	// Append a counter suffix if the target already exists to avoid silent overwrites.
 	base := strings.TrimSuffix(filepath.Base(input), filepath.Ext(input))
 	outputPath := filepath.Join("/processing", base+profile.Output.Suffix+".mkv")
+	if _, err := os.Stat(outputPath); err == nil {
+		for i := 2; ; i++ {
+			candidate := filepath.Join("/processing", fmt.Sprintf("%s%s.%d.mkv", base, profile.Output.Suffix, i))
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				outputPath = candidate
+				break
+			}
+		}
+	}
 
 	args := buildFFmpegArgs(input, outputPath, profile)
 	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", outputPath, "profile", profile.Name)
@@ -73,7 +83,6 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 func buildFFmpegArgs(input, output string, p *TranscodeProfile) []string {
 	args := []string{
 		"-i", input,
-		"-y", // overwrite output without asking
 	}
 
 	// Video

@@ -10,12 +10,13 @@ import (
 // PipelineSettings controls which pipeline stages run and how notifications
 // are sent. Persisted to /config/procula/settings.json.
 type PipelineSettings struct {
-	ValidationEnabled  bool     `json:"validation_enabled"`
-	TranscodingEnabled bool     `json:"transcoding_enabled"`
-	CatalogEnabled     bool     `json:"catalog_enabled"`
-	NotifMode          string   `json:"notification_mode"`            // "internal", "apprise", "direct"
-	AppriseURLs        []string `json:"apprise_urls,omitempty"`
-	DirectURL          string   `json:"direct_url,omitempty"`
+	ValidationEnabled    bool     `json:"validation_enabled"`
+	DeleteOnFailure      bool     `json:"delete_on_failure"`       // delete file when validation fails (default: false)
+	TranscodingEnabled   bool     `json:"transcoding_enabled"`
+	CatalogEnabled       bool     `json:"catalog_enabled"`
+	NotifMode            string   `json:"notification_mode"`       // "internal", "apprise", "direct"
+	AppriseURLs          []string `json:"apprise_urls,omitempty"`
+	DirectURL            string   `json:"direct_url,omitempty"`
 }
 
 var (

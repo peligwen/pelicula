@@ -126,6 +126,7 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KB
 	var req struct {
 		Hash   string `json:"hash"`
 		Paused bool   `json:"paused"`
@@ -163,6 +164,7 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KB
 	var req struct {
 		Hash      string `json:"hash"`
 		Category  string `json:"category"`

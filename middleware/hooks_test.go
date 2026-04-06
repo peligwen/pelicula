@@ -14,12 +14,17 @@ func TestIsAllowedWebhookPath(t *testing.T) {
 		{"/tv/show/s01/e01.mkv", true},
 		{"/processing/out.mkv", true},
 		{"/etc/passwd", false},
-		// Note: requires trailing slash — bare prefix not matched
-		{"/downloads", false},
-		{"/movies", false},
+		// Exact directory match is allowed
+		{"/downloads", true},
+		{"/movies", true},
 		{"/download/file.mkv", false}, // partial prefix doesn't match
 		{"", false},
 		{"/var/downloads/file.mkv", false},
+		// Path traversal attempts must be blocked
+		{"/downloads/../etc/passwd", false},
+		{"/movies/../../etc/shadow", false},
+		{"/tv/../../../root/.ssh/id_rsa", false},
+		{"/processing/../movies/../etc/passwd", false},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {

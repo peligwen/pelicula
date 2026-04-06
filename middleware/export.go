@@ -148,6 +148,7 @@ func handleImportBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB
 	var backup BackupExport
 	if err := json.NewDecoder(r.Body).Decode(&backup); err != nil {
 		writeError(w, "invalid backup JSON: "+err.Error(), http.StatusBadRequest)

@@ -77,6 +77,7 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5 MB
 	var req ScanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
@@ -166,6 +167,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5 MB
 	var req ApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)

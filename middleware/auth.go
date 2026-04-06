@@ -40,6 +40,11 @@ type session struct {
 	expiry   time.Time
 }
 
+// loginAttempts tracks recent failed login timestamps per IP for rate limiting.
+type loginAttempts struct {
+	times []time.Time
+}
+
 // Auth handles authentication and authorization.
 // mode "off"      — all requests pass through
 // mode "password" — single shared password (legacy, PELICULA_AUTH=true)
@@ -50,6 +55,7 @@ type Auth struct {
 	usersFile string
 	users     []User
 	sessions  map[string]session
+	failures  map[string]*loginAttempts // IP → recent failure timestamps
 	mu        sync.RWMutex
 }
 
@@ -59,6 +65,7 @@ func NewAuth(mode, password, usersFile string) *Auth {
 		password:  password,
 		usersFile: usersFile,
 		sessions:  make(map[string]session),
+		failures:  make(map[string]*loginAttempts),
 	}
 	if mode == "users" {
 		if err := a.loadUsers(); err != nil {
@@ -69,20 +76,64 @@ func NewAuth(mode, password, usersFile string) *Auth {
 	return a
 }
 
-// cleanupSessions periodically removes expired sessions to prevent unbounded memory growth.
+// cleanupSessions periodically removes expired sessions and stale rate-limit
+// entries to prevent unbounded memory growth.
 func (a *Auth) cleanupSessions() {
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
 		now := time.Now()
+		window := now.Add(-5 * time.Minute)
 		a.mu.Lock()
 		for token, sess := range a.sessions {
 			if now.After(sess.expiry) {
 				delete(a.sessions, token)
 			}
 		}
+		for ip, fa := range a.failures {
+			var recent []time.Time
+			for _, t := range fa.times {
+				if t.After(window) {
+					recent = append(recent, t)
+				}
+			}
+			if len(recent) == 0 {
+				delete(a.failures, ip)
+			} else {
+				fa.times = recent
+			}
+		}
 		a.mu.Unlock()
 	}
+}
+
+// isRateLimited returns true if the IP has exceeded 5 failed logins in 5 minutes.
+func (a *Auth) isRateLimited(ip string) bool {
+	window := time.Now().Add(-5 * time.Minute)
+	a.mu.RLock()
+	fa, ok := a.failures[ip]
+	if !ok {
+		a.mu.RUnlock()
+		return false
+	}
+	count := 0
+	for _, t := range fa.times {
+		if t.After(window) {
+			count++
+		}
+	}
+	a.mu.RUnlock()
+	return count >= 5
+}
+
+// recordFailure records a failed login attempt for rate limiting.
+func (a *Auth) recordFailure(ip string) {
+	a.mu.Lock()
+	if a.failures[ip] == nil {
+		a.failures[ip] = &loginAttempts{}
+	}
+	a.failures[ip].times = append(a.failures[ip].times, time.Now())
+	a.mu.Unlock()
 }
 
 func (a *Auth) loadUsers() error {
@@ -195,6 +246,13 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := clientIP(r)
+	if a.isRateLimited(ip) {
+		writeError(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KB
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -208,6 +266,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	switch a.mode {
 	case "password":
 		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.password)) == 0 {
+			a.recordFailure(ip)
 			writeError(w, "invalid password", http.StatusUnauthorized)
 			return
 		}
@@ -215,6 +274,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	case "users":
 		u, ok := a.lookupUser(req.Username, req.Password)
 		if !ok {
+			a.recordFailure(ip)
 			writeError(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
@@ -275,6 +335,14 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 
 	sess, ok := a.getSession(r)
 	if !ok {
+		// nginx auth_request requires a non-2xx status to deny access.
+		// The dashboard JS uses the JSON body, so we still send it.
+		if r.URL.Query().Get("nginx") == "1" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintf(w, `{"auth":true,"valid":false,"mode":%q}`, a.mode)
+			return
+		}
 		writeJSON(w, map[string]any{"auth": true, "valid": false, "mode": a.mode})
 		return
 	}

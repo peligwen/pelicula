@@ -201,21 +201,22 @@ cmd_setup() {
 
         # Auth setup
         echo -e "${BOLD}Auth${NC}"
-        echo "  1) Off — no auth required (single-user LAN)"
-        echo "  2) Password — single shared password"
+        echo "  1) Password — single shared password (recommended)"
+        echo "  2) Off — no auth required (single-user LAN)"
         echo ""
         echo -en "Auth mode [1-2, default 1]: "
         read -r auth_choice
-        local PELICULA_AUTH="off"
+        local PELICULA_AUTH="true"
         local PELICULA_PASSWORD=""
         if [[ "$auth_choice" == "2" ]]; then
-            echo -en "${BOLD}Password${NC}: "
+            PELICULA_AUTH="off"
+        else
+            echo -en "${BOLD}Password${NC} (leave blank to auto-generate): "
             read -rs PELICULA_PASSWORD
             echo ""
             if [[ -z "$PELICULA_PASSWORD" ]]; then
-                warn "Empty password — auth disabled"
-            else
-                PELICULA_AUTH="true"
+                PELICULA_PASSWORD="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16 2>/dev/null || openssl rand -base64 12 | tr -d '/+=')"
+                info "Generated password: ${BOLD}${PELICULA_PASSWORD}${NC}"
             fi
         fi
         echo ""
@@ -227,9 +228,10 @@ cmd_setup() {
         LIBRARY_DIR="$default_media"
         WORK_DIR="$default_media"
         PELICULA_PORT="7354"
-        PELICULA_AUTH="off"
-        PELICULA_PASSWORD=""
+        PELICULA_PASSWORD="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16 2>/dev/null || openssl rand -base64 12 | tr -d '/+=')"
+        PELICULA_AUTH="true"
         info "Using defaults: TZ=${TZ}, PUID=${PUID}, config=${CONFIG_DIR}"
+        info "Generated password: ${BOLD}${PELICULA_PASSWORD}${NC}"
         echo ""
     fi
 
@@ -237,6 +239,14 @@ cmd_setup() {
     CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
     LIBRARY_DIR="${LIBRARY_DIR/#\~/$HOME}"
     WORK_DIR="${WORK_DIR/#\~/$HOME}"
+
+    local PROCULA_API_KEY
+    PROCULA_API_KEY="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 2>/dev/null || openssl rand -base64 24 | tr -d '/+=')"
+
+    # Back up existing .env before overwriting
+    if [[ -f "$ENV_FILE" ]]; then
+        cp "$ENV_FILE" "${ENV_FILE}.bak.$(date +%s)"
+    fi
 
     # Write .env — quote values so paths with spaces survive `source`
     cat > "$ENV_FILE" <<EOF
@@ -252,6 +262,7 @@ SERVER_COUNTRIES="${SERVER_COUNTRIES}"
 PELICULA_PORT="${PELICULA_PORT}"
 PELICULA_AUTH="${PELICULA_AUTH}"
 PELICULA_PASSWORD="${PELICULA_PASSWORD}"
+PROCULA_API_KEY="${PROCULA_API_KEY}"
 JELLYSEERR_ENABLED=false
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
@@ -336,7 +347,11 @@ setup_tun() {
         pass "/dev/net/tun exists"
     fi
 
-    cat > "$SCRIPT_DIR/docker-compose.override.yml" <<'OVERRIDE'
+    local override_file="$SCRIPT_DIR/docker-compose.override.yml"
+    if [[ -f "$override_file" ]]; then
+        cp "$override_file" "${override_file}.bak.$(date +%s)"
+    fi
+    cat > "$override_file" <<'OVERRIDE'
 services:
   gluetun:
     devices:
@@ -1006,7 +1021,7 @@ cmd_up() {
     seed_config "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" \
 '[Preferences]
 WebUI\AuthSubnetWhitelistEnabled=true
-WebUI\AuthSubnetWhitelist=172.16.0.0/12, 192.168.0.0/16, 10.0.0.0/8
+WebUI\AuthSubnetWhitelist=172.16.0.0/12
 WebUI\LocalHostAuth=false
 WebUI\CSRFProtection=false
 
@@ -1137,7 +1152,7 @@ cmd_reset_config() {
     cat > "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" <<'EOF'
 [Preferences]
 WebUI\AuthSubnetWhitelistEnabled=true
-WebUI\AuthSubnetWhitelist=172.16.0.0/12, 192.168.0.0/16, 10.0.0.0/8
+WebUI\AuthSubnetWhitelist=172.16.0.0/12
 WebUI\LocalHostAuth=false
 WebUI\CSRFProtection=false
 

@@ -75,8 +75,8 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 				j.Error = failReason
 			})
 
-			// Remove the bad file from the library
-			if job.Source.Path != "" {
+			// Remove the bad file from the library only when explicitly enabled in settings
+			if settings.DeleteOnFailure && job.Source.Path != "" {
 				if !isAllowedPath(job.Source.Path) {
 					slog.Warn("refusing to remove file outside allowed directories", "component", "pipeline", "path", job.Source.Path)
 				} else if err := os.Remove(job.Source.Path); err == nil {
@@ -84,6 +84,8 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 				} else if !os.IsNotExist(err) {
 					slog.Error("could not remove bad file", "component", "pipeline", "error", err)
 				}
+			} else if job.Source.Path != "" {
+				slog.Info("validation failed — file left in place (delete_on_failure=false)", "component", "pipeline", "path", job.Source.Path)
 			}
 
 			// Ask pelicula-api to blocklist in *arr so the watcher re-searches

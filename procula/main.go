@@ -13,6 +13,23 @@ import (
 // Set once at startup from CONFIG_DIR env var.
 var configDir string
 
+// proculaAPIKey is the shared secret required on mutating (POST) requests.
+// Empty means auth is disabled (backward-compatible with existing installs
+// that don't have PROCULA_API_KEY set).
+var proculaAPIKey string
+
+// requireAPIKey is middleware that enforces X-API-Key on mutating endpoints.
+// When proculaAPIKey is empty it is a no-op so old installs keep working.
+func requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if proculaAPIKey != "" && r.Header.Get("X-API-Key") != proculaAPIKey {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // Server holds the dependencies for HTTP handlers.
 type Server struct {
 	queue     *Queue
@@ -26,6 +43,7 @@ func main() {
 
 	configDir = env("CONFIG_DIR", "/config")
 	peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
+	proculaAPIKey = env("PROCULA_API_KEY", "")
 
 	q, err := NewQueue(configDir)
 	if err != nil {
@@ -44,14 +62,14 @@ func main() {
 	mux.HandleFunc("GET /ping", srv.handlePing)
 	mux.HandleFunc("GET /api/procula/status", srv.handleStatus)
 	mux.HandleFunc("GET /api/procula/jobs", srv.handleListJobs)
-	mux.HandleFunc("POST /api/procula/jobs", srv.handleCreateJob)
+	mux.HandleFunc("POST /api/procula/jobs", requireAPIKey(srv.handleCreateJob))
 	mux.HandleFunc("GET /api/procula/jobs/{id}", srv.handleGetJob)
-	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", srv.handleRetryJob)
-	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", srv.handleCancelJob)
+	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", requireAPIKey(srv.handleRetryJob))
+	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", requireAPIKey(srv.handleCancelJob))
 	mux.HandleFunc("GET /api/procula/storage", handleStorage)
 	mux.HandleFunc("GET /api/procula/notifications", srv.handleNotifications)
 	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
-	mux.HandleFunc("POST /api/procula/settings", handleSaveSettings)
+	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(handleSaveSettings))
 	mux.HandleFunc("GET /", handleUI)
 	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 

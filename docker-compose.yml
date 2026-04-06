@@ -156,6 +156,7 @@ services:
       - TZ=${TZ}
       - CONFIG_DIR=/config
       - PELICULA_API_URL=http://pelicula-api:8181
+      - PROCULA_API_KEY=${PROCULA_API_KEY:-}
     volumes:
       - ${CONFIG_DIR}/procula:/config
       - ${WORK_DIR}/downloads:/downloads:ro
@@ -177,8 +178,9 @@ services:
     container_name: pelicula-api
     environment:
       - TZ=${TZ}
-      - PELICULA_AUTH=${PELICULA_AUTH:-false}
+      - PELICULA_AUTH=${PELICULA_AUTH:-true}
       - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
+      - PROCULA_API_KEY=${PROCULA_API_KEY:-}
     volumes:
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
       - ${CONFIG_DIR}/radarr:/config/radarr:ro
