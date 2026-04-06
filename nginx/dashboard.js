@@ -538,36 +538,71 @@ function renderStorage(data) {
     const list = document.getElementById('storage-list');
     const summary = document.getElementById('storage-summary');
 
-    const volumes = Array.isArray(data.volumes) ? data.volumes : [];
-    if (!volumes.length) {
+    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
+    if (!filesystems.length) {
         section.style.display = 'none';
         return;
     }
     section.style.display = '';
 
-    const hasCrit = volumes.some(v => v.status === 'critical');
-    const hasWarn = volumes.some(v => v.status === 'warning');
+    const hasCrit = filesystems.some(fs => fs.status === 'critical');
+    const hasWarn = filesystems.some(fs => fs.status === 'warning');
     summary.textContent = hasCrit ? 'Critical' : hasWarn ? 'Warning' : '';
     summary.className = hasCrit ? 'storage-status-critical' : hasWarn ? 'storage-status-warning' : '';
 
-    list.innerHTML = volumes.map(v => {
-        const pct = Math.round(v.used_pct || 0);
-        const barClass = v.status === 'critical' ? 'storage-bar-critical'
-            : v.status === 'warning' ? 'storage-bar-warning' : 'storage-bar-ok';
-        return `<div class="download-item">
-            <div class="download-header">
-                <div class="download-name">${esc(v.label)}</div>
+    list.innerHTML = filesystems.map(fs => {
+        const pct = Math.round(fs.used_pct || 0);
+        const barClass = fs.status === 'critical' ? 'storage-bar-critical'
+            : fs.status === 'warning' ? 'storage-bar-warning' : 'storage-bar-ok';
+
+        const folders = Array.isArray(fs.folders) ? fs.folders : [];
+        const diskLabel = folders.map(f => esc(f.label)).join(', ') || esc(fs.fs_id);
+
+        // Show folder breakdown only when there are multiple folders
+        const showFolders = folders.length > 1;
+        const folderRows = folders.map(f => {
+            const folderPct = (fs.total > 0 && f.size >= 0)
+                ? Math.min(100, Math.round(f.size / fs.total * 100)) : 0;
+            const sizeText = f.size < 0 ? 'Calculating\u2026' : formatSize(f.size);
+            return `<div class="storage-folder">
+                <div class="storage-folder-header">
+                    <span class="storage-folder-label">${esc(f.label)}</span>
+                    <span class="storage-folder-size">${sizeText}</span>
+                </div>
+                <div class="download-bar-bg"><div class="download-bar storage-bar-folder" style="width:${folderPct}%"></div></div>
+            </div>`;
+        }).join('');
+
+        const expandable = showFolders
+            ? `<div class="storage-folders collapsed">${folderRows}</div>` : '';
+        const chevron = showFolders
+            ? `<span class="storage-chevron">&#9660;</span>` : '';
+        const headerClick = showFolders ? ' onclick="toggleStorageDisk(this.parentElement)"' : '';
+
+        return `<div class="download-item storage-disk">
+            <div class="download-header"${headerClick}>
+                <div class="download-name">${diskLabel}</div>
                 <div class="download-actions">
-                    <span class="dl-size">${formatSize(v.used)} / ${formatSize(v.total)}</span>
+                    <span class="dl-size">${formatSize(fs.used)} / ${formatSize(fs.total)}</span>
+                    ${chevron}
                 </div>
             </div>
             <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
             <div class="download-meta">
                 <span>${pct}% used</span>
-                <span>${formatSize(v.available)} free</span>
+                <span>${formatSize(fs.available)} free</span>
             </div>
+            ${expandable}
         </div>`;
     }).join('');
+}
+
+function toggleStorageDisk(el) {
+    const folders = el.querySelector('.storage-folders');
+    const chevron = el.querySelector('.storage-chevron');
+    if (!folders) return;
+    const collapsed = folders.classList.toggle('collapsed');
+    if (chevron) chevron.innerHTML = collapsed ? '&#9660;' : '&#9650;';
 }
 
 // ── Update checker ────────────────────────

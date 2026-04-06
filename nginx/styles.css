@@ -393,6 +393,26 @@ a.service:hover { border-color: #333; background: #181818; }
 .storage-status-warning { color: #f0c060; font-size: 0.75rem; }
 .storage-status-critical { color: #f87171; font-size: 0.75rem; }
 
+/* Storage disk card — expand/collapse */
+.storage-chevron { font-size: 0.55rem; color: #444; margin-left: 0.4rem; flex-shrink: 0; }
+.storage-disk .download-header { cursor: pointer; user-select: none; }
+.storage-disk .download-header:hover .download-name { color: #e0e0e0; }
+.storage-folders {
+    margin-top: 0.5rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid #1a1a1a;
+}
+.storage-folders.collapsed { display: none; }
+.storage-folder { margin-bottom: 0.4rem; }
+.storage-folder:last-child { margin-bottom: 0; }
+.storage-folder-header {
+    display: flex; justify-content: space-between;
+    font-size: 0.72rem; margin-bottom: 0.2rem;
+}
+.storage-folder-label { color: #888; font-weight: 500; }
+.storage-folder-size { color: #555; font-variant-numeric: tabular-nums; }
+.download-bar.storage-bar-folder { background: #333; }
+
 /* Activity feed */
 .activity-item {
     display: flex; align-items: center; gap: 0.6rem;
