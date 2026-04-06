@@ -248,7 +248,7 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var all []dashNotif
+	all := []dashNotif{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
