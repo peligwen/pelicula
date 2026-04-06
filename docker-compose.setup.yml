@@ -1,0 +1,35 @@
+services:
+  pelicula-api:
+    build: ./middleware
+    container_name: pelicula-api
+    environment:
+      - SETUP_MODE=true
+      - HOST_PLATFORM=${HOST_PLATFORM:-linux}
+      - HOST_TZ=${HOST_TZ:-America/New_York}
+      - HOST_PUID=${HOST_PUID:-1000}
+      - HOST_PGID=${HOST_PGID:-1000}
+      - HOST_HOME=${HOST_HOME:-~}
+      - HOST_CONFIG_DIR=${HOST_CONFIG_DIR:-./config}
+      - HOST_LIBRARY_DIR=${HOST_LIBRARY_DIR:-~/media}
+      - HOST_WORK_DIR=${HOST_WORK_DIR:-~/media}
+    volumes:
+      - .:/project
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/api/pelicula/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    volumes:
+      - ./nginx/nginx-setup.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
+      - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
+    ports:
+      - "7354:80"
+    depends_on:
+      pelicula-api:
+        condition: service_healthy

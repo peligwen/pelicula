@@ -48,6 +48,12 @@ docker_cmd() {
     $NEEDS_SUDO docker "$@"
 }
 
+generate_password() {
+    local raw
+    raw="$(LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 15 2>/dev/null || openssl rand -hex 8 | head -c 15)"
+    echo "${raw:0:5}-${raw:5:5}-${raw:10:5}"
+}
+
 load_env() {
     if [[ ! -f "$ENV_FILE" ]]; then
         echo -e "${RED}No .env file found.${NC} Run ${BOLD}./pelicula setup${NC} first."
@@ -215,7 +221,7 @@ cmd_setup() {
             read -rs PELICULA_PASSWORD
             echo ""
             if [[ -z "$PELICULA_PASSWORD" ]]; then
-                PELICULA_PASSWORD="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16 2>/dev/null || openssl rand -base64 12 | tr -d '/+=')"
+                PELICULA_PASSWORD="$(generate_password)"
                 info "Generated password: ${BOLD}${PELICULA_PASSWORD}${NC}"
             fi
         fi
@@ -228,7 +234,7 @@ cmd_setup() {
         LIBRARY_DIR="$default_media"
         WORK_DIR="$default_media"
         PELICULA_PORT="7354"
-        PELICULA_PASSWORD="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16 2>/dev/null || openssl rand -base64 12 | tr -d '/+=')"
+        PELICULA_PASSWORD="$(generate_password)"
         PELICULA_AUTH="true"
         info "Using defaults: TZ=${TZ}, PUID=${PUID}, config=${CONFIG_DIR}"
         info "Generated password: ${BOLD}${PELICULA_PASSWORD}${NC}"
@@ -990,6 +996,93 @@ configure_vpn_key() {
 }
 
 cmd_up() {
+    # If no .env, offer browser-based setup wizard
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo ""
+        echo -e "${BOLD}No configuration found.${NC}"
+        echo ""
+        echo "  Option 1: Open ${BOLD}http://localhost:7354/${NC} in your browser to set up"
+        echo "  Option 2: Run ${BOLD}./pelicula setup${NC} for CLI setup (Ctrl+C to abort)"
+        echo ""
+        info "Starting setup wizard..."
+
+        # Detect host context to pass into the setup container
+        local detected_tz=""
+        if [[ -L /etc/localtime ]]; then
+            detected_tz="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
+        elif [[ -f /etc/timezone ]]; then
+            detected_tz="$(cat /etc/timezone)"
+        fi
+
+        local host_platform="linux"
+        if [[ "$PLATFORM" == "synology" ]]; then
+            host_platform="synology"
+        elif [[ "$(uname)" == "Darwin" ]]; then
+            host_platform="macos"
+        elif grep -qi microsoft /proc/version 2>/dev/null; then
+            host_platform="wsl"
+        fi
+
+        local default_config default_library default_work
+        if [[ "$host_platform" == "synology" ]]; then
+            default_config="/volume1/docker/pelicula/config"
+            default_library="/volume1/media"
+            default_work="/volume1/media"
+        else
+            default_config="$SCRIPT_DIR/config"
+            default_library="$HOME/media"
+            default_work="$HOME/media"
+        fi
+
+        local setup_compose="$SCRIPT_DIR/docker-compose.setup.yml"
+
+        # Clean up setup containers on Ctrl+C
+        cleanup_setup() {
+            echo ""
+            warn "Setup aborted"
+            $NEEDS_SUDO docker compose -f "$setup_compose" down 2>/dev/null
+            exit 1
+        }
+        trap cleanup_setup INT
+
+        HOST_PLATFORM="$host_platform" \
+        HOST_TZ="${detected_tz:-America/New_York}" \
+        HOST_PUID="$(id -u)" \
+        HOST_PGID="$(id -g)" \
+        HOST_HOME="$HOME" \
+        HOST_CONFIG_DIR="$default_config" \
+        HOST_LIBRARY_DIR="$default_library" \
+        HOST_WORK_DIR="$default_work" \
+        $NEEDS_SUDO docker compose -f "$setup_compose" up -d --build
+
+        echo ""
+        echo -e "  Open ${BOLD}http://localhost:7354/${NC} to continue setup"
+        echo ""
+
+        # Poll for .env to appear (written by the wizard), with timeout
+        info "Waiting for setup to complete (Ctrl+C to abort)..."
+        local wait_count=0
+        while [[ ! -f "$ENV_FILE" ]]; do
+            sleep 2
+            wait_count=$((wait_count + 1))
+            if [[ $wait_count -ge 150 ]]; then
+                warn "Setup timed out after 5 minutes"
+                $NEEDS_SUDO docker compose -f "$setup_compose" down 2>/dev/null
+                echo -e "Run ${BOLD}./pelicula setup${NC} for CLI setup instead."
+                exit 1
+            fi
+        done
+        pass "Configuration saved"
+
+        # Restore default signal handling
+        trap - INT
+
+        # Tear down setup containers
+        $NEEDS_SUDO docker compose -f "$setup_compose" down
+
+        echo ""
+    fi
+
     load_env
     info "Starting media stack..."
 

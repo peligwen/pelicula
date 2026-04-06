@@ -58,6 +58,32 @@ body {
     margin-top: 0.3rem;
     font-weight: 400;
 }
+.watch-btn, .watch-btn:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(200,162,255,0.12);
+    color: #c8a2ff;
+    border: 1px solid rgba(200,162,255,0.25);
+    border-radius: 6px;
+    padding: 0.45rem 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+    align-self: center;
+    flex-shrink: 0;
+}
+.watch-btn:hover {
+    background: rgba(200,162,255,0.22);
+    border-color: rgba(200,162,255,0.45);
+}
+@media (max-width: 540px) {
+    .watch-btn { display: none; }
+}
 
 /* Telemetry strip */
 .telemetry {

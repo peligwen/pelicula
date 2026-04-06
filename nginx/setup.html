@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PELICULA — Setup</title>
+    <link rel="stylesheet" href="/setup.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <div class="logo">
+                <span>P</span><span class="accent">E</span><span>L</span><span>I</span><span>C</span><span>U</span><span>L</span><span>A</span>
+            </div>
+            <div class="logo-sub">Setup</div>
+        </div>
+
+        <!-- Step indicators -->
+        <div class="steps">
+            <div class="step active" data-step="1"><span class="step-num">1</span> VPN</div>
+            <div class="step-line"></div>
+            <div class="step" data-step="2"><span class="step-num">2</span> Paths</div>
+            <div class="step-line"></div>
+            <div class="step" data-step="3"><span class="step-num">3</span> Auth</div>
+            <div class="step-line"></div>
+            <div class="step" data-step="4"><span class="step-num">4</span> Confirm</div>
+        </div>
+
+        <div class="platform-badge" id="platform-badge"></div>
+
+        <!-- Step 1: VPN -->
+        <div class="step-panel active" id="panel-1">
+            <h2>VPN Configuration</h2>
+            <p class="step-desc">Pelicula routes all download traffic through ProtonVPN. You need a paid plan (Plus or higher) with P2P and port forwarding support.</p>
+
+            <label for="vpn-key">WireGuard Private Key</label>
+            <p class="field-help">
+                Go to <strong>protonvpn.com/account</strong> &rarr; WireGuard &rarr; Create key for Linux.
+                <br>Do <strong>not</strong> enable "Moderate NAT" — it breaks port forwarding.
+                <br>Copy the <code>PrivateKey</code> value from the generated config.
+            </p>
+            <input type="password" id="vpn-key" placeholder="WireGuard private key" spellcheck="false" autocomplete="off">
+            <button class="toggle-vis" onclick="toggleVis('vpn-key')" type="button">Show</button>
+
+            <label for="vpn-country">Server Country</label>
+            <p class="field-help">P2P-friendly countries: Netherlands, Switzerland, Sweden, Iceland, Romania</p>
+            <select id="vpn-country">
+                <option value="Netherlands" selected>Netherlands</option>
+                <option value="Switzerland">Switzerland</option>
+                <option value="Sweden">Sweden</option>
+                <option value="Iceland">Iceland</option>
+                <option value="Romania">Romania</option>
+            </select>
+
+            <div class="step-nav">
+                <span></span>
+                <button onclick="goStep(2)" class="btn-primary">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Paths -->
+        <div class="step-panel" id="panel-2">
+            <h2>Storage Paths</h2>
+            <p class="step-desc">Where Pelicula stores config, media libraries, and working files. Defaults are auto-detected for your platform.</p>
+
+            <label for="path-config">Config Directory</label>
+            <p class="field-help">Service databases, settings, and certificates</p>
+            <input type="text" id="path-config" placeholder="./config">
+
+            <label for="path-library">Library Directory</label>
+            <p class="field-help">Final media files (movies/ and tv/ created inside)</p>
+            <input type="text" id="path-library" placeholder="~/media">
+
+            <label for="path-work">Work Directory</label>
+            <p class="field-help">Active downloads and processing temp files (downloads/ and processing/ created inside)</p>
+            <input type="text" id="path-work" placeholder="~/media">
+
+            <div class="step-nav">
+                <button onclick="goStep(1)" class="btn-secondary">Back</button>
+                <button onclick="goStep(3)" class="btn-primary">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Auth -->
+        <div class="step-panel" id="panel-3">
+            <h2>Authentication</h2>
+            <p class="step-desc">Protect the dashboard with a password? Recommended if the server is accessible beyond your local network.</p>
+
+            <div class="toggle-row">
+                <label for="auth-toggle">Enable password</label>
+                <button type="button" class="toggle-btn" id="auth-toggle" onclick="toggleAuth()" data-on="true">On</button>
+            </div>
+
+            <div id="auth-password-section">
+                <label for="auth-password">Password</label>
+                <p class="field-help">Leave blank to auto-generate a memorable password.</p>
+                <input type="text" id="auth-password" placeholder="Auto-generated" spellcheck="false" autocomplete="off">
+            </div>
+
+            <div class="step-nav">
+                <button onclick="goStep(2)" class="btn-secondary">Back</button>
+                <button onclick="goStep(4)" class="btn-primary">Review</button>
+            </div>
+        </div>
+
+        <!-- Step 4: Confirm -->
+        <div class="step-panel" id="panel-4">
+            <h2>Ready to Start</h2>
+            <p class="step-desc">Review your configuration. You can change any of these later with <code>./pelicula configure</code> or from the dashboard.</p>
+
+            <div class="summary" id="summary"></div>
+
+            <div class="error-msg hidden" id="setup-error"></div>
+
+            <div class="step-nav">
+                <button onclick="goStep(3)" class="btn-secondary">Back</button>
+                <button onclick="submitSetup()" class="btn-primary" id="btn-submit">Start Pelicula</button>
+            </div>
+        </div>
+
+        <!-- Done screen -->
+        <div class="step-panel" id="panel-done">
+            <h2>Starting Up</h2>
+            <p class="step-desc">Configuration saved. Pelicula is now starting all services — this takes about 30-60 seconds.</p>
+            <div class="done-password hidden" id="done-password">
+                <label>Your password</label>
+                <div class="password-display" id="display-password"></div>
+                <p class="field-help">Save this somewhere — you'll need it to log into the dashboard.</p>
+            </div>
+            <div class="spinner"></div>
+            <p class="step-desc" id="done-status">Waiting for services...</p>
+        </div>
+    </div>
+
+<script>
+let detected = {};
+
+// Load auto-detected values on page load
+(async function init() {
+    try {
+        const r = await fetch('/api/pelicula/setup/detect');
+        detected = await r.json();
+        document.getElementById('path-config').value = detected.config_dir || '';
+        document.getElementById('path-library').value = detected.library_dir || '';
+        document.getElementById('path-work').value = detected.work_dir || '';
+
+        const badge = document.getElementById('platform-badge');
+        const labels = { synology: 'Synology NAS', macos: 'macOS', wsl: 'WSL', linux: 'Linux' };
+        badge.textContent = labels[detected.platform] || detected.platform;
+    } catch(e) {
+        console.error('detect failed', e);
+    }
+})();
+
+function goStep(n) {
+    // Validate current step before advancing
+    if (n === 2) {
+        const key = document.getElementById('vpn-key').value.trim();
+        if (!key || key.length !== 44 || !key.endsWith('=')) {
+            const el = document.getElementById('vpn-key');
+            el.focus();
+            el.classList.add('input-error');
+            if (key && (key.length !== 44 || !key.endsWith('='))) {
+                el.placeholder = 'Must be 44-character base64 key ending in =';
+            }
+            return;
+        }
+        document.getElementById('vpn-key').classList.remove('input-error');
+    }
+
+    if (n === 3) {
+        // Validate paths are non-empty
+        for (const id of ['path-config', 'path-library', 'path-work']) {
+            const el = document.getElementById(id);
+            if (!el.value.trim()) {
+                el.focus();
+                el.classList.add('input-error');
+                return;
+            }
+            el.classList.remove('input-error');
+        }
+    }
+
+    if (n === 4) buildSummary();
+
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.step').forEach(s => {
+        const sn = parseInt(s.dataset.step);
+        s.classList.toggle('active', sn === n);
+        s.classList.toggle('done', sn < n);
+    });
+    const panel = document.getElementById('panel-' + n);
+    if (panel) panel.classList.add('active');
+}
+
+function toggleVis(id) {
+    const el = document.getElementById(id);
+    const btn = el.nextElementSibling;
+    if (el.type === 'password') {
+        el.type = 'text';
+        btn.textContent = 'Hide';
+    } else {
+        el.type = 'password';
+        btn.textContent = 'Show';
+    }
+}
+
+function toggleAuth() {
+    const btn = document.getElementById('auth-toggle');
+    const on = btn.dataset.on === 'true';
+    btn.dataset.on = on ? 'false' : 'true';
+    btn.textContent = on ? 'Off' : 'On';
+    btn.classList.toggle('off', on);
+    document.getElementById('auth-password-section').style.display = on ? 'none' : '';
+}
+
+function buildSummary() {
+    const country = document.getElementById('vpn-country').value;
+    const config = document.getElementById('path-config').value || detected.config_dir;
+    const library = document.getElementById('path-library').value || detected.library_dir;
+    const work = document.getElementById('path-work').value || detected.work_dir;
+    const authOn = document.getElementById('auth-toggle').dataset.on === 'true';
+    const pwd = document.getElementById('auth-password').value;
+
+    let html = '<table>';
+    html += row('VPN Key', 'Configured');
+    html += row('VPN Country', country);
+    html += row('Config', config);
+    html += row('Library', library);
+    html += row('Work', work);
+    html += row('Auth', authOn ? 'Password' + (pwd ? ' (custom)' : ' (auto-generated)') : 'Off');
+    html += '</table>';
+    document.getElementById('summary').innerHTML = html;
+}
+
+function row(label, value) {
+    return '<tr><td class="sum-label">' + label + '</td><td>' + esc(value) + '</td></tr>';
+}
+
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+async function submitSetup() {
+    const btn = document.getElementById('btn-submit');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    const errEl = document.getElementById('setup-error');
+    errEl.classList.add('hidden');
+
+    const body = {
+        wireguard_key: document.getElementById('vpn-key').value.trim(),
+        country: document.getElementById('vpn-country').value,
+        config_dir: document.getElementById('path-config').value.trim(),
+        library_dir: document.getElementById('path-library').value.trim(),
+        work_dir: document.getElementById('path-work').value.trim(),
+        port: '7354',
+        auth_enabled: document.getElementById('auth-toggle').dataset.on === 'true',
+        password: document.getElementById('auth-password').value,
+    };
+
+    try {
+        const r = await fetch('/api/pelicula/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+            const text = await r.text();
+            throw new Error(text || r.statusText);
+        }
+        const data = await r.json();
+
+        // Show done screen
+        document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.step').forEach(s => s.classList.add('done'));
+        document.getElementById('panel-done').classList.add('active');
+
+        if (data.password) {
+            document.getElementById('display-password').textContent = data.password;
+            document.getElementById('done-password').classList.remove('hidden');
+        }
+
+        // Poll until the full stack is up (redirect to dashboard)
+        pollForDashboard();
+    } catch(e) {
+        errEl.textContent = 'Setup failed: ' + e.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Start Pelicula';
+    }
+}
+
+async function pollForDashboard() {
+    const status = document.getElementById('done-status');
+    for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+            // The setup containers will be replaced by the full stack.
+            // Once the dashboard serves the real index.html, we redirect.
+            const r = await fetch('/api/pelicula/health', { cache: 'no-store' });
+            const data = await r.json();
+            if (data.status && data.status !== 'setup') {
+                status.textContent = 'Services are up! Redirecting...';
+                setTimeout(() => window.location.href = '/', 1500);
+                return;
+            }
+        } catch(e) {
+            // Expected: containers restarting, connection refused briefly
+        }
+        status.textContent = 'Waiting for services... (' + ((i+1)*2) + 's)';
+    }
+    document.querySelector('.spinner').style.animationPlayState = 'paused';
+    document.querySelector('.spinner').style.borderTopColor = '#555';
+    status.textContent = 'Taking longer than expected. Check the terminal for details, or reload this page.';
+}
+</script>
+</body>
+</html>

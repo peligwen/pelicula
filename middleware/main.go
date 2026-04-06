@@ -16,6 +16,24 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
+	// Setup mode: only serve setup endpoints, skip autowire and all service logic
+	if isSetupMode() {
+		slog.Info("starting in setup mode", "component", "main")
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api/pelicula/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"setup"}`))
+		})
+		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
+		mux.HandleFunc("/api/pelicula/setup", handleSetupSubmit)
+		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
+		if err := http.ListenAndServe(":8181", mux); err != nil {
+			slog.Error("server exited", "component", "main", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	services = NewServiceClients("/config")
 
 	// Auto-wire in background so the HTTP server starts immediately

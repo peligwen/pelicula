@@ -1,0 +1,320 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    min-height: 100vh;
+}
+.hidden { display: none !important; }
+
+.setup-container {
+    max-width: 540px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem;
+}
+
+/* ── Header ─────────────────────── */
+.setup-header { text-align: center; margin-bottom: 2rem; }
+.logo {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 700;
+    font-size: 2.4rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #fff;
+}
+.logo .accent { color: #c8a2ff; }
+.logo-sub {
+    font-size: 0.55rem;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: #555;
+    margin-top: 0.3rem;
+}
+
+/* ── Platform badge ─────────────── */
+.platform-badge {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #888;
+    background: #151515;
+    border: 1px solid #222;
+    border-radius: 4px;
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.platform-badge:empty { display: none; }
+
+/* ── Steps indicator ────────────── */
+.steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 2rem;
+}
+.step {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.3rem 0.6rem;
+    border-radius: 4px;
+    transition: color 0.2s;
+}
+.step.active { color: #c8a2ff; }
+.step.done { color: #4caf50; }
+.step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 50%;
+    border: 1px solid #333;
+    font-size: 0.65rem;
+    font-weight: 600;
+}
+.step.active .step-num { border-color: #c8a2ff; color: #c8a2ff; }
+.step.done .step-num { border-color: #4caf50; background: #4caf50; color: #000; }
+.step-line {
+    width: 2rem;
+    height: 1px;
+    background: #333;
+    flex-shrink: 0;
+}
+
+/* ── Step panels ────────────────── */
+.step-panel { display: none; }
+.step-panel.active { display: block; }
+
+.step-panel h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+.step-desc {
+    font-size: 0.8rem;
+    color: #888;
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+}
+.step-desc code {
+    background: #1a1a1a;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+}
+
+/* ── Form fields ────────────────── */
+label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #aaa;
+    margin-top: 1.25rem;
+    margin-bottom: 0.3rem;
+}
+.field-help {
+    font-size: 0.72rem;
+    color: #666;
+    line-height: 1.5;
+    margin-bottom: 0.5rem;
+}
+.field-help strong { color: #999; }
+.field-help code {
+    background: #1a1a1a;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    color: #c8a2ff;
+}
+
+input[type="text"],
+input[type="password"],
+select {
+    width: 100%;
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    color: #e0e0e0;
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+}
+input:focus, select:focus {
+    border-color: #c8a2ff;
+}
+input.input-error {
+    border-color: #e57373;
+    animation: shake 0.3s ease-in-out;
+}
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+}
+select { cursor: pointer; }
+select option { background: #111; }
+
+.toggle-vis {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 0.7rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.3rem 0;
+    float: right;
+    margin-top: -2rem;
+    margin-right: 0.5rem;
+}
+.toggle-vis:hover { color: #c8a2ff; }
+
+/* ── Toggle button ──────────────── */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 1.25rem;
+    margin-bottom: 1rem;
+}
+.toggle-row label { margin: 0; }
+.toggle-btn {
+    background: #c8a2ff;
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    min-width: 3rem;
+    transition: background 0.15s;
+}
+.toggle-btn.off {
+    background: #333;
+    color: #888;
+}
+
+/* ── Navigation ─────────────────── */
+.step-nav {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #1a1a1a;
+}
+.btn-primary, .btn-secondary {
+    border: none;
+    border-radius: 6px;
+    padding: 0.55rem 1.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: background 0.15s;
+}
+.btn-primary {
+    background: #c8a2ff;
+    color: #000;
+}
+.btn-primary:hover { background: #d4b3ff; }
+.btn-primary:disabled {
+    background: #555;
+    color: #888;
+    cursor: not-allowed;
+}
+.btn-secondary {
+    background: #222;
+    color: #aaa;
+}
+.btn-secondary:hover { background: #2a2a2a; }
+
+/* ── Summary table ──────────────── */
+.summary {
+    background: #111;
+    border: 1px solid #1a1a1a;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+.summary table { width: 100%; border-collapse: collapse; }
+.summary td {
+    padding: 0.4rem 0;
+    font-size: 0.8rem;
+    border-bottom: 1px solid #1a1a1a;
+}
+.summary tr:last-child td { border-bottom: none; }
+.sum-label {
+    color: #888;
+    width: 6rem;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+
+/* ── Error ──────────────────────── */
+.error-msg {
+    background: rgba(229,115,115,0.1);
+    border: 1px solid rgba(229,115,115,0.3);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    color: #e57373;
+    font-size: 0.8rem;
+    margin-top: 1rem;
+}
+
+/* ── Done screen ────────────────── */
+.done-password {
+    background: #111;
+    border: 1px solid #1a1a1a;
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 1.5rem 0;
+    text-align: center;
+}
+.done-password label {
+    text-align: center;
+    margin-top: 0;
+}
+.password-display {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 1.4rem;
+    letter-spacing: 0.15em;
+    color: #c8a2ff;
+    padding: 0.75rem 0;
+    user-select: all;
+}
+.done-password .field-help {
+    margin-top: 0.5rem;
+    margin-bottom: 0;
+}
+
+.spinner {
+    width: 2rem;
+    height: 2rem;
+    border: 2px solid #333;
+    border-top-color: #c8a2ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 1.5rem auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
