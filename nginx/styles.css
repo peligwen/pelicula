@@ -382,4 +382,27 @@ a.service:hover { border-color: #333; background: #181818; }
 .login-box button:hover { background: #282828; }
 .login-error { color: #f87171; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
 
-.footer { margin-top: 1.5rem; text-align: center; font-size: 0.65rem; color: #333; letter-spacing: 0.05em; }
+.footer { margin-top: 1.5rem; text-align: center; font-size: 0.65rem; color: #333; letter-spacing: 0.05em; display: flex; justify-content: center; gap: 0.5rem; }
+.footer a { color: #7dda93; text-decoration: none; }
+
+/* Storage bars */
+.dl-size { font-size: 0.72rem; color: #666; }
+.download-bar.storage-bar-ok { background: #7dda93; }
+.download-bar.storage-bar-warning { background: #f0c060; }
+.download-bar.storage-bar-critical { background: #f87171; }
+.storage-status-warning { color: #f0c060; font-size: 0.75rem; }
+.storage-status-critical { color: #f87171; font-size: 0.75rem; }
+
+/* Activity feed */
+.activity-item {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.45rem 1rem; font-size: 0.8rem;
+    border-bottom: 1px solid #1a1a1a;
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-icon { flex-shrink: 0; font-size: 0.75rem; }
+.activity-msg { flex: 1; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-time { flex-shrink: 0; font-size: 0.68rem; color: #444; }
+.activity-item.notif-ready .activity-icon { color: #7dda93; }
+.activity-item.notif-failed .activity-icon { color: #f87171; }
+.activity-item.notif-storage .activity-icon { color: #f0c060; }

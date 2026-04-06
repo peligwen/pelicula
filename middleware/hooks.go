@@ -425,6 +425,44 @@ func isAllowedWebhookPath(p string) bool {
 	return false
 }
 
+// handleStorageProxy proxies Procula's storage report for the dashboard Storage section.
+func handleStorageProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/storage")
+	if err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		slog.Warn("failed to stream storage response", "component", "proxy", "error", err)
+	}
+}
+
+// handleUpdatesProxy proxies Procula's update check result for the dashboard footer.
+func handleUpdatesProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/updates")
+	if err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		slog.Warn("failed to stream updates response", "component", "proxy", "error", err)
+	}
+}
+
 func proculaBaseURL() string {
 	if v := strings.TrimSpace(os.Getenv("PROCULA_URL")); v != "" {
 		return v

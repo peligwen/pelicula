@@ -405,7 +405,7 @@ async function checkVPN() {
     }
 }
 
-function updateTimestamp() { document.getElementById('footer').textContent = new Date().toLocaleTimeString(); }
+function updateTimestamp() { document.getElementById('footer-time').textContent = new Date().toLocaleTimeString(); }
 document.getElementById('t-vpn').addEventListener('click', function() {
     const ip = this.getAttribute('data-ip');
     if (!ip || ip === '?') return;
@@ -420,6 +420,7 @@ async function checkNotifications() {
         if (!res.ok) return;
         const events = await res.json();
         renderNotifications(events);
+        renderActivity(events);
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
@@ -443,8 +444,8 @@ function renderNotifications(events) {
 
     dropdown.innerHTML = events.slice(0, 20).map(e => {
         const isUnread = e.timestamp > lastSeenTs;
-        const typeClass = e.type === 'content_ready' ? 'notif-ready' : 'notif-failed';
-        const icon = e.type === 'content_ready' ? '&#10003;' : '&#9888;';
+        const typeClass = notifClass(e.type);
+        const icon = notifIcon(e.type);
         const time = formatNotifTime(e.timestamp);
         return `<div class="notif-item ${isUnread ? 'unread' : ''} ${typeClass}">
             <span class="notif-icon">${icon}</span>
@@ -488,6 +489,100 @@ document.addEventListener('click', e => {
         document.getElementById('notif-dropdown').classList.add('hidden');
     }
 });
+
+function notifIcon(type) {
+    if (type === 'content_ready') return '&#10003;';
+    if (type === 'storage_warning' || type === 'storage_critical') return '&#9632;';
+    return '&#9888;';
+}
+
+function notifClass(type) {
+    if (type === 'content_ready') return 'notif-ready';
+    if (type === 'storage_warning' || type === 'storage_critical') return 'notif-storage';
+    return 'notif-failed';
+}
+
+// ── Activity feed ─────────────────────────
+function renderActivity(events) {
+    const section = document.getElementById('activity-section');
+    const list = document.getElementById('activity-list');
+    if (!Array.isArray(events) || !events.length) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = '';
+    list.innerHTML = events.slice(0, 15).map(e => {
+        const icon = notifIcon(e.type);
+        const cls = notifClass(e.type);
+        const time = formatNotifTime(e.timestamp);
+        return `<div class="activity-item ${cls}">
+            <span class="activity-icon">${icon}</span>
+            <span class="activity-msg">${esc(e.message)}</span>
+            <span class="activity-time">${time}</span>
+        </div>`;
+    }).join('');
+}
+
+// ── Storage section ───────────────────────
+async function checkStorage() {
+    try {
+        const res = await fetch('/api/pelicula/storage');
+        if (!res.ok) return;
+        const data = await res.json();
+        renderStorage(data);
+    } catch (e) { console.warn('[pelicula] storage error:', e); }
+}
+
+function renderStorage(data) {
+    const section = document.getElementById('storage-section');
+    const list = document.getElementById('storage-list');
+    const summary = document.getElementById('storage-summary');
+
+    const volumes = Array.isArray(data.volumes) ? data.volumes : [];
+    if (!volumes.length) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = '';
+
+    const hasCrit = volumes.some(v => v.status === 'critical');
+    const hasWarn = volumes.some(v => v.status === 'warning');
+    summary.textContent = hasCrit ? 'Critical' : hasWarn ? 'Warning' : '';
+    summary.className = hasCrit ? 'storage-status-critical' : hasWarn ? 'storage-status-warning' : '';
+
+    list.innerHTML = volumes.map(v => {
+        const pct = Math.round(v.used_pct || 0);
+        const barClass = v.status === 'critical' ? 'storage-bar-critical'
+            : v.status === 'warning' ? 'storage-bar-warning' : 'storage-bar-ok';
+        return `<div class="download-item">
+            <div class="download-header">
+                <div class="download-name">${esc(v.label)}</div>
+                <div class="download-actions">
+                    <span class="dl-size">${formatSize(v.used)} / ${formatSize(v.total)}</span>
+                </div>
+            </div>
+            <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
+            <div class="download-meta">
+                <span>${pct}% used</span>
+                <span>${formatSize(v.available)} free</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ── Update checker ────────────────────────
+async function checkUpdates() {
+    try {
+        const res = await fetch('/api/pelicula/updates');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || typeof data !== 'object') return;
+        const el = document.getElementById('footer-update');
+        if (data.update_available && data.latest_version) {
+            el.innerHTML = `&#8593; Update available: <a href="https://github.com/peligwen/pelicula/releases" target="_blank" rel="noopener">${esc(data.latest_version)}</a> &nbsp;&bull;&nbsp;`;
+        }
+    } catch (e) { console.warn('[pelicula] updates error:', e); }
+}
 
 // ── Processing section ────────────────────
 async function checkProcessing() {
@@ -562,7 +657,7 @@ async function retryJob(id) {
 async function refresh() {
     console.log('[pelicula] refresh start');
     try {
-        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus(), checkNotifications(), checkProcessing()]);
+        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus(), checkNotifications(), checkProcessing(), checkStorage()]);
         console.log('[pelicula] refresh done');
     } catch(e) {
         console.error('[pelicula] refresh error:', e);
@@ -572,4 +667,6 @@ async function refresh() {
 
 checkAuth();
 setTimeout(refresh, 500);
+// Update check runs once on load — backend caches for 24h so no need to poll.
+setTimeout(checkUpdates, 1000);
 setInterval(refresh, 15000);

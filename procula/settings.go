@@ -17,6 +17,8 @@ type PipelineSettings struct {
 	NotifMode            string   `json:"notification_mode"`       // "internal", "apprise", "direct"
 	AppriseURLs          []string `json:"apprise_urls,omitempty"`
 	DirectURL            string   `json:"direct_url,omitempty"`
+	StorageWarningPct    float64  `json:"storage_warning_pct"`     // emit warning notification above this % (default: 85)
+	StorageCriticalPct   float64  `json:"storage_critical_pct"`    // emit critical notification above this % (default: 95)
 }
 
 var (
@@ -55,6 +57,8 @@ func defaultSettings() PipelineSettings {
 		TranscodingEnabled: os.Getenv("TRANSCODING_ENABLED") == "true",
 		CatalogEnabled:     true,
 		NotifMode:          "internal",
+		StorageWarningPct:  85,
+		StorageCriticalPct: 95,
 	}
 }
 

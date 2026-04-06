@@ -13,6 +13,9 @@ import (
 // Set once at startup from CONFIG_DIR env var.
 var configDir string
 
+// Version is the current Procula version, injected at build time via -ldflags.
+var Version = "dev"
+
 // proculaAPIKey is the shared secret required on mutating (POST) requests.
 // Empty means auth is disabled (backward-compatible with existing installs
 // that don't have PROCULA_API_KEY set).
@@ -54,6 +57,8 @@ func main() {
 
 	// Single worker processes jobs sequentially
 	go RunWorker(q, configDir, peliculaAPI)
+	go RunStorageMonitor(configDir)
+	go RunUpdateChecker(configDir)
 
 	srv := &Server{queue: q, configDir: configDir}
 
@@ -67,6 +72,7 @@ func main() {
 	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", requireAPIKey(srv.handleRetryJob))
 	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", requireAPIKey(srv.handleCancelJob))
 	mux.HandleFunc("GET /api/procula/storage", handleStorage)
+	mux.HandleFunc("GET /api/procula/updates", handleUpdates)
 	mux.HandleFunc("GET /api/procula/notifications", srv.handleNotifications)
 	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
 	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(handleSaveSettings))
@@ -177,8 +183,11 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStorage(w http.ResponseWriter, r *http.Request) {
-	// Phase 2 — disk monitoring not yet implemented
-	writeJSON(w, map[string]string{"status": "not_implemented"})
+	writeJSON(w, buildStorageReport())
+}
+
+func handleUpdates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, getCachedUpdate())
 }
 
 func handleGetSettings(w http.ResponseWriter, r *http.Request) {
