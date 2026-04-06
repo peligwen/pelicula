@@ -1,0 +1,64 @@
+# Test overlay: replaces gluetun with a no-VPN stub so the full stack can
+# start without real VPN credentials.  Use with:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml -p pelicula-test ...
+#
+# The stub serves a minimal HTTP 200 on port 8000 (gluetun control API) so
+# that other containers' healthchecks and depends_on pass.  qBittorrent's
+# network_mode: "service:gluetun" still works — the stub provides the shared
+# network namespace.
+#
+# All services get pelicula-test-* container names so the test stack can
+# coexist with a running production stack (which uses bare names like
+# "procula", "nginx", etc.).
+
+services:
+
+  # ── VPN stub ─────────────────────────────────────────────────────────────
+  gluetun:
+    image: alpine:3.20
+    container_name: pelicula-test-gluetun
+    entrypoint:
+      - sh
+      - -c
+      - |
+        apk add --no-cache netcat-openbsd -q 2>/dev/null
+        while true; do
+          printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{"status":"ok"}' \
+            | nc -l -p 8000 2>/dev/null || true
+          sleep 0.05
+        done
+    environment:
+      - TZ=${TZ:-UTC}
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8000 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    restart: "no"
+
+  # ── Container name overrides (prevent conflicts with production stack) ────
+  qbittorrent:
+    container_name: pelicula-test-qbittorrent
+
+  prowlarr:
+    container_name: pelicula-test-prowlarr
+
+  sonarr:
+    container_name: pelicula-test-sonarr
+
+  radarr:
+    container_name: pelicula-test-radarr
+
+  jellyfin:
+    container_name: pelicula-test-jellyfin
+
+  procula:
+    container_name: pelicula-test-procula
+
+  pelicula-api:
+    container_name: pelicula-test-api
+
+  nginx:
+    container_name: pelicula-test-nginx
