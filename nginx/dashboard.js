@@ -533,6 +533,11 @@ async function checkStorage() {
     } catch (e) { console.warn('[pelicula] storage error:', e); }
 }
 
+function folderColor(label) {
+    const map = { downloads: '#7dda93', movies: '#c8a2ff', tv: '#6db3f2', processing: '#f0c060' };
+    return map[(label || '').toLowerCase()] || '#888';
+}
+
 function renderStorage(data) {
     const section = document.getElementById('storage-section');
     const list = document.getElementById('storage-list');
@@ -552,24 +557,41 @@ function renderStorage(data) {
 
     list.innerHTML = filesystems.map(fs => {
         const pct = Math.round(fs.used_pct || 0);
-        const barClass = fs.status === 'critical' ? 'storage-bar-critical'
-            : fs.status === 'warning' ? 'storage-bar-warning' : 'storage-bar-ok';
-
         const folders = Array.isArray(fs.folders) ? fs.folders : [];
         const diskLabel = folders.map(f => esc(f.label)).join(', ') || esc(fs.fs_id);
+
+        // Sum of our monitored folder sizes
+        let oursTotal = 0;
+        let allKnown = true;
+        for (const f of folders) {
+            if (f.size < 0) { allKnown = false; }
+            else { oursTotal += f.size; }
+        }
+        const otherUsed = Math.max(0, fs.used - oursTotal);
+
+        // Stacked bar: one segment per folder + gray segment for other disk usage
+        const folderSegs = fs.total > 0 ? folders.map(f => {
+            if (f.size < 0) return '';
+            const w = (f.size / fs.total * 100).toFixed(2);
+            return `<div class="storage-seg" style="width:${w}%;background:${folderColor(f.label)}"></div>`;
+        }).join('') : '';
+        const otherW = fs.total > 0 ? Math.max(0, otherUsed / fs.total * 100).toFixed(2) : 0;
+        const otherSeg = otherW > 0
+            ? `<div class="storage-seg storage-seg-other" style="width:${otherW}%"></div>` : '';
 
         // Show folder breakdown only when there are multiple folders
         const showFolders = folders.length > 1;
         const folderRows = folders.map(f => {
             const folderPct = (fs.total > 0 && f.size >= 0)
-                ? Math.min(100, Math.round(f.size / fs.total * 100)) : 0;
+                ? (f.size / fs.total * 100).toFixed(2) : 0;
             const sizeText = f.size < 0 ? 'Calculating\u2026' : formatSize(f.size);
+            const color = folderColor(f.label);
             return `<div class="storage-folder">
                 <div class="storage-folder-header">
-                    <span class="storage-folder-label">${esc(f.label)}</span>
+                    <span class="storage-folder-label" style="color:${color}">${esc(f.label)}</span>
                     <span class="storage-folder-size">${sizeText}</span>
                 </div>
-                <div class="download-bar-bg"><div class="download-bar storage-bar-folder" style="width:${folderPct}%"></div></div>
+                <div class="download-bar-bg"><div class="download-bar storage-bar-folder" style="width:${folderPct}%;background:${color}"></div></div>
             </div>`;
         }).join('');
 
@@ -579,6 +601,8 @@ function renderStorage(data) {
             ? `<span class="storage-chevron">&#9660;</span>` : '';
         const headerClick = showFolders ? ' onclick="toggleStorageDisk(this.parentElement)"' : '';
 
+        const oursTotalText = allKnown ? formatSize(oursTotal) : 'Calculating\u2026';
+
         return `<div class="download-item storage-disk">
             <div class="download-header"${headerClick}>
                 <div class="download-name">${diskLabel}</div>
@@ -587,10 +611,10 @@ function renderStorage(data) {
                     ${chevron}
                 </div>
             </div>
-            <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
+            <div class="storage-stacked-bar">${folderSegs}${otherSeg}</div>
             <div class="download-meta">
-                <span>${pct}% used</span>
-                <span>${formatSize(fs.available)} free</span>
+                <span>Pelicula: ${oursTotalText}</span>
+                <span>${formatSize(fs.available)} free · ${pct}%</span>
             </div>
             ${expandable}
         </div>`;
