@@ -6,3 +6,4 @@ docker-compose.override.yml
 middleware/pelicula-api
 procula/procula
 coverage.out
+procula/testcache/
