@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pelicula` — single-file bash CLI, all subcommands and platform detection
 - `docker-compose.yml` — parameterized with `${CONFIG_DIR}` and `${MEDIA_DIR}` env vars
 - `docker-compose.override.yml` — generated on Synology only (adds TUN device mapping), gitignored
+- `docker-compose.test.yml` — test overlay: stubs gluetun with an Alpine nc loop, overrides all `container_name` values to `pelicula-test-*` so the test stack coexists with a running production stack
 - `middleware/` — Go backend (auto-wiring, unified search, download management, missing content watcher, import webhook receiver, auth)
 - `procula/` — Go processing pipeline (validation, job queue, FFprobe/FFmpeg, future: transcoding, Jellyfin catalog, notifications)
 - `nginx/nginx.conf` — reverse proxy config, path-based routing to all services, no-cache on dashboard
@@ -23,6 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./pelicula setup       # interactive .env generation + TLS cert + directory creation
 ./pelicula up          # seed configs, enforce auth bypass, start stack, wait for VPN, print URLs
 ./pelicula down|status|logs [svc]|update|check-vpn
+./pelicula test        # end-to-end integration test (isolated stack on port 7399, no VPN needed)
 ```
 
 ## Architecture
@@ -63,7 +65,7 @@ nginx (:7354) ─── /                → dashboard (static HTML)
 **Procula (`procula/`)** — separate Go service on port 8282, proxied at `/api/procula/`. Alpine + FFmpeg container.
 - `procula/queue.go` — JSON file job queue at `/config/jobs/`. One file per job, persisted across restarts.
 - `procula/validate.go` — FFprobe-based validation: integrity, duration sanity, codec extraction, sample detection. On failure: deletes bad file (only if path is under `/downloads`, `/movies`, `/tv`, or `/processing`) + calls `/api/pelicula/downloads/cancel` with `blocklist:true`.
-- `procula/pipeline.go` — single goroutine worker. Stages: validate → process (stub) → catalog (stub).
+- `procula/pipeline.go` — single goroutine worker. Stages: validate → process (transcoding via profiles) → catalog (Jellyfin refresh + notifications).
 - Procula never calls *arr directly; all coordination is through `pelicula-api`.
 
 **Critical networking detail:** qBittorrent runs on the `gluetun` Docker network (`network_mode: "service:gluetun"`). nginx and the *arr apps reach it at `gluetun:8080`. The Docker subnet auth bypass means no password is needed for internal service-to-service communication.
