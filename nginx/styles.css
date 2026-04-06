@@ -84,6 +84,17 @@ body {
 @media (max-width: 540px) {
     .watch-btn { display: none; }
 }
+.settings-btn {
+    color: #444;
+    text-decoration: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding-bottom: 0.15rem;
+    flex-shrink: 0;
+    transition: color 0.15s;
+    align-self: flex-end;
+}
+.settings-btn:hover { color: #c8a2ff; }
 
 /* Telemetry strip */
 .telemetry {

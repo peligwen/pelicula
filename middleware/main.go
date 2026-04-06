@@ -94,6 +94,10 @@ func main() {
 	// admin only: destructive actions
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
+	// admin only: settings (read and update .env)
+	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(http.HandlerFunc(handleSettings)))
+	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(http.HandlerFunc(handleSettingsReset)))
+
 	// admin only: backup export / import
 	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
 	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))

@@ -185,6 +185,7 @@ services:
       - JELLYSEERR_ENABLED=${JELLYSEERR_ENABLED:-false}
       - JELLYSEERR_PORT=${JELLYSEERR_PORT:-5055}
     volumes:
+      - ./.env:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
       - ${CONFIG_DIR}/radarr:/config/radarr:ro
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
@@ -250,6 +251,8 @@ services:
       - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
       - ./nginx/styles.css:/usr/share/nginx/html/styles.css:ro
       - ./nginx/dashboard.js:/usr/share/nginx/html/dashboard.js:ro
+      - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
+      - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"

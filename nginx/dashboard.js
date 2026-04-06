@@ -59,6 +59,11 @@ function applyRole(role) {
     const searchSection = document.querySelector('.search-section');
     if (searchSection) searchSection.style.display = isManager ? '' : 'none';
 
+    // Admin-only elements (e.g. settings gear icon)
+    document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = isAdmin ? '' : 'none';
+    });
+
     // Download action buttons (rendered dynamically — use a data attribute approach)
     // Store role for use in renderDownloads
     document.body.dataset.role = role;
