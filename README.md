@@ -13,6 +13,8 @@ cd pelicula
 
 Open `http://localhost:7354` — that's it.
 
+Prefer a browser? Run `./pelicula up` and open `http://localhost:7354/setup` — a setup wizard walks you through configuration without touching the terminal.
+
 ## Prerequisites
 
 - **Docker** with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine on Linux)
@@ -24,12 +26,13 @@ Open `http://localhost:7354` — that's it.
 On `./pelicula up`, the stack:
 
 1. Seeds service configs (URL bases, auth bypass, download paths)
-2. Starts 8 containers behind an nginx reverse proxy on port 7354
+2. Starts 9 containers behind an nginx reverse proxy on port 7354
 3. Waits for VPN connection and port forwarding
 4. Auto-wires qBittorrent as the download client in Sonarr and Radarr
 5. Connects Prowlarr indexers to both Sonarr and Radarr
-6. Watches for newly added content and triggers searches automatically
-7. Enforces auth bypass on every start (services can't lock you out)
+6. Validates completed downloads automatically (FFprobe integrity, sample detection) — bad files are blocklisted and re-searched
+7. Watches for newly added content and triggers searches automatically
+8. Enforces auth bypass on every start (services can't lock you out)
 
 The only manual step is **adding indexers in Prowlarr** — the dashboard warns if none are configured.
 
@@ -39,7 +42,11 @@ The dashboard at `http://localhost:7354/` is the single interface for the whole 
 
 - **Unified search** — searches Sonarr and Radarr in parallel, interleaved results, type filter tabs
 - **One-click add** — add movies or shows and search starts immediately
+- **Watch button** — links directly to Jellyfin when content is ready to stream
 - **Download management** — pause, resume, cancel, or blocklist with reason selection
+- **Processing pipeline** — live validation and transcoding status with progress bars
+- **Notifications** — bell icon with unread count for "content ready" and validation events
+- **Storage monitoring** — per-volume usage bars with growth rate and time-to-full estimates
 - **Service awareness** — search disables with a red/yellow warning when Radarr or Sonarr are down
 - **VPN telemetry** — IP, country, forwarded port, transfer speeds
 - **Service status** — red until confirmed up, green when healthy
@@ -52,14 +59,19 @@ Everything runs behind nginx on one port:
 
 | Path | Service | Purpose |
 |------|---------|---------|
-| `/` | Dashboard | Search, downloads, status |
+| `/` | Dashboard | Search, downloads, processing, status |
+| `/setup` | Setup wizard | Browser-based first-time configuration |
+| `/settings` | Settings | Runtime configuration |
+| `/import` | Import wizard | Browse and import local media files |
 | `/api/pelicula/` | Go middleware | Auto-wiring, search API, download actions |
+| `/api/procula/` | Procula | Media processing pipeline |
 | `/api/vpn/` | Gluetun | VPN telemetry |
 | `/sonarr/` | Sonarr | TV show automation |
 | `/radarr/` | Radarr | Movie automation |
 | `/prowlarr/` | Prowlarr | Indexer management |
 | `/qbt/` | qBittorrent | Torrent client (VPN-only traffic) |
 | `/jellyfin/` | Jellyfin | Media server and streaming |
+| `/jellyseerr/` | Jellyseerr | Multi-user request management (opt-in) |
 
 All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, qBittorrent loses internet (kill-switch).
 
@@ -73,6 +85,7 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
 ./pelicula logs [svc]  # Tail logs (optionally for one service)
 ./pelicula check-vpn   # Verify VPN tunnel and service health
 ./pelicula update      # Pull latest images and recreate
+./pelicula test        # End-to-end integration test (isolated stack, no VPN needed)
 ```
 
 ## Architecture
@@ -83,7 +96,11 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
   nginx reverse proxy
         |
         +-- /                -> Dashboard (static HTML)
+        +-- /setup           -> Browser setup wizard
+        +-- /settings        -> Runtime configuration
+        +-- /import          -> Local media import wizard
         +-- /api/pelicula/   -> Go middleware (search, downloads, auto-wire)
+        +-- /api/procula/    -> Procula (validation, transcoding, storage)
         +-- /api/vpn/        -> Gluetun control API
         +-- /sonarr/         -> Sonarr --+
         +-- /radarr/         -> Radarr --+--> Prowlarr (indexers)
@@ -94,6 +111,7 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
         |                    /downloads -> /movies, /tv
         |
         +-- /jellyfin/       -> Jellyfin (streams your library)
+        +-- /jellyseerr/     -> Jellyseerr (request management, opt-in)
 ```
 
 ## Download Management
@@ -112,6 +130,14 @@ Progress bars are green (active), amber (paused), or blue (seeding).
 ## Missing Content Watcher
 
 A background process checks every 2 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
+
+## Optional Services
+
+**Jellyseerr** — multi-user request management. When enabled, search requests route through Jellyseerr so users can request content without direct access to Sonarr/Radarr. Enable via `./pelicula configure`.
+
+**Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs via `./pelicula configure`.
+
+Both services start only when enabled and run alongside the core stack.
 
 ## Optional Auth
 
