@@ -82,6 +82,7 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 
 func buildFFmpegArgs(input, output string, p *TranscodeProfile) []string {
 	args := []string{
+		"-y", // overwrite output without prompting
 		"-i", input,
 	}
 

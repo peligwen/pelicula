@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -214,24 +215,12 @@ func TestStorageNotificationMessage(t *testing.T) {
 	}
 	// Message must include all folder labels, not duplicate them.
 	for _, label := range labels {
-		if !contains(events[0].Message, label) {
+		if !strings.Contains(events[0].Message, label) {
 			t.Errorf("message missing label %q: %q", label, events[0].Message)
 		}
 	}
-	if contains(events[0].Message, "Downloads is Downloads") {
+	if strings.Contains(events[0].Message, "Downloads is Downloads") {
 		t.Errorf("message contains duplicate label pattern: %q", events[0].Message)
 	}
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && findSubstring(s, sub))
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}

@@ -207,6 +207,19 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.NotifMode = "internal"
 	}
+	// Clamp storage thresholds to [0, 100] and ensure warning < critical.
+	if s.StorageWarningPct < 0 {
+		s.StorageWarningPct = 0
+	}
+	if s.StorageCriticalPct > 100 {
+		s.StorageCriticalPct = 100
+	}
+	if s.StorageWarningPct >= s.StorageCriticalPct {
+		s.StorageWarningPct = s.StorageCriticalPct - 1
+		if s.StorageWarningPct < 0 {
+			s.StorageWarningPct = 0
+		}
+	}
 	if err := SaveSettings(s); err != nil {
 		writeError(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
 		return
