@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -194,5 +196,135 @@ func TestIsAllowedPath(t *testing.T) {
 				t.Errorf("isAllowedPath(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
+	}
+}
+
+// ── Validate integration tests using helper process pattern ─────────────────
+
+func setupFakeFFprobe(t *testing.T) {
+	t.Helper()
+	// Create a shell script that acts as a fake ffprobe.
+	// The GO_TEST_FFPROBE env var controls behavior.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffprobe")
+	content := `#!/bin/sh
+case "$GO_TEST_FFPROBE" in
+success)
+    # The last argument is the file path
+    for last; do true; done
+    cat <<EOJSON
+{"format":{"filename":"$last","duration":"7200.0","size":"500000000"},"streams":[{"codec_type":"video","codec_name":"h264","width":1920,"height":1080},{"codec_type":"audio","codec_name":"aac"}]}
+EOJSON
+    exit 0
+    ;;
+fail)
+    echo "ffprobe error: invalid data" >&2
+    exit 1
+    ;;
+esac
+`
+	os.WriteFile(script, []byte(content), 0755)
+	old := ffprobeCommand
+	ffprobeCommand = script
+	t.Cleanup(func() { ffprobeCommand = old })
+}
+
+func TestValidate_FileNotFound(t *testing.T) {
+	job := &Job{Source: JobSource{Path: "/nonexistent/movie.mkv"}}
+	result, reason := Validate(job)
+	if result.Passed {
+		t.Error("expected validation to fail for missing file")
+	}
+	if result.Checks.Integrity != "fail" {
+		t.Errorf("integrity = %q, want fail", result.Checks.Integrity)
+	}
+	if reason == "" {
+		t.Error("expected non-empty failure reason")
+	}
+}
+
+func TestValidate_FFprobeFails(t *testing.T) {
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "fail")
+
+	// Create a real file so os.Stat passes
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.mkv")
+	os.WriteFile(path, []byte("data"), 0644)
+
+	job := &Job{Source: JobSource{Path: path}}
+	result, reason := Validate(job)
+	if result.Passed {
+		t.Error("expected validation to fail when ffprobe fails")
+	}
+	if result.Checks.Integrity != "fail" {
+		t.Errorf("integrity = %q, want fail", result.Checks.Integrity)
+	}
+	if reason == "" {
+		t.Error("expected non-empty failure reason")
+	}
+}
+
+func TestValidate_SampleTooSmall(t *testing.T) {
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "success")
+
+	// Create a file that's too small (< 50 MB)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiny.mkv")
+	os.WriteFile(path, make([]byte, 1024), 0644) // 1 KB
+
+	job := &Job{Source: JobSource{
+		Path:                   path,
+		ExpectedRuntimeMinutes: 120,
+	}}
+	result, reason := Validate(job)
+	if result.Passed {
+		t.Error("expected validation to fail for tiny file")
+	}
+	if result.Checks.Sample != "fail" {
+		t.Errorf("sample = %q, want fail", result.Checks.Sample)
+	}
+	if reason == "" {
+		t.Error("expected non-empty failure reason")
+	}
+}
+
+func TestValidate_FullPass(t *testing.T) {
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "success")
+
+	// Create a large enough file — must exceed both the 50 MB absolute floor
+	// and the per-minute floor (expectedMinutes * 3 MB).
+	// With 0 expected minutes, only the absolute 50 MB floor applies
+	// and duration check is skipped.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Truncate(60 * 1024 * 1024) // 60 MB
+	f.Close()
+
+	job := &Job{Source: JobSource{
+		Path:                   path,
+		ExpectedRuntimeMinutes: 0,
+	}}
+	result, reason := Validate(job)
+	if !result.Passed {
+		t.Fatalf("expected validation to pass, reason: %s", reason)
+	}
+	if result.Checks.Integrity != "pass" {
+		t.Errorf("integrity = %q, want pass", result.Checks.Integrity)
+	}
+	if result.Checks.Codecs == nil {
+		t.Fatal("codecs should be populated")
+	}
+	if result.Checks.Codecs.Video != "h264" {
+		t.Errorf("video codec = %q, want h264", result.Checks.Codecs.Video)
+	}
+	if result.Checks.Codecs.Audio != "aac" {
+		t.Errorf("audio codec = %q, want aac", result.Checks.Codecs.Audio)
 	}
 }

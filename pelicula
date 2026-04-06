@@ -2041,18 +2041,42 @@ Session\DefaultSavePath=/downloads/'
 
     # ── Stage 3: Configure Procula + Generate Media ───
 
-    # Disable validation (tiny test file fails the 50MB sample floor)
-    # and transcoding (no profile configured, not what we're testing).
+    # Disable validation (tiny test file fails the 50MB sample floor).
+    # Enable transcoding with a test profile that downscales to 180p.
     local settings_resp
     settings_resp="$(curl -sf --max-time 5 \
         -X POST "http://localhost:${test_port}/api/procula/settings" \
         -H "Content-Type: application/json" \
         -H "X-API-Key: ${test_api_key}" \
-        -d '{"validation_enabled":false,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95}' \
+        -d '{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95}' \
         2>/dev/null || echo "error")"
     if [[ "$settings_resp" == "error" ]]; then
         warn "Could not configure Procula settings (non-fatal, defaults will apply)"
     fi
+
+    # Write a transcoding profile that matches h264 and downscales to 180p.
+    # The test video is 320x240 h264, so this profile will match and transcode.
+    local profiles_dir="$test_config_dir/procula/profiles"
+    mkdir -p "$profiles_dir"
+    cat > "$profiles_dir/test-downscale.json" <<'EOPROFILE'
+{
+  "name": "test-downscale",
+  "enabled": true,
+  "description": "E2E test profile — downscale h264 to 180p",
+  "conditions": {
+    "codecs_include": ["h264"]
+  },
+  "output": {
+    "video_codec": "libx264",
+    "video_preset": "ultrafast",
+    "video_crf": 28,
+    "max_height": 180,
+    "audio_codec": "aac",
+    "audio_channels": 2,
+    "suffix": ".test"
+  }
+}
+EOPROFILE
 
     local movie_dir="$test_library_dir/movies/Test Movie (2024)"
     local movie_file="$movie_dir/Test.Movie.2024.mkv"
@@ -2243,6 +2267,120 @@ except Exception:
         echo ""
         warn "Library scan may still be in progress. Jellyfin logs:"
         test_compose logs --tail 30 jellyfin 2>/dev/null || true
+    fi
+
+    # ── Stage 8: Auth & Nginx Routing ────────────────
+
+    info "Enabling authentication and testing routing..."
+
+    # Update .env to enable password auth and restart pelicula-api
+    sed -i.bak 's/PELICULA_AUTH="off"/PELICULA_AUTH="password"/' "$test_env"
+    sed -i.bak 's/PELICULA_PASSWORD="test-only"/PELICULA_PASSWORD="e2e-test-secret"/' "$test_env"
+    test_compose restart pelicula-api >/dev/null 2>&1
+
+    # Wait for pelicula-api to come back up
+    local auth_ready=false
+    for i in $(seq 1 30); do
+        if curl -sf --max-time 2 "http://localhost:${test_port}/api/pelicula/health" >/dev/null 2>&1; then
+            auth_ready=true
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$auth_ready" != "true" ]]; then
+        t_fail "pelicula-api did not restart after auth change"
+    fi
+
+    # Helper: check HTTP status code
+    assert_http() {
+        local expected="$1" url="$2" cookie_file="${3:-}"
+        local curl_opts="-s -o /dev/null -w %{http_code} --max-time 5"
+        local actual
+        if [[ -n "$cookie_file" ]]; then
+            actual="$(curl $curl_opts -b "$cookie_file" "$url" 2>/dev/null)"
+        else
+            actual="$(curl $curl_opts "$url" 2>/dev/null)"
+        fi
+        if [[ "$actual" == "$expected" ]]; then
+            t_pass "HTTP $expected $url"
+        else
+            t_fail "HTTP $actual (expected $expected) $url"
+        fi
+    }
+
+    # Unprotected routes should still return 200
+    assert_http 200 "http://localhost:${test_port}/"
+    assert_http 200 "http://localhost:${test_port}/api/health/"
+
+    # Protected routes without a session should return 302 (redirect to /?login=1)
+    assert_http 302 "http://localhost:${test_port}/settings"
+    assert_http 302 "http://localhost:${test_port}/import"
+    assert_http 302 "http://localhost:${test_port}/qbt/"
+    assert_http 302 "http://localhost:${test_port}/prowlarr"
+    assert_http 302 "http://localhost:${test_port}/sonarr"
+    assert_http 302 "http://localhost:${test_port}/radarr"
+
+    # Login with wrong password should fail
+    local login_fail
+    login_fail="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+        -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"wrong"}' 2>/dev/null)"
+    if [[ "$login_fail" == "401" ]]; then
+        t_pass "Login rejected with wrong password"
+    else
+        t_fail "Wrong password returned $login_fail (expected 401)"
+    fi
+
+    # Login with correct password should succeed and set cookie
+    local cookie_file="$test_dir/cookies.txt"
+    local login_resp
+    login_resp="$(curl -s -w '\n%{http_code}' --max-time 5 \
+        -c "$cookie_file" \
+        -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"e2e-test-secret"}' 2>/dev/null)"
+    local login_code="${login_resp##*$'\n'}"
+    if [[ "$login_code" == "200" ]]; then
+        t_pass "Login succeeded with correct password"
+    else
+        t_fail "Login returned $login_code (expected 200)"
+    fi
+
+    # Protected routes should now succeed with session cookie
+    assert_http 200 "http://localhost:${test_port}/settings" "$cookie_file"
+    assert_http 200 "http://localhost:${test_port}/api/pelicula/status" "$cookie_file"
+
+    # Auth check should return valid:true
+    local check_resp
+    check_resp="$(curl -sf --max-time 5 -b "$cookie_file" \
+        "http://localhost:${test_port}/api/pelicula/auth/check" 2>/dev/null || echo "{}")"
+    if echo "$check_resp" | grep -q '"valid":true'; then
+        t_pass "Auth check returns valid:true with session"
+    else
+        t_fail "Auth check did not return valid:true"
+    fi
+
+    # Logout should clear the session
+    curl -sf --max-time 5 -b "$cookie_file" -c "$cookie_file" \
+        -X POST "http://localhost:${test_port}/api/pelicula/auth/logout" >/dev/null 2>&1
+
+    local check_after
+    check_after="$(curl -sf --max-time 5 -b "$cookie_file" \
+        "http://localhost:${test_port}/api/pelicula/auth/check" 2>/dev/null || echo "{}")"
+    if echo "$check_after" | grep -q '"valid":false'; then
+        t_pass "Session invalidated after logout"
+    else
+        t_fail "Session still valid after logout"
+    fi
+
+    # Verify no-cache headers on dashboard
+    local cache_header
+    cache_header="$(curl -sI --max-time 5 "http://localhost:${test_port}/" 2>/dev/null | grep -i 'cache-control' || echo "")"
+    if echo "$cache_header" | grep -qi 'no-store'; then
+        t_pass "Dashboard has Cache-Control: no-store"
+    else
+        t_fail "Dashboard missing no-store cache header"
     fi
 
     # ── Summary ───────────────────────────────────────

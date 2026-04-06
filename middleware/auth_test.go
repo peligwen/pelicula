@@ -3,9 +3,48 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// newTestAuth creates an Auth for testing without touching the filesystem.
+// The cleanup goroutine is harmless in tests (sleeps 10 min, then GC'd).
+func newTestAuth(mode, password string, users []User) *Auth {
+	a := &Auth{
+		mode:     mode,
+		password: password,
+		sessions: make(map[string]session),
+		failures: make(map[string]*loginAttempts),
+		users:    users,
+	}
+	return a
+}
+
+// insertSession adds a session directly for testing and returns the token.
+func insertSession(a *Auth, username string, role UserRole, expiry time.Time) string {
+	token := "test-token-" + username
+	a.mu.Lock()
+	a.sessions[token] = session{username: username, role: role, expiry: expiry}
+	a.mu.Unlock()
+	return token
+}
+
+func addSessionCookie(r *http.Request, token string) {
+	r.AddCookie(&http.Cookie{Name: "pelicula_session", Value: token})
+}
+
+func parseJSONBody(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatalf("failed to parse JSON body: %v\nbody: %s", err, w.Body.String())
+	}
+	return m
+}
 
 func TestUserRoleAtLeast(t *testing.T) {
 	cases := []struct {
@@ -96,4 +135,407 @@ func TestVerifyPassword(t *testing.T) {
 			t.Error("expected wrong username to fail verification")
 		}
 	})
+}
+
+// ── HandleLogin ─────────────────────────────────────────────────────────
+
+func TestLogin_PasswordMode_Success(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["role"] != "admin" {
+		t.Errorf("role = %v, want admin", m["role"])
+	}
+	cookies := w.Result().Cookies()
+	var found bool
+	for _, c := range cookies {
+		if c.Name == "pelicula_session" {
+			found = true
+			if !c.HttpOnly {
+				t.Error("cookie should be HttpOnly")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected pelicula_session cookie to be set")
+	}
+}
+
+func TestLogin_PasswordMode_WrongPassword(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	body := strings.NewReader(`{"username":"admin","password":"wrong"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestLogin_UsersMode(t *testing.T) {
+	hash := HashPassword("alice", "pass123")
+	users := []User{{Username: "alice", Password: hash, Role: RoleViewer}}
+	a := newTestAuth("users", "", users)
+
+	t.Run("correct credentials", func(t *testing.T) {
+		body := strings.NewReader(`{"username":"alice","password":"pass123"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		w := httptest.NewRecorder()
+		a.HandleLogin(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		m := parseJSONBody(t, w)
+		if m["role"] != "viewer" {
+			t.Errorf("role = %v, want viewer", m["role"])
+		}
+	})
+
+	t.Run("wrong password", func(t *testing.T) {
+		body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		w := httptest.NewRecorder()
+		a.HandleLogin(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+	})
+
+	t.Run("unknown user", func(t *testing.T) {
+		body := strings.NewReader(`{"username":"bob","password":"pass123"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		w := httptest.NewRecorder()
+		a.HandleLogin(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+	})
+}
+
+func TestLogin_AuthOff(t *testing.T) {
+	a := newTestAuth("off", "", nil)
+	body := strings.NewReader(`{"username":"any","password":"any"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["auth"] != false {
+		t.Errorf("auth = %v, want false", m["auth"])
+	}
+}
+
+func TestLogin_MethodNotAllowed(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/login", nil)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestLogin_BadJSON(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	body := strings.NewReader(`not json`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestLogin_RateLimited(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	ip := "1.2.3.4"
+	for i := 0; i < 5; i++ {
+		a.recordFailure(ip)
+	}
+
+	t.Run("blocked IP", func(t *testing.T) {
+		body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		req.Header.Set("X-Real-IP", ip)
+		w := httptest.NewRecorder()
+		a.HandleLogin(w, req)
+		if w.Code != http.StatusTooManyRequests {
+			t.Fatalf("status = %d, want 429", w.Code)
+		}
+	})
+
+	t.Run("different IP not affected", func(t *testing.T) {
+		body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		req.Header.Set("X-Real-IP", "5.6.7.8")
+		w := httptest.NewRecorder()
+		a.HandleLogin(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+	})
+}
+
+// ── HandleLogout ────────────────────────────────────────────────────────
+
+func TestLogout_ClearsSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	token := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/logout", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	a.HandleLogout(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	// Cookie should be deleted
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "pelicula_session" && c.MaxAge != -1 {
+			t.Errorf("MaxAge = %d, want -1", c.MaxAge)
+		}
+	}
+	// Session should be removed from map
+	a.mu.RLock()
+	_, exists := a.sessions[token]
+	a.mu.RUnlock()
+	if exists {
+		t.Error("session should have been removed from map")
+	}
+}
+
+func TestLogout_NoCookie(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/logout", nil)
+	w := httptest.NewRecorder()
+	a.HandleLogout(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (idempotent)", w.Code)
+	}
+}
+
+func TestLogout_MethodNotAllowed(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/logout", nil)
+	w := httptest.NewRecorder()
+	a.HandleLogout(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", w.Code)
+	}
+}
+
+// ── HandleCheck ─────────────────────────────────────────────────────────
+
+func TestCheck_AuthOff(t *testing.T) {
+	a := newTestAuth("off", "", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["auth"] != false {
+		t.Errorf("auth = %v, want false", m["auth"])
+	}
+	if m["valid"] != true {
+		t.Errorf("valid = %v, want true", m["valid"])
+	}
+}
+
+func TestCheck_ValidSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	token := insertSession(a, "alice", RoleManager, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["valid"] != true {
+		t.Errorf("valid = %v, want true", m["valid"])
+	}
+	if m["username"] != "alice" {
+		t.Errorf("username = %v, want alice", m["username"])
+	}
+	if m["role"] != "manager" {
+		t.Errorf("role = %v, want manager", m["role"])
+	}
+}
+
+func TestCheck_NoSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+	// Without ?nginx=1, returns 200 with valid:false (for dashboard JS)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["valid"] != false {
+		t.Errorf("valid = %v, want false", m["valid"])
+	}
+}
+
+func TestCheck_NginxSubrequest_NoSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+	// With ?nginx=1, must return 401 so nginx triggers @login_redirect
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestCheck_ExpiredSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(-time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (expired session)", w.Code)
+	}
+}
+
+// ── Guard middleware ────────────────────────────────────────────────────
+
+func TestGuard_AuthOff(t *testing.T) {
+	a := newTestAuth("off", "", nil)
+	called := false
+	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := a.Guard(dummy)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if !called {
+		t.Error("handler should be called when auth is off")
+	}
+}
+
+func TestGuard_NoSession(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := a.Guard(dummy)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestGuard_RoleMatrix(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	cases := []struct {
+		name    string
+		role    UserRole
+		guard   func(http.Handler) http.Handler
+		wantOK  bool
+	}{
+		{"viewer+Guard", RoleViewer, a.Guard, true},
+		{"viewer+GuardManager", RoleViewer, a.GuardManager, false},
+		{"viewer+GuardAdmin", RoleViewer, a.GuardAdmin, false},
+		{"manager+Guard", RoleManager, a.Guard, true},
+		{"manager+GuardManager", RoleManager, a.GuardManager, true},
+		{"manager+GuardAdmin", RoleManager, a.GuardAdmin, false},
+		{"admin+Guard", RoleAdmin, a.Guard, true},
+		{"admin+GuardManager", RoleAdmin, a.GuardManager, true},
+		{"admin+GuardAdmin", RoleAdmin, a.GuardAdmin, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			token := insertSession(a, c.name, c.role, time.Now().Add(time.Hour))
+			handler := c.guard(dummy)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			addSessionCookie(req, token)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if c.wantOK && w.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200", w.Code)
+			}
+			if !c.wantOK && w.Code == http.StatusOK {
+				t.Errorf("status = 200, want 403")
+			}
+		})
+	}
+}
+
+// ── Session details ─────────────────────────────────────────────────────
+
+func TestSession_TokenFormat(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "pelicula_session" {
+			if len(c.Value) != 64 {
+				t.Errorf("token length = %d, want 64", len(c.Value))
+			}
+			if _, err := hex.DecodeString(c.Value); err != nil {
+				t.Errorf("token is not valid hex: %v", err)
+			}
+			return
+		}
+	}
+	t.Error("no pelicula_session cookie found")
+}
+
+func TestSession_CookieAttributes(t *testing.T) {
+	a := newTestAuth("password", "secret", nil)
+	body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "pelicula_session" {
+			if c.Path != "/" {
+				t.Errorf("Path = %q, want /", c.Path)
+			}
+			if !c.HttpOnly {
+				t.Error("HttpOnly should be true")
+			}
+			if c.SameSite != http.SameSiteLaxMode {
+				t.Errorf("SameSite = %v, want Lax", c.SameSite)
+			}
+			// Expiry should be ~24h from now
+			if time.Until(c.Expires) < 23*time.Hour {
+				t.Errorf("cookie expires too soon: %v", c.Expires)
+			}
+			return
+		}
+	}
+	t.Error("no pelicula_session cookie found")
 }

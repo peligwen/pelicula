@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	reDuration = regexp.MustCompile(`Duration:\s+(\d+):(\d+):([\d.]+)`)
-	reTime     = regexp.MustCompile(`time=\s*(\d+):(\d+):([\d.]+)`)
+	reDuration    = regexp.MustCompile(`Duration:\s+(\d+):(\d+):([\d.]+)`)
+	reTime        = regexp.MustCompile(`time=\s*(\d+):(\d+):([\d.]+)`)
+	ffmpegCommand = "ffmpeg"
 )
 
 // Process runs FFmpeg to transcode the job's source file using the given profile.
@@ -27,24 +28,12 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 		return "", fmt.Errorf("no input path")
 	}
 
-	// Build output path: /processing/<basename><suffix>.mkv
-	// Append a counter suffix if the target already exists to avoid silent overwrites.
-	base := strings.TrimSuffix(filepath.Base(input), filepath.Ext(input))
-	outputPath := filepath.Join("/processing", base+profile.Output.Suffix+".mkv")
-	if _, err := os.Stat(outputPath); err == nil {
-		for i := 2; ; i++ {
-			candidate := filepath.Join("/processing", fmt.Sprintf("%s%s.%d.mkv", base, profile.Output.Suffix, i))
-			if _, err := os.Stat(candidate); os.IsNotExist(err) {
-				outputPath = candidate
-				break
-			}
-		}
-	}
+	outputPath := resolveOutputPath(input, profile.Output.Suffix)
 
 	args := buildFFmpegArgs(input, outputPath, profile)
 	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", outputPath, "profile", profile.Name)
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, ffmpegCommand, args...)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", fmt.Errorf("stderr pipe: %w", err)
@@ -78,6 +67,23 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 
 	slog.Info("transcoding complete", "component", "process", "output", outputPath)
 	return outputPath, nil
+}
+
+// resolveOutputPath computes the output path for a transcode job,
+// appending a counter suffix to avoid overwriting existing files.
+func resolveOutputPath(input, suffix string) string {
+	base := strings.TrimSuffix(filepath.Base(input), filepath.Ext(input))
+	outputPath := filepath.Join("/processing", base+suffix+".mkv")
+	if _, err := os.Stat(outputPath); err == nil {
+		for i := 2; ; i++ {
+			candidate := filepath.Join("/processing", fmt.Sprintf("%s%s.%d.mkv", base, suffix, i))
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				outputPath = candidate
+				break
+			}
+		}
+	}
+	return outputPath
 }
 
 func buildFFmpegArgs(input, output string, p *TranscodeProfile) []string {

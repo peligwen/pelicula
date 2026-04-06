@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var ffprobeCommand = "ffprobe"
+
 // ffprobeOutput is the subset of ffprobe's JSON output we care about.
 type ffprobeOutput struct {
 	Format  ffprobeFormat   `json:"format"`
@@ -96,7 +98,7 @@ func runFFprobe(path string) (*ffprobeOutput, error) {
 		"-show_streams",
 		path,
 	}
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := exec.CommandContext(ctx, ffprobeCommand, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
