@@ -1156,8 +1156,6 @@ Session\DefaultSavePath=/downloads/'
     echo "  qBittorrent     http://localhost:${port}/qbt/"
     echo "  Jellyfin        http://localhost:${port}/jellyfin/"
     echo "  Procula API     http://localhost:${port}/api/procula/status"
-    echo ""
-    echo -e "Get qBittorrent temp password: ${BOLD}./pelicula logs qbittorrent${NC} (look for 'temporary password')"
 }
 
 cmd_down() {
