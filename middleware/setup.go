@@ -69,20 +69,12 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// CSRF: reject requests from unexpected origins
-	if origin := r.Header.Get("Origin"); origin != "" {
-		// Allow same-host origins only (any port on localhost/127.0.0.1/LAN IP)
-		if !strings.Contains(origin, "localhost") &&
-			!strings.Contains(origin, "127.0.0.1") &&
-			!strings.HasPrefix(origin, "http://192.168.") &&
-			!strings.HasPrefix(origin, "http://10.") &&
-			!strings.HasPrefix(origin, "http://172.") {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
+	if !isLocalOrigin(r.Header.Get("Origin")) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
 	}
 
 	// Refuse if .env already exists
-	envPath := "/project/.env"
 	if _, err := os.Stat(envPath); err == nil {
 		http.Error(w, "already configured", http.StatusConflict)
 		return
