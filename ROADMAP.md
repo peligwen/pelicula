@@ -57,7 +57,7 @@ Multi-user request management. Dashboard search wraps Jellyseerr API.
 
 - [x] Add `jellyseerr` service to `docker-compose.yml` (Docker Compose profile, opt-in)
 - [x] Add nginx proxy at `/jellyseerr`
-- [x] Implement `wireJellyseerr` in `middleware/autowire.go`: connect to Jellyfin auth backend, add Radarr+Sonarr
+- [x] Implement `wireJellyseerr` in `middleware/autowire.go`: complete first-run wizard via API, connect to Jellyfin auth backend, add Radarr+Sonarr
 - [x] `middleware/search.go`: when `JELLYSEERR_ENABLED=true`, route add requests through Jellyseerr's `/api/v1/request`; fall back to direct *arr calls when disabled
 - [x] Add Jellyseerr to `middleware/services.go` health checks
 - [x] Add Jellyseerr card to dashboard services grid

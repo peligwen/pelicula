@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 )
 
@@ -69,12 +70,18 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		return fmt.Errorf("set startup config: %w", err)
 	}
 
-	// Step 2: create admin user with no password (matches stack's no-auth-by-default).
-	// Warning: if you expose Jellyfin beyond the Docker network, set a password via the UI.
-	slog.Info("creating Jellyfin admin user with no password — set one in the UI if Jellyfin is publicly accessible", "component", "autowire")
+	// Step 2: create admin user. Uses JELLYFIN_PASSWORD if set; defaults to no password.
+	// Note: Jellyfin 10.11+ requires a non-empty password via this endpoint.
+	// Set JELLYFIN_PASSWORD in .env if the default empty password is rejected.
+	pass := os.Getenv("JELLYFIN_PASSWORD")
+	if pass == "" {
+		slog.Info("creating Jellyfin admin user with no password — set JELLYFIN_PASSWORD in .env for Jellyfin 10.11+", "component", "autowire")
+	} else {
+		slog.Info("creating Jellyfin admin user with configured password", "component", "autowire")
+	}
 	_, err = jellyfinPost(s, "/Startup/User", "", map[string]any{
 		"Name":     "admin",
-		"Password": "",
+		"Password": pass,
 	})
 	if err != nil {
 		return fmt.Errorf("create admin user: %w", err)
@@ -93,7 +100,7 @@ func completeJellyfinWizard(s *ServiceClients) error {
 func jellyfinAuth(s *ServiceClients) (string, error) {
 	data, err := jellyfinPost(s, "/Users/AuthenticateByName", "", map[string]any{
 		"Username": "admin",
-		"Pw":       "",
+		"Pw":       os.Getenv("JELLYFIN_PASSWORD"),
 	})
 	if err != nil {
 		return "", err

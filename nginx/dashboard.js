@@ -83,6 +83,10 @@ async function checkStatus() {
         const jsCard = document.getElementById('service-jellyseerr');
         if (jsCard) {
             if (data.jellyseerr_enabled) {
+                // Jellyseerr doesn't support sub-path hosting, so link directly to its port.
+                const jsPort = data.jellyseerr_port || 5055;
+                jsCard.href = `http://${window.location.hostname}:${jsPort}`;
+                jsCard.dataset.check = `http://${window.location.hostname}:${jsPort}/api/v1/status`;
                 jsCard.classList.remove('hidden');
             } else {
                 jsCard.classList.add('hidden');

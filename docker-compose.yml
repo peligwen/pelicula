@@ -180,12 +180,16 @@ services:
       - TZ=${TZ}
       - PELICULA_AUTH=${PELICULA_AUTH:-true}
       - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
+      - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
+      - JELLYSEERR_ENABLED=${JELLYSEERR_ENABLED:-false}
+      - JELLYSEERR_PORT=${JELLYSEERR_PORT:-5055}
     volumes:
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
       - ${CONFIG_DIR}/radarr:/config/radarr:ro
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
+      - ${CONFIG_DIR}/jellyseerr:/config/jellyseerr:ro
     depends_on:
       - sonarr
       - radarr
@@ -210,6 +214,8 @@ services:
     environment:
       - TZ=${TZ}
       - LOG_LEVEL=info
+    ports:
+      - "${JELLYSEERR_PORT:-5055}:5055"
     volumes:
       - ${CONFIG_DIR}/jellyseerr:/app/config
     healthcheck:

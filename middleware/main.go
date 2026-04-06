@@ -113,12 +113,17 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	jsPort := os.Getenv("JELLYSEERR_PORT")
+	if jsPort == "" {
+		jsPort = "5055"
+	}
 	status := map[string]any{
 		"status":             "ok",
 		"services":           services.CheckHealth(),
 		"wired":              services.IsWired(),
 		"indexers":           indexerCount,
 		"jellyseerr_enabled": os.Getenv("JELLYSEERR_ENABLED") == "true",
+		"jellyseerr_port":    jsPort,
 	}
 	writeJSON(w, status)
 }
