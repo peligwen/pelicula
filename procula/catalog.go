@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
+
+var feedMu sync.Mutex
 
 // NotificationEvent is an entry in the dashboard notification feed.
 type NotificationEvent struct {
@@ -87,6 +90,14 @@ func buildEvent(job *Job, eventType, message string) NotificationEvent {
 
 func appendToFeed(configDir string, event NotificationEvent) {
 	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
+
+	feedMu.Lock()
+	defer feedMu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(feedPath), 0755); err != nil {
+		slog.Error("failed to create feed directory", "component", "catalog", "error", err)
+		return
+	}
 
 	var events []NotificationEvent
 	if data, err := os.ReadFile(feedPath); err == nil {

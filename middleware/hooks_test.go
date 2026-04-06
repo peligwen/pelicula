@@ -1,8 +1,109 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
+
+// newFakeProcula starts a test HTTP server that serves fixed JSON on a path.
+func newFakeProcula(t *testing.T, path, body string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	})
+	return httptest.NewServer(mux)
+}
+
+func TestHandleStorageProxy(t *testing.T) {
+	fake := newFakeProcula(t, "/api/procula/storage", `{"volumes":[],"timestamp":"2026-04-06T00:00:00Z"}`)
+	defer fake.Close()
+	t.Setenv("PROCULA_URL", fake.URL)
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
+	w := httptest.NewRecorder()
+	handleStorageProxy(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if _, ok := body["volumes"]; !ok {
+		t.Error("response missing 'volumes' key")
+	}
+}
+
+func TestHandleUpdatesProxy(t *testing.T) {
+	fake := newFakeProcula(t, "/api/procula/updates", `{"current_version":"dev","update_available":false}`)
+	defer fake.Close()
+	t.Setenv("PROCULA_URL", fake.URL)
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)
+	w := httptest.NewRecorder()
+	handleUpdatesProxy(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if body["update_available"] != false {
+		t.Errorf("update_available = %v, want false", body["update_available"])
+	}
+}
+
+func TestHandleStorageProxyMethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/storage", nil)
+	w := httptest.NewRecorder()
+	handleStorageProxy(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleUpdatesProxyMethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/updates", nil)
+	w := httptest.NewRecorder()
+	handleUpdatesProxy(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleStorageProxyBadGateway(t *testing.T) {
+	// Point PROCULA_URL at a port with nothing listening.
+	t.Setenv("PROCULA_URL", "http://127.0.0.1:1")
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
+	w := httptest.NewRecorder()
+	handleStorageProxy(w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", w.Code)
+	}
+}
+
+func TestHandleUpdatesProxyBadGateway(t *testing.T) {
+	t.Setenv("PROCULA_URL", "http://127.0.0.1:1")
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)
+	w := httptest.NewRecorder()
+	handleUpdatesProxy(w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", w.Code)
+	}
+}
 
 func TestIsAllowedWebhookPath(t *testing.T) {
 	cases := []struct {
