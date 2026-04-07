@@ -227,6 +227,78 @@ func TestIsAllowedJobPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeLangCode(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"eng", "en"},
+		{"spa", "es"},
+		{"fre", "fr"},
+		{"fra", "fr"},
+		{"en", "en"},
+		{"es", "es"},
+		{"en-US", "en"},
+		{"ENG", "en"},
+		{"unknown", "unknown"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			got := normalizeLangCode(c.in)
+			if got != c.want {
+				t.Errorf("normalizeLangCode(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCheckMissingSubtitles(t *testing.T) {
+	t.Run("env unset — no check", func(t *testing.T) {
+		t.Setenv("PELICULA_SUB_LANGS", "")
+		got := checkMissingSubtitles([]string{"eng", "spa"})
+		if got != nil {
+			t.Errorf("expected nil when env unset, got %v", got)
+		}
+	})
+
+	t.Run("all configured langs present (3-letter)", func(t *testing.T) {
+		t.Setenv("PELICULA_SUB_LANGS", "en,es")
+		got := checkMissingSubtitles([]string{"eng", "spa"})
+		if len(got) != 0 {
+			t.Errorf("expected no missing, got %v", got)
+		}
+	})
+
+	t.Run("all configured langs present (2-letter)", func(t *testing.T) {
+		t.Setenv("PELICULA_SUB_LANGS", "en,es")
+		got := checkMissingSubtitles([]string{"en", "es"})
+		if len(got) != 0 {
+			t.Errorf("expected no missing, got %v", got)
+		}
+	})
+
+	t.Run("one lang missing", func(t *testing.T) {
+		t.Setenv("PELICULA_SUB_LANGS", "en,es")
+		got := checkMissingSubtitles([]string{"eng"})
+		if len(got) != 1 || got[0] != "es" {
+			t.Errorf("expected [es], got %v", got)
+		}
+	})
+
+	t.Run("all langs missing — no embedded subs", func(t *testing.T) {
+		t.Setenv("PELICULA_SUB_LANGS", "en,fr")
+		got := checkMissingSubtitles(nil)
+		if len(got) != 2 {
+			t.Errorf("expected [en fr], got %v", got)
+		}
+	})
+
+	t.Run("extra embedded langs don't cause false missing", func(t *testing.T) {
+		t.Setenv("PELICULA_SUB_LANGS", "en")
+		got := checkMissingSubtitles([]string{"eng", "spa", "fra"})
+		if len(got) != 0 {
+			t.Errorf("expected no missing, got %v", got)
+		}
+	})
+}
+
 // ── Validate integration tests using helper process pattern ─────────────────
 
 func setupFakeFFprobe(t *testing.T) {

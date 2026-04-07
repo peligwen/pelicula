@@ -300,6 +300,7 @@ setup_dirs() {
         "$config_dir/radarr" \
         "$config_dir/jellyfin" \
         "$config_dir/jellyseerr" \
+        "$config_dir/bazarr" \
         "$config_dir/procula/jobs" \
         "$config_dir/procula/profiles" \
         "$config_dir/pelicula" \
@@ -1110,6 +1111,12 @@ cmd_up() {
 
     seed_config "$CONFIG_DIR/jellyfin/network.xml" \
         '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>'
+    # Seed Bazarr base_url so the UI loads correctly behind the /bazarr reverse-proxy prefix
+    mkdir -p "$CONFIG_DIR/bazarr/config"
+    seed_config "$CONFIG_DIR/bazarr/config/config.ini" \
+'[general]
+base_url=/bazarr
+'
     # Seed qBittorrent config: auth bypass for Docker subnet so *arr apps can connect
     mkdir -p "$CONFIG_DIR/qbittorrent/qBittorrent"
     seed_config "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" \
@@ -1156,6 +1163,7 @@ Session\DefaultSavePath=/downloads/'
     echo "  Prowlarr        http://localhost:${port}/prowlarr/"
     echo "  qBittorrent     http://localhost:${port}/qbt/"
     echo "  Jellyfin        http://localhost:${port}/jellyfin/"
+    echo "  Bazarr          http://localhost:${port}/bazarr/"
     echo "  Procula API     http://localhost:${port}/api/procula/status"
     if [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]]; then
         local js_port
@@ -1973,6 +1981,11 @@ EOF
         '<Config><UrlBase>/prowlarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
     seed_config "$test_config_dir/jellyfin/network.xml" \
         '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>'
+    mkdir -p "$test_config_dir/bazarr/config"
+    seed_config "$test_config_dir/bazarr/config/config.ini" \
+'[general]
+base_url=/bazarr
+'
     mkdir -p "$test_config_dir/qbittorrent/qBittorrent"
     seed_config "$test_config_dir/qbittorrent/qBittorrent/qBittorrent.conf" \
 '[Preferences]

@@ -363,6 +363,7 @@ async function checkServices() {
             else if (href.includes('qbt')) name = 'qbittorrent';
             else if (href.includes('jellyfin')) name = 'jellyfin';
             else if (href.includes('procula')) name = 'procula';
+            else if (href.includes('bazarr')) name = 'bazarr';
             else if (href.includes('jellyseerr')) name = 'jellyseerr';
             dot.className = 'status-dot ' + (svcMap[name] === 'up' ? 'up' : 'down');
         });
@@ -712,11 +713,15 @@ function renderProcessing(data) {
         const retryBtn = j.state === 'failed'
             ? `<button class="dl-btn resume" title="Retry" data-job-id="${esc(j.id)}" onclick="retryFromBtn(this)">&#8635;</button>`
             : '';
+        const missingSubsBadge = (j.missing_subs && j.missing_subs.length)
+            ? `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`
+            : '';
         return `<div class="download-item">
             <div class="download-header">
                 <div class="download-name">${esc(j.source ? j.source.title : j.id)}</div>
                 <div class="download-actions">
                     <span class="proc-badge ${stateClass}">${stageName}</span>
+                    ${missingSubsBadge}
                     ${retryBtn}
                 </div>
             </div>

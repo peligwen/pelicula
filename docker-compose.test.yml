@@ -60,5 +60,8 @@ services:
   pelicula-api:
     container_name: pelicula-test-api
 
+  bazarr:
+    container_name: pelicula-test-bazarr
+
   nginx:
     container_name: pelicula-test-nginx

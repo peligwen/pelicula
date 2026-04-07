@@ -65,16 +65,17 @@ type ValidationResult struct {
 }
 
 type Job struct {
-	ID         string            `json:"id"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
-	State      JobState          `json:"state"`
-	Stage      JobStage          `json:"stage"`
-	Progress   float64           `json:"progress"`
-	Source     JobSource         `json:"source"`
-	Validation *ValidationResult `json:"validation,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	RetryCount int               `json:"retry_count"`
+	ID          string            `json:"id"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	State       JobState          `json:"state"`
+	Stage       JobStage          `json:"stage"`
+	Progress    float64           `json:"progress"`
+	Source      JobSource         `json:"source"`
+	Validation  *ValidationResult `json:"validation,omitempty"`
+	MissingSubs []string          `json:"missing_subs,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	RetryCount  int               `json:"retry_count"`
 }
 
 type Queue struct {

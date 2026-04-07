@@ -35,6 +35,7 @@ type SettingsResponse struct {
 	TranscodingEnabled   string `json:"transcoding_enabled"`
 	NotificationsEnabled string `json:"notifications_enabled"`
 	NotificationsMode    string `json:"notifications_mode"`
+	SubLangs             string `json:"sub_langs"`
 	TZ                   string `json:"tz"`
 	PUID                 string `json:"puid"`
 	PGID                 string `json:"pgid"`
@@ -84,6 +85,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"JELLYSEERR_ENABLED", "TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
+		"PELICULA_SUB_LANGS",
 	}
 	inOrder := make(map[string]bool, len(order))
 	for _, k := range order {
@@ -165,6 +167,7 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		TranscodingEnabled:   vars["TRANSCODING_ENABLED"],
 		NotificationsEnabled: vars["NOTIFICATIONS_ENABLED"],
 		NotificationsMode:    vars["NOTIFICATIONS_MODE"],
+		SubLangs:             vars["PELICULA_SUB_LANGS"],
 		TZ:                   vars["TZ"],
 		PUID:                 vars["PUID"],
 		PGID:                 vars["PGID"],
@@ -195,6 +198,7 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		{"work_dir", req.WorkDir},
 		{"port", req.Port},
 		{"tz", req.TZ},
+		{"sub_langs", req.SubLangs},
 	}
 	for _, c := range toCheck {
 		if c.val != "" && strings.ContainsAny(c.val, "\"\n\r") {
@@ -287,6 +291,9 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NotificationsMode != "" {
 		vars["NOTIFICATIONS_MODE"] = req.NotificationsMode
+	}
+	if req.SubLangs != "" {
+		vars["PELICULA_SUB_LANGS"] = req.SubLangs
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
@@ -399,6 +406,7 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
+		"PELICULA_SUB_LANGS":    "en",
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {

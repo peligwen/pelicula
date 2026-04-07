@@ -143,6 +143,7 @@ body {
 .proc-active { background: #1a1030; color: #c8a2ff; border: 1px solid #3a2a60; }
 .proc-done { background: #0e2016; color: #7dda93; border: 1px solid #1a4030; }
 .proc-failed { background: #1a0808; color: #f87171; border: 1px solid #4a1a1a; }
+.proc-warn { background: #1a1200; color: #f0c060; border: 1px solid #4a3800; }
 .download-bar.proc-bar-active { background: #c8a2ff; }
 .download-bar.proc-bar-done { background: #7dda93; }
 .download-bar.proc-bar-failed { background: #f87171; }

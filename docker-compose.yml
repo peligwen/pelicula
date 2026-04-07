@@ -157,6 +157,7 @@ services:
       - CONFIG_DIR=/config
       - PELICULA_API_URL=http://pelicula-api:8181
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
+      - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
     volumes:
       - ${CONFIG_DIR}/procula:/config
       - ${WORK_DIR}/downloads:/downloads:ro
@@ -169,6 +170,28 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ═══════════════════════════════════════════════════
+  # Subtitles — downloads subtitles for movies & TV
+  # ═══════════════════════════════════════════════════
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_DIR}/bazarr:/config
+      - ${LIBRARY_DIR}/movies:/movies
+      - ${LIBRARY_DIR}/tv:/tv
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:6767/bazarr/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
   # Middleware — auto-wiring, search, downloads API
@@ -184,6 +207,7 @@ services:
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
       - JELLYSEERR_ENABLED=${JELLYSEERR_ENABLED:-false}
       - JELLYSEERR_PORT=${JELLYSEERR_PORT:-5055}
+      - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
     volumes:
       - ./.env:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
@@ -191,6 +215,7 @@ services:
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
       - ${CONFIG_DIR}/jellyseerr:/config/jellyseerr:ro
+      - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${LIBRARY_DIR}/movies:/movies
       - ${LIBRARY_DIR}/tv:/tv
       - ${WORK_DIR}/downloads:/downloads:ro
@@ -273,6 +298,7 @@ services:
       - jellyfin
       - pelicula-api
       - procula
+      - bazarr
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:80 || exit 1"]
       interval: 30s

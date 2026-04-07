@@ -172,6 +172,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
+		"PELICULA_SUB_LANGS":    "en",
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {

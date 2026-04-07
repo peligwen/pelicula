@@ -17,10 +17,11 @@ type ServiceClients struct {
 	configDir string
 	client    *http.Client
 
-	SonarrKey    string
-	RadarrKey    string
-	ProwlarrKey  string
+	SonarrKey     string
+	RadarrKey     string
+	ProwlarrKey   string
 	JellyseerrKey string
+	BazarrKey     string
 
 	wired bool
 	mu    sync.RWMutex
@@ -225,6 +226,7 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 		"qbittorrent": "http://gluetun:8080/",
 		"jellyfin":    "http://jellyfin:8096/jellyfin/health",
 		"procula":     "http://procula:8282/ping",
+		"bazarr":      "http://bazarr:6767/bazarr/",
 	}
 	if os.Getenv("JELLYSEERR_ENABLED") == "true" {
 		checks["jellyseerr"] = "http://jellyseerr:5055/api/v1/status"

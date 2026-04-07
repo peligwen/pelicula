@@ -16,6 +16,7 @@ const (
 	sonarrURL   = "http://sonarr:8989/sonarr"
 	radarrURL   = "http://radarr:7878/radarr"
 	prowlarrURL = "http://prowlarr:9696/prowlarr"
+	bazarrURL   = "http://bazarr:6767/bazarr"
 )
 
 func AutoWire(s *ServiceClients) error {
@@ -51,6 +52,9 @@ func AutoWire(s *ServiceClients) error {
 	// Auto-configure Jellyfin: complete wizard, add media libraries
 	wireJellyfin(s)
 
+	// Wire Bazarr: connect Sonarr/Radarr and set subtitle languages
+	wireBazarr(s)
+
 	// Wire Jellyseerr if enabled (opt-in via JELLYSEERR_ENABLED=true)
 	wireJellyseerr(s)
 
@@ -75,6 +79,7 @@ func waitForServices(s *ServiceClients) error {
 	if os.Getenv("JELLYSEERR_ENABLED") == "true" {
 		endpoints["jellyseerr"] = "http://jellyseerr:5055/api/v1/status"
 	}
+	endpoints["bazarr"] = bazarrURL + "/api/system/status"
 
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
@@ -232,6 +237,184 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 		return
 	}
 	slog.Info("added Procula import webhook", "component", "autowire", "service", name, "url", hookURL)
+}
+
+// ── Bazarr ─────────────────────────────────────────────────────────────────
+
+func wireBazarr(s *ServiceClients) {
+	slog.Info("checking Bazarr", "component", "autowire")
+
+	apiKey, err := readBazarrAPIKey(s.configDir)
+	if err != nil {
+		slog.Warn("Bazarr API key not available yet", "component", "autowire", "error", err)
+		return
+	}
+
+	s.mu.Lock()
+	s.BazarrKey = apiKey
+	s.mu.Unlock()
+
+	// Check current settings to avoid duplicate wiring
+	data, err := bzGet(s, "/api/system/settings")
+	if err != nil {
+		slog.Warn("Bazarr settings not reachable", "component", "autowire", "error", err)
+		return
+	}
+
+	var current map[string]any
+	if json.Unmarshal(data, &current) != nil {
+		slog.Warn("Bazarr settings unreadable", "component", "autowire")
+		return
+	}
+
+	s.mu.RLock()
+	sonarrKey := s.SonarrKey
+	radarrKey := s.RadarrKey
+	s.mu.RUnlock()
+
+	// Wire Sonarr into Bazarr if not already configured
+	if sonarrSec, ok := current["sonarr"].(map[string]any); !ok || sonarrSec["enabled"] != true {
+		_, err = bzPost(s, "/api/system/settings", map[string]any{
+			"sonarr": map[string]any{
+				"enabled":        true,
+				"ip":             "sonarr",
+				"port":           8989,
+				"apikey":         sonarrKey,
+				"base_url":       "/sonarr",
+				"ssl":            false,
+				"only_monitored": false,
+				"series_sync":    60,
+				"full_update":    "Startup",
+			},
+		})
+		if err != nil {
+			slog.Error("failed to wire Sonarr into Bazarr", "component", "autowire", "error", err)
+		} else {
+			slog.Info("wired Sonarr into Bazarr", "component", "autowire")
+		}
+	} else {
+		slog.Info("Bazarr Sonarr already configured, skipping", "component", "autowire")
+	}
+
+	// Wire Radarr into Bazarr if not already configured
+	if radarrSec, ok := current["radarr"].(map[string]any); !ok || radarrSec["enabled"] != true {
+		_, err = bzPost(s, "/api/system/settings", map[string]any{
+			"radarr": map[string]any{
+				"enabled":        true,
+				"ip":             "radarr",
+				"port":           7878,
+				"apikey":         radarrKey,
+				"base_url":       "/radarr",
+				"ssl":            false,
+				"only_monitored": false,
+				"movies_sync":    60,
+				"full_update":    "Startup",
+			},
+		})
+		if err != nil {
+			slog.Error("failed to wire Radarr into Bazarr", "component", "autowire", "error", err)
+		} else {
+			slog.Info("wired Radarr into Bazarr", "component", "autowire")
+		}
+	} else {
+		slog.Info("Bazarr Radarr already configured, skipping", "component", "autowire")
+	}
+
+	// Create language profile from PELICULA_SUB_LANGS if any configured
+	wireBazarrLanguageProfile(s)
+
+	slog.Info("Bazarr wired", "component", "autowire")
+}
+
+func wireBazarrLanguageProfile(s *ServiceClients) {
+	subLangs := strings.TrimSpace(os.Getenv("PELICULA_SUB_LANGS"))
+	if subLangs == "" {
+		return
+	}
+
+	// Check existing profiles
+	data, err := bzGet(s, "/api/languagesprofiles")
+	if err != nil {
+		slog.Warn("can't check Bazarr language profiles", "component", "autowire", "error", err)
+		return
+	}
+
+	var profiles []map[string]any
+	if json.Unmarshal(data, &profiles) == nil {
+		for _, p := range profiles {
+			if name, _ := p["name"].(string); name == "Pelicula" {
+				slog.Info("Bazarr language profile already exists, skipping", "component", "autowire")
+				return
+			}
+		}
+	}
+
+	// Build language list for the profile
+	langs := []map[string]any{}
+	for _, code := range strings.Split(subLangs, ",") {
+		code = strings.ToLower(strings.TrimSpace(code))
+		if code == "" {
+			continue
+		}
+		langs = append(langs, map[string]any{
+			"language": code,
+			"hi":       "False",
+			"forced":   "False",
+		})
+	}
+	if len(langs) == 0 {
+		return
+	}
+
+	_, err = bzPost(s, "/api/languagesprofiles", map[string]any{
+		"name":           "Pelicula",
+		"languages":      langs,
+		"originalFormat": false,
+		"cutoff":         nil,
+	})
+	if err != nil {
+		slog.Error("failed to create Bazarr language profile", "component", "autowire", "error", err)
+		return
+	}
+	slog.Info("created Bazarr language profile", "component", "autowire", "langs", subLangs)
+}
+
+// readBazarrAPIKey reads the API key from Bazarr's config.ini.
+// Bazarr generates this key on first startup. The file is mounted read-only
+// at /config/bazarr/config/config.ini inside the middleware container.
+func readBazarrAPIKey(configDir string) (string, error) {
+	path := configDir + "/bazarr/config/config.ini"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read bazarr config.ini: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "apikey") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[1])
+				if key != "" {
+					return key, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("no apikey found in bazarr config.ini")
+}
+
+func bzGet(s *ServiceClients, path string) ([]byte, error) {
+	s.mu.RLock()
+	key := s.BazarrKey
+	s.mu.RUnlock()
+	return s.arrDo("GET", bazarrURL, key, path, nil)
+}
+
+func bzPost(s *ServiceClients, path string, payload any) ([]byte, error) {
+	s.mu.RLock()
+	key := s.BazarrKey
+	s.mu.RUnlock()
+	return s.arrDo("POST", bazarrURL, key, path, payload)
 }
 
 // ── Jellyseerr ─────────────────────────────────────────────────────────────

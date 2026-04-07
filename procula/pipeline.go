@@ -99,6 +99,14 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		}
 
 		slog.Info("validation passed", "component", "pipeline", "job_id", id, "video", result.Checks.Codecs.Video, "audio", result.Checks.Codecs.Audio)
+
+		// Check for missing subtitle languages (informational — does not fail the job)
+		if result.Checks.Codecs != nil {
+			if missing := checkMissingSubtitles(result.Checks.Codecs.Subtitles); len(missing) > 0 {
+				slog.Info("missing subtitle languages", "component", "pipeline", "job_id", id, "langs", missing)
+				_ = q.Update(id, func(j *Job) { j.MissingSubs = missing })
+			}
+		}
 	} else {
 		slog.Info("validation skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 		_ = q.Update(id, func(j *Job) { j.Progress = 0.33 })

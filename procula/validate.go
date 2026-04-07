@@ -199,6 +199,59 @@ func checkDuration(ffprobeDuration string, expectedMinutes int) string {
 	}
 }
 
+// iso6392to1 maps common ISO 639-2 (3-letter) language codes to ISO 639-1
+// (2-letter) so we can compare FFprobe tags against user-configured codes.
+var iso6392to1 = map[string]string{
+	"eng": "en", "spa": "es", "fre": "fr", "fra": "fr", "ger": "de", "deu": "de",
+	"ita": "it", "por": "pt", "rus": "ru", "jpn": "ja", "chi": "zh", "zho": "zh",
+	"kor": "ko", "ara": "ar", "hin": "hi", "dut": "nl", "nld": "nl",
+	"swe": "sv", "nor": "no", "dan": "da", "fin": "fi", "pol": "pl",
+	"tur": "tr", "hun": "hu", "ces": "cs", "cze": "cs", "slk": "sk",
+	"rum": "ro", "ron": "ro", "bul": "bg", "hrv": "hr", "srp": "sr",
+	"ukr": "uk", "vie": "vi", "tha": "th", "ind": "id", "may": "ms",
+}
+
+// normalizeLangCode converts a language tag to a 2-letter ISO 639-1 code where
+// possible. Tags that are already 2-letter or unknown are returned lower-cased.
+func normalizeLangCode(tag string) string {
+	t := strings.ToLower(strings.TrimSpace(tag))
+	if v, ok := iso6392to1[t]; ok {
+		return v
+	}
+	// Also handle "en-US" style tags
+	if idx := strings.IndexByte(t, '-'); idx == 2 {
+		return t[:2]
+	}
+	return t
+}
+
+// checkMissingSubtitles returns the subset of PELICULA_SUB_LANGS codes that are
+// not found in the embedded subtitle tracks. Returns nil when PELICULA_SUB_LANGS
+// is unset or empty (no check configured).
+func checkMissingSubtitles(embedded []string) []string {
+	langs := strings.TrimSpace(os.Getenv("PELICULA_SUB_LANGS"))
+	if langs == "" {
+		return nil
+	}
+
+	have := make(map[string]bool, len(embedded))
+	for _, s := range embedded {
+		have[normalizeLangCode(s)] = true
+	}
+
+	var missing []string
+	for _, raw := range strings.Split(langs, ",") {
+		code := strings.ToLower(strings.TrimSpace(raw))
+		if code == "" {
+			continue
+		}
+		if !have[code] {
+			missing = append(missing, code)
+		}
+	}
+	return missing
+}
+
 func formatBytes(b int64) string {
 	const unit = 1024
 	if b < unit {
