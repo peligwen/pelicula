@@ -1,0 +1,79 @@
+# Peligrosa — remote Jellyfin vhost template
+# Rendered by `./pelicula up` via envsubst into nginx/remote.conf.
+# Variables substituted: REMOTE_HOSTNAME, REMOTE_HTTPS_PORT
+#
+# This file is NOT included directly by nginx — it is a template only.
+# The rendered output (nginx/remote.conf) is gitignored.
+
+# HTTP vhost: serves ACME HTTP-01 challenge files and redirects all else to HTTPS.
+server {
+    listen 80;
+    server_name ${REMOTE_HOSTNAME};
+    resolver 127.0.0.11 valid=30s;
+
+    # Let's Encrypt HTTP-01 challenge (certbot webroot)
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+    }
+
+    # Redirect everything else to HTTPS
+    location / {
+        return 301 https://$host:${REMOTE_HTTPS_PORT}$request_uri;
+    }
+}
+
+# HTTPS vhost: Jellyfin only — no admin routes, no *arr, no pelicula API.
+server {
+    listen 8443 ssl http2;
+    server_name ${REMOTE_HOSTNAME};
+    resolver 127.0.0.11 valid=30s;
+
+    ssl_certificate     /etc/nginx/certs/remote/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/remote/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:REMOTE:10m;
+    ssl_session_timeout 1d;
+
+    # Security headers (HSTS with 1-year max-age)
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    client_max_body_size 100m;
+
+    # ── Hard deny: sensitive Jellyfin system endpoints ───────────────────
+    location ~* ^/(jellyfin/)?[Ss]ystem/[Ll]ogs {
+        return 403;
+    }
+    location ~* ^/(jellyfin/)?[Ss]ystem/[Ii]nfo {
+        return 403;
+    }
+
+    # ── Rate-limited auth endpoint (5 req/min, burst 3) ─────────────────
+    location ~* ^/(jellyfin/)?[Uu]sers/[Aa]uthenticate[Bb]y[Nn]ame {
+        limit_req zone=jf_auth burst=3 nodelay;
+        limit_req_status 429;
+        proxy_pass http://jellyfin:8096;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # ── Jellyfin proxy (root and /jellyfin prefix) ───────────────────────
+    location / {
+        proxy_pass http://jellyfin:8096;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+    }
+}

@@ -288,6 +288,8 @@ services:
       - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
       - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
+      - ./nginx/remote.conf:/etc/nginx/conf.d/remote.conf:ro
+      - ${CONFIG_DIR}/certs/acme-webroot:/var/www/acme:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"
     depends_on:

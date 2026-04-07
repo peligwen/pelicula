@@ -39,6 +39,14 @@ type SettingsResponse struct {
 	TZ                   string `json:"tz"`
 	PUID                 string `json:"puid"`
 	PGID                 string `json:"pgid"`
+	// Peligrosa remote access
+	RemoteAccessEnabled string `json:"remote_access_enabled"`
+	RemoteHostname      string `json:"remote_hostname"`
+	RemoteHTTPPort      string `json:"remote_http_port"`
+	RemoteHTTPSPort     string `json:"remote_https_port"`
+	RemoteCertMode      string `json:"remote_cert_mode"`
+	RemoteLEEmail       string `json:"remote_le_email"`
+	RemoteLEStaging     string `json:"remote_le_staging"`
 }
 
 // parseEnvFile reads a .env file and returns a key→value map.
@@ -86,6 +94,9 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"JELLYSEERR_ENABLED", "TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
 		"PELICULA_SUB_LANGS",
+		"REMOTE_ACCESS_ENABLED", "REMOTE_HOSTNAME",
+		"REMOTE_HTTP_PORT", "REMOTE_HTTPS_PORT",
+		"REMOTE_CERT_MODE", "REMOTE_LE_EMAIL", "REMOTE_LE_STAGING",
 	}
 	inOrder := make(map[string]bool, len(order))
 	for _, k := range order {
@@ -171,6 +182,13 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		TZ:                   vars["TZ"],
 		PUID:                 vars["PUID"],
 		PGID:                 vars["PGID"],
+		RemoteAccessEnabled: vars["REMOTE_ACCESS_ENABLED"],
+		RemoteHostname:      vars["REMOTE_HOSTNAME"],
+		RemoteHTTPPort:      vars["REMOTE_HTTP_PORT"],
+		RemoteHTTPSPort:     vars["REMOTE_HTTPS_PORT"],
+		RemoteCertMode:      vars["REMOTE_CERT_MODE"],
+		RemoteLEEmail:       vars["REMOTE_LE_EMAIL"],
+		RemoteLEStaging:     vars["REMOTE_LE_STAGING"],
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -205,6 +223,27 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, c.name+" contains invalid characters", http.StatusBadRequest)
 			return
 		}
+	}
+
+	// Validate remote access fields if being changed
+	if req.RemoteHostname != "" {
+		if strings.ContainsAny(req.RemoteHostname, "\"/ \n\r:") {
+			http.Error(w, "remote_hostname must be a bare hostname with no scheme, port, or path", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.RemoteCertMode != "" {
+		switch req.RemoteCertMode {
+		case "letsencrypt", "byo", "self-signed":
+			// valid
+		default:
+			http.Error(w, "remote_cert_mode must be one of: letsencrypt, byo, self-signed", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.RemoteLEEmail != "" && !strings.Contains(req.RemoteLEEmail, "@") {
+		http.Error(w, "remote_le_email must be a valid email address", http.StatusBadRequest)
+		return
 	}
 
 	// Validate WireGuard key only if being changed
@@ -294,6 +333,27 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SubLangs != "" {
 		vars["PELICULA_SUB_LANGS"] = req.SubLangs
+	}
+	if req.RemoteAccessEnabled != "" {
+		vars["REMOTE_ACCESS_ENABLED"] = req.RemoteAccessEnabled
+	}
+	if req.RemoteHostname != "" {
+		vars["REMOTE_HOSTNAME"] = req.RemoteHostname
+	}
+	if req.RemoteHTTPPort != "" {
+		vars["REMOTE_HTTP_PORT"] = req.RemoteHTTPPort
+	}
+	if req.RemoteHTTPSPort != "" {
+		vars["REMOTE_HTTPS_PORT"] = req.RemoteHTTPSPort
+	}
+	if req.RemoteCertMode != "" {
+		vars["REMOTE_CERT_MODE"] = req.RemoteCertMode
+	}
+	if req.RemoteLEEmail != "" {
+		vars["REMOTE_LE_EMAIL"] = req.RemoteLEEmail
+	}
+	if req.RemoteLEStaging != "" {
+		vars["REMOTE_LE_STAGING"] = req.RemoteLEStaging
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
@@ -407,6 +467,13 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
 		"PELICULA_SUB_LANGS":    "en",
+		"REMOTE_ACCESS_ENABLED": "false",
+		"REMOTE_HOSTNAME":       "",
+		"REMOTE_HTTP_PORT":      "80",
+		"REMOTE_HTTPS_PORT":     "8920",
+		"REMOTE_CERT_MODE":      "self-signed",
+		"REMOTE_LE_EMAIL":       "",
+		"REMOTE_LE_STAGING":     "false",
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
