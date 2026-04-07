@@ -181,11 +181,26 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) (
 	return outputPath, err
 }
 
-// isAllowedPath checks that path is under one of the expected media directories.
-// This prevents accidental deletion of files outside the media library.
-func isAllowedPath(path string) bool {
+// isAllowedJobPath checks that path is under a known media directory.
+// Used at job-creation time to prevent arbitrary paths from being submitted.
+func isAllowedJobPath(path string) bool {
 	clean := filepath.Clean(path)
 	for _, prefix := range []string{"/downloads", "/movies", "/tv", "/processing"} {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// isAllowedPath checks that path is under a directory where deletion on
+// validation failure is safe. /movies and /tv are intentionally excluded —
+// files there are already imported; deleting them in response to a failed
+// validation job would be destructive, and an attacker with control over the
+// webhook path could trigger it.
+func isAllowedPath(path string) bool {
+	clean := filepath.Clean(path)
+	for _, prefix := range []string{"/downloads", "/processing"} {
 		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return true
 		}

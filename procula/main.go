@@ -115,7 +115,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "path and arr_type are required", http.StatusBadRequest)
 		return
 	}
-	if !isAllowedPath(source.Path) {
+	if !isAllowedJobPath(source.Path) {
 		writeError(w, "path not under an allowed media directory", http.StatusBadRequest)
 		return
 	}

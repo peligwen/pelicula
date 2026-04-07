@@ -174,15 +174,18 @@ func TestFormatBytes(t *testing.T) {
 }
 
 func TestIsAllowedPath(t *testing.T) {
+	// isAllowedPath is the delete-gate: only /downloads and /processing are safe
+	// to delete from on validation failure. /movies and /tv are excluded by design
+	// to prevent an attacker-controlled webhook path from deleting imported media.
 	cases := []struct {
 		path string
 		want bool
 	}{
 		{"/downloads/movie.mkv", true},
-		{"/movies/Alien/alien.mkv", true},
-		{"/tv/show/s01e01.mkv", true},
 		{"/processing/out.mkv", true},
-		{"/downloads", true},  // exact prefix match via filepath.Clean
+		{"/downloads", true},            // exact prefix match via filepath.Clean
+		{"/movies/Alien/alien.mkv", false}, // imported media — never delete
+		{"/tv/show/s01e01.mkv", false},     // imported media — never delete
 		{"/etc/passwd", false},
 		{"/home/user/file.mkv", false},
 		{"", false},
@@ -194,6 +197,31 @@ func TestIsAllowedPath(t *testing.T) {
 			got := isAllowedPath(c.path)
 			if got != c.want {
 				t.Errorf("isAllowedPath(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+func TestIsAllowedJobPath(t *testing.T) {
+	// isAllowedJobPath is the job-creation gate: accepts all known media directories.
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/downloads/movie.mkv", true},
+		{"/movies/Alien/alien.mkv", true},
+		{"/tv/show/s01e01.mkv", true},
+		{"/processing/out.mkv", true},
+		{"/etc/passwd", false},
+		{"/home/user/file.mkv", false},
+		{"", false},
+		{"/downloads/../etc/passwd", false},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			got := isAllowedJobPath(c.path)
+			if got != c.want {
+				t.Errorf("isAllowedJobPath(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
 	}

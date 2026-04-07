@@ -190,9 +190,18 @@ func sendDirect(webhookURL string, event NotificationEvent) {
 }
 
 func triggerJellyfinRefresh(peliculaAPI string) error {
-	url := peliculaAPI + "/api/pelicula/jellyfin/refresh"
+	target := peliculaAPI + "/api/pelicula/jellyfin/refresh"
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(url, "application/json", nil)
+	req, err := http.NewRequest(http.MethodPost, target, nil)
+	if err != nil {
+		return err
+	}
+	// Authenticate with the shared Procula API key so the middleware can verify
+	// the caller is Procula and not an external request.
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

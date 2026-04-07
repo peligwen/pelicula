@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,17 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// Verify shared secret (passed as ?secret= query param by autowire).
+	// If WEBHOOK_SECRET is unset the check is skipped (backward compat with
+	// existing installs that haven't been re-run through setup/reset).
+	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
+		provided := r.URL.Query().Get("secret")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) == 0 {
+			writeError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
@@ -223,6 +235,14 @@ func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Verify Procula API key so only Procula can trigger refreshes.
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		provided := r.Header.Get("X-API-Key")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(key)) == 0 {
+			writeError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
 	if err := TriggerLibraryRefresh(services); err != nil {
 		slog.Error("library refresh failed", "component", "jellyfin", "error", err)
 		writeError(w, "refresh failed", http.StatusInternalServerError)
@@ -413,11 +433,11 @@ func parseArrDate(s string) time.Time {
 	return t
 }
 
-// isAllowedWebhookPath checks that the path from a webhook payload is under a
-// known media directory, preventing path traversal to arbitrary filesystem locations.
-func isAllowedWebhookPath(p string) bool {
+// isUnderPrefixes reports whether the cleaned path equals or is nested under
+// one of the given prefixes. Used by both webhook and browse allowlist checks.
+func isUnderPrefixes(p string, prefixes []string) bool {
 	clean := filepath.Clean(p)
-	for _, prefix := range []string{"/downloads", "/movies", "/tv", "/processing"} {
+	for _, prefix := range prefixes {
 		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return true
 		}
@@ -425,43 +445,40 @@ func isAllowedWebhookPath(p string) bool {
 	return false
 }
 
-// handleStorageProxy proxies Procula's storage report for the dashboard Storage section.
-func handleStorageProxy(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/storage")
-	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		slog.Warn("failed to stream storage response", "component", "proxy", "error", err)
+// isAllowedWebhookPath checks that the path from a webhook payload is under a
+// known media directory, preventing path traversal to arbitrary filesystem locations.
+func isAllowedWebhookPath(p string) bool {
+	return isUnderPrefixes(p, []string{"/downloads", "/movies", "/tv", "/processing"})
+}
+
+// proxyProcula returns an http.HandlerFunc that forwards a GET to the given
+// Procula path and streams the JSON response back. Used for simple dashboard
+// proxy endpoints that need no request-side logic.
+func proxyProcula(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		resp, err := services.client.Get(proculaBaseURL() + path)
+		if err != nil {
+			writeError(w, "procula unavailable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			slog.Warn("failed to stream proxy response", "component", "proxy", "path", path, "error", err)
+		}
 	}
 }
 
+// handleStorageProxy proxies Procula's storage report for the dashboard Storage section.
+var handleStorageProxy = proxyProcula("/api/procula/storage")
+
 // handleUpdatesProxy proxies Procula's update check result for the dashboard footer.
-func handleUpdatesProxy(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	resp, err := services.client.Get(proculaBaseURL() + "/api/procula/updates")
-	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		slog.Warn("failed to stream updates response", "component", "proxy", "error", err)
-	}
-}
+var handleUpdatesProxy = proxyProcula("/api/procula/updates")
 
 func proculaBaseURL() string {
 	if v := strings.TrimSpace(os.Getenv("PROCULA_URL")); v != "" {

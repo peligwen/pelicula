@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -206,6 +206,9 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 	}
 
 	hookURL := "http://pelicula-api:8181/api/pelicula/hooks/import"
+	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
+		hookURL += "?secret=" + url.QueryEscape(secret)
+	}
 	payload := map[string]any{
 		"name":           "Procula",
 		"implementation": "Webhook",
@@ -409,55 +412,14 @@ func wireJellyseerrService(s *ServiceClients, apiKey, svcType, hostname string, 
 	slog.Info("added Jellyseerr service", "component", "autowire", "service_type", svcType)
 }
 
+const jellyseerrBase = "http://jellyseerr:5055"
+
 func jsGet(s *ServiceClients, path, apiKey string) ([]byte, error) {
-	req, err := http.NewRequest("GET", "http://jellyseerr:5055"+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if apiKey != "" {
-		req.Header.Set("X-Api-Key", apiKey)
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
+	return s.arrDo("GET", jellyseerrBase, apiKey, path, nil)
 }
 
 func jsPost(s *ServiceClients, path, apiKey string, payload any) ([]byte, error) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest("POST", "http://jellyseerr:5055"+path, bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	if apiKey != "" {
-		req.Header.Set("X-Api-Key", apiKey)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
+	return s.arrDo("POST", jellyseerrBase, apiKey, path, payload)
 }
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {

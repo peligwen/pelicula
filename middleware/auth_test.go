@@ -11,6 +11,16 @@ import (
 	"time"
 )
 
+// testHash is a test helper that hashes a password, panicking on error.
+// crypto/rand.Read never returns an error in practice (Go 1.20+ guarantee).
+func testHash(username, plaintext string) string {
+	h, err := hashPassword(username, plaintext)
+	if err != nil {
+		panic("hashPassword: " + err.Error())
+	}
+	return h
+}
+
 // newTestAuth creates an Auth for testing without touching the filesystem.
 // The cleanup goroutine is harmless in tests (sleeps 10 min, then GC'd).
 func newTestAuth(mode, password string, users []User) *Auth {
@@ -74,7 +84,7 @@ func TestUserRoleAtLeast(t *testing.T) {
 
 func TestHashPassword(t *testing.T) {
 	t.Run("format is sha256v2:SALT:HASH", func(t *testing.T) {
-		h := HashPassword("alice", "secret")
+		h := testHash("alice", "secret")
 		parts := strings.Split(h, ":")
 		if len(parts) != 3 {
 			t.Fatalf("expected 3 colon-separated parts, got %d in %q", len(parts), h)
@@ -91,8 +101,8 @@ func TestHashPassword(t *testing.T) {
 	})
 
 	t.Run("same password hashed twice has different salts", func(t *testing.T) {
-		h1 := HashPassword("alice", "secret")
-		h2 := HashPassword("alice", "secret")
+		h1 := testHash("alice", "secret")
+		h2 := testHash("alice", "secret")
 		if h1 == h2 {
 			t.Error("expected different hashes due to random salt")
 		}
@@ -101,14 +111,14 @@ func TestHashPassword(t *testing.T) {
 
 func TestVerifyPassword(t *testing.T) {
 	t.Run("correct password verifies", func(t *testing.T) {
-		h := HashPassword("alice", "correct-horse")
+		h := testHash("alice", "correct-horse")
 		if !verifyPassword("alice", "correct-horse", h) {
 			t.Error("expected correct password to verify")
 		}
 	})
 
 	t.Run("wrong password fails", func(t *testing.T) {
-		h := HashPassword("alice", "correct-horse")
+		h := testHash("alice", "correct-horse")
 		if verifyPassword("alice", "wrong-horse", h) {
 			t.Error("expected wrong password to fail")
 		}
@@ -130,7 +140,7 @@ func TestVerifyPassword(t *testing.T) {
 	})
 
 	t.Run("wrong username fails even with correct password", func(t *testing.T) {
-		h := HashPassword("alice", "secret")
+		h := testHash("alice", "secret")
 		if verifyPassword("bob", "secret", h) {
 			t.Error("expected wrong username to fail verification")
 		}
@@ -180,7 +190,7 @@ func TestLogin_PasswordMode_WrongPassword(t *testing.T) {
 }
 
 func TestLogin_UsersMode(t *testing.T) {
-	hash := HashPassword("alice", "pass123")
+	hash := testHash("alice", "pass123")
 	users := []User{{Username: "alice", Password: hash, Role: RoleViewer}}
 	a := newTestAuth("users", "", users)
 

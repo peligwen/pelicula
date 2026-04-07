@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -279,4 +280,105 @@ func TestNormalizeHookPayload(t *testing.T) {
 			t.Error("expected error when movieFile absent")
 		}
 	})
+}
+
+// ── handleImportHook secret enforcement ───────────────────────────────────────
+
+func newRadarrPayload() []byte {
+	raw := map[string]any{
+		"eventType":  "Download",
+		"downloadId": "hash123",
+		"movie": map[string]any{
+			"title": "Alien",
+			"year":  float64(1979),
+			"id":    float64(1),
+		},
+		"movieFile": map[string]any{
+			"path": "/movies/Alien/alien.mkv",
+			"size": float64(1_000_000),
+		},
+	}
+	b, _ := json.Marshal(raw)
+	return b
+}
+
+func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
+	// When WEBHOOK_SECRET is unset, the check is skipped (backward compat).
+	t.Setenv("WEBHOOK_SECRET", "")
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleImportHook(w, req)
+
+	// Will fail trying to reach Procula — but must not return 401.
+	if w.Code == http.StatusUnauthorized {
+		t.Error("expected no 401 when WEBHOOK_SECRET is empty")
+	}
+}
+
+func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
+	t.Setenv("WEBHOOK_SECRET", "correct-secret")
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import?secret=wrong-secret", bytes.NewReader(newRadarrPayload()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleImportHook(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 for wrong secret", w.Code)
+	}
+}
+
+func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
+	t.Setenv("WEBHOOK_SECRET", "my-secret")
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import?secret=my-secret", bytes.NewReader(newRadarrPayload()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleImportHook(w, req)
+
+	// Procula is unreachable in tests — but must not return 401.
+	if w.Code == http.StatusUnauthorized {
+		t.Error("expected no 401 for correct secret")
+	}
+}
+
+func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
+	t.Setenv("WEBHOOK_SECRET", "required-secret")
+	services = NewServiceClients("/config")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleImportHook(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 when secret missing from query", w.Code)
+	}
+}
+
+// ── handleBrowse symlink escape ───────────────────────────────────────────────
+
+func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {
+	// Create a symlink inside /tmp pointing to /etc, then try to browse via
+	// a path that resolves outside the allowed roots. We use a temp dir to
+	// simulate the layout since /downloads doesn't exist in tests.
+	//
+	// The handler checks isAllowedBrowsePath before EvalSymlinks, so a path
+	// that is under /downloads but resolves elsewhere would be caught by the
+	// second check after EvalSymlinks. We verify the forbidden response.
+	//
+	// Since we can't create a path under /downloads in tests, we exercise
+	// the simpler case: a path not under any root is immediately rejected.
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/browse?path=/etc/passwd", nil)
+	w := httptest.NewRecorder()
+	handleBrowse(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for path outside allowed roots", w.Code)
+	}
 }

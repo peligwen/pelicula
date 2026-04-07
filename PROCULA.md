@@ -27,7 +27,9 @@ Radarr/Sonarr                   pelicula-api                    Procula (:8282)
 
 ### How jobs enter the queue
 
-Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives these at a new endpoint (`POST /api/pelicula/hooks/import`), normalizes the payload, and forwards it to Procula's job queue (`POST /api/procula/jobs`). This keeps Procula decoupled — it never talks to the *arr apps directly. The middleware remains the single coordination point.
+Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives these at `POST /api/pelicula/hooks/import`, normalizes the payload, and forwards it to Procula's job queue (`POST /api/procula/jobs`). This keeps Procula decoupled — it never talks to the *arr apps directly. The middleware remains the single coordination point.
+
+**Webhook authentication:** The import hook is protected by a shared secret (`WEBHOOK_SECRET` in `.env`), appended as `?secret=<value>` to the autowired Sonarr/Radarr webhook URL. The nginx config also restricts the route to the Docker internal network (172.16.0.0/12). Existing installs without `WEBHOOK_SECRET` in `.env` continue to work (the check is skipped when the env var is unset).
 
 ### Service layout
 
@@ -127,6 +129,7 @@ On validation failure:
 1. Procula calls `POST /api/pelicula/downloads/cancel` with `blocklist: true` and the appropriate reason
 2. The middleware handles the *arr blocklist + unmonitor
 3. The watcher (already exists) picks up the still-missing item and triggers a new search
+4. **File deletion:** Only if `delete_on_failure: true` is set in Procula settings, **and** the file path is under `/downloads` or `/processing`. Paths under `/movies` or `/tv` are never deleted — those are already-imported files and removing them in response to a re-queued job would be destructive.
 
 ### Stage 2: Process
 

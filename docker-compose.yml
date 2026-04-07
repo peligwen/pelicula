@@ -259,6 +259,9 @@ services:
       - ./nginx/import.html:/usr/share/nginx/html/import.html:ro
       - ./nginx/import.js:/usr/share/nginx/html/import.js:ro
       - ./nginx/import.css:/usr/share/nginx/html/import.css:ro
+      - ./nginx/register.html:/usr/share/nginx/html/register.html:ro
+      - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
+      - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"

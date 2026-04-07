@@ -108,13 +108,7 @@ func browseRoots() []string {
 // isAllowedBrowsePath validates that a path is under one of the allowed roots,
 // preventing directory traversal attacks.
 func isAllowedBrowsePath(p string) bool {
-	clean := filepath.Clean(p)
-	for _, root := range browseRoots() {
-		if clean == root || strings.HasPrefix(clean, root+"/") {
-			return true
-		}
-	}
-	return false
+	return isUnderPrefixes(p, browseRoots())
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -153,6 +147,23 @@ func handleBrowse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "path not under an allowed directory", http.StatusForbidden)
 		return
 	}
+
+	// Resolve symlinks so a symlink inside /downloads pointing to /etc can't
+	// escape the allowed root. Re-check after resolution.
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, "directory not found", http.StatusNotFound)
+		} else {
+			writeError(w, "path not under an allowed directory", http.StatusForbidden)
+		}
+		return
+	}
+	if !isAllowedBrowsePath(resolved) {
+		writeError(w, "path not under an allowed directory", http.StatusForbidden)
+		return
+	}
+	dir = resolved
 
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {

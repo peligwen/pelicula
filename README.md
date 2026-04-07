@@ -26,7 +26,7 @@ Prefer a browser? Run `./pelicula up` and open `http://localhost:7354/setup` —
 On `./pelicula up`, the stack:
 
 1. Seeds service configs (URL bases, auth bypass, download paths)
-2. Starts 9 containers behind an nginx reverse proxy on port 7354
+2. Starts 10 containers behind an nginx reverse proxy on port 7354
 3. Waits for VPN connection and port forwarding
 4. Auto-wires qBittorrent as the download client in Sonarr and Radarr
 5. Connects Prowlarr indexers to both Sonarr and Radarr
@@ -78,14 +78,22 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
 ## CLI
 
 ```
-./pelicula setup       # Interactive first-time configuration
-./pelicula up          # Start all services
-./pelicula down        # Stop all services
-./pelicula status      # Show container status
-./pelicula logs [svc]  # Tail logs (optionally for one service)
-./pelicula check-vpn   # Verify VPN tunnel and service health
-./pelicula update      # Pull latest images and recreate
-./pelicula test        # End-to-end integration test (isolated stack, no VPN needed)
+./pelicula setup               # Interactive first-time configuration
+./pelicula up                  # Start all services
+./pelicula down                # Stop all services
+./pelicula status              # Show container status
+./pelicula logs [svc]          # Tail logs (optionally for one service)
+./pelicula check-vpn           # Verify VPN tunnel and service health
+./pelicula update              # Pull latest images and recreate
+./pelicula restart [svc]       # Restart service(s) without stopping the whole stack
+./pelicula restart-acquire     # Restart and re-run VPN port-forward acquisition
+./pelicula rebuild             # Rebuild and restart middleware/procula containers
+./pelicula reset-config [svc]  # Delete seeded configs so they regenerate on next up
+./pelicula configure           # Interactive menu: auth, notifications, Jellyseerr, transcoding
+./pelicula import              # Open the browser-based local media import wizard
+./pelicula export              # Export watchlist/library backup
+./pelicula import-backup       # Restore from a backup exported by pelicula export
+./pelicula test                # End-to-end integration test (isolated stack, no VPN needed)
 ```
 
 ## Architecture
@@ -153,10 +161,12 @@ To disable Jellyseerr: run `./pelicula configure`, choose **Jellyseerr**, and se
 Pelicula supports three modes via `PELICULA_AUTH` in `.env`:
 
 - `off` (default) — no login required. Fine on a trusted LAN.
-- `password` — shared password via `PELICULA_PASSWORD`. Everyone who logs in gets admin role.
+- `password` (or legacy `true`) — shared password via `PELICULA_PASSWORD`. Everyone who logs in gets admin role.
 - `users` — multi-user with roles. Users live in `/config/pelicula/users.json`. Manage them via `./pelicula configure`.
 
 Role capabilities: **viewer** sees the dashboard and can request content via Jellyseerr; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
+
+**Invites:** Admins can generate shareable invite links from the Users section of the dashboard. Recipients open the link, choose a username and password, and get a Jellyfin viewer account automatically. No admin involvement after the link is shared.
 
 ## Post-Setup: Add Indexers
 

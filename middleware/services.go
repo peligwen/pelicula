@@ -98,13 +98,26 @@ func readAPIKey(path string) string {
 	return cfg.ApiKey
 }
 
-// ArrGet makes a GET request to a *arr service.
-func (s *ServiceClients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
-	req, err := http.NewRequest("GET", baseURL+path, nil)
+// arrDo is the shared implementation for all *arr-compatible HTTP calls.
+// The apiKey is sent as X-Api-Key. For POST/PUT a JSON payload is required;
+// for GET/DELETE pass nil.
+func (s *ServiceClients) arrDo(method, baseURL, apiKey, path string, payload any) ([]byte, error) {
+	var bodyReader io.Reader
+	if payload != nil {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest(method, baseURL+path, bodyReader)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("X-Api-Key", apiKey)
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -120,31 +133,14 @@ func (s *ServiceClients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
 	return body, nil
 }
 
+// ArrGet makes a GET request to a *arr service.
+func (s *ServiceClients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+	return s.arrDo("GET", baseURL, apiKey, path, nil)
+}
+
 // ArrPost makes a POST request to a *arr service.
 func (s *ServiceClients) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest("POST", baseURL+path, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Api-Key", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
+	return s.arrDo("POST", baseURL, apiKey, path, payload)
 }
 
 // QbtGet makes a GET request to qBittorrent (via Docker network, auth bypass).
@@ -184,51 +180,12 @@ func (s *ServiceClients) QbtPost(path string, form string) error {
 
 // ArrDelete makes a DELETE request to a *arr service.
 func (s *ServiceClients) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
-	req, err := http.NewRequest("DELETE", baseURL+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Api-Key", apiKey)
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
+	return s.arrDo("DELETE", baseURL, apiKey, path, nil)
 }
 
 // ArrPut makes a PUT request to a *arr service.
 func (s *ServiceClients) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest("PUT", baseURL+path, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Api-Key", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
+	return s.arrDo("PUT", baseURL, apiKey, path, payload)
 }
 
 // ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.

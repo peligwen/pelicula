@@ -448,31 +448,9 @@ func TriggerLibraryRefresh(s *ServiceClients) error {
 	return nil
 }
 
-// jellyfinGet makes a GET request to Jellyfin with the Emby authorization header.
-func jellyfinGet(s *ServiceClients, path, token string) ([]byte, error) {
-	req, err := http.NewRequest("GET", jellyfinURL+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	setEmbyAuth(req, token)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, &jellyfinHTTPError{resp.StatusCode}
-	}
-	return body, nil
-}
-
-// jellyfinPost makes a POST request to Jellyfin with the Emby authorization header.
-func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, error) {
+// jellyfinDo is the shared implementation for all Jellyfin HTTP calls.
+// For POST with a payload, pass the body as payload (JSON-encoded); for GET/DELETE pass nil.
+func jellyfinDo(s *ServiceClients, method, path, token string, payload any) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -481,8 +459,7 @@ func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, e
 		}
 		bodyReader = bytes.NewReader(data)
 	}
-
-	req, err := http.NewRequest("POST", jellyfinURL+path, bodyReader)
+	req, err := http.NewRequest(method, jellyfinURL+path, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +467,6 @@ func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, e
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -506,27 +482,19 @@ func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, e
 	return body, nil
 }
 
+// jellyfinGet makes a GET request to Jellyfin with the Emby authorization header.
+func jellyfinGet(s *ServiceClients, path, token string) ([]byte, error) {
+	return jellyfinDo(s, "GET", path, token, nil)
+}
+
+// jellyfinPost makes a POST request to Jellyfin with the Emby authorization header.
+func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, error) {
+	return jellyfinDo(s, "POST", path, token, payload)
+}
+
 // jellyfinDelete makes a DELETE request to Jellyfin with the Emby authorization header.
 func jellyfinDelete(s *ServiceClients, path, token string) ([]byte, error) {
-	req, err := http.NewRequest("DELETE", jellyfinURL+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	setEmbyAuth(req, token)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, &jellyfinHTTPError{resp.StatusCode}
-	}
-	return body, nil
+	return jellyfinDo(s, "DELETE", path, token, nil)
 }
 
 func setEmbyAuth(req *http.Request, token string) {

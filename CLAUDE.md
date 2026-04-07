@@ -26,10 +26,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## CLI Commands
 
 ```
-./pelicula setup       # interactive .env generation + TLS cert + directory creation
-./pelicula up          # seed configs, enforce auth bypass, start stack, wait for VPN, print URLs
+./pelicula setup               # interactive .env generation + TLS cert + directory creation
+./pelicula up                  # seed configs, enforce auth bypass, start stack, wait for VPN, print URLs
 ./pelicula down|status|logs [svc]|update|check-vpn
-./pelicula test        # end-to-end integration test (isolated stack on port 7399, no VPN needed)
+./pelicula restart [svc]       # restart service(s) without taking the whole stack down
+./pelicula restart-acquire     # restart, then re-run port-forward acquisition
+./pelicula rebuild             # rebuild and restart middleware/procula containers
+./pelicula reset-config [svc]  # delete seeded configs so they regenerate on next up
+./pelicula configure           # interactive menu: auth, notifications, Jellyseerr, transcoding
+./pelicula import              # import local media files via the browser wizard
+./pelicula export              # export watchlist / library backup
+./pelicula import-backup       # restore from a backup exported by pelicula export
+./pelicula test                # end-to-end integration test (isolated stack on port 7399, no VPN needed)
 ```
 
 ## Architecture
@@ -64,17 +72,38 @@ nginx (:7354) ─── /                → dashboard (static HTML)
 - `POST /api/pelicula/downloads/cancel` — removes torrent + files, finds the item in the *arr queue, removes it, and unmonitors the movie/episode to prevent the watcher from re-grabbing it. Optionally blocklists the release.
 
 **Settings and setup endpoints:**
-- `GET/POST /api/pelicula/settings` — read/write runtime configuration (`.env` values). CSRF-protected.
-- `POST /api/pelicula/setup` — browser setup wizard: validates inputs, generates `.env`, creates directories.
-- `GET /api/pelicula/browse` — server-side folder browser for the import wizard. Returns directory listings.
+- `GET/POST /api/pelicula/settings` — read/write runtime configuration (`.env` values). Admin-only; POST requires a local Origin header (RFC1918 or localhost) — empty Origin is rejected.
+- `POST /api/pelicula/settings/reset` — full settings reset from a new WireGuard key. Admin-only, same Origin guard.
+- `POST /api/pelicula/setup` — browser setup wizard: validates inputs, generates `.env`, creates directories. Only available in setup mode (`SETUP_MODE=true`).
+- `GET /api/pelicula/browse` — server-side folder browser for the import wizard. Resolves symlinks and re-checks against allowlist to prevent escape.
+- `GET /api/pelicula/library/scan` — match local media files against Radarr/Sonarr. Admin-only.
+- `POST /api/pelicula/library/apply` — apply matched items (add to *arr). Admin-only.
 
-**Procula integration endpoints (Phase 1):**
-- `POST /api/pelicula/hooks/import` — receives Radarr/Sonarr import webhooks, normalizes payload, forwards to Procula as a job. Auto-wired into Radarr/Sonarr by `wireImportWebhook()` in `middleware/autowire.go`. Works without auth (webhook caller can't do cookie auth).
-- `GET /api/pelicula/processing` — proxies Procula's `/api/procula/status` for the dashboard.
+**Auth, user, and invite endpoints:**
+- `GET/POST /api/pelicula/users` — list Jellyfin users / create user. Admin-only.
+- `DELETE/POST /api/pelicula/users/:id` — delete user / reset password. Admin-only.
+- `GET/POST /api/pelicula/invites` — list/create shareable invite links. Admin-only.
+- `GET /api/pelicula/invites/:token` — check invite validity. Public.
+- `POST /api/pelicula/invites/:token/redeem` — self-service viewer registration. Public (invite gated).
+- `GET /api/pelicula/sessions` — active Jellyfin sessions (now-playing card). Admin-only.
+
+**Dashboard data endpoints:**
+- `GET /api/pelicula/status` — VPN status, service health, wired flag. Viewer+.
+- `GET /api/pelicula/downloads` — current torrent list. Viewer+.
+- `GET /api/pelicula/notifications` — merged Procula + *arr history feed. Viewer+.
+- `GET /api/pelicula/storage` — proxies Procula storage stats. Viewer+.
+- `GET /api/pelicula/updates` — proxies Procula update check. Viewer+.
+- `GET/POST /api/pelicula/export` — export watchlist/backup. Admin-only.
+- `POST /api/pelicula/import-backup` — restore backup. Admin-only.
+
+**Procula integration endpoints:**
+- `POST /api/pelicula/hooks/import` — receives Radarr/Sonarr import webhooks, normalizes payload, forwards to Procula as a job. Auto-wired into Radarr/Sonarr by `wireImportWebhook()`. Requires `WEBHOOK_SECRET` query param (if `WEBHOOK_SECRET` is set in `.env`). Restricted to Docker-internal networks in nginx.
+- `POST /api/pelicula/jellyfin/refresh` — triggers Jellyfin library scan. Called by Procula; requires `X-API-Key: <PROCULA_API_KEY>`. Restricted to Docker-internal networks in nginx.
+- `GET /api/pelicula/processing` — proxies Procula's status + job list for the dashboard Processing section.
 
 **Procula (`procula/`)** — separate Go service on port 8282, proxied at `/api/procula/`. Alpine + FFmpeg container.
 - `procula/queue.go` — JSON file job queue at `/config/jobs/`. One file per job, persisted across restarts.
-- `procula/validate.go` — FFprobe-based validation: integrity, duration sanity, codec extraction, sample detection. On failure: deletes bad file (only if path is under `/downloads`, `/movies`, `/tv`, or `/processing`) + calls `/api/pelicula/downloads/cancel` with `blocklist:true`.
+- `procula/validate.go` — FFprobe-based validation: integrity, duration sanity, codec extraction, sample detection. On failure: calls `/api/pelicula/downloads/cancel` with `blocklist:true`. Only deletes the bad file if `DeleteOnFailure=true` **and** the path is under `/downloads` or `/processing` (not `/movies` or `/tv` — imported media is never deleted).
 - `procula/pipeline.go` — single goroutine worker. Stages: validate → process (transcoding via profiles) → catalog (Jellyfin refresh + notifications).
 - Procula never calls *arr directly; all coordination is through `pelicula-api`.
 
@@ -107,3 +136,5 @@ The bash CLI could be rewritten as a single Go binary for true cross-platform su
 - Both `middleware/` and `procula/` have no external Go dependencies (stdlib only) — neither `go.mod` has requires
 - **qBittorrent v5** renamed pause/resume API to stop/start — middleware uses the v5 endpoints
 - Dashboard serves with `Cache-Control: no-store` to avoid stale HTML during development
+- `WEBHOOK_SECRET` in `.env` — generated by setup wizard; appended as `?secret=` to the autowired Radarr/Sonarr webhook URL. `handleImportHook` rejects requests with the wrong secret. Missing secret = no check (backward compat for installs pre-dating this feature).
+- `PELICULA_AUTH` accepts `off`, `password`, `users`. The legacy alias `true` is treated as `password` (stored as `true` in `.env`, accepted at runtime).

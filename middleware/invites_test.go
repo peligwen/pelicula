@@ -256,7 +256,8 @@ func inviteAdminRequest(t *testing.T, method, path string, body any) *http.Reque
 	r := httptest.NewRequest(method, path, rb)
 	r.Header.Set("Content-Type", "application/json")
 	// Inject admin session
-	a := newTestAuth("users", "", []User{{Username: "admin", Password: HashPassword("admin", "secret"), Role: RoleAdmin}})
+	h, _ := hashPassword("admin", "secret")
+	a := newTestAuth("users", "", []User{{Username: "admin", Password: h, Role: RoleAdmin}})
 	tok := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
 	orig := authMiddleware
 	authMiddleware = a

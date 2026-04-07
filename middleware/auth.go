@@ -150,14 +150,16 @@ func (a *Auth) loadUsers() error {
 	return json.Unmarshal(data, &a.users)
 }
 
-// HashPassword generates a salted SHA-256 hash in "sha256v2:SALT:HASH" format.
+// hashPassword generates a salted SHA-256 hash in "sha256v2:SALT:HASH" format.
 // HASH = sha256(SALT + ":" + username + ":" + plaintext)
-func HashPassword(username, plaintext string) string {
+func hashPassword(username, plaintext string) (string, error) {
 	salt := make([]byte, 16)
-	rand.Read(salt) //nolint:errcheck — always succeeds on Go 1.20+
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
 	saltHex := hex.EncodeToString(salt)
 	h := sha256.Sum256([]byte(saltHex + ":" + username + ":" + plaintext))
-	return "sha256v2:" + saltHex + ":" + hex.EncodeToString(h[:])
+	return "sha256v2:" + saltHex + ":" + hex.EncodeToString(h[:]), nil
 }
 
 // verifyPassword checks plaintext against a stored hash.
@@ -290,13 +292,18 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		writeError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	expiry := time.Now().Add(24 * time.Hour)
 
 	a.mu.Lock()
 	a.sessions[token] = session{username: req.Username, role: role, expiry: expiry}
 	a.mu.Unlock()
 
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "pelicula_session",
 		Value:    token,
@@ -304,6 +311,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Expires:  expiry,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
 	})
 
 	writeJSON(w, map[string]any{"status": "ok", "role": string(role)})
@@ -362,8 +370,10 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func generateToken() string {
+func generateToken() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

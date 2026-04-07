@@ -81,7 +81,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"PUID", "PGID", "TZ",
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
 		"PELICULA_PORT", "PELICULA_AUTH", "PELICULA_PASSWORD",
-		"PROCULA_API_KEY",
+		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"JELLYSEERR_ENABLED", "TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
 	}
@@ -378,6 +378,8 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	pgid := envOr("HOST_PGID", orDefault(existing["PGID"], "1000"))
 	tz := envOr("HOST_TZ", orDefault(existing["TZ"], "America/New_York"))
 	proculaKey := generateAPIKey()
+	// Preserve existing WEBHOOK_SECRET if present so autowired webhooks keep working
+	webhookSecret := orDefault(existing["WEBHOOK_SECRET"], generateAPIKey())
 
 	vars := map[string]string{
 		"CONFIG_DIR":            req.ConfigDir,
@@ -392,6 +394,7 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"PELICULA_AUTH":         authMode,
 		"PELICULA_PASSWORD":     password,
 		"PROCULA_API_KEY":       proculaKey,
+		"WEBHOOK_SECRET":        webhookSecret,
 		"JELLYSEERR_ENABLED":    "false",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
@@ -413,12 +416,13 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// isLocalOrigin returns true if the request Origin is empty (same-origin form
-// post) or is a localhost or private-network address. Parses the origin as a
-// URL and checks the hostname to prevent substring-match bypasses.
+// isLocalOrigin returns true if the request Origin is a localhost or
+// private-network address. Parses the origin as a URL and checks the hostname
+// to prevent substring-match bypasses. Returns false for empty Origin so that
+// unauthenticated curl requests (no Origin header) cannot bypass CSRF checks.
 func isLocalOrigin(origin string) bool {
 	if origin == "" {
-		return true
+		return false
 	}
 	u, err := url.Parse(origin)
 	if err != nil {
