@@ -187,6 +187,12 @@ func (a *Auth) lookupUser(username, plaintext string) (User, bool) {
 	return User{}, false
 }
 
+// IsOffMode reports whether auth is disabled (PELICULA_AUTH=off).
+// Used by endpoints that must block state-mutating requests even in off mode.
+func (a *Auth) IsOffMode() bool {
+	return a.mode == "off"
+}
+
 // Guard wraps a handler; if auth is off it passes through, otherwise
 // it requires a valid session regardless of role.
 func (a *Auth) Guard(next http.Handler) http.Handler {

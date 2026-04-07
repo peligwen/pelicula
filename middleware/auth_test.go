@@ -507,6 +507,30 @@ func TestGuard_RoleMatrix(t *testing.T) {
 	}
 }
 
+// TestGuardAdmin_OffMode_HandleUsers_StillBlocked documents that the off-mode
+// bypass in guardRole does NOT protect handleUsers — instead handleUsers has its
+// own explicit off-mode check so POST is blocked even when GuardAdmin is a no-op.
+func TestGuardAdmin_OffMode_HandleUsers_StillBlocked(t *testing.T) {
+	a := newTestAuth("off", "", nil)
+	// In off mode, GuardAdmin passes through unconditionally.
+	called := false
+	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := a.GuardAdmin(dummy)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/users", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if !called {
+		t.Error("GuardAdmin in off mode should not block the handler (handleUsers handles it itself)")
+	}
+	// Confirm IsOffMode reports true so handleUsers can enforce its own check.
+	if !a.IsOffMode() {
+		t.Error("IsOffMode() should return true when mode is 'off'")
+	}
+}
+
 // ── Session details ─────────────────────────────────────────────────────
 
 func TestSession_TokenFormat(t *testing.T) {

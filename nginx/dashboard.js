@@ -90,8 +90,9 @@ async function checkStatus() {
             if (data.jellyseerr_enabled) {
                 // Jellyseerr doesn't support sub-path hosting, so link directly to its port.
                 const jsPort = data.jellyseerr_port || 5055;
-                jsCard.href = `http://${window.location.hostname}:${jsPort}`;
-                jsCard.dataset.check = `http://${window.location.hostname}:${jsPort}/api/v1/status`;
+                const jsProto = window.location.protocol;
+                jsCard.href = `${jsProto}//${window.location.hostname}:${jsPort}`;
+                jsCard.dataset.check = `${jsProto}//${window.location.hostname}:${jsPort}/api/v1/status`;
                 jsCard.classList.remove('hidden');
             } else {
                 jsCard.classList.add('hidden');
@@ -103,7 +104,7 @@ async function checkStatus() {
             if (data.jellyseerr_enabled) {
                 usersSection.classList.remove('hidden');
                 const jsPort = data.jellyseerr_port || 5055;
-                window._jellyseerrURL = `http://${window.location.hostname}:${jsPort}/`;
+                window._jellyseerrURL = `${window.location.protocol}//${window.location.hostname}:${jsPort}/`;
                 if (!usersLoaded) { loadUsers(); usersLoaded = true; }
             } else {
                 usersSection.classList.add('hidden');

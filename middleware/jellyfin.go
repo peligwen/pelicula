@@ -3,19 +3,68 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
+	"unicode"
 )
 
-const (
-	jellyfinURL     = "http://jellyfin:8096/jellyfin"
-	embyAuthHeader  = `MediaBrowser Client="Pelicula", Device="pelicula-api", DeviceId="pelicula-autowire", Version="1.0"`
-)
+// jellyfinURL is a var (not const) so tests can point it at an httptest.Server.
+var jellyfinURL = "http://jellyfin:8096/jellyfin"
+
+const embyAuthHeader = `MediaBrowser Client="Pelicula", Device="pelicula-api", DeviceId="pelicula-autowire", Version="1.0"`
+
+// ErrPasswordRequired is returned by CreateJellyfinUser when password is empty.
+var ErrPasswordRequired = errors.New("password is required")
+
+// jellyfinHTTPError captures the HTTP status code from a Jellyfin API response.
+type jellyfinHTTPError struct {
+	StatusCode int
+}
+
+func (e *jellyfinHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.StatusCode) }
+
+// validJellyfinID returns true when id looks like a Jellyfin UUID
+// ("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"). Validates before building URL paths
+// so a malicious or malformed Id cannot introduce path traversal.
+func validJellyfinID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, c := range id {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// validUsername returns true when the name is safe to send to Jellyfin:
+// 1–64 chars, no leading/trailing whitespace, no control chars, no / or \.
+func validUsername(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	if strings.TrimSpace(s) != s {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || r == '/' || r == '\\' {
+			return false
+		}
+	}
+	return true
+}
 
 // wireJellyfin auto-configures Jellyfin: completes the startup wizard (if needed)
 // and adds Movies + TV Shows libraries pointing to the same folders used everywhere else.
@@ -202,7 +251,10 @@ func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
 // via this API since they would have unrestricted access to Jellyseerr.
 func CreateJellyfinUser(s *ServiceClients, username, password string) error {
 	if password == "" {
-		return fmt.Errorf("password is required")
+		return ErrPasswordRequired
+	}
+	if len(password) > 256 {
+		return fmt.Errorf("password too long (max 256 chars)")
 	}
 	token, err := jellyfinAuth(s)
 	if err != nil {
@@ -221,6 +273,11 @@ func CreateJellyfinUser(s *ServiceClients, username, password string) error {
 	if id == "" {
 		return fmt.Errorf("no user ID in create response")
 	}
+	// Validate the ID is a UUID before embedding it in a URL path.
+	// Jellyfin always returns UUIDs; anything else is malformed or adversarial.
+	if !validJellyfinID(id) {
+		return fmt.Errorf("unexpected user ID format from Jellyfin: %q", id)
+	}
 	// Set the password. If this fails, attempt to delete the user so the admin
 	// isn't left with a passwordless account they can't see from Pelicula.
 	_, err = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
@@ -230,9 +287,9 @@ func CreateJellyfinUser(s *ServiceClients, username, password string) error {
 	if err != nil {
 		if _, delErr := jellyfinDelete(s, "/Users/"+id, token); delErr != nil {
 			slog.Warn("password set failed and rollback delete also failed", "component", "jellyfin", "userId", id, "deleteError", delErr)
-			return fmt.Errorf("set password: %w (rollback failed — delete user %q manually in Jellyfin)", err, username)
+			return fmt.Errorf("set password failed (rollback failed — delete user %q manually in Jellyfin): %w", username, err)
 		}
-		return fmt.Errorf("set password: %w (user was removed)", err)
+		return fmt.Errorf("set password failed (user was removed): %w", err)
 	}
 	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
 	return nil
@@ -271,7 +328,7 @@ func jellyfinGet(s *ServiceClients, path, token string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return body, &jellyfinHTTPError{resp.StatusCode}
 	}
 	return body, nil
 }
@@ -306,7 +363,7 @@ func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, e
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return body, &jellyfinHTTPError{resp.StatusCode}
 	}
 	return body, nil
 }
@@ -329,7 +386,7 @@ func jellyfinDelete(s *ServiceClients, path, token string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return body, &jellyfinHTTPError{resp.StatusCode}
 	}
 	return body, nil
 }
@@ -344,17 +401,32 @@ func setEmbyAuth(req *http.Request, token string) {
 
 // handleUsers handles GET /api/pelicula/users (list) and POST /api/pelicula/users (create).
 func handleUsers(w http.ResponseWriter, r *http.Request) {
+	// Block state-mutating requests when auth is off: anyone on the network could
+	// create Jellyfin accounts (immediately usable via Jellyseerr) without credentials.
+	// Read-only GET is fine in off mode since the dashboard uses it for display only.
+	if r.Method != http.MethodGet && authMiddleware != nil && authMiddleware.IsOffMode() {
+		writeError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		users, err := ListJellyfinUsers(services)
 		if err != nil {
 			slog.Error("list jellyfin users failed", "component", "users", "error", err)
-			writeError(w, "could not list users: "+err.Error(), http.StatusBadGateway)
+			writeError(w, "could not list users", http.StatusBadGateway)
 			return
 		}
 		writeJSON(w, users)
 
 	case http.MethodPost:
+		// CSRF guard: reject cross-origin requests (mirrors handleSettingsUpdate).
+		if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
+			writeError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap
 		var req struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
@@ -363,17 +435,26 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		if req.Username == "" {
-			writeError(w, "username is required", http.StatusBadRequest)
+		if !validUsername(req.Username) {
+			if req.Username == "" {
+				writeError(w, "username is required", http.StatusBadRequest)
+			} else {
+				writeError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no control chars or slashes)", http.StatusBadRequest)
+			}
 			return
 		}
 		if err := CreateJellyfinUser(services, req.Username, req.Password); err != nil {
-			slog.Error("create jellyfin user failed", "component", "users", "error", err)
-			code := http.StatusBadGateway
-			if err.Error() == "password is required" {
-				code = http.StatusBadRequest
+			slog.Error("create jellyfin user failed", "component", "users", "username", req.Username, "error", err)
+			if errors.Is(err, ErrPasswordRequired) {
+				writeError(w, "password is required", http.StatusBadRequest)
+				return
 			}
-			writeError(w, "could not create user: "+err.Error(), code)
+			var jErr *jellyfinHTTPError
+			if errors.As(err, &jErr) && jErr.StatusCode == http.StatusBadRequest {
+				writeError(w, "could not create user: name already taken or invalid", http.StatusBadRequest)
+				return
+			}
+			writeError(w, "could not create user", http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
