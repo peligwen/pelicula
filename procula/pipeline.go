@@ -41,6 +41,17 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		return
 	}
 
+	// Manual transcode jobs skip Validate and CatalogEarly — the file is
+	// already in the library and the user explicitly chose a profile.
+	if job.ManualProfile != "" {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		q.registerCancel(id, cancel)
+		defer q.unregisterCancel(id)
+		runManualTranscode(ctx, q, id, configDir, peliculaAPI)
+		return
+	}
+
 	// Create a cancellable context so Cancel() can kill a running FFmpeg
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -112,7 +123,25 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		_ = q.Update(id, func(j *Job) { j.Progress = 0.33 })
 	}
 
-	// ── Stage 2: Process ─────────────────────────────────────────────────
+	// ── Stage 2: Catalog (early) ──────────────────────────────────────────
+	// Run before transcoding so Jellyfin sees the original immediately —
+	// the file is already on disk (hardlinked by *arr). The user can start
+	// watching while the sidecar is being generated.
+	if job, _ = q.Get(id); job.State == StateCancelled {
+		return
+	}
+	_ = q.Update(id, func(j *Job) {
+		j.Stage = StageCatalog
+		j.Progress = 0.4
+	})
+	job, _ = q.Get(id)
+	if settings.CatalogEnabled {
+		CatalogEarly(job, configDir, peliculaAPI)
+	} else {
+		slog.Info("catalog skipped (disabled in settings)", "component", "pipeline", "job_id", id)
+	}
+
+	// ── Stage 3: Process ─────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
@@ -121,26 +150,23 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Progress = 0.5
 	})
 	job, _ = q.Get(id)
-	if outputPath, err := maybeTranscode(ctx, q, job, configDir); err != nil {
+	if err := maybeTranscode(ctx, q, job, configDir); err != nil {
 		slog.Warn("transcoding failed, proceeding with original", "component", "pipeline", "job_id", id, "error", err)
-	} else if outputPath != "" {
-		_ = q.Update(id, func(j *Job) { j.Source.Path = outputPath })
 		job, _ = q.Get(id)
+		WriteTranscodeFailedNotification(job, configDir, err.Error())
 	}
+	job, _ = q.Get(id)
 
-	// ── Stage 3: Catalog ─────────────────────────────────────────────────
+	// ── Stage 4: Catalog (late) ───────────────────────────────────────────
+	// Only trigger a second refresh if a sidecar was actually written —
+	// this makes the alternate version visible in Jellyfin's version picker.
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	_ = q.Update(id, func(j *Job) {
-		j.Stage = StageCatalog
-		j.Progress = 0.9
-	})
-	job, _ = q.Get(id)
-	if settings.CatalogEnabled {
-		Catalog(job, configDir, peliculaAPI)
-	} else {
-		slog.Info("catalog skipped (disabled in settings)", "component", "pipeline", "job_id", id)
+	if settings.CatalogEnabled && len(job.TranscodeOutputs) > 0 {
+		_ = q.Update(id, func(j *Job) { j.Progress = 0.95 })
+		job, _ = q.Get(id)
+		CatalogLate(job, peliculaAPI)
 	}
 
 	// ── Done ──────────────────────────────────────────────────────────────
@@ -157,36 +183,150 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 }
 
 // maybeTranscode runs FFmpeg if TRANSCODING_ENABLED=true and a matching profile
-// exists for the job's video codec/resolution. Returns the output path (or "" to
-// skip transcoding) and any non-fatal error.
-func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) (string, error) {
+// exists for the job's video codec/resolution. On success the sidecar path is
+// appended to job.TranscodeOutputs; the original Source.Path is never modified.
+// Returns a non-nil error only when transcoding was attempted and failed; the
+// caller continues with the original file either way.
+func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) error {
 	if !GetSettings().TranscodingEnabled {
-		return "", nil
+		return nil
 	}
 
 	if job.Validation == nil || job.Validation.Checks.Codecs == nil {
-		return "", nil
+		return nil
 	}
 	codecs := job.Validation.Checks.Codecs
 
 	profiles, err := LoadProfiles(configDir)
 	if err != nil || len(profiles) == 0 {
-		return "", nil
+		return nil
 	}
 
 	profile := FindMatchingProfile(profiles, codecs.Video, codecs.Height)
 	if profile == nil {
-		return "", nil // no matching profile → skip transcoding
+		return nil // no matching profile → skip transcoding
+	}
+
+	// Passthrough: source already satisfies the profile's output requirements
+	if ShouldPassthrough(codecs, profile) {
+		slog.Info("transcode passthrough: source already matches profile target",
+			"component", "pipeline", "job_id", job.ID,
+			"codec", codecs.Video, "height", codecs.Height, "profile", profile.Name)
+		_ = q.Update(job.ID, func(j *Job) {
+			j.TranscodeProfile = profile.Name
+			j.TranscodeDecision = "passthrough"
+		})
+		return nil
 	}
 
 	slog.Info("transcoding job", "component", "pipeline", "job_id", job.ID, "profile", profile.Name)
+	_ = q.Update(job.ID, func(j *Job) {
+		j.TranscodeProfile = profile.Name
+	})
 
-	outputPath, err := Process(ctx, job, profile, func(pct float64) {
+	outputPath, err := Process(ctx, job, profile, func(pct, etaSecs float64) {
 		// Map pct (0–1) into the 50–90% progress window
 		progress := 0.5 + pct*0.4
-		q.Update(job.ID, func(j *Job) { j.Progress = progress }) //nolint:errcheck
+		q.Update(job.ID, func(j *Job) { //nolint:errcheck
+			j.Progress = progress
+			j.TranscodeETA = etaSecs
+		})
 	})
-	return outputPath, err
+
+	if err != nil {
+		_ = q.Update(job.ID, func(j *Job) {
+			j.TranscodeDecision = "failed"
+			j.TranscodeError = err.Error()
+		})
+		return err
+	}
+
+	_ = q.Update(job.ID, func(j *Job) {
+		j.TranscodeDecision = "transcoded"
+		j.TranscodeOutputs = append(j.TranscodeOutputs, outputPath)
+	})
+	return nil
+}
+
+// runManualTranscode handles jobs with ManualProfile set. It skips validation
+// and the early catalog (the file is already in the library), transcodes using
+// the named profile, then triggers a late Jellyfin refresh so the sidecar
+// appears as an alternate version. On failure the job is marked StateFailed.
+func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAPI string) {
+	_ = q.Update(id, func(j *Job) {
+		j.State = StateProcessing
+		j.Stage = StageProcess
+		j.Progress = 0.1
+	})
+	job, _ := q.Get(id)
+
+	slog.Info("manual transcode job", "component", "pipeline", "job_id", id, "profile", job.ManualProfile, "title", job.Source.Title)
+
+	profiles, err := LoadProfiles(configDir)
+	if err != nil {
+		slog.Error("failed to load profiles", "component", "pipeline", "job_id", id, "error", err)
+		_ = q.Update(id, func(j *Job) {
+			j.State = StateFailed
+			j.Error = "could not load profiles: " + err.Error()
+		})
+		return
+	}
+
+	profile := FindProfileByName(profiles, job.ManualProfile)
+	if profile == nil {
+		slog.Warn("profile not found for manual transcode", "component", "pipeline", "job_id", id, "profile", job.ManualProfile)
+		_ = q.Update(id, func(j *Job) {
+			j.State = StateFailed
+			j.Error = "profile not found: " + job.ManualProfile
+		})
+		return
+	}
+
+	_ = q.Update(id, func(j *Job) {
+		j.TranscodeProfile = profile.Name
+		j.Progress = 0.2
+	})
+
+	outputPath, err := Process(ctx, job, profile, func(pct, etaSecs float64) {
+		progress := 0.2 + pct*0.7
+		q.Update(id, func(j *Job) { //nolint:errcheck
+			j.Progress = progress
+			j.TranscodeETA = etaSecs
+		})
+	})
+
+	if err != nil {
+		slog.Warn("manual transcode failed", "component", "pipeline", "job_id", id, "error", err)
+		_ = q.Update(id, func(j *Job) {
+			j.State = StateFailed
+			j.Stage = StageProcess
+			j.TranscodeDecision = "failed"
+			j.TranscodeError = err.Error()
+		})
+		job, _ = q.Get(id)
+		WriteTranscodeFailedNotification(job, configDir, err.Error())
+		return
+	}
+
+	_ = q.Update(id, func(j *Job) {
+		j.TranscodeDecision = "transcoded"
+		j.TranscodeOutputs = append(j.TranscodeOutputs, outputPath)
+		j.Progress = 0.95
+	})
+
+	// Refresh Jellyfin so the sidecar appears as an alternate version
+	settings := GetSettings()
+	if settings.CatalogEnabled {
+		job, _ = q.Get(id)
+		CatalogLate(job, peliculaAPI)
+	}
+
+	_ = q.Update(id, func(j *Job) {
+		j.State = StateCompleted
+		j.Stage = StageDone
+		j.Progress = 1.0
+	})
+	slog.Info("manual transcode completed", "component", "pipeline", "job_id", id, "title", job.Source.Title, "output", outputPath)
 }
 
 // isAllowedJobPath checks that path is under a known media directory.

@@ -126,6 +126,10 @@ func main() {
 	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(handleLibraryScan)))
 	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(handleLibraryApply)))
 
+	// admin only: manual transcoding — list profiles, enqueue transcode jobs
+	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(handleTranscodeProfiles)))
+	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
+
 	slog.Info("listening", "component", "main", "addr", ":8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
 		slog.Error("server exited", "component", "main", "error", err)

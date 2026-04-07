@@ -1,5 +1,28 @@
 /* ── Import page styles ─────────────────── */
 
+/* Mode toggle (Import / Re-transcode) */
+.mode-toggle {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+}
+.mode-pill {
+    padding: 0.45rem 1rem;
+    background: #131313;
+    border: 1px solid #222;
+    border-radius: 20px;
+    color: #666;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.mode-pill:hover { color: #aaa; border-color: #333; }
+.mode-pill.active {
+    background: rgba(200,162,255,0.1);
+    border-color: rgba(200,162,255,0.3);
+    color: #c8a2ff;
+}
+
 .back-btn, .back-btn:visited {
     display: inline-flex;
     align-items: center;

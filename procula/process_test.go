@@ -252,7 +252,7 @@ func TestProcess_Success(t *testing.T) {
 	}
 
 	var progressCalled bool
-	progressFn := func(pct float64) {
+	progressFn := func(pct, _ float64) {
 		progressCalled = true
 	}
 
@@ -289,6 +289,72 @@ func TestProcess_FFmpegFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "FFmpeg exited with error") {
 		t.Errorf("error = %q, want it to contain 'FFmpeg exited with error'", err)
+	}
+}
+
+// ── Atomic rename / partial cleanup tests ───────────────────────────────────
+
+// TestProcess_AtomicRename verifies that on success the final file exists and
+// no .partial file is left behind.
+func TestProcess_AtomicRename(t *testing.T) {
+	setupFakeFFmpeg(t)
+	t.Setenv("GO_TEST_FFMPEG", "success")
+
+	dir := t.TempDir()
+	input := filepath.Join(dir, "movie.mkv")
+	os.WriteFile(input, []byte("input"), 0644)
+
+	job := &Job{Source: JobSource{Path: input}}
+	profile := &TranscodeProfile{
+		Name:   "test",
+		Output: TranscodeOutput{VideoCodec: "libx264", AudioCodec: "aac", Suffix: " - 1080p"},
+	}
+
+	out, err := processWithDir(context.Background(), job, profile, nil, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Final file must exist
+	if _, err := os.Stat(out); os.IsNotExist(err) {
+		t.Errorf("final output file not found: %s", out)
+	}
+	// No .partial file should remain
+	if _, err := os.Stat(out + ".partial"); !os.IsNotExist(err) {
+		t.Errorf(".partial file still present after successful transcode")
+	}
+	// Output must be in the same directory as the input (sidecar)
+	if filepath.Dir(out) != dir {
+		t.Errorf("sidecar should be in %s, got %s", dir, filepath.Dir(out))
+	}
+}
+
+// TestProcess_PartialCleanedOnFailure verifies that a .partial file is removed
+// when FFmpeg fails (no orphaned partial output left behind).
+func TestProcess_PartialCleanedOnFailure(t *testing.T) {
+	setupFakeFFmpeg(t)
+	t.Setenv("GO_TEST_FFMPEG", "fail")
+
+	dir := t.TempDir()
+	input := filepath.Join(dir, "movie.mkv")
+	os.WriteFile(input, []byte("input"), 0644)
+
+	job := &Job{Source: JobSource{Path: input}}
+	profile := &TranscodeProfile{
+		Name:   "test",
+		Output: TranscodeOutput{VideoCodec: "libx264", AudioCodec: "aac", Suffix: ".test"},
+	}
+
+	_, err := processWithDir(context.Background(), job, profile, nil, dir)
+	if err == nil {
+		t.Fatal("expected error from failing FFmpeg")
+	}
+
+	// Verify no .partial file lingers
+	pattern := filepath.Join(dir, "*.partial")
+	matches, _ := filepath.Glob(pattern)
+	if len(matches) > 0 {
+		t.Errorf("partial file(s) not cleaned up after failure: %v", matches)
 	}
 }
 

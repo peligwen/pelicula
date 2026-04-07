@@ -26,6 +26,12 @@
 
     <!-- Main -->
     <div class="main">
+        <!-- Mode toggle: Import vs Re-transcode -->
+        <div class="mode-toggle" id="mode-toggle">
+            <button class="mode-pill active" data-mode="import" onclick="setMode('import')">Import new media</button>
+            <button class="mode-pill" data-mode="retranscode" onclick="setMode('retranscode')">Re-transcode existing</button>
+        </div>
+
         <!-- Step indicator -->
         <div class="import-steps" id="import-steps">
             <div class="import-step active" data-step="browse">
@@ -128,6 +134,54 @@
                 <div></div>
                 <a href="/" class="import-btn primary">Back to Dashboard</a>
             </div>
+        </div>
+    </div>
+
+        <!-- Re-transcode flow (hidden by default) -->
+        <div id="retranscode-flow" class="hidden">
+
+            <!-- RT Step 1: Browse + select files -->
+            <div class="import-panel" id="retranscode-browse">
+                <div class="section-header">
+                    <span>Select files to re-transcode</span>
+                    <span class="import-selected-count" id="rt-selected-count"></span>
+                </div>
+                <div class="browse-tree" id="retranscode-tree">
+                    <div class="no-items">Loading library...</div>
+                </div>
+                <div class="import-nav">
+                    <div></div>
+                    <button class="import-btn primary" id="rt-btn-next" onclick="rtGoToConfigure()" disabled>Choose Profile</button>
+                </div>
+            </div>
+
+            <!-- RT Step 2: Profile picker -->
+            <div class="import-panel hidden" id="retranscode-configure">
+                <div class="section-header"><span>Select a transcode profile</span></div>
+                <div id="rt-profiles-container">
+                    <div class="no-items">Loading profiles...</div>
+                </div>
+                <div class="import-nav">
+                    <button class="import-btn" onclick="rtGoToBrowse()">Back</button>
+                    <button class="import-btn primary" id="rt-btn-apply" onclick="doRetranscode()" disabled>Apply</button>
+                </div>
+            </div>
+
+            <!-- RT Step 3: Result -->
+            <div class="import-panel hidden" id="retranscode-apply">
+                <div class="section-header"><span>Re-transcode</span></div>
+                <div id="rt-apply-content">
+                    <div class="apply-progress">
+                        <div class="apply-spinner"></div>
+                        <span>Queuing transcode jobs...</span>
+                    </div>
+                </div>
+                <div class="import-nav hidden" id="rt-apply-nav">
+                    <button class="import-btn" onclick="rtGoToBrowse()">Transcode more</button>
+                    <a href="/" class="import-btn primary">Back to Dashboard</a>
+                </div>
+            </div>
+
         </div>
     </div>
 

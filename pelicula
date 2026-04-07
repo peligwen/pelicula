@@ -828,8 +828,9 @@ configure_transcoding() {
     echo "  1) Disable transcoding"
     echo "  2) Enable transcoding"
     echo "  3) Install default profile templates"
+    echo "  4) Toggle a profile on/off"
     echo ""
-    echo -en "Select [1-3]: "
+    echo -en "Select [1-4]: "
     read -r choice
     case "$choice" in
         1)
@@ -838,7 +839,7 @@ configure_transcoding() {
             ;;
         2)
             set_env_var TRANSCODING_ENABLED true
-            pass "Transcoding enabled (Phase E required for FFmpeg processing)"
+            pass "Transcoding enabled"
             if [[ -z "$(ls -A "$profiles_dir" 2>/dev/null)" ]]; then
                 info "No profiles installed — run option 3 to install defaults"
             fi
@@ -846,10 +847,55 @@ configure_transcoding() {
         3)
             install_default_profiles "$profiles_dir"
             ;;
+        4)
+            toggle_profile "$profiles_dir"
+            ;;
         *)
             warn "Unknown option"
             ;;
     esac
+}
+
+toggle_profile() {
+    local dir="$1"
+    if [[ ! -d "$dir" ]] || [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+        warn "No profiles installed. Run option 3 first."
+        return
+    fi
+
+    echo ""
+    echo "  Installed profiles:"
+    local i=0
+    local -a profile_files=()
+    for f in "$dir"/*.json; do
+        [[ -f "$f" ]] || continue
+        local name enabled
+        name="$(basename "$f" .json)"
+        enabled="$(grep -o '"enabled": *[^,}]*' "$f" 2>/dev/null | head -1 | grep -o 'true\|false' || echo "unknown")"
+        i=$((i + 1))
+        profile_files+=("$f")
+        echo "    ${i}) ${name} (${enabled})"
+    done
+    echo ""
+    echo -en "  Select profile number to toggle [1-${i}]: "
+    read -r sel
+    if [[ ! "$sel" =~ ^[0-9]+$ ]] || [[ "$sel" -lt 1 ]] || [[ "$sel" -gt "$i" ]]; then
+        warn "Invalid selection"
+        return
+    fi
+    local target="${profile_files[$((sel - 1))]}"
+    python3 -c "
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+data['enabled'] = not data['enabled']
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+new_state = 'enabled' if data['enabled'] else 'disabled'
+print(f\"Profile '{data['name']}' is now {new_state}\")
+" "$target"
 }
 
 install_default_profiles() {
@@ -870,7 +916,7 @@ install_default_profiles() {
     "video_preset": "medium",
     "video_crf": 20,
     "audio_codec": "copy",
-    "suffix": "-h264"
+    "suffix": " - H264"
   }
 }
 EOF
@@ -893,7 +939,7 @@ EOF
     "max_height": 1080,
     "audio_codec": "aac",
     "audio_channels": 2,
-    "suffix": "-1080p"
+    "suffix": " - 1080p"
   }
 }
 EOF
@@ -2605,6 +2651,29 @@ except Exception as e:
         echo ""
         warn "Procula logs:"
         test_compose logs --tail 40 procula 2>/dev/null || true
+        exit 1
+    fi
+
+    # ── Sidecar verification ──────────────────────────
+    # The test-downscale profile has suffix ".test", so Procula should have
+    # written a sidecar alongside the original file as a Jellyfin alt version.
+    local sidecar_file="$movie_dir/Test.Movie.2024.test.mkv"
+    if [[ -f "$sidecar_file" ]]; then
+        t_pass "Transcoded sidecar created (Jellyfin alternate version)"
+    else
+        # Non-fatal: sidecar may be inside the container volume only
+        local container_sidecar="/movies/Test Movie (2024)/Test.Movie.2024.test.mkv"
+        if $NEEDS_SUDO docker exec pelicula-test-procula test -f "$container_sidecar" 2>/dev/null; then
+            t_pass "Transcoded sidecar created (inside container volume)"
+        else
+            warn "Sidecar not found at ${sidecar_file} — transcoding may have been skipped (passthrough or profile mismatch)"
+        fi
+    fi
+    # Original file must still exist (sidecar mode never deletes the source)
+    if [[ -f "$movie_file" ]]; then
+        t_pass "Original file preserved after transcoding"
+    else
+        t_fail "Original file was deleted — sidecar mode must not remove the source"
         exit 1
     fi
 

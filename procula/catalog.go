@@ -36,10 +36,12 @@ type NotificationConfig struct {
 	DirectURL   string   `json:"direct_url"`   // single webhook URL for "direct" mode
 }
 
-// Catalog runs after processing completes: triggers Jellyfin library refresh
-// via pelicula-api and writes a "content ready" notification to the feed.
-func Catalog(job *Job, configDir, peliculaAPI string) {
-	slog.Info("cataloging job", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
+// CatalogEarly runs immediately after validation: tells Jellyfin about the new
+// file so it becomes watchable right away, writes the "content ready"
+// notification, and sends any configured external notification.
+// The file is already in the library (hardlinked by *arr) before this runs.
+func CatalogEarly(job *Job, configDir, peliculaAPI string) {
+	slog.Info("cataloging job (early)", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
 
 	// Trigger Jellyfin library refresh via pelicula-api
 	if err := triggerJellyfinRefresh(peliculaAPI); err != nil {
@@ -55,10 +57,28 @@ func Catalog(job *Job, configDir, peliculaAPI string) {
 	sendExternalNotification(cfg, event)
 }
 
+// CatalogLate runs after a transcoded sidecar has been written alongside the
+// original. It triggers a second (silent) Jellyfin refresh so the alternate
+// version appears in the version picker. No duplicate notification is emitted.
+func CatalogLate(job *Job, peliculaAPI string) {
+	slog.Info("cataloging job (late refresh for sidecar)", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
+	if err := triggerJellyfinRefresh(peliculaAPI); err != nil {
+		slog.Warn("late Jellyfin refresh failed (non-fatal)", "component", "catalog", "error", err)
+	}
+}
+
 // WriteValidationFailedNotification writes a failed notification from the pipeline.
 func WriteValidationFailedNotification(job *Job, configDir, reason string) {
 	msg := fmt.Sprintf("Validation failed: %s — %s", job.Source.Title, reason)
 	event := buildEvent(job, "validation_failed", msg)
+	appendToFeed(configDir, event)
+}
+
+// WriteTranscodeFailedNotification writes a transcode failure notification to the feed.
+// The job continues with the original file; this is informational.
+func WriteTranscodeFailedNotification(job *Job, configDir, reason string) {
+	msg := fmt.Sprintf("Transcode failed: %s — %s", job.Source.Title, reason)
+	event := buildEvent(job, "transcode_failed", msg)
 	appendToFeed(configDir, event)
 }
 

@@ -416,3 +416,211 @@ function renderApplyResult(result, validate) {
 // ── Init ────────────────────────────────────────────────────────────────────
 
 loadBrowseRoots();
+
+// ── Re-transcode mode ────────────────────────────────────────────────────────
+
+const rtState = {
+    selected: new Set(), // Set of file paths
+    profile: null,       // selected profile name
+};
+
+function setMode(mode) {
+    const importSteps = document.getElementById('import-steps');
+    const importPanels = document.querySelectorAll('.import-panel');
+    const rtFlow = document.getElementById('retranscode-flow');
+    document.querySelectorAll('.mode-pill').forEach(p => {
+        p.classList.toggle('active', p.dataset.mode === mode);
+    });
+    if (mode === 'retranscode') {
+        importSteps.classList.add('hidden');
+        importPanels.forEach(p => p.classList.add('hidden'));
+        rtFlow.classList.remove('hidden');
+        if (document.getElementById('retranscode-tree').querySelector('.no-items')) {
+            loadRetranscodeBrowse();
+        }
+        document.getElementById('retranscode-browse').classList.remove('hidden');
+        document.getElementById('retranscode-configure').classList.add('hidden');
+        document.getElementById('retranscode-apply').classList.add('hidden');
+    } else {
+        rtFlow.classList.add('hidden');
+        importSteps.classList.remove('hidden');
+        document.getElementById('step-browse').classList.remove('hidden');
+    }
+}
+
+// ── RT Browse ────────────────────────────────────────────────────────────────
+
+async function loadRetranscodeBrowse() {
+    const tree = document.getElementById('retranscode-tree');
+    try {
+        const res = await apiFetch('/api/pelicula/browse');
+        if (!res.ok) { tree.innerHTML = '<div class="no-items">Failed to load library</div>'; return; }
+        const data = await res.json();
+        // Filter to /movies and /tv only
+        const roots = (data.entries || []).filter(e => e.path === '/movies' || e.path === '/tv');
+        if (!roots.length) { tree.innerHTML = '<div class="no-items">No /movies or /tv directories found</div>'; return; }
+        tree.innerHTML = '';
+        roots.forEach(e => tree.appendChild(createRTBrowseEntry(e, 0)));
+    } catch (err) {
+        tree.innerHTML = '<div class="no-items">Error: ' + esc(err.message) + '</div>';
+    }
+}
+
+function createRTBrowseEntry(entry, depth) {
+    const div = document.createElement('div');
+    div.className = 'browse-entry';
+    div.style.paddingLeft = (depth * 1.25) + 'rem';
+
+    if (entry.isDir) {
+        div.innerHTML = `
+            <span class="browse-expand">▶</span>
+            <span class="browse-icon">📁</span>
+            <span class="browse-name">${esc(entry.name)}</span>
+            <div class="browse-children hidden"></div>`;
+        const expand = div.querySelector('.browse-expand');
+        const children = div.querySelector('.browse-children');
+        expand.addEventListener('click', async () => {
+            if (children.classList.contains('hidden')) {
+                expand.textContent = '▼';
+                children.classList.remove('hidden');
+                if (!children.dataset.loaded) {
+                    children.innerHTML = '<div class="browse-loading">Loading…</div>';
+                    children.dataset.loaded = '1';
+                    try {
+                        const res = await apiFetch('/api/pelicula/browse?path=' + encodeURIComponent(entry.path));
+                        const data = await res.json();
+                        children.innerHTML = '';
+                        (data.entries || []).forEach(child => children.appendChild(createRTBrowseEntry(child, depth + 1)));
+                        if (!children.children.length) children.innerHTML = '<div class="browse-loading" style="color:#444">Empty</div>';
+                        if (data.truncated) children.insertAdjacentHTML('beforeend', '<div class="browse-truncated">Results truncated</div>');
+                    } catch {
+                        children.innerHTML = '<div class="browse-loading" style="color:#f87171">Error</div>';
+                    }
+                }
+            } else {
+                expand.textContent = '▶';
+                children.classList.add('hidden');
+            }
+        });
+    } else {
+        const checked = rtState.selected.has(entry.path);
+        div.innerHTML = `
+            <input type="checkbox" class="browse-checkbox" ${checked ? 'checked' : ''}>
+            <span class="browse-icon">🎬</span>
+            <span class="browse-name">${esc(entry.name)}</span>
+            <span class="browse-size">${formatSize(entry.size)}</span>`;
+        div.querySelector('input').addEventListener('change', e => {
+            if (e.target.checked) rtState.selected.add(entry.path);
+            else rtState.selected.delete(entry.path);
+            updateRTCount();
+        });
+    }
+    return div;
+}
+
+function updateRTCount() {
+    const n = rtState.selected.size;
+    document.getElementById('rt-selected-count').textContent = n ? n + ' selected' : '';
+    document.getElementById('rt-btn-next').disabled = n === 0;
+}
+
+// ── RT Configure ─────────────────────────────────────────────────────────────
+
+function rtGoToConfigure() {
+    document.getElementById('retranscode-browse').classList.add('hidden');
+    document.getElementById('retranscode-configure').classList.remove('hidden');
+    loadRTProfiles();
+}
+
+function rtGoToBrowse() {
+    document.getElementById('retranscode-configure').classList.add('hidden');
+    document.getElementById('retranscode-apply').classList.add('hidden');
+    document.getElementById('retranscode-browse').classList.remove('hidden');
+    // Reset result panel for re-use
+    document.getElementById('rt-apply-content').innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Queuing transcode jobs...</span></div>';
+    document.getElementById('rt-apply-nav').classList.add('hidden');
+}
+
+async function loadRTProfiles() {
+    const container = document.getElementById('rt-profiles-container');
+    container.innerHTML = '<div class="no-items">Loading profiles…</div>';
+    try {
+        const res = await apiFetch('/api/pelicula/transcode/profiles');
+        if (!res.ok) { container.innerHTML = '<div class="no-items">Could not load profiles</div>'; return; }
+        const profiles = await res.json();
+        if (!profiles || !profiles.length) {
+            container.innerHTML = '<div class="no-items">No profiles installed. Run <code>./pelicula configure → Transcoding → Install defaults</code>.</div>';
+            return;
+        }
+        let html = '<div class="strategy-options">';
+        profiles.forEach(p => {
+            const conds = [];
+            if (p.conditions) {
+                if (p.conditions.codecs_include && p.conditions.codecs_include.length)
+                    conds.push('Codecs: ' + p.conditions.codecs_include.join(', ').toUpperCase());
+                if (p.conditions.min_height)
+                    conds.push('Min height: ' + p.conditions.min_height + 'p');
+            }
+            const condStr = conds.length ? '<div class="strategy-desc" style="color:#666;font-size:0.72rem;margin-top:0.2rem">' + esc(conds.join(' · ')) + '</div>' : '';
+            const enabledBadge = p.enabled ? '' : ' <span style="color:#666;font-size:0.7rem">(disabled)</span>';
+            html += `<label class="strategy-option">
+                <input type="radio" name="rt-profile" value="${esc(p.name)}" onchange="rtProfileSelected('${esc(p.name)}')">
+                <div class="strategy-card">
+                    <div class="strategy-name">${esc(p.name)}${enabledBadge}</div>
+                    <div class="strategy-desc">${esc(p.description || '')}</div>
+                    ${condStr}
+                </div>
+            </label>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = '<div class="no-items">Error: ' + esc(err.message) + '</div>';
+    }
+}
+
+function rtProfileSelected(name) {
+    rtState.profile = name;
+    document.getElementById('rt-btn-apply').disabled = false;
+}
+
+// ── RT Apply ─────────────────────────────────────────────────────────────────
+
+async function doRetranscode() {
+    if (!rtState.profile || !rtState.selected.size) return;
+    document.getElementById('retranscode-configure').classList.add('hidden');
+    document.getElementById('retranscode-apply').classList.remove('hidden');
+
+    try {
+        const res = await apiFetch('/api/pelicula/library/retranscode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: [...rtState.selected], profile: rtState.profile }),
+        });
+        const result = await res.json();
+        renderRTResult(result);
+    } catch (err) {
+        renderRTResult({ queued: 0, failed: rtState.selected.size, errors: [err.message] });
+    }
+}
+
+function renderRTResult(result) {
+    const content = document.getElementById('rt-apply-content');
+    let html = '<div class="apply-result">';
+    html += '<div class="apply-stat"><span class="apply-stat-label">Queued</span><span class="apply-stat-value added">' + (result.queued || 0) + '</span></div>';
+    html += '<div class="apply-stat"><span class="apply-stat-label">Failed</span><span class="apply-stat-value failed">' + (result.failed || 0) + '</span></div>';
+    html += '</div>';
+    if (result.errors && result.errors.length) {
+        html += '<div class="apply-errors">';
+        result.errors.forEach(e => { html += '<div class="apply-error-item">' + esc(e) + '</div>'; });
+        html += '</div>';
+    }
+    if (result.queued > 0) {
+        html += '<div class="apply-success">Jobs queued. Track progress in the <a href="/" style="color:#7dda93">dashboard</a> Processing section.</div>';
+    }
+    content.innerHTML = html;
+    document.getElementById('rt-apply-nav').classList.remove('hidden');
+    // Clear state for re-use
+    rtState.selected.clear();
+    rtState.profile = null;
+}

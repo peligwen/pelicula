@@ -65,6 +65,18 @@ func LoadProfiles(configDir string) ([]TranscodeProfile, error) {
 	return profiles, nil
 }
 
+// FindProfileByName returns the profile with the given name regardless of its
+// enabled flag. Used for manual transcode requests where the user explicitly
+// picks a profile. Returns nil if no profile with that name exists.
+func FindProfileByName(profiles []TranscodeProfile, name string) *TranscodeProfile {
+	for i, p := range profiles {
+		if strings.EqualFold(p.Name, name) {
+			return &profiles[i]
+		}
+	}
+	return nil
+}
+
 // FindMatchingProfile returns the first enabled profile whose conditions match
 // the given video codec and height. Returns nil if no profile matches.
 func FindMatchingProfile(profiles []TranscodeProfile, videoCodec string, videoHeight int) *TranscodeProfile {
@@ -77,6 +89,42 @@ func FindMatchingProfile(profiles []TranscodeProfile, videoCodec string, videoHe
 		}
 	}
 	return nil
+}
+
+// normalizeCodecName converts encoder names (e.g. "libx264") to the codec name
+// that FFprobe would report (e.g. "h264") so passthrough comparisons work correctly.
+func normalizeCodecName(codec string) string {
+	switch strings.ToLower(codec) {
+	case "libx264":
+		return "h264"
+	case "libx265":
+		return "hevc"
+	case "libvpx-vp9":
+		return "vp9"
+	case "libaom-av1":
+		return "av1"
+	default:
+		return strings.ToLower(codec)
+	}
+}
+
+// ShouldPassthrough returns true when the source already satisfies the profile's
+// output requirements (same codec family, height already within target). In that
+// case there is nothing to do and ffmpeg should be skipped entirely.
+func ShouldPassthrough(codecs *CodecInfo, profile *TranscodeProfile) bool {
+	if profile.Output.VideoCodec == "copy" {
+		// "copy" means explicitly stream-copy; let the caller decide, not our concern
+		return false
+	}
+	// Codec must already match the target (normalize encoder names → codec names)
+	if normalizeCodecName(codecs.Video) != normalizeCodecName(profile.Output.VideoCodec) {
+		return false
+	}
+	// Height is either unconstrained or source is already within the target
+	if profile.Output.MaxHeight > 0 && codecs.Height > profile.Output.MaxHeight {
+		return false
+	}
+	return true
 }
 
 func matchesConditions(c TranscodeConditions, videoCodec string, videoHeight int) bool {

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -820,3 +822,103 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 	}
 	return nil
 }
+
+// ── Transcode proxy handlers ──────────────────────────────────────────────────
+
+// RetranscodeRequest is the body accepted by handleLibraryRetranscode.
+type RetranscodeRequest struct {
+	Files   []string `json:"files"`
+	Profile string   `json:"profile"`
+}
+
+// RetranscodeResult summarises the outcome of a batch retranscode request.
+type RetranscodeResult struct {
+	Queued int      `json:"queued"`
+	Failed int      `json:"failed"`
+	Errors []string `json:"errors,omitempty"`
+}
+
+// handleTranscodeProfiles proxies GET /api/procula/profiles so the import
+// wizard can list available transcode profiles without knowing Proculals internal URL.
+func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	req, err := http.NewRequest(http.MethodGet, proculaBaseURL()+"/api/procula/profiles", nil)
+	if err != nil {
+		writeError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+	resp, err := services.client.Do(req)
+	if err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		slog.Warn("failed to stream profiles response", "component", "library", "error", err)
+	}
+}
+
+// handleLibraryRetranscode accepts a list of library file paths and a profile
+// name, then enqueues a manual transcode job in Procula for each file.
+// Only paths under /movies or /tv are accepted.
+func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req RetranscodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(req.Files) == 0 || req.Profile == "" {
+		writeError(w, "files and profile are required", http.StatusBadRequest)
+		return
+	}
+
+	result := RetranscodeResult{}
+	for _, path := range req.Files {
+		clean := filepath.Clean(path)
+		if !isUnderPrefixes(clean, []string{"/movies", "/tv"}) {
+			result.Failed++
+			result.Errors = append(result.Errors, path+": not under /movies or /tv")
+			continue
+		}
+		body, _ := json.Marshal(map[string]string{"path": clean, "profile": req.Profile})
+		proculaReq, err := http.NewRequest(http.MethodPost, proculaBaseURL()+"/api/procula/transcode", bytes.NewReader(body))
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, path+": "+err.Error())
+			continue
+		}
+		proculaReq.Header.Set("Content-Type", "application/json")
+		if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+			proculaReq.Header.Set("X-API-Key", key)
+		}
+		resp, err := services.client.Do(proculaReq)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, path+": "+err.Error())
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: procula HTTP %d", path, resp.StatusCode))
+			continue
+		}
+		result.Queued++
+	}
+
+	writeJSON(w, result)
+}
+

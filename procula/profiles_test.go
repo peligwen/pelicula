@@ -150,6 +150,78 @@ func TestFindMatchingProfile(t *testing.T) {
 	})
 }
 
+func TestNormalizeCodecName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"libx264", "h264"},
+		{"libx265", "hevc"},
+		{"libvpx-vp9", "vp9"},
+		{"libaom-av1", "av1"},
+		{"h264", "h264"},
+		{"HEVC", "hevc"},
+		{"copy", "copy"},
+	}
+	for _, c := range cases {
+		if got := normalizeCodecName(c.in); got != c.want {
+			t.Errorf("normalizeCodecName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestShouldPassthrough(t *testing.T) {
+	cases := []struct {
+		name    string
+		codecs  CodecInfo
+		profile TranscodeOutput
+		want    bool
+	}{
+		{
+			"same codec, no height constraint → passthrough",
+			CodecInfo{Video: "h264", Height: 720},
+			TranscodeOutput{VideoCodec: "libx264"},
+			true,
+		},
+		{
+			"same codec, source within max height → passthrough",
+			CodecInfo{Video: "h264", Height: 720},
+			TranscodeOutput{VideoCodec: "libx264", MaxHeight: 1080},
+			true,
+		},
+		{
+			"same codec, source exceeds max height → transcode",
+			CodecInfo{Video: "h264", Height: 2160},
+			TranscodeOutput{VideoCodec: "libx264", MaxHeight: 1080},
+			false,
+		},
+		{
+			"different codec → transcode",
+			CodecInfo{Video: "hevc", Height: 1080},
+			TranscodeOutput{VideoCodec: "libx264"},
+			false,
+		},
+		{
+			"copy codec never passthrough",
+			CodecInfo{Video: "h264", Height: 1080},
+			TranscodeOutput{VideoCodec: "copy"},
+			false,
+		},
+		{
+			"encoder name matches codec name → passthrough",
+			CodecInfo{Video: "hevc", Height: 1080},
+			TranscodeOutput{VideoCodec: "libx265"},
+			true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			profile := &TranscodeProfile{Output: c.profile}
+			got := ShouldPassthrough(&c.codecs, profile)
+			if got != c.want {
+				t.Errorf("ShouldPassthrough(%+v, %+v) = %v, want %v", c.codecs, c.profile, got, c.want)
+			}
+		})
+	}
+}
+
 func TestLoadProfiles(t *testing.T) {
 	t.Run("missing directory returns nil", func(t *testing.T) {
 		dir := t.TempDir()

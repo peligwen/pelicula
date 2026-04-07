@@ -76,6 +76,18 @@ type Job struct {
 	MissingSubs []string          `json:"missing_subs,omitempty"`
 	Error       string            `json:"error,omitempty"`
 	RetryCount  int               `json:"retry_count"`
+
+	// ManualProfile, when non-empty, causes the pipeline to skip Validate and
+	// CatalogEarly and run a targeted transcode using the named profile.
+	// Set by the POST /api/procula/transcode endpoint.
+	ManualProfile string `json:"manual_profile,omitempty"`
+
+	// Transcoding metadata (populated by maybeTranscode / runManualTranscode)
+	TranscodeProfile  string   `json:"transcode_profile,omitempty"`
+	TranscodeDecision string   `json:"transcode_decision,omitempty"` // "transcoded", "passthrough", "failed"
+	TranscodeOutputs  []string `json:"transcode_outputs,omitempty"`
+	TranscodeError    string   `json:"transcode_error,omitempty"`
+	TranscodeETA      float64  `json:"transcode_eta,omitempty"`
 }
 
 type Queue struct {

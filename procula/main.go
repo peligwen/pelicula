@@ -76,6 +76,8 @@ func main() {
 	mux.HandleFunc("GET /api/procula/notifications", srv.handleNotifications)
 	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
 	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(handleSaveSettings))
+	mux.HandleFunc("GET /api/procula/profiles", srv.handleListProfiles)
+	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /", handleUI)
 	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 
@@ -226,6 +228,97 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("settings saved", "component", "settings", "validation", s.ValidationEnabled, "transcoding", s.TranscodingEnabled, "catalog", s.CatalogEnabled, "notif_mode", s.NotifMode)
 	writeJSON(w, s)
+}
+
+func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles, err := LoadProfiles(s.configDir)
+	if err != nil {
+		writeError(w, "failed to load profiles: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if profiles == nil {
+		profiles = []TranscodeProfile{}
+	}
+	writeJSON(w, profiles)
+}
+
+// handleManualTranscode creates a transcoding-only job for an existing library file.
+// The file must already be under /movies or /tv (not /downloads).
+func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		Path    string `json:"path"`
+		Profile string `json:"profile"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Path == "" || req.Profile == "" {
+		writeError(w, "path and profile are required", http.StatusBadRequest)
+		return
+	}
+
+	// Manual transcode is only valid for files already in the library.
+	clean := filepath.Clean(req.Path)
+	if !isLibraryPath(clean) {
+		writeError(w, "path must be under /movies or /tv", http.StatusBadRequest)
+		return
+	}
+
+	// Stat the file to confirm it exists and get its size.
+	fi, err := os.Stat(clean)
+	if err != nil {
+		writeError(w, "file not found or not accessible", http.StatusBadRequest)
+		return
+	}
+	if fi.IsDir() {
+		writeError(w, "path must be a file, not a directory", http.StatusBadRequest)
+		return
+	}
+
+	// Derive a human-readable title from the parent directory (Plex-style naming).
+	title := strings.TrimSuffix(fi.Name(), filepath.Ext(fi.Name()))
+	if parent := filepath.Base(filepath.Dir(clean)); parent != "movies" && parent != "tv" {
+		title = parent
+	}
+
+	source := JobSource{
+		Path:    clean,
+		Size:    fi.Size(),
+		Title:   title,
+		ArrType: "radarr", // placeholder; manual jobs aren't tied to an arr instance
+		Type:    "movie",
+	}
+
+	job, err := s.queue.Create(source)
+	if err != nil {
+		writeError(w, "failed to create job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.queue.Update(job.ID, func(j *Job) {
+		j.ManualProfile = req.Profile
+	}); err != nil {
+		writeError(w, "failed to set profile: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	job, _ = s.queue.Get(job.ID)
+	slog.Info("manual transcode job created", "component", "api", "job_id", job.ID, "profile", req.Profile, "title", title)
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, job)
+}
+
+// isLibraryPath returns true only for paths under /movies or /tv.
+// Used to restrict manual transcode to already-imported library files.
+func isLibraryPath(path string) bool {
+	for _, prefix := range []string{"/movies", "/tv"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

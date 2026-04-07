@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -20,22 +21,37 @@ var (
 )
 
 // Process runs FFmpeg to transcode the job's source file using the given profile.
-// Progress is reported via progressFn (0.0–1.0) as transcoding proceeds.
-// Returns the output file path on success.
-func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(float64)) (string, error) {
-	return processWithDir(ctx, job, profile, progressFn, "/processing")
+// The transcoded file is written as a sidecar alongside the source (same directory)
+// using an atomic .partial → final rename so no half-written file is ever visible.
+// progressFn is called at most once per second with (pct 0.0–1.0, etaSecs).
+// Returns the sidecar file path on success.
+func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(pct, etaSecs float64)) (string, error) {
+	if job.Source.Path == "" {
+		return "", fmt.Errorf("no input path")
+	}
+	outputDir := filepath.Dir(job.Source.Path)
+	return processWithDir(ctx, job, profile, progressFn, outputDir)
 }
 
-func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(float64), processingDir string) (string, error) {
+func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(pct, etaSecs float64), outputDir string) (string, error) {
 	input := job.Source.Path
 	if input == "" {
 		return "", fmt.Errorf("no input path")
 	}
 
-	outputPath := resolveOutputPath(input, profile.Output.Suffix, processingDir)
+	finalPath := resolveOutputPath(input, profile.Output.Suffix, outputDir)
+	partialPath := finalPath + ".partial"
 
-	args := buildFFmpegArgs(input, outputPath, profile)
-	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", outputPath, "profile", profile.Name)
+	// Always clean up the partial file on any non-success exit.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			os.Remove(partialPath) //nolint:errcheck
+		}
+	}()
+
+	args := buildFFmpegArgs(input, partialPath, profile)
+	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", finalPath, "profile", profile.Name)
 
 	cmd := exec.CommandContext(ctx, ffmpegCommand, args...)
 	stderr, err := cmd.StderrPipe()
@@ -47,8 +63,13 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 		return "", fmt.Errorf("start FFmpeg: %w", err)
 	}
 
-	// Parse duration and time progress from FFmpeg stderr
-	var durationSecs float64
+	// Parse duration and time progress from FFmpeg stderr.
+	// Throttle updates to ~1/s and compute a simple ETA.
+	var (
+		durationSecs       float64
+		startTime          time.Time
+		lastProgressUpdate time.Time
+	)
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -59,18 +80,34 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 		}
 		if durationSecs > 0 {
 			if pct := parseProgress(line, durationSecs); pct >= 0 && progressFn != nil {
-				progressFn(pct)
+				now := time.Now()
+				if startTime.IsZero() && pct > 0 {
+					startTime = now
+				}
+				if now.Sub(lastProgressUpdate) >= time.Second {
+					var etaSecs float64
+					if !startTime.IsZero() && pct > 0 && pct < 1 {
+						elapsed := now.Sub(startTime).Seconds()
+						etaSecs = elapsed * (1 - pct) / pct
+					}
+					progressFn(pct, etaSecs)
+					lastProgressUpdate = now
+				}
 			}
 		}
 	}
 
 	if err := cmd.Wait(); err != nil {
-		os.Remove(outputPath) //nolint:errcheck
 		return "", fmt.Errorf("FFmpeg exited with error: %w", err)
 	}
 
-	slog.Info("transcoding complete", "component", "process", "output", outputPath)
-	return outputPath, nil
+	if err := os.Rename(partialPath, finalPath); err != nil {
+		return "", fmt.Errorf("rename output: %w", err)
+	}
+	succeeded = true
+
+	slog.Info("transcoding complete", "component", "process", "output", finalPath)
+	return finalPath, nil
 }
 
 // resolveOutputPath computes the output path for a transcode job,
