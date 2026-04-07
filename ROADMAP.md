@@ -62,6 +62,22 @@ Multi-user request management. Dashboard search wraps Jellyseerr API.
 - [x] Add Jellyseerr to `middleware/services.go` health checks
 - [x] Add Jellyseerr card to dashboard services grid
 - [x] `./pelicula configure` → Jellyseerr section: enable/disable
+- [x] Jellyseerr on by default; config dir created at setup time; URL in `./pelicula up` printout
+- [x] Dashboard Users section: list Jellyfin users, add user (name + password), copy Jellyseerr share URL
+
+### Future: Invite Flow
+
+One-time invite links so admins can onboard users without creating their Jellyfin account manually first.
+
+- [ ] `POST /api/pelicula/invites` — generate a signed, single-use token (HMAC, stored in `/config/pelicula/invites.json` with expiry + optional email label)
+- [ ] `GET /api/pelicula/invites/accept?token=...` — validate token, create the Jellyfin account (name + password from the claimant), mark token used
+- [ ] Dashboard: "Create invite link" button in the Users section → copies `http://host:7354/join?token=...` to clipboard (or shows it inline as with the existing share URL fallback)
+- [ ] `/join` page (static HTML served by nginx) — a minimal form: choose username + password, submit to `/api/pelicula/invites/accept`
+- [ ] Invite expiry: configurable TTL (default 7 days); expired/used tokens return a clear error page
+- [ ] Notify admin (Apprise / internal feed) when an invite is claimed, so they know a new user has joined
+- [ ] `./pelicula configure` → Users section: list active invites, revoke
+
+**Notes:** Token must be unguessable (32-byte random, base64url-encoded). The `/join` page and `/api/pelicula/invites/accept` must be reachable without a Pelicula session (pre-auth). All other invite management endpoints are admin-guarded. No email sending from Pelicula itself — admin copies the link and sends it however they like.
 
 ---
 
@@ -98,6 +114,7 @@ Push notifications to phone, email, Telegram, etc.
 - **Jellyfin/Plex SSO**: layer on top of the Phase B user model. Delegates auth to Jellyfin or Plex; Pelicula user model is the standalone fallback.
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
+- **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair (move library bind mounts out of the base compose file so the two modes are symmetric); `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; `./pelicula up` picks the right overlay; setup prompts added to both the bash CLI and `middleware/setup.go`; `setup_dirs` skips creating library subdirs when NFS mode is on. NAS-side prerequisite: enable NFS service, export a shared folder with `movies/` + `tv/` subdirs, set permissions so `PUID`/`PGID` can write (or squash to admin). Gotchas: NFSv4 idmapping can silently map to `nobody`; use `soft,timeo=100,retrans=3` to avoid hung containers when the NAS goes offline; `./pelicula test` must stay on local-library mode. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
 
 ---
 
