@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -567,7 +568,7 @@ func TestValidJellyfinID(t *testing.T) {
 
 func TestListJellyfinUsers_FieldMapping(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	payload := `[{"Name":"carol","Id":"cid","HasPassword":false,"LastLoginDate":"` + now + `"}]`
+	payload := `[{"Name":"carol","Id":"cid","HasPassword":false,"LastLoginDate":"` + now + `","Policy":{"IsAdministrator":true}}]`
 
 	newFakeJellyfin(t, func(mux *http.ServeMux) {
 		mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
@@ -596,5 +597,336 @@ func TestListJellyfinUsers_FieldMapping(t *testing.T) {
 	}
 	if u.LastLoginDate == "" {
 		t.Error("LastLoginDate should be populated")
+	}
+	if !u.IsAdmin {
+		t.Error("IsAdmin should be true when Policy.IsAdministrator is true")
+	}
+}
+
+// ── DeleteJellyfinUser ────────────────────────────────────────────────────────
+
+func TestDeleteJellyfinUser_HappyPath(t *testing.T) {
+	const uid = "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21"
+	var deleteCalls atomic.Int32
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				deleteCalls.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+		})
+	})
+	resetServices(t)
+
+	if err := DeleteJellyfinUser(services, uid); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleteCalls.Load() != 1 {
+		t.Errorf("DELETE called %d times, want 1", deleteCalls.Load())
+	}
+}
+
+func TestDeleteJellyfinUser_InvalidID(t *testing.T) {
+	err := DeleteJellyfinUser(services, "../etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for invalid ID, got nil")
+	}
+}
+
+// ── handleUserDelete (last-admin protection) ──────────────────────────────────
+
+const testAdminID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+const testUserID2 = "11111111-2222-3333-4444-555555555555"
+
+// setupUsersHandler registers a /Users handler returning two users: one admin + one regular.
+func setupUsersHandler(mux *http.ServeMux, adminID, userID string) {
+	mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[` +
+			`{"Id":"` + adminID + `","Name":"admin","HasPassword":true,"Policy":{"IsAdministrator":true}},` +
+			`{"Id":"` + userID + `","Name":"bob","HasPassword":true,"Policy":{"IsAdministrator":false}}` +
+			`]`))
+	})
+}
+
+func TestHandleUserDelete_HappyPath(t *testing.T) {
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		setupUsersHandler(mux, testAdminID, testUserID2)
+		mux.HandleFunc("/Users/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
+		})
+	})
+	resetServices(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/"+testUserID2, nil)
+	w := httptest.NewRecorder()
+	handleUserDelete(w, req, testUserID2)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204; body: %s", w.Code, w.Body)
+	}
+}
+
+func TestHandleUserDelete_LastAdminProtection(t *testing.T) {
+	// Only one admin — deleting them should be refused.
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[{"Id":"` + testAdminID + `","Name":"admin","HasPassword":true,"Policy":{"IsAdministrator":true}}]`))
+		})
+	})
+	resetServices(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/"+testAdminID, nil)
+	w := httptest.NewRecorder()
+	handleUserDelete(w, req, testAdminID)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 (last admin protection)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "only admin") {
+		t.Errorf("body = %q, want mention of 'only admin'", w.Body)
+	}
+}
+
+func TestHandleUserDelete_NotFound(t *testing.T) {
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		setupUsersHandler(mux, testAdminID, testUserID2)
+	})
+	resetServices(t)
+
+	unknownID := "ffffffff-ffff-ffff-ffff-ffffffffffff"
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/"+unknownID, nil)
+	w := httptest.NewRecorder()
+	handleUserDelete(w, req, unknownID)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// ── SetJellyfinUserPassword / handleUserPassword ──────────────────────────────
+
+func TestSetJellyfinUserPassword_HappyPath(t *testing.T) {
+	const uid = "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21"
+	var pwCalls atomic.Int32
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/Password") {
+				pwCalls.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
+		})
+	})
+	resetServices(t)
+
+	if err := SetJellyfinUserPassword(services, uid, "newpassword"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pwCalls.Load() != 1 {
+		t.Errorf("/Password POST called %d times, want 1", pwCalls.Load())
+	}
+}
+
+func TestSetJellyfinUserPassword_EmptyPassword(t *testing.T) {
+	err := SetJellyfinUserPassword(services, "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", "")
+	if !errors.Is(err, ErrPasswordRequired) {
+		t.Errorf("expected ErrPasswordRequired, got %v", err)
+	}
+}
+
+func TestSetJellyfinUserPassword_InvalidID(t *testing.T) {
+	err := SetJellyfinUserPassword(services, "not-a-uuid", "pass")
+	if err == nil {
+		t.Fatal("expected error for invalid ID")
+	}
+}
+
+func TestHandleUserPassword_HappyPath(t *testing.T) {
+	const uid = "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21"
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	resetServices(t)
+
+	body := strings.NewReader(`{"password":"newpass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/users/"+uid+"/password", body)
+	w := httptest.NewRecorder()
+	handleUserPassword(w, req, uid)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204; body: %s", w.Code, w.Body)
+	}
+}
+
+func TestHandleUserPassword_EmptyPassword(t *testing.T) {
+	newFakeJellyfin(t, nil)
+	resetServices(t)
+
+	body := strings.NewReader(`{"password":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21/password", body)
+	w := httptest.NewRecorder()
+	handleUserPassword(w, req, "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21")
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// ── handleUsersWithID routing ─────────────────────────────────────────────────
+
+func TestHandleUsersWithID_OffMode(t *testing.T) {
+	orig := authMiddleware
+	authMiddleware = newTestAuth("off", "", nil)
+	t.Cleanup(func() { authMiddleware = orig })
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", nil)
+	w := httptest.NewRecorder()
+	handleUsersWithID(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 in off mode", w.Code)
+	}
+}
+
+func TestHandleUsersWithID_ForeignOrigin(t *testing.T) {
+	newFakeJellyfin(t, nil)
+	resetServices(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	w := httptest.NewRecorder()
+	handleUsersWithID(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
+	}
+}
+
+func TestHandleUsersWithID_InvalidID(t *testing.T) {
+	newFakeJellyfin(t, nil)
+	resetServices(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	handleUsersWithID(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleUsersWithID_PasswordMethodNotAllowed(t *testing.T) {
+	newFakeJellyfin(t, nil)
+	resetServices(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21/password", nil)
+	w := httptest.NewRecorder()
+	handleUsersWithID(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// ── GetJellyfinSessions / handleSessions ─────────────────────────────────────
+
+func TestGetJellyfinSessions_HappyPath(t *testing.T) {
+	payload := `[
+		{"UserName":"alice","DeviceName":"iPhone","Client":"Infuse","LastActivityDate":"2026-04-06T12:00:00Z",
+		 "NowPlayingItem":{"Name":"Dune: Part Two","Type":"Movie"}},
+		{"UserName":"bob","DeviceName":"TV","Client":"Jellyfin for Android TV","LastActivityDate":"2026-04-06T11:00:00Z"}
+	]`
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Sessions", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(payload))
+		})
+	})
+	resetServices(t)
+
+	sessions, err := GetJellyfinSessions(services)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("want 2 sessions, got %d", len(sessions))
+	}
+	if sessions[0].UserName != "alice" {
+		t.Errorf("sessions[0].UserName = %q, want alice", sessions[0].UserName)
+	}
+	if sessions[0].NowPlayingTitle != "Dune: Part Two" {
+		t.Errorf("sessions[0].NowPlayingTitle = %q, want 'Dune: Part Two'", sessions[0].NowPlayingTitle)
+	}
+	if sessions[0].NowPlayingType != "Movie" {
+		t.Errorf("sessions[0].NowPlayingType = %q, want Movie", sessions[0].NowPlayingType)
+	}
+	if sessions[1].NowPlayingTitle != "" {
+		t.Error("sessions[1] has no NowPlayingItem, title should be empty")
+	}
+}
+
+func TestGetJellyfinSessions_SkipsSystemSessions(t *testing.T) {
+	// Sessions without UserName are system/device sessions — should be filtered.
+	payload := `[{"DeviceName":"Server","Client":"System","LastActivityDate":"2026-04-06T12:00:00Z"}]`
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Sessions", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(payload))
+		})
+	})
+	resetServices(t)
+
+	sessions, err := GetJellyfinSessions(services)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("want 0 sessions (system sessions filtered), got %d", len(sessions))
+	}
+}
+
+func TestHandleSessions_HappyPath(t *testing.T) {
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Sessions", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[{"UserName":"alice","DeviceName":"TV","Client":"Jellyfin","NowPlayingItem":{"Name":"Inception","Type":"Movie"}}]`))
+		})
+	})
+	resetServices(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/sessions", nil)
+	w := httptest.NewRecorder()
+	handleSessions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body)
+	}
+	var sessions []JellyfinSession
+	if err := json.Unmarshal(w.Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].NowPlayingTitle != "Inception" {
+		t.Errorf("unexpected sessions: %+v", sessions)
+	}
+}
+
+func TestHandleSessions_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/sessions", nil)
+	w := httptest.NewRecorder()
+	handleSessions(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
 	}
 }

@@ -485,12 +485,43 @@ a.service:hover { border-color: #333; background: #181818; }
     list-style: none; margin: 0 0 0.75rem; padding: 0;
 }
 .users-list li {
-    display: flex; align-items: center; justify-content: space-between;
+    flex-direction: column; align-items: stretch;
     padding: 0.5rem 1rem; background: #131313; border: 1px solid #1e1e1e;
     border-radius: 8px; margin-bottom: 0.3rem; font-size: 0.82rem;
+    display: flex; gap: 0.35rem;
 }
+.user-info { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .users-list .user-name { color: #ccc; font-weight: 500; }
-.users-list .user-meta { font-size: 0.7rem; color: #444; }
+.users-list .user-meta { font-size: 0.7rem; color: #444; margin-left: auto; }
+.user-admin-badge { font-size: 0.65rem; color: #666; background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 4px; padding: 0.1rem 0.35rem; }
+.user-actions { display: flex; gap: 0.3rem; }
+.user-action-btn {
+    padding: 0.25rem 0.6rem; background: #1a1a1a; border: 1px solid #2a2a2a;
+    border-radius: 5px; color: #888; font-size: 0.72rem; cursor: pointer;
+    transition: all 0.15s;
+}
+.user-action-btn:hover { background: #222; border-color: #444; color: #ccc; }
+.user-action-delete { color: #666; }
+.user-action-delete:hover { color: #f87171; border-color: #5a2020; background: #1a1010; }
+.user-action-delete-confirm { color: #f87171 !important; border-color: #5a2020 !important; background: #1a1010 !important; }
+.user-reset-form { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+.user-reset-input {
+    flex: 1; min-width: 120px; padding: 0.3rem 0.6rem;
+    background: #0e0e0e; border: 1px solid #222; border-radius: 5px;
+    color: #e0e0e0; font-size: 0.78rem; outline: none;
+}
+.user-reset-input:focus { border-color: #3a3a3a; }
+/* Sessions / Now Playing */
+.sessions-list { list-style: none; margin: 0; padding: 0; }
+.session-item {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.45rem 1rem; background: #131313; border: 1px solid #1e1e1e;
+    border-radius: 8px; margin-bottom: 0.3rem; font-size: 0.82rem;
+}
+.session-user { color: #ccc; font-weight: 500; }
+.session-sep { color: #333; }
+.session-title { color: #aaa; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-device { font-size: 0.7rem; color: #444; white-space: nowrap; }
 .add-user-form {
     display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
 }

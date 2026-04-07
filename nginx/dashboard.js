@@ -738,7 +738,7 @@ async function retryJob(id) {
 async function refresh() {
     console.log('[pelicula] refresh start');
     try {
-        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus(), checkNotifications(), checkProcessing(), checkStorage()]);
+        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus(), checkNotifications(), checkProcessing(), checkStorage(), loadSessions()]);
         console.log('[pelicula] refresh done');
     } catch(e) {
         console.error('[pelicula] refresh error:', e);
@@ -770,10 +770,132 @@ async function loadUsers() {
             const lastSeen = u.lastLoginDate
                 ? new Date(u.lastLoginDate).toLocaleDateString()
                 : 'never';
-            return `<li><span class="user-name">${escapeHtml(u.name)}</span><span class="user-meta">last login: ${lastSeen}</span></li>`;
+            const adminBadge = u.isAdmin ? '<span class="user-admin-badge">admin</span>' : '';
+            return `<li data-user-id="${escapeHtml(u.id)}" data-user-name="${escapeHtml(u.name)}">` +
+                `<div class="user-info"><span class="user-name">${escapeHtml(u.name)}</span>${adminBadge}<span class="user-meta">last login: ${lastSeen}</span></div>` +
+                `<div class="user-actions">` +
+                `<button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>` +
+                `<button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>` +
+                `</div>` +
+                `<div class="user-reset-form hidden">` +
+                `<input type="password" class="user-reset-input" placeholder="New password">` +
+                `<button class="user-action-btn" onclick="submitResetPassword(this)">Set</button>` +
+                `<button class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>` +
+                `</div>` +
+                `</li>`;
         }).join('');
     } catch (e) {
         console.warn('[pelicula] loadUsers error:', e);
+    }
+}
+
+function startResetPassword(btn) {
+    const li = btn.closest('li');
+    li.querySelector('.user-actions').classList.add('hidden');
+    li.querySelector('.user-reset-form').classList.remove('hidden');
+    li.querySelector('.user-reset-input').focus();
+}
+
+function cancelResetPassword(btn) {
+    const li = btn.closest('li');
+    li.querySelector('.user-reset-form').classList.add('hidden');
+    li.querySelector('.user-actions').classList.remove('hidden');
+    li.querySelector('.user-reset-input').value = '';
+}
+
+async function submitResetPassword(btn) {
+    const li = btn.closest('li');
+    const id = li.dataset.userId;
+    const input = li.querySelector('.user-reset-input');
+    const password = input.value;
+    if (!password) { input.focus(); return; }
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/pelicula/users/${encodeURIComponent(id)}/password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            alert(data.error || 'Failed to reset password.');
+            return;
+        }
+        cancelResetPassword(btn);
+    } catch (e) {
+        alert('Network error resetting password.');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function startDeleteUser(btn) {
+    if (btn.dataset.confirming) {
+        deleteUser(btn);
+        return;
+    }
+    btn.dataset.confirming = '1';
+    btn.textContent = 'Confirm?';
+    btn.classList.add('user-action-delete-confirm');
+    // Auto-reset after 4s if not confirmed
+    setTimeout(() => {
+        if (btn.dataset.confirming) {
+            btn.dataset.confirming = '';
+            btn.textContent = 'Delete';
+            btn.classList.remove('user-action-delete-confirm');
+        }
+    }, 4000);
+}
+
+async function deleteUser(btn) {
+    const li = btn.closest('li');
+    const id = li.dataset.userId;
+    const name = li.dataset.userName;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/pelicula/users/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+        });
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            alert(data.error || `Failed to delete ${name}.`);
+            btn.disabled = false;
+            btn.dataset.confirming = '';
+            btn.textContent = 'Delete';
+            btn.classList.remove('user-action-delete-confirm');
+            return;
+        }
+        loadUsers();
+    } catch (e) {
+        alert('Network error deleting user.');
+        btn.disabled = false;
+    }
+}
+
+// ── Sessions / Now Playing ─────────────────
+async function loadSessions() {
+    const list = document.getElementById('sessions-list');
+    const section = document.getElementById('activity-section');
+    if (!list || !section) return;
+    try {
+        const resp = await fetch('/api/pelicula/sessions');
+        if (!resp.ok) { section.classList.add('hidden'); return; }
+        const sessions = await resp.json();
+        const active = (sessions || []).filter(s => s.nowPlayingTitle);
+        if (active.length === 0) {
+            section.classList.add('hidden');
+            return;
+        }
+        section.classList.remove('hidden');
+        list.innerHTML = active.map(s => {
+            const what = s.nowPlayingType === 'Episode' ? `episode of ${escapeHtml(s.nowPlayingTitle)}` : escapeHtml(s.nowPlayingTitle);
+            return `<li class="session-item"><span class="session-user">${escapeHtml(s.userName)}</span>` +
+                `<span class="session-sep">·</span><span class="session-title">${what}</span>` +
+                `<span class="session-sep">·</span><span class="session-device">${escapeHtml(s.client || s.deviceName)}</span></li>`;
+        }).join('');
+    } catch (e) {
+        section.classList.add('hidden');
+        console.warn('[pelicula] loadSessions error:', e);
     }
 }
 
