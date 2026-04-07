@@ -102,6 +102,9 @@ func main() {
 	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
 	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))
 
+	// admin only: Jellyfin user management (list + create)
+	mux.Handle("/api/pelicula/users", auth.GuardAdmin(http.HandlerFunc(handleUsers)))
+
 	// admin only: library import scan + apply + browse
 	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(handleBrowse)))
 	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(handleLibraryScan)))

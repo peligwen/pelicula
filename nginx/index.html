@@ -201,6 +201,21 @@
             </div>
         </div>
 
+        <div class="section hidden" id="users-section">
+            <div class="section-header">
+                <span>Users</span>
+                <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
+            </div>
+            <p class="users-hint">Users log in to Jellyseerr with their Jellyfin credentials to request content.</p>
+            <ul id="users-list" class="users-list"></ul>
+            <form id="add-user-form" class="add-user-form">
+                <input id="new-username" placeholder="Username" autocomplete="off" required>
+                <input id="new-password" type="password" placeholder="Password" required>
+                <button type="submit">Add user</button>
+            </form>
+            <p id="add-user-error" class="users-error hidden"></p>
+        </div>
+
         <div class="footer" id="footer">
             <span id="footer-update"></span>
             <span id="footer-time"></span>

@@ -159,6 +159,77 @@ func wireJellyfinLibrary(s *ServiceClients, token, name, collectionType, path st
 	slog.Info("added Jellyfin library", "component", "autowire", "library", name, "path", path)
 }
 
+// JellyfinUser is a minimal representation of a Jellyfin user for the dashboard.
+type JellyfinUser struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	HasPassword   bool   `json:"hasPassword"`
+	LastLoginDate string `json:"lastLoginDate,omitempty"`
+}
+
+// ListJellyfinUsers returns all non-system Jellyfin users.
+func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
+	token, err := jellyfinAuth(s)
+	if err != nil {
+		return nil, fmt.Errorf("auth failed: %w", err)
+	}
+	data, err := jellyfinGet(s, "/Users", token)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse users: %w", err)
+	}
+	users := make([]JellyfinUser, 0, len(raw))
+	for _, u := range raw {
+		name, _ := u["Name"].(string)
+		id, _ := u["Id"].(string)
+		hasPass, _ := u["HasPassword"].(bool)
+		lastLogin, _ := u["LastLoginDate"].(string)
+		users = append(users, JellyfinUser{
+			ID:            id,
+			Name:          name,
+			HasPassword:   hasPass,
+			LastLoginDate: lastLogin,
+		})
+	}
+	return users, nil
+}
+
+// CreateJellyfinUser creates a new Jellyfin user with the given name and password.
+func CreateJellyfinUser(s *ServiceClients, username, password string) error {
+	token, err := jellyfinAuth(s)
+	if err != nil {
+		return fmt.Errorf("auth failed: %w", err)
+	}
+	// Create the user account
+	data, err := jellyfinPost(s, "/Users/New", token, map[string]any{"Name": username})
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("parse create response: %w", err)
+	}
+	id, _ := result["Id"].(string)
+	if id == "" {
+		return fmt.Errorf("no user ID in create response")
+	}
+	// Set the password
+	if password != "" {
+		_, err = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
+			"CurrentPw": "",
+			"NewPw":     password,
+		})
+		if err != nil {
+			return fmt.Errorf("set password: %w", err)
+		}
+	}
+	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
+	return nil
+}
+
 // TriggerLibraryRefresh asks Jellyfin to scan all libraries.
 // Called by the middleware's /api/pelicula/jellyfin/refresh endpoint (invoked by Procula).
 func TriggerLibraryRefresh(s *ServiceClients) error {
@@ -238,4 +309,41 @@ func setEmbyAuth(req *http.Request, token string) {
 		auth += fmt.Sprintf(`, Token="%s"`, token)
 	}
 	req.Header.Set("X-Emby-Authorization", auth)
+}
+
+// handleUsers handles GET /api/pelicula/users (list) and POST /api/pelicula/users (create).
+func handleUsers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		users, err := ListJellyfinUsers(services)
+		if err != nil {
+			slog.Error("list jellyfin users failed", "component", "users", "error", err)
+			writeError(w, "could not list users: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, users)
+
+	case http.MethodPost:
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.Username == "" {
+			writeError(w, "username is required", http.StatusBadRequest)
+			return
+		}
+		if err := CreateJellyfinUser(services, req.Username, req.Password); err != nil {
+			slog.Error("create jellyfin user failed", "component", "users", "error", err)
+			writeError(w, "could not create user: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }

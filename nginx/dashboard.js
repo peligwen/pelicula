@@ -97,6 +97,18 @@ async function checkStatus() {
                 jsCard.classList.add('hidden');
             }
         }
+        // Show Users section when Jellyseerr is enabled
+        const usersSection = document.getElementById('users-section');
+        if (usersSection) {
+            if (data.jellyseerr_enabled) {
+                usersSection.classList.remove('hidden');
+                const jsPort = data.jellyseerr_port || 5055;
+                window._jellyseerrURL = `http://${window.location.hostname}:${jsPort}/`;
+                loadUsers();
+            } else {
+                usersSection.classList.add('hidden');
+            }
+        }
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
@@ -738,3 +750,67 @@ setTimeout(refresh, 500);
 // Update check runs once on load — backend caches for 24h so no need to poll.
 setTimeout(checkUpdates, 1000);
 setInterval(refresh, 15000);
+
+// ── Users ─────────────────────────────────
+async function loadUsers() {
+    const list = document.getElementById('users-list');
+    if (!list) return;
+    try {
+        const resp = await fetch('/api/pelicula/users');
+        if (!resp.ok) return;
+        const users = await resp.json();
+        if (!users || users.length === 0) {
+            list.innerHTML = '<li style="color:#444;font-size:0.8rem;padding:0.5rem 1rem;background:#131313;border:1px solid #1e1e1e;border-radius:8px;">No users yet.</li>';
+            return;
+        }
+        list.innerHTML = users.map(u => {
+            const lastSeen = u.lastLoginDate
+                ? new Date(u.lastLoginDate).toLocaleDateString()
+                : 'never';
+            return `<li><span class="user-name">${escapeHtml(u.name)}</span><span class="user-meta">last login: ${lastSeen}</span></li>`;
+        }).join('');
+    } catch (e) {
+        console.warn('[pelicula] loadUsers error:', e);
+    }
+}
+
+document.getElementById('add-user-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('new-username').value.trim();
+    const password = document.getElementById('new-password').value;
+    const errEl = document.getElementById('add-user-error');
+    errEl.classList.add('hidden');
+    try {
+        const resp = await fetch('/api/pelicula/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            errEl.textContent = data.error || 'Failed to create user.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        document.getElementById('new-username').value = '';
+        document.getElementById('new-password').value = '';
+        loadUsers();
+    } catch (e) {
+        errEl.textContent = 'Network error.';
+        errEl.classList.remove('hidden');
+    }
+});
+
+document.getElementById('share-jellyseerr-btn')?.addEventListener('click', () => {
+    const url = window._jellyseerrURL || window.location.origin;
+    navigator.clipboard.writeText(url).then(() => {
+        const btn = document.getElementById('share-jellyseerr-btn');
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = prev; }, 2000);
+    });
+});
+
+function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
