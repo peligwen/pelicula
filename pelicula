@@ -269,7 +269,7 @@ PELICULA_PORT="${PELICULA_PORT}"
 PELICULA_AUTH="${PELICULA_AUTH}"
 PELICULA_PASSWORD="${PELICULA_PASSWORD}"
 PROCULA_API_KEY="${PROCULA_API_KEY}"
-JELLYSEERR_ENABLED=false
+JELLYSEERR_ENABLED=true
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
 NOTIFICATIONS_MODE=internal
@@ -299,6 +299,7 @@ setup_dirs() {
         "$config_dir/sonarr" \
         "$config_dir/radarr" \
         "$config_dir/jellyfin" \
+        "$config_dir/jellyseerr" \
         "$config_dir/procula/jobs" \
         "$config_dir/procula/profiles" \
         "$config_dir/pelicula" \
@@ -1156,6 +1157,11 @@ Session\DefaultSavePath=/downloads/'
     echo "  qBittorrent     http://localhost:${port}/qbt/"
     echo "  Jellyfin        http://localhost:${port}/jellyfin/"
     echo "  Procula API     http://localhost:${port}/api/procula/status"
+    if [[ "$(get_env_var JELLYSEERR_ENABLED true)" == "true" ]]; then
+        local js_port
+        js_port="$(get_env_var JELLYSEERR_PORT 5055)"
+        echo "  Jellyseerr      http://localhost:${js_port}/"
+    fi
 }
 
 cmd_down() {

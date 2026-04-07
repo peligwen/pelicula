@@ -131,13 +131,22 @@ Progress bars are green (active), amber (paused), or blue (seeding).
 
 A background process checks every 2 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
 
+## Sharing with Others (Jellyseerr)
+
+Jellyseerr is included and on by default. It gives friends and family a clean interface to request movies and TV shows without accessing the admin tools directly.
+
+**How it works:**
+1. Pelicula auto-wires Jellyseerr to Jellyfin, Radarr, and Sonarr on first boot.
+2. Create Jellyfin accounts for your users from the **Users** section of the Pelicula dashboard (or in the Jellyfin admin UI at `/jellyfin`).
+3. Share your Jellyseerr URL (`http://your-host:5055/`) — users log in with their Jellyfin credentials and can start requesting content immediately.
+
+Requests route through Jellyseerr's approval workflow before hitting Sonarr/Radarr. Admin searches from the Pelicula dashboard bypass Jellyseerr and go directly to the *arr apps.
+
+To disable Jellyseerr: run `./pelicula configure`, choose **Jellyseerr**, and select disable. Searches will fall back to direct *arr calls.
+
 ## Optional Services
 
-**Jellyseerr** — multi-user request management. When enabled, search requests route through Jellyseerr so users can request content without direct access to Sonarr/Radarr. Enable via `./pelicula configure`.
-
 **Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs via `./pelicula configure`.
-
-Both services start only when enabled and run alongside the core stack.
 
 ## Optional Auth
 
