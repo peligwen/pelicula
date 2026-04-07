@@ -365,16 +365,17 @@ async function checkServices() {
         const svcMap = data.services || {};
         document.querySelectorAll('a.service').forEach(el => {
             const dot = el.querySelector('.status-dot');
-            const href = el.getAttribute('href');
-            let name = '';
-            if (href.includes('sonarr')) name = 'sonarr';
-            else if (href.includes('radarr')) name = 'radarr';
-            else if (href.includes('prowlarr')) name = 'prowlarr';
-            else if (href.includes('qbt')) name = 'qbittorrent';
-            else if (href.includes('jellyfin')) name = 'jellyfin';
-            else if (href.includes('procula')) name = 'procula';
-            else if (href.includes('bazarr')) name = 'bazarr';
-            else if (href.includes('jellyseerr')) name = 'jellyseerr';
+            let name = el.dataset.service || '';
+            if (!name) {
+                const href = el.getAttribute('href') || '';
+                if (href.includes('sonarr')) name = 'sonarr';
+                else if (href.includes('radarr')) name = 'radarr';
+                else if (href.includes('prowlarr')) name = 'prowlarr';
+                else if (href.includes('qbt')) name = 'qbittorrent';
+                else if (href.includes('jellyfin')) name = 'jellyfin';
+                else if (href.includes('procula')) name = 'procula';
+                else if (href.includes('bazarr')) name = 'bazarr';
+            }
             dot.className = 'status-dot ' + (svcMap[name] === 'up' ? 'up' : 'down');
         });
         // Search depends on Radarr + Sonarr
