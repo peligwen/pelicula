@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -89,6 +90,9 @@ func (s *InviteStore) load() error {
 func (s *InviteStore) save() error {
 	data, err := json.MarshalIndent(s.invites, "", "  ")
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
 		return err
 	}
 	return os.WriteFile(s.path, data, 0600)
