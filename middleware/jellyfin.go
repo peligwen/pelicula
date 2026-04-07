@@ -30,23 +30,35 @@ type jellyfinHTTPError struct {
 
 func (e *jellyfinHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.StatusCode) }
 
-// validJellyfinID returns true when id looks like a Jellyfin UUID
-// ("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"). Validates before building URL paths
-// so a malicious or malformed Id cannot introduce path traversal.
+// validJellyfinID returns true when id looks like a Jellyfin user ID.
+// Jellyfin returns IDs as 32-char dashless hex strings over the API, but also
+// accepts the 36-char dashed UUID form. Both are allowed here to guard against
+// path traversal — only hex digits (and dashes in the right positions) pass.
 func validJellyfinID(id string) bool {
-	if len(id) != 36 {
-		return false
-	}
-	for i, c := range id {
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if c != '-' {
+	switch len(id) {
+	case 32:
+		// Dashless hex: Jellyfin's actual wire format from /Users.
+		for _, c := range id {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
 				return false
 			}
-		} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return false
 		}
+		return true
+	case 36:
+		// Dashed UUID form: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+		for i, c := range id {
+			if i == 8 || i == 13 || i == 18 || i == 23 {
+				if c != '-' {
+					return false
+				}
+			} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
 	}
-	return true
 }
 
 // validUsername returns true when the name is safe to send to Jellyfin:

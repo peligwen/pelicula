@@ -543,14 +543,18 @@ func TestValidJellyfinID(t *testing.T) {
 		"3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21",
 		"00000000-0000-0000-0000-000000000000",
 		"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+		// Dashless 32-char form: Jellyfin's actual wire format from /Users.
+		"a1b2c3d4e5f67890abcdef1234567890",
+		"00000000000000000000000000000000",
 	}
 	invalid := []string{
 		"",
 		"not-a-uuid",
 		"../System/Shutdown",
-		"3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f2",  // too short
-		"3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f210", // too long
+		"3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f2",  // too short (35)
+		"3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f210", // too long (37)
 		"3a4d9e71x6a1b-4f2c-9d12-98b4c76e3f21",  // wrong separator
+		"a1b2c3d4e5f67890abcdef123456789",         // dashless too short (31)
 	}
 	for _, v := range valid {
 		if !validJellyfinID(v) {
