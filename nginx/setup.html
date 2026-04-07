@@ -104,6 +104,67 @@
                 <input type="text" id="auth-password" placeholder="Auto-generated" spellcheck="false" autocomplete="off">
             </div>
 
+            <!-- Remote Access section — settings mode only -->
+            <div id="remote-section" style="display:none; margin-top:1.75rem; padding-top:1.5rem; border-top: 1px solid #1a1a1a;">
+                <div style="display:flex; align-items:baseline; gap:0.5rem; margin-bottom:0.5rem;">
+                    <span style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:#aaa;">Remote Access</span>
+                    <span style="font-size:0.65rem; color:#555; letter-spacing:0.04em;">Peligrosa</span>
+                </div>
+                <p class="step-desc" style="margin-bottom:1rem;">Expose Jellyfin to the internet via a hardened nginx vhost. Requires a public DNS hostname and open router ports. The admin dashboard stays LAN-only.</p>
+
+                <div class="toggle-row" style="margin-top:0;">
+                    <label for="remote-toggle">Enable remote access</label>
+                    <button type="button" class="toggle-btn off" id="remote-toggle" onclick="toggleRemote()" data-on="false">Off</button>
+                </div>
+
+                <div id="remote-config" style="display:none;">
+                    <label for="remote-hostname">Hostname</label>
+                    <p class="field-help">Public DNS hostname for this server (e.g. <code>home.duckdns.org</code>). Required for Let's Encrypt — must not be a raw IP.</p>
+                    <input type="text" id="remote-hostname" placeholder="home.duckdns.org" spellcheck="false" autocomplete="off">
+
+                    <label for="remote-cert-mode">Certificate mode</label>
+                    <select id="remote-cert-mode" onchange="updateRemoteCertVisibility()">
+                        <option value="letsencrypt">Let's Encrypt (auto-renewing)</option>
+                        <option value="byo">Bring your own certificate</option>
+                        <option value="self-signed">Self-signed</option>
+                    </select>
+
+                    <div id="remote-le-section">
+                        <label for="remote-le-email">Let's Encrypt email</label>
+                        <p class="field-help">Used for expiry notices and account recovery.</p>
+                        <input type="text" id="remote-le-email" placeholder="you@example.com" spellcheck="false" autocomplete="off">
+
+                        <div class="remote-staging-row">
+                            <input type="checkbox" id="remote-le-staging">
+                            <label for="remote-le-staging" class="remote-staging-label">Use Let's Encrypt staging</label>
+                        </div>
+                        <p class="field-help">Staging issues untrusted test certs with no rate limits. Enable while testing, disable for production.</p>
+                    </div>
+
+                    <div id="remote-byo-section" style="display:none;">
+                        <div class="remote-byo-notice">
+                            Drop <code>fullchain.pem</code> and <code>privkey.pem</code> into <code>&lt;CONFIG_DIR&gt;/certs/remote/</code> before restarting.
+                        </div>
+                    </div>
+
+                    <div id="remote-self-signed-notice" style="display:none;">
+                        <p class="field-help" style="color:#e09060; margin-top:0.75rem;">Self-signed certificates are rejected by iOS/tvOS Jellyfin apps and most browsers without a manual trust override.</p>
+                    </div>
+
+                    <div class="remote-ports-row">
+                        <div>
+                            <label for="remote-https-port">HTTPS port</label>
+                            <input type="text" id="remote-https-port" placeholder="8920">
+                        </div>
+                        <div>
+                            <label for="remote-http-port">HTTP port</label>
+                            <p class="field-help" style="margin-bottom:0.3rem;">ACME challenge + HTTP→HTTPS redirect</p>
+                            <input type="text" id="remote-http-port" placeholder="80">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="step-nav">
                 <button onclick="goStep(2)" class="btn-secondary">Back</button>
                 <button onclick="goStep(4)" class="btn-primary">Review</button>
@@ -208,6 +269,7 @@ function applySettingsMode() {
     document.getElementById('platform-badge').style.display = 'none';
     document.getElementById('auth-password-help').textContent = 'Leave blank to keep the current password.';
     document.getElementById('auth-password').placeholder = 'Unchanged';
+    document.getElementById('remote-section').style.display = '';
 }
 
 function prefillSettings(s) {
@@ -238,6 +300,27 @@ function prefillSettings(s) {
         document.getElementById('auth-password-section').style.display = 'none';
     }
     // Password field: always leave blank (placeholder says "Unchanged")
+
+    // Remote access
+    const remoteOn = s.remote_access_enabled === 'true';
+    const remoteBtn = document.getElementById('remote-toggle');
+    if (remoteOn) {
+        remoteBtn.dataset.on = 'true';
+        remoteBtn.textContent = 'On';
+        remoteBtn.classList.remove('off');
+        document.getElementById('remote-config').style.display = '';
+    }
+    document.getElementById('remote-hostname').value = s.remote_hostname || '';
+    document.getElementById('remote-https-port').value = s.remote_https_port || '8920';
+    document.getElementById('remote-http-port').value = s.remote_http_port || '80';
+    const certMode = s.remote_cert_mode || 'self-signed';
+    const certSel = document.getElementById('remote-cert-mode');
+    for (const opt of certSel.options) {
+        if (opt.value === certMode) { opt.selected = true; break; }
+    }
+    document.getElementById('remote-le-email').value = s.remote_le_email || '';
+    document.getElementById('remote-le-staging').checked = s.remote_le_staging === 'true';
+    updateRemoteCertVisibility();
 }
 
 function goStep(n) {
@@ -273,7 +356,42 @@ function goStep(n) {
         }
     }
 
-    if (n === 4) buildSummary();
+    if (n === 4) {
+        // Validate remote access fields when enabled (settings mode only)
+        if (mode === 'settings' && document.getElementById('remote-toggle').dataset.on === 'true') {
+            const hostnameEl = document.getElementById('remote-hostname');
+            const hostname = stripHostname(hostnameEl.value);
+            hostnameEl.value = hostname;
+            if (!hostname) {
+                hostnameEl.focus();
+                hostnameEl.classList.add('input-error');
+                return;
+            }
+            hostnameEl.classList.remove('input-error');
+
+            for (const id of ['remote-https-port', 'remote-http-port']) {
+                const el = document.getElementById(id);
+                const v = parseInt(el.value, 10);
+                if (!el.value.trim() || isNaN(v) || v < 1 || v > 65535) {
+                    el.focus();
+                    el.classList.add('input-error');
+                    return;
+                }
+                el.classList.remove('input-error');
+            }
+
+            if (document.getElementById('remote-cert-mode').value === 'letsencrypt') {
+                const emailEl = document.getElementById('remote-le-email');
+                if (!/.+@.+\..+/.test(emailEl.value.trim())) {
+                    emailEl.focus();
+                    emailEl.classList.add('input-error');
+                    return;
+                }
+                emailEl.classList.remove('input-error');
+            }
+        }
+        buildSummary();
+    }
 
     document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.step').forEach(s => {
@@ -295,6 +413,30 @@ function toggleVis(id) {
         el.type = 'password';
         btn.textContent = 'Show';
     }
+}
+
+function stripHostname(raw) {
+    // Strip scheme and path, return bare hostname — mirrors bash _remote_set_hostname
+    return raw.trim()
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/.*$/, '')
+        .trim();
+}
+
+function toggleRemote() {
+    const btn = document.getElementById('remote-toggle');
+    const on = btn.dataset.on === 'true';
+    btn.dataset.on = on ? 'false' : 'true';
+    btn.textContent = on ? 'Off' : 'On';
+    btn.classList.toggle('off', on);
+    document.getElementById('remote-config').style.display = on ? 'none' : '';
+}
+
+function updateRemoteCertVisibility() {
+    const mode = document.getElementById('remote-cert-mode').value;
+    document.getElementById('remote-le-section').style.display = mode === 'letsencrypt' ? '' : 'none';
+    document.getElementById('remote-byo-section').style.display = mode === 'byo' ? '' : 'none';
+    document.getElementById('remote-self-signed-notice').style.display = mode === 'self-signed' ? '' : 'none';
 }
 
 function toggleAuth() {
@@ -328,6 +470,17 @@ function buildSummary() {
             ? (pwd ? 'Password (new)' : 'Password (unchanged)')
             : 'Off';
         html += row('Auth', authStatus);
+
+        const remoteOn = document.getElementById('remote-toggle').dataset.on === 'true';
+        if (remoteOn) {
+            const hostname = document.getElementById('remote-hostname').value;
+            const httpsPort = document.getElementById('remote-https-port').value || '8920';
+            const certMode = document.getElementById('remote-cert-mode').value;
+            const portSuffix = httpsPort === '443' ? '' : ':' + httpsPort;
+            html += row('Remote', 'https://' + hostname + portSuffix + ' (' + certMode + ')');
+        } else {
+            html += row('Remote', 'Off');
+        }
     } else {
         html += row('Auth', authOn ? 'Password' + (pwd ? ' (custom)' : ' (auto-generated)') : 'Off');
     }
@@ -360,6 +513,7 @@ async function submitSetup() {
     // For setup/reset mode: key is required
     const wireguardKey = (mode === 'settings' && !key) ? '••••••••' : key;
 
+    const remoteOn = mode === 'settings' && document.getElementById('remote-toggle').dataset.on === 'true';
     const body = {
         wireguard_key: wireguardKey,
         country: document.getElementById('vpn-country').value,
@@ -369,6 +523,13 @@ async function submitSetup() {
         port: '7354',
         auth_enabled: authOn,
         password: document.getElementById('auth-password').value,
+        remote_access_enabled: remoteOn ? 'true' : 'false',
+        remote_hostname: remoteOn ? document.getElementById('remote-hostname').value : '',
+        remote_https_port: remoteOn ? (document.getElementById('remote-https-port').value || '8920') : '8920',
+        remote_http_port: remoteOn ? (document.getElementById('remote-http-port').value || '80') : '80',
+        remote_cert_mode: remoteOn ? document.getElementById('remote-cert-mode').value : 'self-signed',
+        remote_le_email: remoteOn ? document.getElementById('remote-le-email').value : '',
+        remote_le_staging: remoteOn ? (document.getElementById('remote-le-staging').checked ? 'true' : 'false') : 'false',
     };
 
     let endpoint;
@@ -483,6 +644,20 @@ async function confirmReset() {
     toggleBtn.classList.remove('off');
     document.getElementById('auth-password-section').style.display = '';
     document.getElementById('auth-password').value = '';
+
+    // Reset remote access to Off
+    const remoteBtn = document.getElementById('remote-toggle');
+    remoteBtn.dataset.on = 'false';
+    remoteBtn.textContent = 'Off';
+    remoteBtn.classList.add('off');
+    document.getElementById('remote-config').style.display = 'none';
+    document.getElementById('remote-hostname').value = '';
+    document.getElementById('remote-https-port').value = '';
+    document.getElementById('remote-http-port').value = '';
+    document.getElementById('remote-cert-mode').selectedIndex = 0;
+    document.getElementById('remote-le-email').value = '';
+    document.getElementById('remote-le-staging').checked = false;
+    updateRemoteCertVisibility();
 
     // Update UI for reset mode
     document.getElementById('confirm-heading').textContent = 'Reset Configuration';
