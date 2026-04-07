@@ -1,9 +1,17 @@
+// ── Resilient fetch (auto-abort after ms) ──
+function tfetch(url, opts, ms) {
+    ms = ms || 4000;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, Object.assign({}, opts, {signal: ctrl.signal})).finally(() => clearTimeout(t));
+}
+
 // ── Auth ──────────────────────────────────
 let currentRole = 'admin'; // default when auth is off
 
 async function checkAuth() {
     try {
-        const res = await fetch('/api/pelicula/auth/check');
+        const res = await tfetch('/api/pelicula/auth/check');
         const data = await res.json();
         if (!data.auth) {
             // Auth is off — no login needed, full access
@@ -75,7 +83,7 @@ document.getElementById('login-password').addEventListener('keydown', e => { if 
 // ── Status + Indexer check ────────────────
 async function checkStatus() {
     try {
-        const res = await fetch('/api/pelicula/status', {});
+        const res = await tfetch('/api/pelicula/status');
         if (!res.ok) return;
         const data = await res.json();
         const toast = document.getElementById('toast');
@@ -254,7 +262,7 @@ searchInput.addEventListener('focus', () => {
 // ── Downloads ─────────────────────────────
 async function checkDownloads() {
     try {
-        const res = await fetch('/api/pelicula/downloads', {});
+        const res = await tfetch('/api/pelicula/downloads');
         if (!res.ok) throw new Error();
         const data = await res.json();
         renderDownloads(data);
@@ -288,9 +296,11 @@ function renderDownloads(data) {
             : `<button class="dl-btn pause" title="Pause" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>`;
         const cancelBtn = canCancel ? `<button class="dl-btn cancel" title="Cancel download" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="dlCancelFromBtn(this,false)">&#10005;</button>` : '';
         const blocklistBtn = canCancel ? `<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="openBlocklistFromBtn(this)">&#8856;</button>` : '';
+        const isDone = pct >= 100 && isSeeding;
         const statusText = isPaused ? '<span class="paused-label">paused</span>'
             : isFetching ? '<span class="fetching-label">Fetching metadata\u2026</span>'
-            : `${speed}${eta ? ' \u00b7 ' + eta : ''}`;
+            : isDone ? '<span class="seeding-label">seeding</span>'
+            : `${speed}${eta && t.eta < 8640000 ? ' \u00b7 ' + eta : ''}`;
         const sizeText = isFetching ? '\u2014' : `${pct}% of ${formatSize(t.size)}`;
         return `<div class="download-item"><div class="download-header"><div class="download-name" onclick="this.classList.toggle('expanded')" title="${esc(t.name)}">${esc(t.name)}</div><div class="download-actions">${pauseBtn}${cancelBtn}${blocklistBtn}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${sizeText}</span><span>${statusText}</span></div></div>`;
     }).join('');
@@ -349,7 +359,7 @@ function formatETA(s) { if (s > 86400) return Math.floor(s/86400)+'d'; if (s > 3
 async function checkServices() {
     const warn = document.getElementById('search-warning');
     try {
-        const res = await fetch('/api/pelicula/status', {});
+        const res = await tfetch('/api/pelicula/status');
         if (!res.ok) throw new Error();
         const data = await res.json();
         const svcMap = data.services || {};
@@ -388,7 +398,7 @@ async function checkServices() {
         }
     } catch (e) {
         console.warn('[pelicula] status check error:', e);
-        document.querySelectorAll('a.service .status-dot').forEach(d => d.className = 'status-dot down');
+        document.querySelectorAll('a.service .status-dot').forEach(d => d.className = 'status-dot unknown');
         searchInput.disabled = true;
         searchInput.placeholder = 'Search unavailable';
         warn.textContent = 'Cannot reach services — search is disabled';
@@ -405,22 +415,26 @@ async function checkVPN() {
     const desc = document.getElementById('vpn-desc');
     const card = document.getElementById('vpn-card');
     try {
-        const [ipRes, portRes] = await Promise.all([
-            fetch('/api/vpn/v1/publicip/ip', {}),
-            fetch('/api/vpn/v1/portforward', {})
+        const [ipResult, portResult] = await Promise.allSettled([
+            tfetch('/api/vpn/v1/publicip/ip'),
+            tfetch('/api/vpn/v1/portforward')
         ]);
-        if (ipRes.ok) {
+        const ipRes = ipResult.status === 'fulfilled' ? ipResult.value : null;
+        const portRes = portResult.status === 'fulfilled' ? portResult.value : null;
+        if (ipRes && ipRes.ok) {
             const data = await ipRes.json();
             vpnEl.setAttribute('data-ip', data.public_ip || '?');
             vpnEl.textContent = '***.***';
             vpnEl.className = 'vpn-stat-val vpn-ok';
-            regionEl.textContent = data.country || '?';
+            regionEl.textContent = data.country || '\u2014';
             regionEl.classList.remove('loading');
             dot.className = 'status-dot up';
             desc.textContent = 'Connected';
             card.classList.remove('vpn-down');
+        } else if (!ipRes) {
+            throw new Error('VPN timeout');
         }
-        if (portRes.ok) {
+        if (portRes && portRes.ok) {
             const pd = await portRes.json();
             portEl.textContent = pd.port || '?';
             portEl.classList.remove('loading');
@@ -448,7 +462,7 @@ let lastSeenTs = localStorage.getItem('peliculaLastSeen') || '1970-01-01T00:00:0
 
 async function checkNotifications() {
     try {
-        const res = await fetch('/api/pelicula/notifications');
+        const res = await tfetch('/api/pelicula/notifications');
         if (!res.ok) return;
         const events = await res.json();
         renderNotifications(events);
@@ -558,7 +572,7 @@ function renderActivity(events) {
 // ── Storage section ───────────────────────
 async function checkStorage() {
     try {
-        const res = await fetch('/api/pelicula/storage');
+        const res = await tfetch('/api/pelicula/storage');
         if (!res.ok) return;
         const data = await res.json();
         renderStorage(data);
@@ -678,7 +692,7 @@ async function checkUpdates() {
 // ── Processing section ────────────────────
 async function checkProcessing() {
     try {
-        const res = await fetch('/api/pelicula/processing');
+        const res = await tfetch('/api/pelicula/processing');
         if (!res.ok) return;
         const data = await res.json();
         renderProcessing(data);
@@ -749,15 +763,32 @@ async function retryJob(id) {
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
+let lastRefreshAt = 0;
+
 async function refresh() {
     console.log('[pelicula] refresh start');
-    try {
-        await Promise.all([checkServices(), checkVPN(), checkDownloads(), checkStatus(), checkNotifications(), checkProcessing(), checkStorage(), loadSessions()]);
-        console.log('[pelicula] refresh done');
-    } catch(e) {
-        console.error('[pelicula] refresh error:', e);
-    }
+    const results = await Promise.allSettled([
+        checkServices(), checkVPN(), checkDownloads(), checkStatus(),
+        checkNotifications(), checkProcessing(), checkStorage(), loadSessions()
+    ]);
+    const failed = results.filter(r => r.status === 'rejected').length;
+    console.log('[pelicula] refresh done' + (failed ? ' (' + failed + ' failed)' : ''));
+    lastRefreshAt = Date.now();
     updateTimestamp();
+    updateStaleBanner();
+}
+
+function updateStaleBanner() {
+    if (!lastRefreshAt) return;
+    const age = Date.now() - lastRefreshAt;
+    const stale = age > 30000;
+    document.body.classList.toggle('stale', stale);
+    const el = document.getElementById('footer-update');
+    if (el && stale && !el.querySelector('a')) {
+        el.textContent = 'stale \u2014 last updated ' + Math.round(age / 1000) + 's ago \u00b7 ';
+    } else if (el && !stale && el.textContent.startsWith('stale')) {
+        el.textContent = '';
+    }
 }
 
 checkAuth();
@@ -765,6 +796,7 @@ setTimeout(refresh, 500);
 // Update check runs once on load — backend caches for 24h so no need to poll.
 setTimeout(checkUpdates, 1000);
 setInterval(refresh, 15000);
+setInterval(updateStaleBanner, 5000);
 
 // ── Users ─────────────────────────────────
 let usersLoaded = false;
@@ -892,7 +924,7 @@ async function loadSessions() {
     const section = document.getElementById('activity-section');
     if (!list || !section) return;
     try {
-        const resp = await fetch('/api/pelicula/sessions');
+        const resp = await tfetch('/api/pelicula/sessions');
         if (!resp.ok) { section.classList.add('hidden'); return; }
         const sessions = await resp.json();
         const active = (sessions || []).filter(s => s.nowPlayingTitle);

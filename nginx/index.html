@@ -55,6 +55,7 @@
             <div class="masthead-right">
                 <a href="/import" class="settings-btn admin-only" title="Import Media">&#8615;</a>
                 <a href="/settings" class="settings-btn admin-only" title="Settings">&#9881;</a>
+                <button class="reload-btn" id="reload-btn" title="Reload dashboard" onclick="refresh()">&#8635;</button>
                 <div class="bell-wrap" id="bell-wrap">
                     <button class="bell-btn" id="bell-btn" title="Notifications" onclick="toggleNotifications()">
                         &#9679;
@@ -130,7 +131,7 @@
                 <!-- VPN card (wide, spans full row) -->
                 <div class="service service-vpn" id="vpn-card">
                     <div class="service-vpn-left">
-                        <span class="status-dot checking" id="vpn-dot"></span>
+                        <span class="status-dot unknown" id="vpn-dot"></span>
                         <div>
                             <div class="service-name">VPN</div>
                             <div class="service-desc" id="vpn-desc">Checking&hellip;</div>
@@ -161,56 +162,56 @@
                 </div>
                 <a class="service" target="_blank" rel="noopener" href="/sonarr/" data-check="/sonarr/ping">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Sonarr</div><div class="service-desc">TV Shows</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service" target="_blank" rel="noopener" href="/radarr/" data-check="/radarr/ping">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Radarr</div><div class="service-desc">Movies</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service" target="_blank" rel="noopener" href="/prowlarr/" data-check="/prowlarr/ping">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Prowlarr</div><div class="service-desc">Indexers</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service" target="_blank" rel="noopener" href="/qbt/" data-check="/qbt/">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">qBittorrent</div><div class="service-desc">Downloads</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service" target="_blank" rel="noopener" href="/jellyfin/" data-check="/jellyfin/health">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Jellyfin</div><div class="service-desc">Media Server</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service" target="_blank" rel="noopener" href="/procula/">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Procula</div><div class="service-desc">Processing</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service" target="_blank" rel="noopener" href="/bazarr/" data-check="/bazarr/api/system/status">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Bazarr</div><div class="service-desc">Subtitles</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
                 </a>
                 <a class="service hidden" id="service-jellyseerr" target="_blank" rel="noopener" href="#" data-check="">
                     <div class="service-left">
-                        <span class="status-dot checking"></span>
+                        <span class="status-dot unknown"></span>
                         <div><div class="service-name">Jellyseerr</div><div class="service-desc">Request &amp; share</div></div>
                     </div>
                     <span class="service-arrow">&rarr;</span>
