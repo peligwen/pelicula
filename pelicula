@@ -41,7 +41,11 @@ detect_platform
 # ── Helpers ─────────────────────────────────────────
 
 compose_cmd() {
-    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+    local -a _extra=()
+    [[ -f "${SCRIPT_DIR}/docker-compose.override.yml" ]] && _extra+=("-f" "${SCRIPT_DIR}/docker-compose.override.yml")
+    [[ -f "${SCRIPT_DIR}/docker-compose.remote.yml" ]] && _extra+=("-f" "${SCRIPT_DIR}/docker-compose.remote.yml")
+    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+        ${_extra[@]+"${_extra[@]}"} "$@"
 }
 
 docker_cmd() {
@@ -1165,6 +1169,11 @@ _remote_set_cert_mode() {
                 echo "  Let's Encrypt needs an email for expiry notices and account recovery."
                 prompt le_email "Email address"
             fi
+            # M1: basic email shape validation
+            if [[ "$le_email" != *@*.* ]]; then
+                warn "That doesn't look like a valid email address — no changes made"
+                return
+            fi
             echo ""
             echo -en "  Use Let's Encrypt staging CA? (use this for testing to avoid rate limits) [y/N]: "
             read -r staging
@@ -1203,19 +1212,23 @@ _remote_set_cert_mode() {
     warn "Run ./pelicula up to apply"
 }
 
-# Render nginx/remote.conf and docker-compose.remote.yml from current .env.
+# Render ${CONFIG_DIR}/nginx/remote.conf and docker-compose.remote.yml from .env.
 # Called by cmd_up before starting the stack.
 render_remote_configs() {
     local remote_enabled
     remote_enabled="$(get_env_var REMOTE_ACCESS_ENABLED false)"
 
-    local remote_conf="${SCRIPT_DIR}/nginx/remote.conf"
+    # H2: rendered file lives under CONFIG_DIR, not in the repo tree
+    local remote_conf="${CONFIG_DIR}/nginx/remote.conf"
     local remote_compose="${SCRIPT_DIR}/docker-compose.remote.yml"
     local cert_dir="${CONFIG_DIR}/certs/remote"
     local acme_dir="${CONFIG_DIR}/certs/acme-webroot"
+    local le_state_dir="${CONFIG_DIR}/certs/letsencrypt"
+
+    mkdir -p "${CONFIG_DIR}/nginx"
 
     if [[ "$remote_enabled" != "true" ]]; then
-        # Write empty file so nginx include doesn't error
+        # Write empty file so nginx bind-mount target exists and nginx include is a no-op
         echo "# Remote access disabled" > "$remote_conf"
         rm -f "$remote_compose"
         return 0
@@ -1235,8 +1248,15 @@ render_remote_configs() {
         exit 1
     fi
 
+    # C4: guard — LE mode requires an email address
+    if [[ "$cert_mode" == "letsencrypt" && -z "$le_email" ]]; then
+        echo -e "${RED}Error:${NC} Let's Encrypt mode requires REMOTE_LE_EMAIL to be set."
+        echo -e "Run ${BOLD}./pelicula configure${NC} → Remote access → Change cert mode."
+        exit 1
+    fi
+
     # Create cert and ACME dirs
-    mkdir -p "$cert_dir" "$acme_dir"
+    mkdir -p "$cert_dir" "$acme_dir" "$le_state_dir"
 
     # Provision cert based on mode
     case "$cert_mode" in
@@ -1255,7 +1275,7 @@ render_remote_configs() {
             ;;
         letsencrypt)
             # nginx needs a cert on disk to start; bootstrap with self-signed if absent.
-            # Certbot will replace it on first successful renewal.
+            # Certbot replaces it with a real LE cert on first successful issuance.
             if [[ ! -f "$cert_dir/fullchain.pem" ]] || [[ ! -f "$cert_dir/privkey.pem" ]]; then
                 info "No cert yet — generating bootstrap self-signed for nginx startup"
                 _remote_ensure_selfsigned_cert "$cert_dir" "$hostname"
@@ -1266,7 +1286,7 @@ render_remote_configs() {
             ;;
     esac
 
-    # Render nginx/remote.conf from template via envsubst
+    # Render remote.conf from template via envsubst (allow-list prevents substituting nginx $vars)
     if [[ ! -f "${SCRIPT_DIR}/nginx/remote.conf.template" ]]; then
         echo -e "${RED}Error:${NC} nginx/remote.conf.template not found"
         exit 1
@@ -1288,8 +1308,15 @@ render_remote_configs() {
 
     if [[ "$cert_mode" == "letsencrypt" ]]; then
         local staging_flag=""
-        [[ "$le_staging" == "true" ]] && staging_flag="--staging "
+        [[ "$le_staging" == "true" ]] && staging_flag="--staging"
 
+        # C2: LE state goes to a dedicated letsencrypt dir; nginx reads certs from cert_dir.
+        # C3: deploy-hook copies resolved cert files then signals nginx with SIGHUP.
+        #     certbot/certbot is python-on-alpine and has no nginx binary, so we use
+        #     kill -HUP with the shared PID namespace (pid: service:nginx) to signal
+        #     nginx's master process directly.
+        # C4: use YAML literal block scalar (|) so the shell script is readable and
+        #     newlines are preserved verbatim; escape $! as $$! for compose interpolation.
         {
             echo ""
             echo "  certbot:"
@@ -1297,23 +1324,26 @@ render_remote_configs() {
             echo "    container_name: pelicula-certbot"
             echo "    pid: \"service:nginx\""
             echo "    volumes:"
-            echo "      - ${cert_dir}:/etc/letsencrypt/archive/pelicula"
-            echo "      - ${CONFIG_DIR}/certs/letsencrypt:/etc/letsencrypt"
+            echo "      - ${le_state_dir}:/etc/letsencrypt"
+            echo "      - ${cert_dir}:/out"
             echo "      - ${acme_dir}:/var/www/acme"
             echo "    entrypoint: /bin/sh"
-            echo "    command: >-"
-            echo "      -c \"trap exit TERM;"
-            echo "      if [ ! -f /etc/letsencrypt/renewal/${hostname}.conf ]; then"
-            echo "        certbot certonly ${staging_flag}--webroot -w /var/www/acme"
-            echo "          --agree-tos --no-eff-email -m ${le_email} -d ${hostname}"
-            echo "          --cert-path /etc/letsencrypt/archive/pelicula/fullchain.pem"
-            echo "          --key-path /etc/letsencrypt/archive/pelicula/privkey.pem;"
-            echo "      fi;"
+            echo "    command: |"
+            echo "      -c '"
+            echo "      trap exit TERM"
+            echo "      if [ ! -f /etc/letsencrypt/renewal/pelicula.conf ]; then"
+            echo "        certbot certonly ${staging_flag} --webroot -w /var/www/acme \\"
+            echo "          --agree-tos --no-eff-email -m ${le_email} \\"
+            echo "          --cert-name pelicula -d ${hostname}"
+            echo "        cp -L /etc/letsencrypt/live/pelicula/fullchain.pem /out/fullchain.pem"
+            echo "        cp -L /etc/letsencrypt/live/pelicula/privkey.pem /out/privkey.pem"
+            echo "        kill -HUP \$(pgrep -o nginx)"
+            echo "      fi"
             echo "      while :; do"
-            echo "        certbot renew ${staging_flag}--webroot -w /var/www/acme"
-            echo "          --deploy-hook 'nginx -s reload';"
-            echo "        sleep 12h & wait \$\${!};"
-            echo "      done\""
+            echo "        certbot renew ${staging_flag} --webroot -w /var/www/acme \\"
+            echo "          --deploy-hook 'cp -L /etc/letsencrypt/live/pelicula/fullchain.pem /out/fullchain.pem && cp -L /etc/letsencrypt/live/pelicula/privkey.pem /out/privkey.pem && kill -HUP \$(pgrep -o nginx)'"
+            echo "        sleep 12h & wait \$\$!"
+            echo "      done'"
             echo "    depends_on:"
             echo "      - nginx"
             echo "    restart: unless-stopped"
@@ -1474,13 +1504,7 @@ Session\DefaultSavePath=/downloads/'
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
     [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
-
-    local -a compose_extra=()
-    [[ -f "${SCRIPT_DIR}/docker-compose.override.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.override.yml")
-    [[ -f "${SCRIPT_DIR}/docker-compose.remote.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.remote.yml")
-    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
-        ${compose_extra[@]+"${compose_extra[@]}"} \
-        ${profile_args[@]+"${profile_args[@]}"} up -d
+    compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
 
     # Wait for gluetun health
     info "Waiting for VPN connection..."
@@ -1675,12 +1699,7 @@ cmd_update() {
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
     [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
-    local -a compose_extra=()
-    [[ -f "${SCRIPT_DIR}/docker-compose.override.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.override.yml")
-    [[ -f "${SCRIPT_DIR}/docker-compose.remote.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.remote.yml")
-    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
-        ${compose_extra[@]+"${compose_extra[@]}"} \
-        ${profile_args[@]+"${profile_args[@]}"} up -d
+    compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
     pass "Update complete"
 }
 
