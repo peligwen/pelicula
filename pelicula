@@ -378,7 +378,7 @@ cmd_configure() {
         echo -e "${BOLD}Pelicula Configuration${NC}"
         echo ""
 
-        local auth_mode notifications transcoding jellyseerr port vpn_country
+        local auth_mode notifications transcoding jellyseerr port vpn_country remote_enabled remote_hostname
         auth_mode="$(get_env_var PELICULA_AUTH off)"
         [[ "$auth_mode" == "true" ]] && auth_mode="password"
         notifications="$(get_env_var NOTIFICATIONS_MODE internal)"
@@ -386,10 +386,17 @@ cmd_configure() {
         jellyseerr="$(get_env_var JELLYSEERR_ENABLED false)"
         port="$(get_env_var PELICULA_PORT 7354)"
         vpn_country="$(get_env_var SERVER_COUNTRIES Netherlands)"
+        remote_enabled="$(get_env_var REMOTE_ACCESS_ENABLED false)"
+        remote_hostname="$(get_env_var REMOTE_HOSTNAME "")"
 
-        local transcode_label jellyseerr_label
+        local transcode_label jellyseerr_label remote_label
         [[ "$transcoding" == "true" ]] && transcode_label="enabled" || transcode_label="off"
         [[ "$jellyseerr" == "true" ]] && jellyseerr_label="enabled" || jellyseerr_label="off"
+        if [[ "$remote_enabled" == "true" ]] && [[ -n "$remote_hostname" ]]; then
+            remote_label="on (${remote_hostname})"
+        else
+            remote_label="off"
+        fi
 
         echo "  1) Auth          mode: ${auth_mode}"
         echo "  2) Notifications mode: ${notifications}"
@@ -398,9 +405,10 @@ cmd_configure() {
         echo "  5) Network       port ${port}, ${vpn_country}"
         echo "  6) Paths"
         echo "  7) VPN Key"
+        echo "  8) Remote access ${remote_label}"
         echo "  q) Quit"
         echo ""
-        echo -en "Select [1-7, q]: "
+        echo -en "Select [1-8, q]: "
         read -r choice
         case "$choice" in
             1) configure_auth ;;
@@ -410,6 +418,7 @@ cmd_configure() {
             5) configure_network ;;
             6) configure_paths ;;
             7) configure_vpn_key ;;
+            8) configure_remote_access ;;
             q|Q) echo ""; break ;;
             *) warn "Unknown option" ;;
         esac
@@ -997,6 +1006,338 @@ configure_vpn_key() {
     warn "Restart gluetun for the new key to take effect: ./pelicula restart"
 }
 
+# ── Peligrosa: Remote Access ─────────────────────────────────────────────────
+
+configure_remote_access() {
+    echo ""
+    echo -e "${BOLD}Remote Access (Peligrosa)${NC}"
+    echo ""
+    local current_enabled current_hostname current_http_port current_https_port current_cert_mode
+    current_enabled="$(get_env_var REMOTE_ACCESS_ENABLED false)"
+    current_hostname="$(get_env_var REMOTE_HOSTNAME "")"
+    current_http_port="$(get_env_var REMOTE_HTTP_PORT 80)"
+    current_https_port="$(get_env_var REMOTE_HTTPS_PORT 8920)"
+    current_cert_mode="$(get_env_var REMOTE_CERT_MODE self-signed)"
+
+    echo "  Status:     ${current_enabled}"
+    [[ -n "$current_hostname" ]] && echo "  Hostname:   ${current_hostname}"
+    echo "  HTTP port:  ${current_http_port}  (ACME challenge + redirect)"
+    echo "  HTTPS port: ${current_https_port} (Jellyfin remote)"
+    echo "  Cert mode:  ${current_cert_mode}"
+    echo ""
+    echo "  When enabled, a second nginx vhost serves Jellyfin ONLY on the"
+    echo "  HTTPS port. All admin routes (/sonarr, /radarr, /api/pelicula,"
+    echo "  etc.) are unreachable on that port."
+    echo ""
+    echo "  1) Enable remote access"
+    echo "  2) Disable remote access"
+    echo "  3) Change hostname"
+    echo "  4) Change ports"
+    echo "  5) Change cert mode"
+    echo "  b) Back"
+    echo ""
+    echo -en "Select [1-5, b]: "
+    read -r choice
+    case "$choice" in
+        1) _remote_enable ;;
+        2) _remote_disable ;;
+        3) _remote_set_hostname ;;
+        4) _remote_set_ports ;;
+        5) _remote_set_cert_mode ;;
+        b|B) return ;;
+        *) warn "Unknown option" ;;
+    esac
+}
+
+_remote_enable() {
+    local hostname http_port https_port cert_mode
+    hostname="$(get_env_var REMOTE_HOSTNAME "")"
+    http_port="$(get_env_var REMOTE_HTTP_PORT 80)"
+    https_port="$(get_env_var REMOTE_HTTPS_PORT 8920)"
+    cert_mode="$(get_env_var REMOTE_CERT_MODE self-signed)"
+
+    echo ""
+    if [[ -z "$hostname" ]]; then
+        echo "  Enter your public hostname (e.g. myhome.duckdns.org or jellyfin.example.com)."
+        echo "  This must be a DNS name — raw IP addresses cannot get a TLS certificate."
+        echo ""
+        prompt hostname "Public hostname"
+        # Strip any scheme or trailing slashes the user might paste
+        hostname="${hostname#http://}"
+        hostname="${hostname#https://}"
+        hostname="${hostname%%/*}"
+        if [[ -z "$hostname" ]]; then
+            warn "Hostname is required — no changes made"
+            return
+        fi
+        set_env_var REMOTE_HOSTNAME "$hostname"
+    fi
+
+    set_env_var REMOTE_ACCESS_ENABLED true
+    set_env_var REMOTE_HTTP_PORT "$http_port"
+    set_env_var REMOTE_HTTPS_PORT "$https_port"
+    set_env_var REMOTE_CERT_MODE "$cert_mode"
+
+    pass "Remote access enabled"
+    echo ""
+    echo -e "  ${CYAN}Router port forwards required:${NC}"
+    echo "    External port ${http_port}  → this machine port ${http_port}   (HTTP redirect + ACME renewal)"
+    echo "    External port ${https_port} → this machine port ${https_port}  (Jellyfin HTTPS)"
+    echo ""
+    if [[ "$cert_mode" == "letsencrypt" ]]; then
+        echo -e "  ${CYAN}Let's Encrypt:${NC} port ${http_port} must be reachable from the internet for"
+        echo "  automatic certificate issuance and renewal."
+    elif [[ "$cert_mode" == "byo" ]]; then
+        echo -e "  ${CYAN}BYO cert:${NC} place your certificate at:"
+        echo "    $(get_env_var CONFIG_DIR)/certs/remote/fullchain.pem"
+        echo "    $(get_env_var CONFIG_DIR)/certs/remote/privkey.pem"
+    elif [[ "$cert_mode" == "self-signed" ]]; then
+        echo -e "  ${YELLOW}Self-signed cert:${NC} browsers and Jellyfin mobile apps will show security"
+        echo "  warnings. Use Let's Encrypt for real remote access."
+    fi
+    echo ""
+    warn "Run ./pelicula up to apply"
+}
+
+_remote_disable() {
+    set_env_var REMOTE_ACCESS_ENABLED false
+    pass "Remote access disabled"
+    warn "Run ./pelicula up to apply"
+}
+
+_remote_set_hostname() {
+    echo ""
+    local current
+    current="$(get_env_var REMOTE_HOSTNAME "")"
+    [[ -n "$current" ]] && echo "  Current: ${current}"
+    echo ""
+    prompt new_hostname "Public hostname (e.g. myhome.duckdns.org)"
+    new_hostname="${new_hostname#http://}"
+    new_hostname="${new_hostname#https://}"
+    new_hostname="${new_hostname%%/*}"
+    if [[ -z "$new_hostname" ]]; then
+        warn "Hostname cannot be empty — no changes made"
+        return
+    fi
+    set_env_var REMOTE_HOSTNAME "$new_hostname"
+    pass "Hostname set to ${new_hostname}"
+    warn "Run ./pelicula up to apply"
+}
+
+_remote_set_ports() {
+    echo ""
+    local current_http current_https
+    current_http="$(get_env_var REMOTE_HTTP_PORT 80)"
+    current_https="$(get_env_var REMOTE_HTTPS_PORT 8920)"
+    echo "  Current HTTP port:  ${current_http}"
+    echo "  Current HTTPS port: ${current_https}"
+    echo ""
+    echo "  The HTTP port must be forwarded from your router to this machine."
+    echo "  Let's Encrypt requires that the router forwards external port 80 to"
+    echo "  whatever port you choose here (internal port is this value)."
+    echo ""
+    prompt new_http "HTTP port" "$current_http"
+    prompt new_https "HTTPS port" "$current_https"
+    set_env_var REMOTE_HTTP_PORT "$new_http"
+    set_env_var REMOTE_HTTPS_PORT "$new_https"
+    pass "Ports updated (HTTP: ${new_http}, HTTPS: ${new_https})"
+    warn "Run ./pelicula up to apply"
+}
+
+_remote_set_cert_mode() {
+    echo ""
+    local current
+    current="$(get_env_var REMOTE_CERT_MODE self-signed)"
+    echo "  Current: ${current}"
+    echo ""
+    echo "  1) Let's Encrypt  — automatic cert via HTTP-01 (requires port 80 reachable)"
+    echo "  2) BYO cert       — drop fullchain.pem + privkey.pem into config/certs/remote/"
+    echo "  3) Self-signed    — auto-generated; browsers will warn (direct-IP / testing only)"
+    echo ""
+    echo -en "Select [1-3]: "
+    read -r choice
+    case "$choice" in
+        1)
+            local le_email
+            le_email="$(get_env_var REMOTE_LE_EMAIL "")"
+            if [[ -z "$le_email" ]]; then
+                echo ""
+                echo "  Let's Encrypt needs an email for expiry notices and account recovery."
+                prompt le_email "Email address"
+            fi
+            echo ""
+            echo -en "  Use Let's Encrypt staging CA? (use this for testing to avoid rate limits) [y/N]: "
+            read -r staging
+            local le_staging="false"
+            [[ "$staging" == "y" || "$staging" == "Y" ]] && le_staging="true"
+            set_env_var REMOTE_CERT_MODE letsencrypt
+            set_env_var REMOTE_LE_EMAIL "$le_email"
+            set_env_var REMOTE_LE_STAGING "$le_staging"
+            pass "Cert mode: Let's Encrypt (staging: ${le_staging})"
+            echo ""
+            echo "  A certbot sidecar will issue and auto-renew the cert on ./pelicula up."
+            echo "  Ensure port $(get_env_var REMOTE_HTTP_PORT 80) is forwarded from your router."
+            ;;
+        2)
+            local config_dir
+            config_dir="$(get_env_var CONFIG_DIR ./config)"
+            set_env_var REMOTE_CERT_MODE byo
+            pass "Cert mode: BYO"
+            echo ""
+            echo "  Place your certificate files at:"
+            echo "    ${config_dir}/certs/remote/fullchain.pem"
+            echo "    ${config_dir}/certs/remote/privkey.pem"
+            echo "  Then run: ./pelicula up"
+            ;;
+        3)
+            set_env_var REMOTE_CERT_MODE self-signed
+            echo ""
+            echo -e "  ${YELLOW}Warning:${NC} self-signed certs cause browser security warnings and are"
+            echo "  rejected by most Jellyfin mobile and TV apps. Suitable for testing only."
+            pass "Cert mode: self-signed"
+            ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+    warn "Run ./pelicula up to apply"
+}
+
+# Render nginx/remote.conf and docker-compose.remote.yml from current .env.
+# Called by cmd_up before starting the stack.
+render_remote_configs() {
+    local remote_enabled
+    remote_enabled="$(get_env_var REMOTE_ACCESS_ENABLED false)"
+
+    local remote_conf="${SCRIPT_DIR}/nginx/remote.conf"
+    local remote_compose="${SCRIPT_DIR}/docker-compose.remote.yml"
+    local cert_dir="${CONFIG_DIR}/certs/remote"
+    local acme_dir="${CONFIG_DIR}/certs/acme-webroot"
+
+    if [[ "$remote_enabled" != "true" ]]; then
+        # Write empty file so nginx include doesn't error
+        echo "# Remote access disabled" > "$remote_conf"
+        rm -f "$remote_compose"
+        return 0
+    fi
+
+    local hostname https_port http_port cert_mode le_email le_staging
+    hostname="$(get_env_var REMOTE_HOSTNAME "")"
+    https_port="$(get_env_var REMOTE_HTTPS_PORT 8920)"
+    http_port="$(get_env_var REMOTE_HTTP_PORT 80)"
+    cert_mode="$(get_env_var REMOTE_CERT_MODE self-signed)"
+    le_email="$(get_env_var REMOTE_LE_EMAIL "")"
+    le_staging="$(get_env_var REMOTE_LE_STAGING false)"
+
+    if [[ -z "$hostname" ]]; then
+        echo -e "${RED}Error:${NC} REMOTE_ACCESS_ENABLED=true but REMOTE_HOSTNAME is not set."
+        echo -e "Run ${BOLD}./pelicula configure${NC} → Remote access to set a hostname."
+        exit 1
+    fi
+
+    # Create cert and ACME dirs
+    mkdir -p "$cert_dir" "$acme_dir"
+
+    # Provision cert based on mode
+    case "$cert_mode" in
+        self-signed)
+            _remote_ensure_selfsigned_cert "$cert_dir" "$hostname"
+            ;;
+        byo)
+            if [[ ! -f "$cert_dir/fullchain.pem" ]] || [[ ! -f "$cert_dir/privkey.pem" ]]; then
+                echo -e "${RED}Error:${NC} BYO cert mode requires certificate files:"
+                echo "  ${cert_dir}/fullchain.pem"
+                echo "  ${cert_dir}/privkey.pem"
+                echo "Place your certificate there and re-run ./pelicula up"
+                exit 1
+            fi
+            pass "BYO certificate found"
+            ;;
+        letsencrypt)
+            # nginx needs a cert on disk to start; bootstrap with self-signed if absent.
+            # Certbot will replace it on first successful renewal.
+            if [[ ! -f "$cert_dir/fullchain.pem" ]] || [[ ! -f "$cert_dir/privkey.pem" ]]; then
+                info "No cert yet — generating bootstrap self-signed for nginx startup"
+                _remote_ensure_selfsigned_cert "$cert_dir" "$hostname"
+                warn "Certbot will replace this with a real Let's Encrypt cert on first run"
+            else
+                pass "Certificate found ($(openssl x509 -noout -issuer -in "$cert_dir/fullchain.pem" 2>/dev/null | sed 's/.*CN *= *//' || echo unknown))"
+            fi
+            ;;
+    esac
+
+    # Render nginx/remote.conf from template via envsubst
+    if [[ ! -f "${SCRIPT_DIR}/nginx/remote.conf.template" ]]; then
+        echo -e "${RED}Error:${NC} nginx/remote.conf.template not found"
+        exit 1
+    fi
+    REMOTE_HOSTNAME="$hostname" REMOTE_HTTPS_PORT="$https_port" \
+        envsubst '${REMOTE_HOSTNAME} ${REMOTE_HTTPS_PORT}' \
+        < "${SCRIPT_DIR}/nginx/remote.conf.template" > "$remote_conf"
+    pass "Rendered nginx remote vhost (${hostname}:${https_port})"
+
+    # Write docker-compose.remote.yml
+    {
+        echo "# Generated by ./pelicula up — do not edit manually"
+        echo "services:"
+        echo "  nginx:"
+        echo "    ports:"
+        echo "      - \"${http_port}:80\""
+        echo "      - \"${https_port}:8443\""
+    } > "$remote_compose"
+
+    if [[ "$cert_mode" == "letsencrypt" ]]; then
+        local staging_flag=""
+        [[ "$le_staging" == "true" ]] && staging_flag="--staging "
+
+        {
+            echo ""
+            echo "  certbot:"
+            echo "    image: certbot/certbot:latest"
+            echo "    container_name: pelicula-certbot"
+            echo "    pid: \"service:nginx\""
+            echo "    volumes:"
+            echo "      - ${cert_dir}:/etc/letsencrypt/archive/pelicula"
+            echo "      - ${CONFIG_DIR}/certs/letsencrypt:/etc/letsencrypt"
+            echo "      - ${acme_dir}:/var/www/acme"
+            echo "    entrypoint: /bin/sh"
+            echo "    command: >-"
+            echo "      -c \"trap exit TERM;"
+            echo "      if [ ! -f /etc/letsencrypt/renewal/${hostname}.conf ]; then"
+            echo "        certbot certonly ${staging_flag}--webroot -w /var/www/acme"
+            echo "          --agree-tos --no-eff-email -m ${le_email} -d ${hostname}"
+            echo "          --cert-path /etc/letsencrypt/archive/pelicula/fullchain.pem"
+            echo "          --key-path /etc/letsencrypt/archive/pelicula/privkey.pem;"
+            echo "      fi;"
+            echo "      while :; do"
+            echo "        certbot renew ${staging_flag}--webroot -w /var/www/acme"
+            echo "          --deploy-hook 'nginx -s reload';"
+            echo "        sleep 12h & wait \$\${!};"
+            echo "      done\""
+            echo "    depends_on:"
+            echo "      - nginx"
+            echo "    restart: unless-stopped"
+        } >> "$remote_compose"
+        pass "Certbot sidecar configured (${hostname}, staging: ${le_staging})"
+    fi
+}
+
+# Generate a self-signed cert into the given dir for the given hostname.
+_remote_ensure_selfsigned_cert() {
+    local dir="$1" hostname="$2"
+    if [[ -f "$dir/fullchain.pem" ]] && [[ -f "$dir/privkey.pem" ]]; then
+        pass "Remote certificate exists"
+        return 0
+    fi
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "$dir/privkey.pem" \
+        -out "$dir/fullchain.pem" \
+        -subj "/CN=${hostname}" \
+        -addext "subjectAltName=DNS:${hostname}" \
+        2>/dev/null
+    pass "Generated self-signed remote certificate (${hostname})"
+}
+
 cmd_up() {
     # If no .env, offer browser-based setup wizard
     if [[ ! -f "$ENV_FILE" ]]; then
@@ -1090,6 +1431,7 @@ cmd_up() {
 
     setup_dirs "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR"
     setup_cert "$CONFIG_DIR"
+    render_remote_configs
 
     # Verify TUN device on Linux (macOS uses utun via Docker Desktop)
     if [[ "$(uname)" != "Darwin" ]] && [[ ! -c /dev/net/tun ]]; then
@@ -1132,7 +1474,13 @@ Session\DefaultSavePath=/downloads/'
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
     [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
-    compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
+
+    local -a compose_extra=()
+    [[ -f "${SCRIPT_DIR}/docker-compose.override.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.override.yml")
+    [[ -f "${SCRIPT_DIR}/docker-compose.remote.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.remote.yml")
+    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+        ${compose_extra[@]+"${compose_extra[@]}"} \
+        ${profile_args[@]+"${profile_args[@]}"} up -d
 
     # Wait for gluetun health
     info "Waiting for VPN connection..."
@@ -1169,6 +1517,14 @@ Session\DefaultSavePath=/downloads/'
         local js_port
         js_port="$(get_env_var JELLYSEERR_PORT 5055)"
         echo "  Jellyseerr      http://localhost:${js_port}/"
+    fi
+    if [[ "$(get_env_var REMOTE_ACCESS_ENABLED false)" == "true" ]]; then
+        local r_host r_https
+        r_host="$(get_env_var REMOTE_HOSTNAME "")"
+        r_https="$(get_env_var REMOTE_HTTPS_PORT 8920)"
+        echo ""
+        echo -e "  ${CYAN}Remote Jellyfin:${NC} https://${r_host}:${r_https}/"
+        echo "  (Ensure router forwards ports $(get_env_var REMOTE_HTTP_PORT 80) and ${r_https} to this machine)"
     fi
 }
 
@@ -1319,7 +1675,12 @@ cmd_update() {
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
     [[ "$(get_env_var NOTIFICATIONS_MODE internal)" == "apprise" ]] && profile_args+=("--profile" "apprise")
-    compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
+    local -a compose_extra=()
+    [[ -f "${SCRIPT_DIR}/docker-compose.override.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.override.yml")
+    [[ -f "${SCRIPT_DIR}/docker-compose.remote.yml" ]] && compose_extra+=("-f" "${SCRIPT_DIR}/docker-compose.remote.yml")
+    $NEEDS_SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+        ${compose_extra[@]+"${compose_extra[@]}"} \
+        ${profile_args[@]+"${profile_args[@]}"} up -d
     pass "Update complete"
 }
 

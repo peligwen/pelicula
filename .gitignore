@@ -2,7 +2,6 @@
 config/
 docker-compose.override.yml
 docker-compose.remote.yml
-nginx/remote.conf
 *.tar.gz
 /reviews
 middleware/pelicula-api
