@@ -1,71 +1,23 @@
 # Pelicula Roadmap
 
-Pelicula is evolving from a single-admin media stack into a multi-user product. This document tracks planned phases and their implementation status.
+Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's deferred, and summarises what landed.
 
 ---
 
-## Phase A — Onboarding
+## Active
 
-Reduce friction on first run. Add runtime configuration menu.
+### Bazarr — Subtitle Acquisition
 
-- [x] Simplify `./pelicula setup` to 2 required prompts (VPN key + country); auto-detect everything else
-- [x] Add `./pelicula setup --advanced` for full first-run walkthrough (TZ, PUID/PGID, paths, port, auth)
-- [x] Add `./pelicula configure` runtime configuration menu (auth, notifications, transcoding, network, paths)
-- [x] Add `set_env_var` helper for idempotent `.env` updates
-- [x] Create `$CONFIG_DIR/pelicula/` directory for future user data
+Content arrives fully validated and transcoded, but subtitles are not yet automatic. Bazarr is the standard *arr-ecosystem solution and wires in cleanly alongside the existing auto-wire pattern.
 
----
+- [ ] Add `bazarr` service to `docker-compose.yml` (Docker Compose profile, opt-in — same pattern as Jellyseerr and Apprise)
+- [ ] Auto-wire in `middleware/autowire.go`: connect Bazarr to Sonarr and Radarr (mirror Prowlarr wiring), seed config with `UrlBase: /bazarr`
+- [ ] Add nginx proxy at `/bazarr`
+- [ ] Add Bazarr card to dashboard services grid
+- [ ] Procula validation stage: after `catalog`, flag jobs missing subtitles for configured languages — Bazarr handles acquisition via its own Sonarr/Radarr polling; Procula does not talk to Bazarr directly
+- [ ] `./pelicula configure` → Bazarr section: enable/disable
 
-## Phase B — Auth & Roles
-
-Multi-user access to the dashboard with role-based visibility.
-
-- [x] Pelicula user model: `users.json` at `/config/pelicula/users.json`
-- [x] Three roles: `viewer` (read-only + Jellyseerr requests), `manager` (search + add + pause/resume), `admin` (everything)
-- [x] Rewrite `middleware/auth.go`: session stores username + role; `Guard` checks role per endpoint
-- [x] `PELICULA_AUTH=users` mode in `middleware/main.go`
-- [x] Dashboard login form: username + password fields (users mode shows username field)
-- [x] Dashboard hides destructive controls (cancel, blocklist) based on role
-- [x] `./pelicula configure` → Auth section: create/edit/delete users
-
-**Security boundaries:**
-- Destructive actions (cancel + delete files, blocklist) → admin only
-- Additive actions (search + add content) → manager+
-- *arr UIs (Sonarr/Radarr/Prowlarr/qBittorrent) → admin only
-
----
-
-## Phase C — In-Dashboard Notifications
-
-Zero-config "content ready" signal. No external services required.
-
-- [x] Implement `procula/catalog.go`: Jellyfin library refresh + notification event on completion
-- [x] Write notification events to `/config/procula/notifications_feed.json` (ring buffer, 50 events)
-- [x] New middleware endpoint `GET /api/pelicula/notifications` proxies Procula feed
-- [x] New middleware endpoint `POST /api/pelicula/jellyfin/refresh` (internal, Procula calls this)
-- [x] Dashboard: bell icon in masthead with unread count badge
-- [x] Dashboard: notification dropdown with recent events (localStorage tracks last-seen)
-- [x] Dashboard: Processing section between Downloads and Services (job cards, progress bars, stage badges)
-
-**Events:** content ready, validation failed (blocklisted + re-searching), transcoding complete, storage warning
-
----
-
-## Phase D — Jellyseerr
-
-Multi-user request management. Dashboard search wraps Jellyseerr API.
-
-- [x] Add `jellyseerr` service to `docker-compose.yml` (Docker Compose profile, opt-in)
-- [x] Add nginx proxy at `/jellyseerr`
-- [x] Implement `wireJellyseerr` in `middleware/autowire.go`: complete first-run wizard via API, connect to Jellyfin auth backend, add Radarr+Sonarr
-- [x] `middleware/search.go`: when `JELLYSEERR_ENABLED=true`, route add requests through Jellyseerr's `/api/v1/request`; fall back to direct *arr calls when disabled
-- [x] Add Jellyseerr to `middleware/services.go` health checks
-- [x] Add Jellyseerr card to dashboard services grid
-- [x] `./pelicula configure` → Jellyseerr section: enable/disable
-- [x] Jellyseerr on by default; config dir created at setup time; URL in `./pelicula up` printout
-- [x] Dashboard Users section: list Jellyfin users, add user (name + password), copy Jellyseerr share URL
-
-### Future: Invite Flow
+### Invite Flow (Phase D follow-up)
 
 One-time invite links so admins can onboard users without creating their Jellyfin account manually first.
 
@@ -79,46 +31,7 @@ One-time invite links so admins can onboard users without creating their Jellyfi
 
 **Notes:** Token must be unguessable (32-byte random, base64url-encoded). The `/join` page and `/api/pelicula/invites/accept` must be reachable without a Pelicula session (pre-auth). All other invite management endpoints are admin-guarded. No email sending from Pelicula itself — admin copies the link and sends it however they like.
 
----
-
-## Phase E — Transcoding
-
-Available but dormant by default. Only runs when a matching profile is enabled.
-
-- [x] Implement `procula/process.go`: FFmpeg invocation with progress tracking (parse `time=` from stderr)
-- [x] New `procula/profiles.go`: load profiles from `/config/procula/profiles/`; match on codec or resolution
-- [x] Ship two default profile templates (disabled by default):
-  - `compatibility-h264.json` — HEVC/AV1 → H.264 for max device compatibility
-  - `mobile-1080p.json` — 4K → 1080p with stereo audio
-- [x] `procula/pipeline.go`: wire process stage (validate → process → catalog)
-- [x] `./pelicula configure` → Transcoding section: enable/disable, list profiles
-
----
-
-## Phase F — External Notifications (Apprise)
-
-Push notifications to phone, email, Telegram, etc.
-
-- [x] Add `apprise` service to `docker-compose.yml` (Docker Compose profile, opt-in)
-- [x] Extend `procula/catalog.go`: POST to `http://apprise:8000/notify` when configured
-- [x] `direct` mode: single HTTP POST without Apprise container (ntfy / Gotify / any webhook URL)
-- [x] Config in `/config/procula/notifications.json`: mode, apprise_urls, direct_url
-- [x] `./pelicula configure` → Notifications section: choose provider, enter URLs
-
-**Providers via Apprise:** ntfy, Gotify, email/SMTP, Pushover, Telegram, and 85+ others. Discord is not a supported option.
-
----
-
-## Deferred
-
-- **Jellyfin/Plex SSO**: layer on top of the Phase B user model. Delegates auth to Jellyfin or Plex; Pelicula user model is the standalone fallback.
-- **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
-- **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
-- **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair (move library bind mounts out of the base compose file so the two modes are symmetric); `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; `./pelicula up` picks the right overlay; setup prompts added to both the bash CLI and `middleware/setup.go`; `setup_dirs` skips creating library subdirs when NFS mode is on. NAS-side prerequisite: enable NFS service, export a shared folder with `movies/` + `tv/` subdirs, set permissions so `PUID`/`PGID` can write (or squash to admin). Gotchas: NFSv4 idmapping can silently map to `nobody`; use `soft,timeo=100,retrans=3` to avoid hung containers when the NAS goes offline; `./pelicula test` must stay on local-library mode. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
-
----
-
-## Pelicula for Windows
+### Pelicula for Windows
 
 Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `pelicula.exe`) for true cross-platform support including native Windows without WSL.
 
@@ -137,4 +50,30 @@ Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `p
 
 **What does NOT change:** middleware, procula, nginx, docker-compose.yml, all containers. The Go CLI is purely the operator tool that wraps `docker compose` and manages configuration.
 
-**Note:** The current bash script remains authoritative until this is complete. Build after Phases D–F.
+**Note:** The current bash script remains authoritative until this is complete. Build after active phases above.
+
+---
+
+## Deferred
+
+- **Jellyfin/Plex SSO**: layer on top of the Phase B user model. Delegates auth to Jellyfin or Plex; Pelicula user model is the standalone fallback.
+- **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
+- **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
+- **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; `./pelicula up` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
+- **Procula queue: JSON files vs SQLite** — Current implementation (`procula/queue.go`) uses one JSON file per job under `/config/procula/jobs/`. Pros: zero external dependencies, stdlib only, trivial to inspect, files are the unit of recovery. Cons: O(n) scans on load, no atomic multi-job operations. At current scale (single worker goroutine, hundreds of jobs/month) the cost is negligible. SQLite would win if we add cross-job analytics to the dashboard, a second worker, or job volume exceeds ~10k/month. Migration path is straightforward: JSON files are keyed by job ID, a one-shot importer can seed SQLite on first startup.
+
+---
+
+## Shipped
+
+**Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `./pelicula configure` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
+
+**Phase B — Auth & Roles:** `users.json` model with viewer / manager / admin roles, `Guard` / `GuardManager` / `GuardAdmin` middleware, dashboard login form, role-based UI hiding. Post-ship hardening: `IsOffMode()` guard on `handleUsers`, CSRF origin check, `MaxBytesReader`, username and UUID validation.
+
+**Phase C — In-Dashboard Notifications:** Procula catalog stage writes to `/config/procula/notifications_feed.json` (ring buffer, 50 events), bell icon with unread badge, Processing section on dashboard with job cards and progress bars.
+
+**Phase D — Jellyseerr:** Auto-wired to Jellyfin + Radarr + Sonarr on first boot, on by default, nginx proxy at `/jellyseerr`, dashboard Users section (list Jellyfin accounts, create accounts, share Jellyseerr URL).
+
+**Phase E — Transcoding:** `procula/process.go` with FFmpeg progress tracking (parses `time=` from stderr), profile matching on codec or resolution, two default profiles shipped disabled (`compatibility-h264.json`, `mobile-1080p.json`).
+
+**Phase F — External Notifications (Apprise):** Apprise container (opt-in Docker Compose profile), `direct` mode for single-webhook setups (ntfy, Gotify, any webhook URL), config at `/config/procula/notifications.json`. Discord is not a supported provider.
