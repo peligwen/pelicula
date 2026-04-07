@@ -9,7 +9,7 @@ Radarr/Sonarr                   pelicula-api                    Procula (:8282)
   |                                 |                               |
   |-- import webhook -------------->|-- POST /api/procula/jobs ---->|
   |                                 |                               |
-  |                                 |   queue + persist (SQLite)    |
+  |                                 |   queue + persist (JSON files)|
   |                                 |                               |
   |                                 |<-- GET /api/procula/status ---|
   |                                 |    (dashboard polls this)     |
@@ -35,9 +35,10 @@ Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives t
 |---------|------|------|
 | `procula` | 8282 | Job queue, pipeline orchestration, FFmpeg processing, storage management |
 | `pelicula-api` | 8181 | Receives webhooks, forwards jobs, serves dashboard data, proxies Procula status |
-| `bazarr` | 6767 | Subtitle acquisition (existing project, added to stack) |
 
-Procula runs as a single Go binary with FFmpeg installed in the container image (Alpine + FFmpeg). No external Go dependencies (stdlib + SQLite via CGo, or pure-Go SQLite driver).
+Procula runs as a single Go binary with FFmpeg installed in the container image (Alpine + FFmpeg). No external Go dependencies (stdlib only).
+
+Bazarr (subtitle acquisition) is planned but not yet shipped — see ROADMAP.md.
 
 ## Container Definition
 
@@ -51,7 +52,7 @@ procula:
     - PGID=${PGID}
     - TZ=${TZ}
   volumes:
-    - ${CONFIG_DIR}/procula:/config           # SQLite DB, job state, transcode profiles
+    - ${CONFIG_DIR}/procula:/config           # job state, transcode profiles
     - ${MEDIA_DIR}/downloads:/downloads       # Read: completed downloads
     - ${MEDIA_DIR}/movies:/movies             # Read/write: movie library
     - ${MEDIA_DIR}/tv:/tv                     # Read/write: TV library
@@ -81,9 +82,7 @@ EXPOSE 8282
 CMD ["procula"]
 ```
 
-Note: CGO_ENABLED=1 because SQLite requires it (via `modernc.org/sqlite` for pure-Go, or `mattn/go-sqlite3` for CGo). If we want to stay zero-dependency, use a JSON-file-based queue instead — simpler, good enough for single-instance.
-
-**Decision: Use JSON file queue initially.** One job file per item in `/config/procula/jobs/`. No SQLite dependency, stays stdlib-only, matches the middleware pattern. Can migrate to SQLite later if scale demands it.
+**Queue implementation:** One JSON file per job in `/config/procula/jobs/`. No SQLite dependency, stays stdlib-only, matches the middleware pattern. SQLite was considered (CGO_ENABLED=1, `modernc.org/sqlite` or `mattn/go-sqlite3`) but rejected for the initial implementation — JSON files are simpler, inspectable with `ls`/`cat`, and the single-goroutine worker means there's no lock contention. See ROADMAP.md "Procula queue" for revisit criteria (cross-job analytics, second worker, or high job volume).
 
 ## API Endpoints
 
@@ -178,8 +177,7 @@ ffmpeg -i input.mkv -af loudnorm=I=-14:TP=-2:LRA=7 ...
 
 **2d. Subtitle handling**
 - Detect embedded subtitle tracks via FFprobe
-- If none found for configured languages, notify Bazarr (or call OpenSubtitles API directly)
-- Bazarr integration: Bazarr auto-discovers from Sonarr/Radarr, so this is mostly a "verify and flag" step
+- If none found for configured languages, flag for Bazarr (planned — see ROADMAP.md); Bazarr auto-discovers from Sonarr/Radarr via its own polling
 
 ### Stage 3: Catalog
 
@@ -256,12 +254,12 @@ Add a **Processing** section between Downloads and Services:
 |       +-- "Movies: 1.2 TB / 4 TB" with fill bar
 |       +-- "TV: 800 GB / 4 TB" with fill bar
 |       +-- growth rate + time-to-full estimate
-+-- Services (add Procula + Bazarr cards)
++-- Services (add Procula card; Bazarr card planned)
 ```
 
 The dashboard polls `GET /api/pelicula/processing` on the same 15-second refresh cycle.
 
-## Bazarr Integration
+## Bazarr Integration *(Planned — not yet shipped)*
 
 Add Bazarr to docker-compose.yml:
 
@@ -398,7 +396,7 @@ Build in this order — each stage is independently useful:
 4. Proxy Procula status through pelicula-api
 5. **Result:** Users get notified when content is ready; dashboard shows pipeline status
 
-### Phase 4: Subtitles (Bazarr)
+### Phase 4: Subtitles (Bazarr) *(Planned)*
 1. Add Bazarr to docker-compose.yml
 2. Seed Bazarr config (UrlBase)
 3. Auto-wire Bazarr to Sonarr/Radarr in middleware
