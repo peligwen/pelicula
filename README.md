@@ -19,7 +19,7 @@ Prefer a browser? Run `./pelicula up` and open `http://localhost:7354/setup` —
 
 - **Docker** with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine on Linux)
 - **ProtonVPN** paid plan (Plus or higher) with a Wireguard private key
-- **bash** (macOS, Linux, WSL — the CLI auto-detects your platform)
+- **bash** (macOS, Linux, WSL, Synology NAS — the CLI auto-detects your platform and uses the right default paths; no manual folder creation needed on Synology)
 
 ## What Happens Automatically
 
@@ -148,9 +148,15 @@ To disable Jellyseerr: run `./pelicula configure`, choose **Jellyseerr**, and se
 
 **Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs via `./pelicula configure`.
 
-## Optional Auth
+## Auth
 
-Set `PELICULA_AUTH=true` and `PELICULA_PASSWORD=yourpassword` in `.env` to require a password for the dashboard and API.
+Pelicula supports three modes via `PELICULA_AUTH` in `.env`:
+
+- `off` (default) — no login required. Fine on a trusted LAN.
+- `password` — shared password via `PELICULA_PASSWORD`. Everyone who logs in gets admin role.
+- `users` — multi-user with roles. Users live in `/config/pelicula/users.json`. Manage them via `./pelicula configure`.
+
+Role capabilities: **viewer** sees the dashboard and can request content via Jellyseerr; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
 
 ## Post-Setup: Add Indexers
 
