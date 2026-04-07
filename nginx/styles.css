@@ -96,15 +96,6 @@ body {
 }
 .settings-btn:hover { color: #c8a2ff; }
 
-/* Telemetry strip */
-.telemetry {
-    display: flex;
-    gap: 1rem;
-    align-items: flex-end;
-    padding-bottom: 0.15rem;
-    min-width: 0;
-    overflow: hidden;
-}
 
 /* Bell / notifications */
 .bell-wrap { position: relative; flex-shrink: 0; padding-bottom: 0.15rem; }
@@ -155,27 +146,6 @@ body {
 .download-bar.proc-bar-active { background: #c8a2ff; }
 .download-bar.proc-bar-done { background: #7dda93; }
 .download-bar.proc-bar-failed { background: #f87171; }
-.telem-item {
-    text-align: right;
-}
-.telem-label {
-    font-size: 0.6rem;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 0.1rem;
-}
-.telem-value {
-    font-size: 0.95rem;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    font-family: "SF Mono", "Menlo", "Consolas", monospace;
-    color: #ccc;
-}
-.telem-value.loading { color: #333; }
-.telem-value.vpn-ok { color: #7dda93; }
-.telem-value.vpn-err { color: #f87171; }
-#t-vpn { cursor: pointer; }
 
 /* ── Toast / Alert ─────────────────────── */
 .toast {
@@ -367,6 +337,53 @@ body {
 /* Services */
 .services { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 @media (max-width: 560px) { .services { grid-template-columns: 1fr; } }
+
+/* VPN service card — wide row */
+.service-vpn {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    background: #131313;
+    border: 1px solid #1e1e1e;
+    border-radius: 8px;
+    color: #ccc;
+    transition: border-color 0.15s, background 0.15s;
+}
+.service-vpn.vpn-down { border-color: rgba(248,113,113,0.2); }
+.service-vpn-left { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+.service-vpn-stats {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.vpn-stat { display: flex; flex-direction: column; align-items: flex-end; }
+.vpn-stat-label {
+    font-size: 0.6rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.1rem;
+}
+.vpn-stat-val {
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    color: #ccc;
+}
+.vpn-stat-val.loading { color: #333; }
+.vpn-stat-val.vpn-ok { color: #7dda93; }
+.vpn-stat-val.vpn-err { color: #f87171; }
+#t-vpn { cursor: pointer; }
+@media (max-width: 480px) {
+    .service-vpn { flex-direction: column; align-items: flex-start; }
+    .service-vpn-stats { justify-content: flex-start; }
+}
+
 a.service {
     display: flex;
     align-items: center;

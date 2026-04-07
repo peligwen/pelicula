@@ -53,28 +53,6 @@
             </div>
             <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">▶ Watch</a>
             <div class="masthead-right">
-                <div class="telemetry">
-                    <div class="telem-item">
-                        <div class="telem-label">VPN</div>
-                        <div class="telem-value loading" id="t-vpn">---</div>
-                    </div>
-                    <div class="telem-item">
-                        <div class="telem-label">Region</div>
-                        <div class="telem-value loading" id="t-region">---</div>
-                    </div>
-                    <div class="telem-item">
-                        <div class="telem-label">Port</div>
-                        <div class="telem-value loading" id="t-port">---</div>
-                    </div>
-                    <div class="telem-item">
-                        <div class="telem-label">DL</div>
-                        <div class="telem-value loading" id="t-dl">---</div>
-                    </div>
-                    <div class="telem-item">
-                        <div class="telem-label">UL</div>
-                        <div class="telem-value loading" id="t-ul">---</div>
-                    </div>
-                </div>
                 <a href="/import" class="settings-btn admin-only" title="Import Media">&#8615;</a>
                 <a href="/settings" class="settings-btn admin-only" title="Settings">&#9881;</a>
                 <div class="bell-wrap" id="bell-wrap">
@@ -149,6 +127,38 @@
         <div class="section">
             <div class="section-header"><span>Services</span></div>
             <div class="services">
+                <!-- VPN card (wide, spans full row) -->
+                <div class="service service-vpn" id="vpn-card">
+                    <div class="service-vpn-left">
+                        <span class="status-dot checking" id="vpn-dot"></span>
+                        <div>
+                            <div class="service-name">VPN</div>
+                            <div class="service-desc" id="vpn-desc">Checking&hellip;</div>
+                        </div>
+                    </div>
+                    <div class="service-vpn-stats" id="vpn-stats">
+                        <div class="vpn-stat">
+                            <span class="vpn-stat-label">Region</span>
+                            <span class="vpn-stat-val loading" id="t-region">---</span>
+                        </div>
+                        <div class="vpn-stat">
+                            <span class="vpn-stat-label">IP</span>
+                            <span class="vpn-stat-val loading" id="t-vpn" title="Click to reveal">---</span>
+                        </div>
+                        <div class="vpn-stat">
+                            <span class="vpn-stat-label">Port</span>
+                            <span class="vpn-stat-val loading" id="t-port">---</span>
+                        </div>
+                        <div class="vpn-stat">
+                            <span class="vpn-stat-label">DL</span>
+                            <span class="vpn-stat-val loading" id="t-dl">---</span>
+                        </div>
+                        <div class="vpn-stat">
+                            <span class="vpn-stat-label">UL</span>
+                            <span class="vpn-stat-val loading" id="t-ul">---</span>
+                        </div>
+                    </div>
+                </div>
                 <a class="service" target="_blank" rel="noopener" href="/sonarr/" data-check="/sonarr/ping">
                     <div class="service-left">
                         <span class="status-dot checking"></span>

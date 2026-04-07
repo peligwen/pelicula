@@ -258,7 +258,7 @@ async function checkDownloads() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         renderDownloads(data);
-        // Update telemetry speed
+        // Update VPN card speeds
         var s = data.stats || {};
         document.getElementById('t-dl').textContent = formatSpeed(s.dlspeed || 0);
         document.getElementById('t-dl').classList.remove('loading');
@@ -353,7 +353,7 @@ async function checkServices() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         const svcMap = data.services || {};
-        document.querySelectorAll('.service').forEach(el => {
+        document.querySelectorAll('a.service').forEach(el => {
             const dot = el.querySelector('.status-dot');
             const href = el.getAttribute('href');
             let name = '';
@@ -387,7 +387,7 @@ async function checkServices() {
         }
     } catch (e) {
         console.warn('[pelicula] status check error:', e);
-        document.querySelectorAll('.status-dot').forEach(d => d.className = 'status-dot down');
+        document.querySelectorAll('a.service .status-dot').forEach(d => d.className = 'status-dot down');
         searchInput.disabled = true;
         searchInput.placeholder = 'Search unavailable';
         warn.textContent = 'Cannot reach services — search is disabled';
@@ -400,6 +400,9 @@ async function checkVPN() {
     const vpnEl = document.getElementById('t-vpn');
     const regionEl = document.getElementById('t-region');
     const portEl = document.getElementById('t-port');
+    const dot = document.getElementById('vpn-dot');
+    const desc = document.getElementById('vpn-desc');
+    const card = document.getElementById('vpn-card');
     try {
         const [ipRes, portRes] = await Promise.all([
             fetch('/api/vpn/v1/publicip/ip', {}),
@@ -409,9 +412,12 @@ async function checkVPN() {
             const data = await ipRes.json();
             vpnEl.setAttribute('data-ip', data.public_ip || '?');
             vpnEl.textContent = '***.***';
-            vpnEl.className = 'telem-value vpn-ok';
+            vpnEl.className = 'vpn-stat-val vpn-ok';
             regionEl.textContent = data.country || '?';
             regionEl.classList.remove('loading');
+            dot.className = 'status-dot up';
+            desc.textContent = 'Connected';
+            card.classList.remove('vpn-down');
         }
         if (portRes.ok) {
             const pd = await portRes.json();
@@ -420,10 +426,13 @@ async function checkVPN() {
         }
     } catch (e) {
         console.warn('[pelicula] VPN telemetry error:', e);
-        vpnEl.textContent = 'DOWN';
-        vpnEl.className = 'telem-value vpn-err';
+        vpnEl.textContent = '---';
+        vpnEl.className = 'vpn-stat-val vpn-err';
         regionEl.textContent = '-'; regionEl.classList.remove('loading');
         portEl.textContent = '-'; portEl.classList.remove('loading');
+        dot.className = 'status-dot down';
+        desc.textContent = 'Down — downloads paused';
+        card.classList.add('vpn-down');
     }
 }
 
