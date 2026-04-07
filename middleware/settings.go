@@ -106,11 +106,14 @@ func writeEnvFile(path string, vars map[string]string) error {
 		}
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(sb.String()), 0600); err != nil {
-		return err
+	// Direct write (not tmp+rename): .env is bind-mounted as a single file
+	// into the container, so a rename from an overlay-fs tmp would fail with
+	// EXDEV and, even if it didn't, would replace the in-container mount
+	// point rather than the host file.
+	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
-	return os.Rename(tmp, path)
+	return nil
 }
 
 func writeLine(sb *strings.Builder, k, v string) {
