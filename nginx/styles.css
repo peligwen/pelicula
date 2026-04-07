@@ -507,3 +507,8 @@ a.service:hover { border-color: #333; background: #181818; }
 }
 .add-user-form button:hover { background: #222; border-color: #444; color: #fff; }
 .users-error { font-size: 0.78rem; color: #f87171; margin: 0.4rem 0 0; }
+.share-url-input {
+    flex: 1; min-width: 0; padding: 0.45rem 0.75rem; margin-top: 0.4rem;
+    background: #0e0e0e; border: 1px solid #2a2a2a; border-radius: 6px;
+    color: #aaa; font-size: 0.78rem; outline: none; width: 100%;
+}

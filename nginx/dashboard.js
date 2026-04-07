@@ -104,7 +104,7 @@ async function checkStatus() {
                 usersSection.classList.remove('hidden');
                 const jsPort = data.jellyseerr_port || 5055;
                 window._jellyseerrURL = `http://${window.location.hostname}:${jsPort}/`;
-                loadUsers();
+                if (!usersLoaded) { loadUsers(); usersLoaded = true; }
             } else {
                 usersSection.classList.add('hidden');
             }
@@ -752,6 +752,8 @@ setTimeout(checkUpdates, 1000);
 setInterval(refresh, 15000);
 
 // ── Users ─────────────────────────────────
+let usersLoaded = false;
+
 async function loadUsers() {
     const list = document.getElementById('users-list');
     if (!list) return;
@@ -803,12 +805,30 @@ document.getElementById('add-user-form')?.addEventListener('submit', async (e) =
 
 document.getElementById('share-jellyseerr-btn')?.addEventListener('click', () => {
     const url = window._jellyseerrURL || window.location.origin;
-    navigator.clipboard.writeText(url).then(() => {
-        const btn = document.getElementById('share-jellyseerr-btn');
-        const prev = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => { btn.textContent = prev; }, 2000);
-    });
+    const btn = document.getElementById('share-jellyseerr-btn');
+    const showURL = () => {
+        // Fall back: show the URL inline so the user can select+copy manually.
+        let urlDisplay = document.getElementById('jellyseerr-share-url');
+        if (!urlDisplay) {
+            urlDisplay = document.createElement('input');
+            urlDisplay.id = 'jellyseerr-share-url';
+            urlDisplay.type = 'text';
+            urlDisplay.readOnly = true;
+            urlDisplay.className = 'share-url-input';
+            btn.parentNode.insertBefore(urlDisplay, btn.nextSibling);
+        }
+        urlDisplay.value = url;
+        urlDisplay.select();
+    };
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+            const prev = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = prev; }, 2000);
+        }).catch(showURL);
+    } else {
+        showURL();
+    }
 });
 
 function escapeHtml(str) {

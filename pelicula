@@ -1157,7 +1157,7 @@ Session\DefaultSavePath=/downloads/'
     echo "  qBittorrent     http://localhost:${port}/qbt/"
     echo "  Jellyfin        http://localhost:${port}/jellyfin/"
     echo "  Procula API     http://localhost:${port}/api/procula/status"
-    if [[ "$(get_env_var JELLYSEERR_ENABLED true)" == "true" ]]; then
+    if [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]]; then
         local js_port
         js_port="$(get_env_var JELLYSEERR_PORT 5055)"
         echo "  Jellyseerr      http://localhost:${js_port}/"
