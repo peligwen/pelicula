@@ -198,7 +198,12 @@ func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
 }
 
 // CreateJellyfinUser creates a new Jellyfin user with the given name and password.
+// password must be non-empty; Jellyfin users without passwords should not be created
+// via this API since they would have unrestricted access to Jellyseerr.
 func CreateJellyfinUser(s *ServiceClients, username, password string) error {
+	if password == "" {
+		return fmt.Errorf("password is required")
+	}
 	token, err := jellyfinAuth(s)
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
@@ -216,15 +221,18 @@ func CreateJellyfinUser(s *ServiceClients, username, password string) error {
 	if id == "" {
 		return fmt.Errorf("no user ID in create response")
 	}
-	// Set the password
-	if password != "" {
-		_, err = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
-			"CurrentPw": "",
-			"NewPw":     password,
-		})
-		if err != nil {
-			return fmt.Errorf("set password: %w", err)
+	// Set the password. If this fails, attempt to delete the user so the admin
+	// isn't left with a passwordless account they can't see from Pelicula.
+	_, err = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
+		"CurrentPw": "",
+		"NewPw":     password,
+	})
+	if err != nil {
+		if _, delErr := jellyfinDelete(s, "/Users/"+id, token); delErr != nil {
+			slog.Warn("password set failed and rollback delete also failed", "component", "jellyfin", "userId", id, "deleteError", delErr)
+			return fmt.Errorf("set password: %w (rollback failed — delete user %q manually in Jellyfin)", err, username)
 		}
+		return fmt.Errorf("set password: %w (user was removed)", err)
 	}
 	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
 	return nil
@@ -303,6 +311,29 @@ func jellyfinPost(s *ServiceClients, path, token string, payload any) ([]byte, e
 	return body, nil
 }
 
+// jellyfinDelete makes a DELETE request to Jellyfin with the Emby authorization header.
+func jellyfinDelete(s *ServiceClients, path, token string) ([]byte, error) {
+	req, err := http.NewRequest("DELETE", jellyfinURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	setEmbyAuth(req, token)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return body, nil
+}
+
 func setEmbyAuth(req *http.Request, token string) {
 	auth := embyAuthHeader
 	if token != "" {
@@ -338,7 +369,11 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := CreateJellyfinUser(services, req.Username, req.Password); err != nil {
 			slog.Error("create jellyfin user failed", "component", "users", "error", err)
-			writeError(w, "could not create user: "+err.Error(), http.StatusBadGateway)
+			code := http.StatusBadGateway
+			if err.Error() == "password is required" {
+				code = http.StatusBadRequest
+			}
+			writeError(w, "could not create user: "+err.Error(), code)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
