@@ -301,7 +301,7 @@ func TestCreateJellyfinUser_PasswordSetFailsRollbackSucceeds(t *testing.T) {
 	})
 	resetServices(t)
 
-	err := CreateJellyfinUser(services, "alice", "secret")
+	_, err := CreateJellyfinUser(services, "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -327,7 +327,7 @@ func TestCreateJellyfinUser_PasswordSetFailsRollbackAlsoFails(t *testing.T) {
 	})
 	resetServices(t)
 
-	err := CreateJellyfinUser(services, "alice", "secret")
+	_, err := CreateJellyfinUser(services, "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -355,7 +355,7 @@ func TestCreateJellyfinUser_NoIdInResponse(t *testing.T) {
 	})
 	resetServices(t)
 
-	err := CreateJellyfinUser(services, "alice", "secret")
+	_, err := CreateJellyfinUser(services, "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -380,7 +380,7 @@ func TestCreateJellyfinUser_JellyfinCreateFailure(t *testing.T) {
 	})
 	resetServices(t)
 
-	err := CreateJellyfinUser(services, "alice", "secret")
+	_, err := CreateJellyfinUser(services, "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -425,7 +425,7 @@ func TestCreateJellyfinUser_NonUUIDIdRejected(t *testing.T) {
 	})
 	resetServices(t)
 
-	err := CreateJellyfinUser(services, "alice", "secret")
+	_, err := CreateJellyfinUser(services, "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error for non-UUID id, got nil")
 	}
@@ -478,7 +478,7 @@ func TestCreateJellyfinUser_EmptyPasswordReturnsSentinel(t *testing.T) {
 	services = NewServiceClients(t.TempDir())
 	t.Cleanup(func() { services = origSvcs })
 
-	err := CreateJellyfinUser(services, "alice", "")
+	_, err := CreateJellyfinUser(services, "alice", "")
 	if !isErrPasswordRequired(err) {
 		t.Errorf("expected ErrPasswordRequired, got %v", err)
 	}

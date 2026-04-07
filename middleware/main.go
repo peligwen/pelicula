@@ -39,6 +39,7 @@ func main() {
 	}
 
 	services = NewServiceClients("/config")
+	inviteStore = NewInviteStore("/config/pelicula/invites.json")
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -111,6 +112,10 @@ func main() {
 	mux.Handle("/api/pelicula/users", auth.GuardAdmin(http.HandlerFunc(handleUsers)))
 	// admin only: per-user operations (delete + password reset)
 	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(http.HandlerFunc(handleUsersWithID)))
+
+	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
+	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(http.HandlerFunc(handleInvites)))
+	mux.HandleFunc("/api/pelicula/invites/", handleInviteOp)
 	// read: active Jellyfin sessions for the now-playing card.
 	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.
 	// Relax to GuardAuthenticated when viewer/manager roles land on the dashboard.

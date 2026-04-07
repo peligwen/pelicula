@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <title>Join Pelicula</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        /* Registration-specific layout */
+        .reg-wrap {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.5rem;
+        }
+        .reg-card {
+            width: 100%;
+            max-width: 420px;
+            background: #111;
+            border: 1px solid #1e1e1e;
+            border-radius: 12px;
+            padding: 2rem 2rem 1.75rem;
+        }
+        .reg-logo {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            letter-spacing: 0.35em;
+            color: #fff;
+            margin-bottom: 0.2rem;
+        }
+        .reg-logo .accent { color: #c8a2ff; }
+        .reg-subtitle {
+            font-size: 0.7rem;
+            letter-spacing: 0.45em;
+            text-transform: uppercase;
+            color: #444;
+            margin-bottom: 1.75rem;
+        }
+        .reg-heading {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #ccc;
+            margin-bottom: 0.35rem;
+        }
+        .reg-hint {
+            font-size: 0.78rem;
+            color: #555;
+            margin-bottom: 1.5rem;
+            line-height: 1.4;
+        }
+        .reg-field {
+            margin-bottom: 0.75rem;
+        }
+        .reg-field label {
+            display: block;
+            font-size: 0.72rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            margin-bottom: 0.3rem;
+        }
+        .reg-field input {
+            width: 100%;
+            padding: 0.65rem 0.85rem;
+            background: #0e0e0e;
+            border: 1px solid #222;
+            border-radius: 7px;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .reg-field input:focus { border-color: #444; }
+        .reg-strength {
+            height: 3px;
+            border-radius: 2px;
+            background: #1e1e1e;
+            margin-top: 0.35rem;
+            overflow: hidden;
+        }
+        .reg-strength-bar {
+            height: 100%;
+            width: 0;
+            border-radius: 2px;
+            transition: width 0.2s, background 0.2s;
+        }
+        .reg-submit {
+            width: 100%;
+            margin-top: 1.25rem;
+            padding: 0.7rem;
+            background: rgba(200,162,255,0.12);
+            border: 1px solid rgba(200,162,255,0.25);
+            border-radius: 7px;
+            color: #c8a2ff;
+            font-size: 0.88rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .reg-submit:hover:not(:disabled) {
+            background: rgba(200,162,255,0.22);
+            border-color: rgba(200,162,255,0.45);
+        }
+        .reg-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+        .reg-error {
+            font-size: 0.8rem;
+            color: #f87171;
+            margin-top: 0.75rem;
+            line-height: 1.4;
+            display: none;
+        }
+        .reg-error a { color: #f87171; }
+        /* Success card */
+        .reg-success { display: none; text-align: center; }
+        .reg-success-icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .reg-success-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #7dda93;
+            margin-bottom: 0.4rem;
+        }
+        .reg-success-text {
+            font-size: 0.82rem;
+            color: #666;
+            margin-bottom: 1.5rem;
+            line-height: 1.45;
+        }
+        .reg-open-btn {
+            display: inline-block;
+            padding: 0.65rem 1.5rem;
+            background: rgba(200,162,255,0.12);
+            border: 1px solid rgba(200,162,255,0.25);
+            border-radius: 7px;
+            color: #c8a2ff;
+            font-size: 0.88rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .reg-open-btn:hover {
+            background: rgba(200,162,255,0.22);
+            border-color: rgba(200,162,255,0.45);
+        }
+        .reg-qr {
+            margin: 1.25rem auto 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .reg-qr-label {
+            font-size: 0.68rem;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        /* Dead link page */
+        .reg-dead { text-align: center; }
+        .reg-dead-icon { font-size: 2rem; margin-bottom: 0.75rem; color: #444; }
+        .reg-dead-title { font-size: 1rem; font-weight: 600; color: #666; margin-bottom: 0.4rem; }
+        .reg-dead-text { font-size: 0.8rem; color: #444; line-height: 1.45; }
+        /* Loading state */
+        .reg-loading { text-align: center; color: #444; font-size: 0.82rem; padding: 1rem 0; }
+    </style>
+</head>
+<body>
+    <div class="reg-wrap">
+        <div class="reg-card">
+            <div class="reg-logo">
+                <span>P</span><span class="accent">E</span><span>L</span><span>I</span><span>C</span><span>U</span><span>L</span><span>A</span>
+            </div>
+            <div class="reg-subtitle">Media Acquisition System</div>
+
+            <!-- Checking link state (shown while the token is being validated) -->
+            <div id="reg-loading" class="reg-loading">Checking link&hellip;</div>
+
+            <!-- Invalid/expired state -->
+            <div id="reg-dead" class="reg-dead" style="display:none">
+                <div class="reg-dead-icon">&#128683;</div>
+                <div class="reg-dead-title" id="reg-dead-title">This invite link is no longer active</div>
+                <div class="reg-dead-text" id="reg-dead-text">Ask the person who shared it with you for a new one.</div>
+            </div>
+
+            <!-- Registration form (hidden until token validates) -->
+            <div id="reg-form-wrap" style="display:none">
+                <div class="reg-heading">Create your account</div>
+                <div class="reg-hint">Pick a username and password. You'll use these to log in to Jellyseerr to request movies and TV shows.</div>
+                <form id="reg-form" autocomplete="off">
+                    <div class="reg-field">
+                        <label for="reg-username">Username</label>
+                        <input id="reg-username" type="text" autocomplete="username" placeholder="yourname" maxlength="64" required>
+                    </div>
+                    <div class="reg-field">
+                        <label for="reg-password">Password</label>
+                        <input id="reg-password" type="password" autocomplete="new-password" placeholder="Choose a password" required>
+                        <div class="reg-strength"><div class="reg-strength-bar" id="reg-strength-bar"></div></div>
+                    </div>
+                    <div class="reg-field">
+                        <label for="reg-confirm">Confirm password</label>
+                        <input id="reg-confirm" type="password" autocomplete="new-password" placeholder="Repeat password" required>
+                    </div>
+                    <button type="submit" class="reg-submit" id="reg-submit">Create account</button>
+                </form>
+                <div class="reg-error" id="reg-error"></div>
+            </div>
+
+            <!-- Success card -->
+            <div class="reg-success" id="reg-success">
+                <div class="reg-success-icon">&#10003;</div>
+                <div class="reg-success-title">You're all set!</div>
+                <div class="reg-success-text">Your account has been created. Sign in to Jellyseerr to start requesting movies and TV shows.</div>
+                <a href="#" id="reg-jellyseerr-link" class="reg-open-btn" target="_blank" rel="noopener">Open Jellyseerr</a>
+                <div class="reg-qr" id="reg-qr" style="display:none">
+                    <div class="reg-qr-label">Or scan to open on another device</div>
+                    <div id="reg-qr-svg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/qr.js"></script>
+    <script src="/register.js"></script>
+</body>
+</html>

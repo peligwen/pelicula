@@ -105,7 +105,7 @@ async function checkStatus() {
                 usersSection.classList.remove('hidden');
                 const jsPort = data.jellyseerr_port || 5055;
                 window._jellyseerrURL = `${window.location.protocol}//${window.location.hostname}:${jsPort}/`;
-                if (!usersLoaded) { loadUsers(); usersLoaded = true; }
+                if (!usersLoaded) { loadUsers(); loadInvites(); usersLoaded = true; }
             } else {
                 usersSection.classList.add('hidden');
             }
@@ -956,4 +956,198 @@ document.getElementById('share-jellyseerr-btn')?.addEventListener('click', () =>
 
 function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Invites ────────────────────────────────
+async function loadInvites() {
+    const list = document.getElementById('invites-list');
+    if (!list) return;
+    try {
+        const resp = await fetch('/api/pelicula/invites');
+        if (!resp.ok) { list.innerHTML = ''; return; }
+        const invites = await resp.json();
+        if (!invites || invites.length === 0) {
+            list.innerHTML = '<li class="invite-empty">No invite links yet.</li>';
+            return;
+        }
+        list.innerHTML = invites.map(inv => {
+            const stateClass = {active:'invite-active', expired:'invite-dead', exhausted:'invite-dead', revoked:'invite-dead'}[inv.state] || 'invite-dead';
+            const stateLabel = {active:'active', expired:'expired', exhausted:'used up', revoked:'revoked'}[inv.state] || inv.state;
+            const label = inv.label ? escapeHtml(inv.label) : '—';
+            const uses = inv.max_uses != null ? `${inv.uses}/${inv.max_uses}` : `${inv.uses}/∞`;
+            const expiry = inv.expires_at ? `expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'no expiry';
+            const link = `${window.location.origin}/register?t=${encodeURIComponent(inv.token)}`;
+            const isActive = inv.state === 'active';
+            return `<li class="invite-item" data-token="${escapeHtml(inv.token)}">` +
+                `<div class="invite-row">` +
+                `<span class="invite-badge ${stateClass}">${stateLabel}</span>` +
+                `<span class="invite-meta">${uses} use${inv.uses !== 1 ? 's' : ''} · ${expiry}</span>` +
+                (inv.label ? `<span class="invite-label-text">${label}</span>` : '') +
+                `</div>` +
+                `<div class="invite-actions">` +
+                (isActive ? `<button class="user-action-btn" onclick="copyInviteItemLink(this, '${escapeHtml(link)}')" title="Copy invite link">Copy link</button>` : '') +
+                (isActive ? `<button class="user-action-btn" onclick="revokeInvite(this)" title="Deactivate this invite">Revoke</button>` : '') +
+                `<button class="user-action-btn user-action-delete" onclick="deleteInvite(this)" title="Delete record">Delete</button>` +
+                `</div>` +
+                `</li>`;
+        }).join('');
+    } catch (e) {
+        console.warn('[pelicula] loadInvites error:', e);
+    }
+}
+
+function copyInviteItemLink(btn, link) {
+    const doCopy = () => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = prev; }, 2000);
+    };
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(link).then(doCopy).catch(() => { btn.textContent = 'Copy failed'; });
+    } else {
+        doCopy(); // best-effort fallback
+    }
+}
+
+async function revokeInvite(btn) {
+    const li = btn.closest('li');
+    const token = li.dataset.token;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/pelicula/invites/${encodeURIComponent(token)}/revoke`, { method: 'POST' });
+        if (!resp.ok) {
+            const d = await resp.json().catch(() => ({}));
+            alert(d.error || 'Failed to revoke invite.');
+            btn.disabled = false;
+            return;
+        }
+        loadInvites();
+    } catch (e) {
+        alert('Network error revoking invite.');
+        btn.disabled = false;
+    }
+}
+
+async function deleteInvite(btn) {
+    if (!btn.dataset.confirming) {
+        btn.dataset.confirming = '1';
+        btn.textContent = 'Confirm?';
+        btn.classList.add('user-action-delete-confirm');
+        setTimeout(() => {
+            if (btn.dataset.confirming) {
+                btn.dataset.confirming = '';
+                btn.textContent = 'Delete';
+                btn.classList.remove('user-action-delete-confirm');
+            }
+        }, 4000);
+        return;
+    }
+    const li = btn.closest('li');
+    const token = li.dataset.token;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/pelicula/invites/${encodeURIComponent(token)}`, { method: 'DELETE' });
+        if (!resp.ok) {
+            const d = await resp.json().catch(() => ({}));
+            alert(d.error || 'Failed to delete invite.');
+            btn.disabled = false;
+            return;
+        }
+        loadInvites();
+    } catch (e) {
+        alert('Network error deleting invite.');
+        btn.disabled = false;
+    }
+}
+
+// ── Invite modal ────────────────────────────
+function openInviteModal() {
+    // Reset to step 1
+    document.getElementById('invite-step-create').style.display = '';
+    document.getElementById('invite-step-share').style.display = 'none';
+    document.getElementById('invite-modal-title').textContent = 'Create invite link';
+    document.getElementById('invite-label').value = '';
+    document.getElementById('invite-expires').value = '168';
+    document.getElementById('invite-uses').value = '1';
+    document.getElementById('invite-create-error').classList.add('hidden');
+    document.getElementById('invite-create-btn').disabled = false;
+    document.getElementById('invite-modal').classList.remove('hidden');
+}
+
+function closeInviteModal() {
+    document.getElementById('invite-modal').classList.add('hidden');
+    loadInvites();
+}
+
+async function submitCreateInvite() {
+    const btn = document.getElementById('invite-create-btn');
+    const errEl = document.getElementById('invite-create-error');
+    errEl.classList.add('hidden');
+
+    const label = document.getElementById('invite-label').value.trim();
+    const expiresHours = parseInt(document.getElementById('invite-expires').value, 10);
+    const maxUsesVal = parseInt(document.getElementById('invite-uses').value, 10);
+
+    const body = {
+        label: label || undefined,
+        expires_in_hours: expiresHours > 0 ? expiresHours : null,
+        max_uses: maxUsesVal > 0 ? maxUsesVal : null,
+    };
+
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+    try {
+        const resp = await fetch('/api/pelicula/invites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            errEl.textContent = data.error || 'Failed to create invite.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        showInviteShareStep(data);
+    } catch (e) {
+        errEl.textContent = 'Network error.';
+        errEl.classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create link';
+    }
+}
+
+function showInviteShareStep(invite) {
+    const link = `${window.location.origin}/register?t=${encodeURIComponent(invite.token)}`;
+    document.getElementById('invite-link-val').value = link;
+    document.getElementById('invite-step-create').style.display = 'none';
+    document.getElementById('invite-step-share').style.display = '';
+    document.getElementById('invite-modal-title').textContent = 'Share invite link';
+
+    // QR code
+    if (typeof qrSVG === 'function') {
+        const svg = qrSVG(link, 4);
+        if (svg) {
+            document.getElementById('invite-qr-svg').innerHTML = svg;
+            document.getElementById('invite-qr-wrap').style.display = '';
+        }
+    }
+}
+
+function copyInviteLink() {
+    const input = document.getElementById('invite-link-val');
+    const btn = document.getElementById('invite-copy-btn');
+    const doCopy = () => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = prev; }, 2000);
+    };
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(input.value).then(doCopy).catch(() => {
+            input.select();
+        });
+    } else {
+        input.select();
+    }
 }

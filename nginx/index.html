@@ -206,19 +206,84 @@
             <ul id="sessions-list" class="sessions-list"></ul>
         </div>
 
+        <!-- Invite modal -->
+        <div class="modal-overlay hidden" id="invite-modal">
+            <div class="modal">
+                <h3 id="invite-modal-title">Create invite link</h3>
+                <!-- Step 1: options form -->
+                <div id="invite-step-create">
+                    <div class="invite-field">
+                        <label for="invite-label">Label <span class="invite-field-hint">(optional, for your reference)</span></label>
+                        <input id="invite-label" type="text" placeholder="e.g. For Mom" maxlength="64" autocomplete="off">
+                    </div>
+                    <div class="invite-field">
+                        <label for="invite-expires">Expires after</label>
+                        <select id="invite-expires">
+                            <option value="1">1 hour</option>
+                            <option value="24">1 day</option>
+                            <option value="168" selected>7 days</option>
+                            <option value="720">30 days</option>
+                            <option value="0">Never</option>
+                        </select>
+                    </div>
+                    <div class="invite-field">
+                        <label for="invite-uses">Max uses</label>
+                        <select id="invite-uses">
+                            <option value="1" selected>1 use</option>
+                            <option value="3">3 uses</option>
+                            <option value="5">5 uses</option>
+                            <option value="10">10 uses</option>
+                            <option value="0">Unlimited</option>
+                        </select>
+                    </div>
+                    <div id="invite-create-error" class="users-error hidden"></div>
+                    <div class="modal-buttons">
+                        <button class="modal-btn-cancel" onclick="closeInviteModal()">Cancel</button>
+                        <button class="modal-btn-confirm" id="invite-create-btn" onclick="submitCreateInvite()">Create link</button>
+                    </div>
+                </div>
+                <!-- Step 2: share panel (shown after creation) -->
+                <div id="invite-step-share" style="display:none">
+                    <p class="invite-share-hint">Share this link — it lets someone create their own account.</p>
+                    <div class="invite-link-row">
+                        <input id="invite-link-val" type="text" readonly class="invite-link-input">
+                        <button id="invite-copy-btn" onclick="copyInviteLink()">Copy</button>
+                    </div>
+                    <div id="invite-qr-wrap" class="invite-qr-wrap" style="display:none">
+                        <div class="invite-qr-label">Scan to open on a phone or TV</div>
+                        <div id="invite-qr-svg"></div>
+                    </div>
+                    <div class="modal-buttons" style="margin-top:1.25rem">
+                        <button class="modal-btn-cancel" onclick="closeInviteModal()">Done</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="section hidden" id="users-section">
             <div class="section-header">
                 <span>Users</span>
                 <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
             </div>
-            <p class="users-hint">Users log in to Jellyseerr with their Jellyfin credentials to request content.</p>
+
+            <!-- Invite links subsection -->
+            <div class="invites-header">
+                <span class="invites-label">Invite links</span>
+                <button class="section-action" onclick="openInviteModal()">+ Create invite</button>
+            </div>
+            <ul id="invites-list" class="invites-list"></ul>
+
+            <p class="users-hint" style="margin-top:0.75rem">Existing accounts — users log in to Jellyseerr with their Jellyfin credentials.</p>
             <ul id="users-list" class="users-list"></ul>
-            <form id="add-user-form" class="add-user-form">
-                <input id="new-username" placeholder="Username" autocomplete="off" required>
-                <input id="new-password" type="password" placeholder="Password" required>
-                <button type="submit">Add user</button>
-            </form>
-            <p id="add-user-error" class="users-error hidden"></p>
+            <details class="add-user-details">
+                <summary class="add-user-summary">Add user manually</summary>
+                <form id="add-user-form" class="add-user-form" style="margin-top:0.6rem">
+                    <input id="new-username" placeholder="Username" autocomplete="off" required>
+                    <input id="new-password" type="password" placeholder="Password" required>
+                    <button type="submit">Add user</button>
+                </form>
+                <p id="add-user-error" class="users-error hidden"></p>
+            </details>
         </div>
 
         <div class="footer" id="footer">

@@ -368,34 +368,36 @@ func GetJellyfinSessions(s *ServiceClients) ([]JellyfinSession, error) {
 // CreateJellyfinUser creates a new Jellyfin user with the given name and password.
 // password must be non-empty; Jellyfin users without passwords should not be created
 // via this API since they would have unrestricted access to Jellyseerr.
-func CreateJellyfinUser(s *ServiceClients, username, password string) error {
+// CreateJellyfinUser creates a new Jellyfin user with the given name and password.
+// Returns the new user's Jellyfin ID on success.
+func CreateJellyfinUser(s *ServiceClients, username, password string) (string, error) {
 	if password == "" {
-		return ErrPasswordRequired
+		return "", ErrPasswordRequired
 	}
 	if len(password) > 256 {
-		return fmt.Errorf("password too long (max 256 chars)")
+		return "", fmt.Errorf("password too long (max 256 chars)")
 	}
 	token, err := jellyfinAuth(s)
 	if err != nil {
-		return fmt.Errorf("auth failed: %w", err)
+		return "", fmt.Errorf("auth failed: %w", err)
 	}
 	// Create the user account
 	data, err := jellyfinPost(s, "/Users/New", token, map[string]any{"Name": username})
 	if err != nil {
-		return fmt.Errorf("create user: %w", err)
+		return "", fmt.Errorf("create user: %w", err)
 	}
 	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
-		return fmt.Errorf("parse create response: %w", err)
+		return "", fmt.Errorf("parse create response: %w", err)
 	}
 	id, _ := result["Id"].(string)
 	if id == "" {
-		return fmt.Errorf("no user ID in create response")
+		return "", fmt.Errorf("no user ID in create response")
 	}
 	// Validate the ID is a UUID before embedding it in a URL path.
 	// Jellyfin always returns UUIDs; anything else is malformed or adversarial.
 	if !validJellyfinID(id) {
-		return fmt.Errorf("unexpected user ID format from Jellyfin: %q", id)
+		return "", fmt.Errorf("unexpected user ID format from Jellyfin: %q", id)
 	}
 	// Set the password. If this fails, attempt to delete the user so the admin
 	// isn't left with a passwordless account they can't see from Pelicula.
@@ -411,12 +413,12 @@ func CreateJellyfinUser(s *ServiceClients, username, password string) error {
 		}
 		if _, delErr := jellyfinDelete(s, "/Users/"+id, token); delErr != nil {
 			slog.Warn("password set failed and rollback delete also failed", "component", "jellyfin", "userId", id, "deleteError", delErr)
-			return fmt.Errorf("%s (rollback failed — delete user %q manually in Jellyfin): %w", msg, username, err)
+			return "", fmt.Errorf("%s (rollback failed — delete user %q manually in Jellyfin): %w", msg, username, err)
 		}
-		return fmt.Errorf("%s (user was removed): %w", msg, err)
+		return "", fmt.Errorf("%s (user was removed): %w", msg, err)
 	}
 	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
-	return nil
+	return id, nil
 }
 
 // TriggerLibraryRefresh asks Jellyfin to scan all libraries.
@@ -567,7 +569,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if err := CreateJellyfinUser(services, req.Username, req.Password); err != nil {
+		if _, err := CreateJellyfinUser(services, req.Username, req.Password); err != nil {
 			slog.Error("create jellyfin user failed", "component", "users", "username", req.Username, "error", err)
 			if errors.Is(err, ErrPasswordRequired) {
 				writeError(w, "password is required", http.StatusBadRequest)
