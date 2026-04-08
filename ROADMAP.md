@@ -10,12 +10,12 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 Content arrives fully validated and transcoded, but subtitles are not yet automatic. Bazarr is the standard *arr-ecosystem solution and wires in cleanly alongside the existing auto-wire pattern.
 
-- [ ] Add `bazarr` service to `docker-compose.yml` (Docker Compose profile, opt-in — same pattern as Apprise)
-- [ ] Auto-wire in `middleware/autowire.go`: connect Bazarr to Sonarr and Radarr (mirror Prowlarr wiring), seed config with `UrlBase: /bazarr`
-- [ ] Add nginx proxy at `/bazarr`
-- [ ] Add Bazarr card to dashboard services grid
-- [ ] Procula validation stage: after `catalog`, flag jobs missing subtitles for configured languages — Bazarr handles acquisition via its own Sonarr/Radarr polling; Procula does not talk to Bazarr directly
-- [ ] `./pelicula configure` → Bazarr section: enable/disable
+- [x] Add `bazarr` service to `docker-compose.yml`
+- [x] Auto-wire in `middleware/autowire.go`: connect Bazarr to Sonarr and Radarr, seed config with `UrlBase: /bazarr`, create language profile from `PELICULA_SUB_LANGS`
+- [x] Add nginx proxy at `/bazarr`
+- [x] Add Bazarr card to dashboard services grid
+- [x] Procula validation stage: after `catalog`, flag jobs missing subtitles for configured languages — `PELICULA_SUB_LANGS` drives both the Bazarr profile and the Procula check
+- [x] `./pelicula configure` → Subtitles section: set `PELICULA_SUB_LANGS` (comma-separated ISO 639-1 codes)
 
 
 ### Pelicula for Windows

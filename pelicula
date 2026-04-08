@@ -415,6 +415,10 @@ cmd_configure() {
             remote_label="off"
         fi
 
+        local sub_langs_label
+        sub_langs_label="$(get_env_var PELICULA_SUB_LANGS "(not set)")"
+        [[ -z "$sub_langs_label" ]] && sub_langs_label="(not set)"
+
         echo "  1) Auth          mode: ${auth_mode}"
         echo "  2) Notifications mode: ${notifications}"
         echo "  3) Transcoding   ${transcode_label}"
@@ -423,9 +427,10 @@ cmd_configure() {
         echo "  6) VPN Key"
         echo "  7) Remote access ${remote_label}"
         echo "  8) Seeding       ${seeding_label}"
+        echo "  9) Subtitles     ${sub_langs_label}"
         echo "  q) Quit"
         echo ""
-        echo -en "Select [1-8, q]: "
+        echo -en "Select [1-9, q]: "
         read -r choice
         case "$choice" in
             1) configure_auth ;;
@@ -436,6 +441,7 @@ cmd_configure() {
             6) configure_vpn_key ;;
             7) configure_remote_access ;;
             8) configure_seeding ;;
+            9) configure_subtitles ;;
             q|Q) echo ""; break ;;
             *) warn "Unknown option" ;;
         esac
@@ -827,6 +833,55 @@ configure_transcoding() {
             ;;
         4)
             toggle_profile "$profiles_dir"
+            ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+}
+
+configure_subtitles() {
+    echo ""
+    echo -e "${BOLD}Subtitles${NC}"
+    echo ""
+    local current
+    current="$(get_env_var PELICULA_SUB_LANGS "")"
+    if [[ -n "$current" ]]; then
+        echo "  Current languages: ${current}"
+    else
+        echo "  Current languages: (not configured — Bazarr will use its own defaults)"
+    fi
+    echo ""
+    echo "  Comma-separated ISO 639-1 language codes (e.g. en,es,fr) for subtitle"
+    echo "  acquisition. Bazarr creates a language profile with these codes on startup."
+    echo "  Procula also uses this list to flag imports that are missing subtitles."
+    echo ""
+    echo "  Examples:"
+    echo "    en        — English only"
+    echo "    en,es     — English + Spanish (common for language learners)"
+    echo "    en,es,fr  — English, Spanish, French"
+    echo ""
+    echo "  1) Set subtitle languages"
+    echo "  2) Clear (use Bazarr defaults)"
+    echo ""
+    echo -en "Select [1-2]: "
+    read -r choice
+    case "$choice" in
+        1)
+            prompt sub_langs "Language codes (comma-separated, e.g. en,es)"
+            if [[ -z "$sub_langs" ]]; then
+                warn "No languages entered — no change made"
+            else
+                # Normalize: lowercase, strip spaces
+                sub_langs="$(echo "$sub_langs" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
+                set_env_var PELICULA_SUB_LANGS "$sub_langs"
+                pass "Subtitle languages set to: ${sub_langs}"
+                info "Restart to apply: ./pelicula restart"
+            fi
+            ;;
+        2)
+            set_env_var PELICULA_SUB_LANGS ""
+            pass "Subtitle languages cleared — Bazarr will use its own defaults"
             ;;
         *)
             warn "Unknown option"
