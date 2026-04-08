@@ -60,7 +60,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 - [ ] **[Peligrosa] bcrypt/argon2id** — replace salted SHA-256 KDF with a proper slow hash for user passwords. SHA-256 is fast on GPUs; argon2id is the preferred migration target.
 - [ ] **[Peligrosa] HMAC invite tokens** — sign tokens with a server secret so validity is verifiable without a DB lookup. Prevents brute-force token enumeration.
-- [ ] **[Peligrosa] Central CSRF middleware** — extract `isLocalOrigin` call sites into a single `requireLocalOrigin` wrapper wired per-route in `main.go`, replacing inline checks across 5 files (`settings.go`, `setup.go`, `admin_ops.go`, `invites.go`, `jellyfin.go`).
+- [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
 - [ ] **[Peligrosa] `middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Requires splitting `jellyfin.go` (user CRUD moves; library/setup-wizard code stays) and designing a constructor that accepts config + Jellyfin client.
 - [ ] **[Peligrosa] SSO** — layer Jellyfin/Plex auth over the Phase B user model. Delegates auth to Jellyfin or Plex; Pelicula user model is the standalone fallback.
 

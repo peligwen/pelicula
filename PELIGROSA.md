@@ -45,11 +45,13 @@ Three modes via `PELICULA_AUTH`:
 
 ### CSRF Origin Guard (`middleware/auth.go`)
 
-`isLocalOrigin(origin string) bool` — rejects requests where the `Origin` header is empty or is not an RFC1918/localhost address. Parses as URL and checks hostname to prevent substring-match bypasses.
+`isLocalOrigin(origin string) bool` — returns true if the `Origin` header is an RFC1918/localhost address. Parses as URL to prevent substring-match bypasses. Returns false for empty strings.
 
-Two inline patterns used across the codebase:
-- **Strict** (`!isLocalOrigin(origin)`) — rejects empty origin. Used by settings, setup, admin ops — places where only an operator at a LAN browser should ever POST.
-- **Soft** (`origin != "" && !isLocalOrigin(origin)`) — allows missing origin (API/curl callers), rejects browser cross-origin. Used by user CRUD and invite create — where programmatic callers are valid.
+Two middleware wrappers enforce the policy per-route in `main.go`:
+- **`requireLocalOriginStrict`** — rejects state-mutating requests (POST/PUT/PATCH/DELETE) with empty or non-local Origin. Used for admin-only endpoints where only a LAN browser should ever mutate state: `/settings`, `/settings/reset`, `/setup`.
+- **`requireLocalOriginSoft`** — allows empty Origin (API/curl callers) but rejects non-empty non-local Origins. Used for endpoints where programmatic callers are valid: `/users`, `/users/`, `/invites`, `/invites/`.
+
+Safe methods (GET/HEAD) always pass through. `admin_ops.go` uses a separate auth-conditional variant (`requireAuthOrLocalOrigin`) that only enforces origin checks in off-mode — the `GuardAdmin` session check provides protection when auth is enabled.
 
 ### Users and User Management (`middleware/jellyfin.go`, `middleware/auth.go`)
 
@@ -135,7 +137,7 @@ Enable via `./pelicula configure → 8) Remote access`.
 - **Invite tokens** are random but not HMAC-signed — token validity requires a database lookup. HMAC signing is a [roadmap item](#roadmap).
 - **Self-signed HTTPS** breaks Chrome on the LAN (Chrome blocks JS). Default LAN setup uses HTTP; use Peligrosa remote vhost for TLS.
 - **`WEBHOOK_SECRET`** is optional for backward compatibility. Fresh installs get a random secret from setup; nginx additionally restricts the endpoint to Docker-internal networks.
-- **CSRF guards** are inline per-handler, not a central middleware. Central middleware is a [roadmap item](#roadmap).
+- **CSRF guards** use `requireLocalOriginStrict` / `requireLocalOriginSoft` wrappers wired per-route in `main.go`. `admin_ops.go` uses a separate auth-conditional variant; see [Reading the Code](#reading-the-code).
 
 ---
 
@@ -164,6 +166,6 @@ See [ROADMAP.md — Peligrosa initiative](ROADMAP.md#peligrosa-initiative) for t
 
 - **bcrypt/argon2id** — replace SHA-256 password KDF
 - **HMAC invite tokens** — sign tokens so validity is verifiable without a DB read
-- **Central CSRF middleware** — one `requireLocalOrigin` wrapper wired per-route in `main.go` instead of inline checks across 5 files
+- ~~**Central CSRF middleware**~~ — shipped: `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`
 - **`middleware/peligrosa/` subpackage** — extract the trust boundary into its own Go package with an explicit API surface
 - **SSO** — layer Jellyfin/Plex auth over the Phase B user model (deferred, no timeline)
