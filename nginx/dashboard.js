@@ -1080,10 +1080,16 @@ async function loadUsers() {
         const resp = await fetch('/api/pelicula/users');
         if (!resp.ok) return;
         const users = await resp.json();
+        const countEl = document.getElementById('users-count');
+        const metricEl = document.getElementById('um-metric-accounts');
         if (!users || users.length === 0) {
             list.innerHTML = '<li style="color:#444;font-size:0.8rem;padding:0.5rem 1rem;background:#131313;border:1px solid #1e1e1e;border-radius:8px;">No users yet.</li>';
+            if (countEl) countEl.textContent = '';
+            if (metricEl) metricEl.textContent = '0';
             return;
         }
+        if (countEl) countEl.textContent = ` (${users.length})`;
+        if (metricEl) metricEl.textContent = users.length;
         list.innerHTML = users.map(u => {
             const lastSeen = u.lastLoginDate
                 ? new Date(u.lastLoginDate).toLocaleDateString()
@@ -1200,6 +1206,8 @@ async function loadSessions() {
         if (!resp.ok) { section.classList.add('hidden'); return; }
         const sessions = await resp.json();
         const active = (sessions || []).filter(s => s.nowPlayingTitle);
+        const sessMetric = document.getElementById('um-metric-sessions');
+        if (sessMetric) sessMetric.textContent = active.length;
         if (active.length === 0) {
             section.classList.add('hidden');
             return;
@@ -1291,10 +1299,13 @@ async function loadInvites() {
         const resp = await fetch('/api/pelicula/invites');
         if (!resp.ok) { list.innerHTML = ''; return; }
         const invites = await resp.json();
+        const invMetric = document.getElementById('um-metric-invites');
         if (!invites || invites.length === 0) {
             list.innerHTML = '<li class="invite-empty">No invite links yet.</li>';
+            if (invMetric) invMetric.textContent = '0';
             return;
         }
+        if (invMetric) invMetric.textContent = invites.filter(i => i.state === 'active').length;
         list.innerHTML = invites.map(inv => {
             const stateClass = {active:'invite-active', expired:'invite-dead', exhausted:'invite-dead', revoked:'invite-dead'}[inv.state] || 'invite-dead';
             const stateLabel = {active:'active', expired:'expired', exhausted:'used up', revoked:'revoked'}[inv.state] || inv.state;

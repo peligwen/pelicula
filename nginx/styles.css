@@ -645,6 +645,73 @@ a.service:hover { border-color: #333; background: #181818; }
 }
 .invite-qr-label { font-size: 0.68rem; color: #444; text-transform: uppercase; letter-spacing: 0.08em; }
 
+/* ── User Management section ─────────────── */
+.um-hero { margin-bottom: 0.65rem; }
+.um-hero-title-row {
+    display: flex; align-items: center; gap: 0.45rem;
+}
+.um-hero-icon { font-size: 0.9rem; opacity: 0.6; line-height: 1; }
+.um-hero-title {
+    margin: 0; font-size: 1rem; font-weight: 600;
+    color: #ece0ff; letter-spacing: 0.01em; flex: 1;
+}
+.um-hero-sub { margin: 0.2rem 0 0; font-size: 0.72rem; color: #555; }
+
+.um-metrics {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem; margin-bottom: 0.7rem;
+}
+.um-metric {
+    padding: 0.65rem 0.9rem; border-radius: 8px;
+    border: 1px solid rgba(200,162,255,.18);
+    background: linear-gradient(180deg, rgba(200,162,255,.07), rgba(200,162,255,.02));
+}
+.um-metric-num {
+    font-size: 1.4rem; font-weight: 600; color: #c8a2ff;
+    font-variant-numeric: tabular-nums; line-height: 1;
+}
+.um-metric-label {
+    font-size: 0.58rem; font-weight: 600; color: #555;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    margin-top: 0.35rem;
+}
+
+.um-lanes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.6rem;
+}
+.um-lane {
+    border-left: 2px solid rgba(200,162,255,.35);
+    background: rgba(200,162,255,.04);
+    border-radius: 8px;
+    padding: 0.65rem 0.9rem;
+}
+.um-lane-header {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 0.62rem; font-weight: 600; color: #a87fd4;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    list-style: none; cursor: pointer;
+    margin-bottom: 0.5rem;
+}
+.um-lane-header::-webkit-details-marker { display: none; }
+.um-lane-header::marker { display: none; }
+.um-lane-hint {
+    font-size: 0.55rem; color: #3a3a3a;
+    text-transform: none; letter-spacing: 0;
+    transition: color 0.15s;
+}
+details[open] .um-lane-hint { color: #555; }
+.um-count-pill {
+    display: inline-block; margin-left: 0.4rem;
+    font-size: 0.62rem; font-weight: 600; color: #c8a2ff;
+    background: rgba(200,162,255,.12); padding: 0.05rem 0.45rem;
+    border-radius: 8px;
+}
+.users-details { margin: 0; }
+.users-details > .um-lane-header { margin-bottom: 0; }
+details.users-details[open] > .um-lane-header { margin-bottom: 0.5rem; }
+
 /* Add user manually — collapsible */
 .add-user-details { margin-top: 0.4rem; }
 .add-user-summary {

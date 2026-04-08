@@ -298,30 +298,60 @@
         </div>
 
         <div class="section hidden" id="users-section">
-            <div class="section-header">
-                <span>Users</span>
-                <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
+            <div class="um-hero">
+                <div class="um-hero-title-row">
+                    <span class="um-hero-icon">👥</span>
+                    <h2 class="um-hero-title">User Management</h2>
+                    <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
+                </div>
+                <p class="um-hero-sub">Invites, accounts, and active sessions</p>
             </div>
 
-            <!-- Invite links subsection -->
-            <div class="invites-header">
-                <span class="invites-label">Invite links</span>
-                <button class="section-action" onclick="openInviteModal()">+ Create invite</button>
+            <div class="um-metrics">
+                <div class="um-metric">
+                    <div class="um-metric-num" id="um-metric-accounts">—</div>
+                    <div class="um-metric-label">Accounts</div>
+                </div>
+                <div class="um-metric">
+                    <div class="um-metric-num" id="um-metric-invites">—</div>
+                    <div class="um-metric-label">Active invites</div>
+                </div>
+                <div class="um-metric">
+                    <div class="um-metric-num" id="um-metric-sessions">—</div>
+                    <div class="um-metric-label">Now playing</div>
+                </div>
             </div>
-            <ul id="invites-list" class="invites-list"></ul>
 
-            <p class="users-hint" style="margin-top:0.75rem">Existing accounts — users log in at <a href="/jellyfin/" target="_blank" style="color:#7dda93">/jellyfin/</a> with their credentials.</p>
-            <ul id="users-list" class="users-list"></ul>
-            <details class="add-user-details">
-                <summary class="add-user-summary">Add user manually</summary>
-                <form id="add-user-form" class="add-user-form" style="margin-top:0.6rem">
-                    <input id="new-username" placeholder="Username" autocomplete="off" required>
-                    <input id="new-password" type="password" placeholder="Password" required>
-                    <button type="submit">Add user</button>
-                </form>
-                <p id="add-user-error" class="users-error hidden"></p>
-                <p id="add-user-success" class="hidden" style="margin-top:0.5rem;font-size:0.8rem;color:#7dda93"></p>
-            </details>
+            <div class="um-lanes">
+                <div class="um-lane">
+                    <div class="um-lane-header">
+                        <span>Invite links</span>
+                        <button class="section-action" onclick="openInviteModal()">+ Create</button>
+                    </div>
+                    <ul id="invites-list" class="invites-list"></ul>
+                </div>
+
+                <div class="um-lane">
+                    <details class="users-details">
+                        <summary class="um-lane-header">
+                            <span>Existing accounts<span id="users-count" class="um-count-pill"></span></span>
+                            <span class="um-lane-hint">expand</span>
+                        </summary>
+                        <p class="users-hint">Users log in at <a href="/jellyfin/" target="_blank" style="color:#c8a2ff">/jellyfin/</a> with their credentials.</p>
+                        <ul id="users-list" class="users-list"></ul>
+                        <details class="add-user-details">
+                            <summary class="add-user-summary">Add user manually</summary>
+                            <form id="add-user-form" class="add-user-form" style="margin-top:0.6rem">
+                                <input id="new-username" placeholder="Username" autocomplete="off" required>
+                                <input id="new-password" type="password" placeholder="Password" required>
+                                <button type="submit">Add user</button>
+                            </form>
+                            <p id="add-user-error" class="users-error hidden"></p>
+                            <p id="add-user-success" class="hidden" style="margin-top:0.5rem;font-size:0.8rem;color:#7dda93"></p>
+                        </details>
+                    </details>
+                </div>
+            </div>
         </div>
 
         <div class="footer" id="footer">
