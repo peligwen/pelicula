@@ -16,17 +16,36 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23'
       - name: go vet
         working-directory: ${{ matrix.module }}
         run: go vet ./...
       - name: go test
         working-directory: ${{ matrix.module }}
         run: go test ./...
+      - name: go test -race
+        working-directory: ${{ matrix.module }}
+        run: go test -race ./...
 
   shellcheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck pelicula
-        run: shellcheck -S warning pelicula || true
+        run: shellcheck -S warning pelicula
+
+  e2e:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install docker compose plugin
+        run: |
+          DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+          mkdir -p $DOCKER_CONFIG/cli-plugins
+          curl -SL https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
+            -o $DOCKER_CONFIG/cli-plugins/docker-compose
+          chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+      - name: e2e test stack
+        run: ./pelicula test
+        timeout-minutes: 10
