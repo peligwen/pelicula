@@ -131,11 +131,16 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	if !checkAdminRate(w, r) {
 		return
 	}
-	// Restart everything except ourselves first
+	// Restart everything except ourselves first.
+	// qbittorrent is omitted: it shares gluetun's network namespace and
+	// comes back automatically when gluetun restarts.
 	order := []string{"nginx", "procula", "sonarr", "radarr", "prowlarr",
 		"qbittorrent", "jellyfin", "bazarr", "gluetun", "jellyseerr"}
 	var errs []string
 	for _, svc := range order {
+		if !isAllowedContainer(svc) {
+			continue // defense-in-depth: skip any future typo in order
+		}
 		if err := dockerRestart(svc); err != nil {
 			slog.Warn("stack restart: skipping", "component", "admin_ops", "svc", svc, "error", err)
 			errs = append(errs, svc+": "+err.Error())

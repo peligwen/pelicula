@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 // dockerHost returns the Docker Engine API base URL.
@@ -18,7 +19,7 @@ func dockerHost() string {
 	return "http://docker-proxy:2375"
 }
 
-var dockerClient = &http.Client{}
+var dockerClient = &http.Client{Timeout: 30 * time.Second}
 
 // allowedContainers is the explicit whitelist of container names the admin
 // endpoints may act on.  Defense-in-depth on top of the docker-socket-proxy
@@ -87,6 +88,11 @@ func dockerLogs(name string, tail int) ([]byte, error) {
 //
 // Frame format: [stream(1), 0,0,0, size(4 BE)] followed by `size` payload bytes.
 // stream: 1=stdout, 2=stderr (we include both).
+//
+// Total output is capped at maxLogBytes to bound memory use against a
+// misbehaving proxy or unexpectedly large frames.
+const maxLogBytes = 5 << 20 // 5 MiB
+
 func demuxDockerLogs(r io.Reader) ([]byte, error) {
 	var out []byte
 	hdr := make([]byte, 8)
@@ -101,6 +107,9 @@ func demuxDockerLogs(r io.Reader) ([]byte, error) {
 		size := binary.BigEndian.Uint32(hdr[4:8])
 		if size == 0 {
 			continue
+		}
+		if len(out)+int(size) > maxLogBytes {
+			break
 		}
 		chunk := make([]byte, size)
 		if _, err := io.ReadFull(r, chunk); err != nil {
