@@ -89,34 +89,6 @@ func requireAuthOrLocalOrigin(w http.ResponseWriter, r *http.Request) bool {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-// handleServiceRestart restarts a single container by name.
-// POST /api/pelicula/admin/restart?svc=<name>
-func handleServiceRestart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !requireAuthOrLocalOrigin(w, r) {
-		return
-	}
-	if !checkAdminRate(w, r) {
-		return
-	}
-	svc := r.URL.Query().Get("svc")
-	if !isAllowedContainer(svc) {
-		writeError(w, "unknown service", http.StatusBadRequest)
-		return
-	}
-	if err := dockerRestart(svc); err != nil {
-		slog.Error("restart failed", "component", "admin_ops", "svc", svc, "error", err)
-		auditLog(r, "restart", svc, "error: "+err.Error())
-		writeError(w, "restart failed: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	auditLog(r, "restart", svc, "ok")
-	writeJSON(w, map[string]any{"ok": true, "svc": svc})
-}
-
 // handleStackRestart restarts all whitelisted containers.
 // pelicula-api is restarted last (in a goroutine) so the response can flush.
 // POST /api/pelicula/admin/stack/restart
@@ -157,34 +129,6 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		dockerRestart("pelicula-api") //nolint:errcheck — we won't be here to log it
-	}()
-}
-
-// handleStackRebuild restarts the two Go services (pelicula-api + procula).
-// Named "rebuild" for historical/dashboard compatibility; a true image rebuild
-// requires ./pelicula rebuild from a host shell.
-// POST /api/pelicula/admin/stack/rebuild
-func handleStackRebuild(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !requireAuthOrLocalOrigin(w, r) {
-		return
-	}
-	if !checkAdminRate(w, r) {
-		return
-	}
-	rebuildResult := "ok"
-	if err := dockerRestart("procula"); err != nil {
-		slog.Warn("restart_go_services: procula restart failed", "component", "admin_ops", "error", err)
-		rebuildResult = "procula: " + err.Error()
-	}
-	auditLog(r, "restart_go_services", "pelicula-api+procula", rebuildResult)
-	writeJSON(w, map[string]any{"ok": true})
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		dockerRestart("pelicula-api") //nolint:errcheck
 	}()
 }
 

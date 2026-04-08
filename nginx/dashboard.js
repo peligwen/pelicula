@@ -492,24 +492,6 @@ document.addEventListener('click', (e) => {
     }
 });
 
-async function restartService(name) {
-    const btn = document.getElementById('svc-menu-btn');
-    if (!confirm('Restart ' + name + '?')) return;
-    toggleStackMenu();
-    if (btn) btn.disabled = true;
-    try {
-        const res = await fetch('/api/pelicula/admin/restart?svc=' + encodeURIComponent(name), { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) { showAdminToast(data.error || 'Restart failed', true); return; }
-        showAdminToast(name + ' restarted');
-        setTimeout(() => checkServices().then(updateSvcTotals), 3000);
-    } catch (e) {
-        showAdminToast('Network error', true);
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-}
-
 async function stackRestart() {
     const btn = document.getElementById('svc-menu-btn');
     if (!confirm('Restart all stack services? The dashboard will reconnect automatically.')) return;
@@ -524,25 +506,6 @@ async function stackRestart() {
     } catch (e) {
         // pelicula-api restarted — response was lost. That's fine.
         showAdminToast('Stack restarting\u2026');
-        setTimeout(() => checkServices().then(updateSvcTotals), 5000);
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-}
-
-async function stackRebuild() {
-    const btn = document.getElementById('svc-menu-btn');
-    if (!confirm('Restart pelicula-api and procula?\n\nFor a full image rebuild, run ./pelicula rebuild from a shell.')) return;
-    toggleStackMenu();
-    if (btn) btn.disabled = true;
-    try {
-        const res = await fetch('/api/pelicula/admin/stack/rebuild', { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) { showAdminToast(data.error || 'Rebuild failed', true); return; }
-        showAdminToast('Go services restarting\u2026');
-        setTimeout(() => checkServices().then(updateSvcTotals), 5000);
-    } catch (e) {
-        showAdminToast('Go services restarting\u2026');
         setTimeout(() => checkServices().then(updateSvcTotals), 5000);
     } finally {
         if (btn) btn.disabled = false;

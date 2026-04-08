@@ -164,9 +164,7 @@ func main() {
 	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
 
 	// admin only: container control via docker-socket-proxy sidecar
-	mux.Handle("/api/pelicula/admin/restart", auth.GuardAdmin(http.HandlerFunc(handleServiceRestart)))
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
-	mux.Handle("/api/pelicula/admin/stack/rebuild", auth.GuardAdmin(http.HandlerFunc(handleStackRebuild)))
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
