@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -163,5 +165,270 @@ func TestSuggestedTVPath(t *testing.T) {
 					c.title, c.season, c.filename, got, c.want)
 			}
 		})
+	}
+}
+
+// ── FS helpers ────────────────────────────────────────────────────────────────
+
+func TestCopyFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	dst := filepath.Join(dir, "dst.mkv")
+
+	content := []byte("fake video content")
+	if err := os.WriteFile(src, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("dst content = %q, want %q", got, content)
+	}
+	// src should still exist after copy (copyFile does not remove src)
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		t.Error("copyFile should not remove src")
+	}
+}
+
+func TestMoveFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	dst := filepath.Join(dir, "subdir", "dst.mkv")
+
+	content := []byte("video data")
+	if err := os.WriteFile(src, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Dir(dst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveFile(src, dst); err != nil {
+		t.Fatalf("moveFile: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("dst content = %q, want %q", got, content)
+	}
+	// src should be gone after a move
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("moveFile should remove src")
+	}
+}
+
+func TestWalkVideoFiles(t *testing.T) {
+	// Build a directory tree:
+	//   root/
+	//     movie.mkv              ← included
+	//     readme.txt             ← skipped (not a video ext)
+	//     .hidden/               ← skipped (hidden dir)
+	//       hidden.mkv           ← never reached
+	//     Extras/                ← skipped (skipDirs)
+	//       extra.mkv            ← never reached
+	//     Season 01/
+	//       ep01.mkv             ← included
+	//       sample.mkv           ← skipped (name contains "sample" AND < 100 MB)
+	root := t.TempDir()
+	write := func(path string, size int) {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, make([]byte, size), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(filepath.Join(root, "movie.mkv"), 500)
+	write(filepath.Join(root, "readme.txt"), 100)
+	write(filepath.Join(root, ".hidden", "hidden.mkv"), 500)
+	write(filepath.Join(root, "Extras", "extra.mkv"), 500)
+	write(filepath.Join(root, "Season 01", "ep01.mkv"), 500)
+	write(filepath.Join(root, "Season 01", "sample.mkv"), 100) // < 100 MB → skipped
+
+	files, _ := walkVideoFiles(root, nil, 100)
+	paths := make(map[string]bool, len(files))
+	for _, f := range files {
+		paths[filepath.Base(f.Path)] = true
+	}
+
+	if !paths["movie.mkv"] {
+		t.Error("expected movie.mkv to be included")
+	}
+	if !paths["ep01.mkv"] {
+		t.Error("expected ep01.mkv to be included")
+	}
+	if paths["readme.txt"] {
+		t.Error("readme.txt should be excluded (not a video)")
+	}
+	if paths["hidden.mkv"] {
+		t.Error("hidden.mkv should be excluded (hidden dir)")
+	}
+	if paths["extra.mkv"] {
+		t.Error("extra.mkv should be excluded (Extras dir)")
+	}
+	if paths["sample.mkv"] {
+		t.Error("sample.mkv should be excluded (sample file)")
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 files, got %d: %v", len(files), files)
+	}
+}
+
+func TestWalkVideoFilesCap(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 5; i++ {
+		name := filepath.Join(root, filepath.Base(t.TempDir())+".mkv")
+		if err := os.WriteFile(name, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, remaining := walkVideoFiles(root, nil, 3)
+	if len(files) != 3 {
+		t.Errorf("expected cap=3 to limit to 3 files, got %d", len(files))
+	}
+	if remaining != 0 {
+		t.Errorf("remaining should be 0 when cap hit, got %d", remaining)
+	}
+}
+
+// ── applyFSOps ────────────────────────────────────────────────────────────────
+
+// newApplyFSOpsRoots builds a tmp tree with src and dst roots so applyFSOps can
+// be exercised without touching the production /downloads or /movies paths.
+func newApplyFSOpsRoots(t *testing.T) (srcRoot, dstRoot string) {
+	t.Helper()
+	base := t.TempDir()
+	srcRoot = filepath.Join(base, "downloads")
+	dstRoot = filepath.Join(base, "movies")
+	for _, d := range []string{srcRoot, dstRoot} {
+		if err := os.Mkdir(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return
+}
+
+func TestApplyFSOps_Migrate(t *testing.T) {
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+	src := filepath.Join(srcRoot, "Alien.1979.mkv")
+	dst := filepath.Join(dstRoot, "Alien (1979)", "Alien.1979.mkv")
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []ApplyItem{{
+		Type:       "movie",
+		Title:      "Alien",
+		Year:       1979,
+		SourcePath: src,
+		DestPath:   dst,
+	}}
+	applyFSOps(items, "migrate", []string{srcRoot}, []string{dstRoot})
+
+	if _, err := os.Stat(dst); os.IsNotExist(err) {
+		t.Fatal("dst should exist after migrate")
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("src should be gone after migrate")
+	}
+	if items[0].DestPath != dst {
+		t.Errorf("DestPath = %q, want %q", items[0].DestPath, dst)
+	}
+}
+
+func TestApplyFSOps_Symlink(t *testing.T) {
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+	src := filepath.Join(srcRoot, "Inception.2010.mkv")
+	dst := filepath.Join(dstRoot, "Inception (2010)", "Inception.2010.mkv")
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []ApplyItem{{
+		Type:       "movie",
+		Title:      "Inception",
+		Year:       2010,
+		SourcePath: src,
+		DestPath:   dst,
+	}}
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
+
+	info, err := os.Lstat(dst)
+	if os.IsNotExist(err) {
+		t.Fatal("dst should exist after symlink")
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("dst should be a symlink")
+	}
+	// src should still exist
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		t.Error("src should still exist after symlink")
+	}
+	if items[0].DestPath != dst {
+		t.Errorf("DestPath = %q, want %q", items[0].DestPath, dst)
+	}
+}
+
+func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
+	// Calling applyFSOps twice with symlink strategy should not error on the
+	// second call — it silently skips if the dst already exists.
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+	src := filepath.Join(srcRoot, "movie.mkv")
+	dst := filepath.Join(dstRoot, "Movie (2020)", "movie.mkv")
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: src, DestPath: dst}}
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}) // should not panic / error
+}
+
+func TestApplyFSOps_Keep(t *testing.T) {
+	// "keep" must not touch any files.
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+	src := filepath.Join(srcRoot, "movie.mkv")
+	dst := filepath.Join(dstRoot, "Movie (2020)", "movie.mkv")
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: src, DestPath: dst}}
+	applyFSOps(items, "keep", []string{srcRoot}, []string{dstRoot})
+
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("keep strategy should not create dst")
+	}
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		t.Error("keep strategy should leave src intact")
+	}
+}
+
+func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
+	// SourcePath outside allowedSrcRoots must be silently ignored.
+	_, dstRoot := newApplyFSOpsRoots(t)
+	base := filepath.Dir(dstRoot)
+	escapeSrc := filepath.Join(base, "outside.mkv")
+	dst := filepath.Join(dstRoot, "Movie (2020)", "outside.mkv")
+	if err := os.WriteFile(escapeSrc, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: escapeSrc, DestPath: dst}}
+	applyFSOps(items, "migrate", []string{filepath.Join(base, "downloads")}, []string{dstRoot})
+
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("path outside allowedSrcRoots should not be migrated")
+	}
+	// original must remain untouched
+	if _, err := os.Stat(escapeSrc); os.IsNotExist(err) {
+		t.Error("escapeSrc should be untouched")
 	}
 }

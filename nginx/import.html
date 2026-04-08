@@ -89,21 +89,23 @@
                         <input type="radio" name="strategy" value="migrate" checked>
                         <div class="strategy-card">
                             <div class="strategy-name">Migrate</div>
-                            <div class="strategy-desc">Move files into the managed library structure</div>
+                            <div class="strategy-desc"><strong>Moves</strong> each file to its library destination. Original location is freed.</div>
+                            <div class="strategy-example">e.g. /downloads/Foo.mkv &rarr; /movies/Foo (2024)/Foo.mkv</div>
                         </div>
                     </label>
                     <label class="strategy-option">
                         <input type="radio" name="strategy" value="symlink">
                         <div class="strategy-card">
                             <div class="strategy-name">Symlink</div>
-                            <div class="strategy-desc">Create symlinks to bridge existing files</div>
+                            <div class="strategy-desc"><strong>Links</strong> the library path to your original file. Original stays put — deleting it breaks the library entry.</div>
+                            <div class="strategy-example">e.g. /movies/Foo (2024)/Foo.mkv &rarr; /downloads/Foo.mkv</div>
                         </div>
                     </label>
                     <label class="strategy-option">
                         <input type="radio" name="strategy" value="keep">
                         <div class="strategy-card">
                             <div class="strategy-name">Keep</div>
-                            <div class="strategy-desc">Register files in place without moving them</div>
+                            <div class="strategy-desc"><strong>Registers</strong> in Sonarr/Radarr without touching files. Use when an external tool already manages your layout.</div>
                         </div>
                     </label>
                 </div>

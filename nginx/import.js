@@ -2,7 +2,7 @@
 
 const state = {
     step: 'browse',
-    selected: [],        // [{path, name, size}]
+    selected: [],        // [{path, name, size, isDir}]
     scanResults: [],     // from /library/scan
     dismissed: new Set(),
 };
@@ -83,6 +83,14 @@ function createBrowseEntry(entry, depth) {
     row.style.paddingLeft = (0.75 + depth * 1.25) + 'rem';
 
     if (entry.isDir) {
+        // Directory checkbox — selecting a folder imports all video files inside it.
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'browse-checkbox';
+        cb.title = 'Select entire folder';
+        cb.addEventListener('change', () => toggleFolderSelection(entry, cb.checked));
+        row.appendChild(cb);
+
         const expand = document.createElement('span');
         expand.className = 'browse-expand';
         expand.textContent = '\u25B6';
@@ -97,6 +105,11 @@ function createBrowseEntry(entry, depth) {
         name.className = 'browse-name';
         name.textContent = entry.name;
         row.appendChild(name);
+
+        const hint = document.createElement('span');
+        hint.className = 'browse-size';
+        hint.textContent = 'folder';
+        row.appendChild(hint);
 
         // Children container
         const children = document.createElement('div');
@@ -119,6 +132,12 @@ function createBrowseEntry(entry, depth) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.className = 'browse-checkbox';
+    // Disable individual file selection if a parent folder is already selected.
+    if (isPathCoveredByFolder(entry.path)) {
+        cb.checked = true;
+        cb.disabled = true;
+        cb.title = 'Covered by parent folder selection';
+    }
     cb.addEventListener('change', () => toggleFileSelection(entry, cb.checked));
     row.appendChild(cb);
 
@@ -188,7 +207,23 @@ async function toggleDir(expandEl, childrenEl, path) {
     }
 }
 
+function isPathCoveredByFolder(filePath) {
+    return state.selected.some(s => s.isDir && filePath.startsWith(s.path + '/'));
+}
+
+function toggleFolderSelection(entry, checked) {
+    if (checked) {
+        if (!state.selected.find(s => s.path === entry.path)) {
+            state.selected.push({ path: entry.path, name: entry.name, isDir: true });
+        }
+    } else {
+        state.selected = state.selected.filter(s => s.path !== entry.path);
+    }
+    updateSelectedCount();
+}
+
 function toggleFileSelection(entry, checked) {
+    if (isPathCoveredByFolder(entry.path)) return; // parent folder takes precedence
     if (checked) {
         if (!state.selected.find(s => s.path === entry.path)) {
             state.selected.push({ path: entry.path, name: entry.name, size: entry.size });
@@ -200,10 +235,14 @@ function toggleFileSelection(entry, checked) {
 }
 
 function updateSelectedCount() {
-    const count = state.selected.length;
+    const folders = state.selected.filter(s => s.isDir).length;
+    const files = state.selected.filter(s => !s.isDir).length;
     const el = document.getElementById('selected-count');
-    el.textContent = count ? count + ' file' + (count > 1 ? 's' : '') + ' selected' : '';
-    document.getElementById('btn-scan').disabled = count === 0;
+    const parts = [];
+    if (folders) parts.push(folders + ' folder' + (folders > 1 ? 's' : ''));
+    if (files) parts.push(files + ' file' + (files > 1 ? 's' : ''));
+    el.textContent = parts.length ? parts.join(', ') + ' selected' : '';
+    document.getElementById('btn-scan').disabled = state.selected.length === 0;
 }
 
 // ── Step 2: Scan / Match ────────────────────────────────────────────────────
@@ -211,14 +250,21 @@ function updateSelectedCount() {
 async function doScan() {
     goToStep('match');
     const results = document.getElementById('match-results');
-    results.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Scanning files...</span></div>';
+    const folderCount = state.selected.filter(s => s.isDir).length;
+    const fileCount = state.selected.filter(s => !s.isDir).length;
+    const scanDesc = [
+        folderCount ? folderCount + ' folder' + (folderCount > 1 ? 's' : '') : '',
+        fileCount ? fileCount + ' file' + (fileCount > 1 ? 's' : '') : '',
+    ].filter(Boolean).join(', ');
+    results.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Scanning ' + esc(scanDesc) + '...</span></div>';
 
     try {
-        const files = state.selected.map(f => ({ path: f.path, size: f.size }));
+        const files = state.selected.filter(s => !s.isDir).map(f => ({ path: f.path, size: f.size }));
+        const folders = state.selected.filter(s => s.isDir).map(s => s.path);
         const res = await apiFetch('/api/pelicula/library/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files }),
+            body: JSON.stringify({ files, folders }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
@@ -284,12 +330,17 @@ function createMatchItem(item) {
     info.className = 'match-info';
 
     if (item.match) {
+        const destHtml = item.suggestedPath
+            ? '<div class="match-dest" title="' + escAttr(item.suggestedPath) + '">' +
+              '<span class="match-dest-arrow">&rarr;</span>' + esc(item.suggestedPath) + '</div>'
+            : '';
         info.innerHTML =
             '<div class="match-title">' + esc(item.match.title) +
             (item.match.year ? ' <span style="color:#666">(' + item.match.year + ')</span>' : '') +
             '</div>' +
             '<div class="match-meta">' + esc(item.match.type) + '</div>' +
-            '<div class="match-file" title="' + escAttr(item.file) + '">' + esc(item.file) + '</div>';
+            '<div class="match-file" title="' + escAttr(item.file) + '">' + esc(item.file) + '</div>' +
+            destHtml;
     } else {
         info.innerHTML =
             '<div class="match-title" style="color:#666">' + esc(item.file.split('/').pop()) + '</div>' +
@@ -359,6 +410,7 @@ async function doApply() {
             rootFolderPath: r.match.type === 'movie' ? '/movies' : '/tv',
             monitored: strategy !== 'keep',
             sourcePath: r.file,
+            destPath: r.suggestedPath || '',
         }));
 
     if (!items.length) {
@@ -398,6 +450,29 @@ function renderApplyResult(result, validate) {
         html += '<div class="apply-errors">';
         result.errors.forEach(e => {
             html += '<div class="apply-error-item">' + esc(e) + '</div>';
+        });
+        html += '</div>';
+    }
+
+    // Per-item file operation summary
+    if (result.items && result.items.length) {
+        html += '<div class="apply-items">';
+        result.items.forEach(item => {
+            const opClass = item.fsOp === 'failed' ? 'apply-item-failed' : 'apply-item-ok';
+            html += '<div class="apply-item-row ' + opClass + '">';
+            html += '<span class="apply-item-op badge-' + esc(item.fsOp || 'kept') + '">' + esc(item.fsOp || 'kept') + '</span>';
+            html += '<span class="apply-item-title">' + esc(item.title) + '</span>';
+            if (item.src && item.dest && item.src !== item.dest) {
+                html += '<div class="apply-item-paths"><span class="apply-item-src">' + esc(item.src) + '</span>' +
+                        '<span class="match-dest-arrow">&rarr;</span>' +
+                        '<span class="apply-item-dest">' + esc(item.dest) + '</span></div>';
+            } else if (item.dest) {
+                html += '<div class="apply-item-paths"><span class="apply-item-dest">' + esc(item.dest) + '</span></div>';
+            }
+            if (item.error) {
+                html += '<div class="apply-item-error">' + esc(item.error) + '</div>';
+            }
+            html += '</div>';
         });
         html += '</div>';
     }

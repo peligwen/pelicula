@@ -964,8 +964,15 @@ document.getElementById('add-user-form')?.addEventListener('submit', async (e) =
             errEl.classList.remove('hidden');
             return;
         }
+        const createdUsername = username;
         document.getElementById('new-username').value = '';
         document.getElementById('new-password').value = '';
+        const successEl = document.getElementById('add-user-success');
+        if (successEl) {
+            successEl.innerHTML = `User <strong>${escapeHtml(createdUsername)}</strong> created. <a href="/jellyfin/" target="_blank" style="color:#7dda93">Open Jellyfin &rarr;</a>`;
+            successEl.classList.remove('hidden');
+            setTimeout(() => successEl.classList.add('hidden'), 8000);
+        }
         loadUsers();
     } catch (e) {
         errEl.textContent = 'Network error.';

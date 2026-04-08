@@ -21,7 +21,8 @@ import (
 // ── Scan types ────────────────────────────────────────────────────────────────
 
 type ScanRequest struct {
-	Files []ScanFile `json:"files"`
+	Files   []ScanFile `json:"files"`
+	Folders []string   `json:"folders,omitempty"` // directories to walk recursively
 }
 
 type ScanFile struct {
@@ -62,14 +63,24 @@ type ApplyItem struct {
 	Year           int    `json:"year"`
 	RootFolderPath string `json:"rootFolderPath"`
 	Monitored      bool   `json:"monitored"`
-	SourcePath     string `json:"sourcePath,omitempty"` // original file path, used for Procula validation
+	SourcePath     string `json:"sourcePath,omitempty"` // original file path, used for FS ops and Procula
+	DestPath       string `json:"destPath,omitempty"`   // pre-computed destination (client-supplied for confirmation)
 }
 
 type LibraryApplyResult struct {
-	Added   int      `json:"added"`
-	Skipped int      `json:"skipped"`
-	Failed  int      `json:"failed"`
-	Errors  []string `json:"errors,omitempty"`
+	Added   int               `json:"added"`
+	Skipped int               `json:"skipped"`
+	Failed  int               `json:"failed"`
+	Errors  []string          `json:"errors,omitempty"`
+	Items   []ApplyItemResult `json:"items,omitempty"` // per-item detail for display
+}
+
+type ApplyItemResult struct {
+	Title  string `json:"title"`
+	Src    string `json:"src,omitempty"`
+	Dest   string `json:"dest,omitempty"`
+	FSOp   string `json:"fsOp,omitempty"` // "moved", "symlinked", "kept", "skipped", "failed"
+	Error  string `json:"error,omitempty"`
 }
 
 // ── Browse types ─────────────────────────────────────────────────────────────
@@ -111,6 +122,152 @@ func browseRoots() []string {
 // preventing directory traversal attacks.
 func isAllowedBrowsePath(p string) bool {
 	return isUnderPrefixes(p, browseRoots())
+}
+
+// walkVideoFiles recursively walks dir and appends video files to out (up to
+// the remaining capacity of cap). Returns the updated slice and updated cap.
+// Reuses the same skip rules as handleBrowse: hidden files, skipDirs, non-video
+// extensions, and sample files under 100 MB.
+func walkVideoFiles(dir string, out []ScanFile, cap int) ([]ScanFile, int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out, cap
+	}
+	for _, de := range entries {
+		if cap <= 0 {
+			break
+		}
+		name := de.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		full := filepath.Join(dir, name)
+		if de.IsDir() {
+			if skipDirs[strings.ToLower(name)] {
+				continue
+			}
+			out, cap = walkVideoFiles(full, out, cap)
+		} else {
+			ext := strings.ToLower(filepath.Ext(name))
+			if !videoExts[ext] {
+				continue
+			}
+			info, err := de.Info()
+			if err != nil {
+				continue
+			}
+			if strings.Contains(strings.ToLower(name), "sample") && info.Size() < 100<<20 {
+				continue
+			}
+			out = append(out, ScanFile{Path: full, Size: info.Size()})
+			cap--
+		}
+	}
+	return out, cap
+}
+
+// copyFile copies src to dst using a buffered io.Copy, removing dst on error.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	in.Close()
+	return nil
+}
+
+// moveFile moves src to dst, falling back to copy+remove when os.Rename fails
+// across different filesystems (common on Synology bind mounts).
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	// Cross-device: copy then remove.
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
+// applyFSOps iterates items and performs the filesystem operation dictated by
+// strategy ("migrate", "symlink", or "keep") for each item that has a SourcePath.
+// Items are modified in place: SourcePath and DestPath are updated on success.
+// allowedSrcRoots and allowedDstRoots default to the production values when nil.
+func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string) {
+	if strategy == "keep" {
+		return
+	}
+	if allowedSrcRoots == nil {
+		allowedSrcRoots = browseRoots()
+	}
+	if allowedDstRoots == nil {
+		allowedDstRoots = []string{"/movies", "/tv"}
+	}
+
+	for i := range items {
+		item := &items[i]
+		if item.SourcePath == "" {
+			continue
+		}
+		src := filepath.Clean(item.SourcePath)
+		if !isUnderPrefixes(src, allowedSrcRoots) {
+			continue
+		}
+
+		dst := item.DestPath
+		if dst == "" {
+			if item.Type == "movie" {
+				dst = suggestedMoviePath(item.Title, item.Year, filepath.Base(src))
+			} else {
+				dst = suggestedTVPath(item.Title, 0, filepath.Base(src))
+			}
+		}
+		dst = filepath.Clean(dst)
+		if !isUnderPrefixes(dst, allowedDstRoots) {
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			slog.Warn("import: mkdir failed", "component", "library", "dst", dst, "error", err)
+			continue
+		}
+
+		switch strategy {
+		case "migrate":
+			if err := moveFile(src, dst); err != nil {
+				slog.Warn("import: move failed", "component", "library",
+					"src", src, "dst", dst, "error", err)
+			} else {
+				item.SourcePath = dst
+				item.DestPath = dst
+			}
+		case "symlink":
+			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+				if err := os.Symlink(src, dst); err != nil {
+					slog.Warn("import: symlink failed", "component", "library",
+						"src", src, "dst", dst, "error", err)
+				} else {
+					item.DestPath = dst
+				}
+			}
+		}
+	}
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -249,6 +406,21 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Expand any selected folders into individual video files.
+	const maxScanFiles = 2000
+	remaining := maxScanFiles - len(req.Files)
+	for _, dir := range req.Folders {
+		clean := filepath.Clean(dir)
+		if !isAllowedBrowsePath(clean) {
+			continue
+		}
+		req.Files, remaining = walkVideoFiles(clean, req.Files, remaining)
+		if remaining <= 0 {
+			break
+		}
+	}
+
 	if len(req.Files) == 0 {
 		writeJSON(w, []MatchItem{})
 		return
@@ -352,6 +524,11 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	movieProfiles, _ := loadProfileNameMap(radarrURL, radarrKey)
 	seriesProfiles, _ := loadProfileNameMap(sonarrURL, sonarrKey)
 
+	// ── Filesystem operations (migrate / symlink) ────────────────────────────
+	// Perform FS ops before *arr registration so that if a move fails we don't
+	// register a path that doesn't exist yet.  "keep" skips this section.
+	applyFSOps(req.Items, req.Strategy, nil, nil)
+
 	// Deduplicate by (type, id) — multiple files from the same title map to
 	// one Radarr/Sonarr entry.
 	type dedupeKey struct {
@@ -394,9 +571,21 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		fsOp := "kept"
+		switch req.Strategy {
+		case "migrate":
+			if item.DestPath != "" {
+				fsOp = "moved"
+			}
+		case "symlink":
+			if item.DestPath != "" {
+				fsOp = "symlinked"
+			}
+		}
+
 		sem <- struct{}{}
 		wg.Add(1)
-		go func(it ApplyItem) {
+		go func(it ApplyItem, op string) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			var err error
@@ -411,11 +600,17 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 				result.Failed++
 				result.Errors = append(result.Errors,
 					fmt.Sprintf("%s %q: %v", it.Type, it.Title, err))
+				result.Items = append(result.Items, ApplyItemResult{
+					Title: it.Title, Src: it.SourcePath, FSOp: "failed", Error: err.Error(),
+				})
 			} else {
 				result.Added++
 				addedItems = append(addedItems, it)
+				result.Items = append(result.Items, ApplyItemResult{
+					Title: it.Title, Src: it.SourcePath, Dest: it.DestPath, FSOp: op,
+				})
 			}
-		}(item)
+		}(item, fsOp)
 	}
 	wg.Wait()
 

@@ -334,3 +334,74 @@
     font-size: 0.82rem;
     color: #7dda93;
 }
+
+/* ── Source → destination preview (match step) ── */
+.match-dest {
+    font-size: 0.7rem;
+    color: #3a5a3a;
+    margin-top: 0.2rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.match-dest-arrow {
+    margin-right: 0.3rem;
+    color: #3a5a3a;
+}
+
+/* ── Strategy card example line ── */
+.strategy-example {
+    font-size: 0.68rem;
+    color: #3a4a3a;
+    margin-top: 0.2rem;
+    font-family: monospace;
+}
+
+/* ── Apply per-item results ── */
+.apply-items {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.apply-item-row {
+    padding: 0.4rem 0.6rem;
+    border-radius: 5px;
+    font-size: 0.78rem;
+    border: 1px solid #1e1e1e;
+}
+.apply-item-ok { background: #0e1010; }
+.apply-item-failed { background: #1a0808; border-color: #4a1a1a; }
+.apply-item-op {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    margin-right: 0.4rem;
+    font-weight: 500;
+}
+.badge-moved { background: #0e2016; color: #7dda93; border: 1px solid #1a4030; }
+.badge-symlinked { background: #0e0e18; color: #c8a2ff; border: 1px solid #3a2a60; }
+.badge-kept { background: #1a1a1a; color: #666; border: 1px solid #2a2a2a; }
+.badge-skipped { background: #1a1a1a; color: #666; border: 1px solid #2a2a2a; }
+.badge-failed { background: #1a0808; color: #f87171; border: 1px solid #4a1a1a; }
+.apply-item-title { color: #aaa; font-weight: 500; }
+.apply-item-paths {
+    margin-top: 0.2rem;
+    font-size: 0.68rem;
+    color: #444;
+    font-family: monospace;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+}
+.apply-item-src { color: #444; }
+.apply-item-dest { color: #3a5a3a; }
+.apply-item-error { font-size: 0.72rem; color: #f87171; margin-top: 0.15rem; }
+
+/* ── Folder checkbox in browse tree ── */
+.browse-entry input[type="checkbox"].browse-checkbox {
+    margin-right: 0.35rem;
+    flex-shrink: 0;
+    accent-color: #c8a2ff;
+}
