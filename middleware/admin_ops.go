@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -140,7 +141,11 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, svc+": "+err.Error())
 		}
 	}
-	auditLog(r, "stack_restart", "all", "ok")
+	result := "ok"
+	if len(errs) > 0 {
+		result = "partial: " + strings.Join(errs, "; ")
+	}
+	auditLog(r, "stack_restart", "all", result)
 	writeJSON(w, map[string]any{"ok": true, "errors": errs})
 	// Restart ourselves last — response has already been sent above (flush happens
 	// after writeJSON returns). Give it 500ms.
@@ -151,7 +156,8 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStackRebuild restarts the two Go services (pelicula-api + procula).
-// A true image rebuild requires ./pelicula rebuild from a host shell.
+// Named "rebuild" for historical/dashboard compatibility; a true image rebuild
+// requires ./pelicula rebuild from a host shell.
 // POST /api/pelicula/admin/stack/rebuild
 func handleStackRebuild(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -164,10 +170,12 @@ func handleStackRebuild(w http.ResponseWriter, r *http.Request) {
 	if !checkAdminRate(w, r) {
 		return
 	}
+	rebuildResult := "ok"
 	if err := dockerRestart("procula"); err != nil {
-		slog.Warn("rebuild: procula restart failed", "component", "admin_ops", "error", err)
+		slog.Warn("restart_go_services: procula restart failed", "component", "admin_ops", "error", err)
+		rebuildResult = "procula: " + err.Error()
 	}
-	auditLog(r, "rebuild", "pelicula-api+procula", "ok")
+	auditLog(r, "restart_go_services", "pelicula-api+procula", rebuildResult)
 	writeJSON(w, map[string]any{"ok": true})
 	go func() {
 		time.Sleep(500 * time.Millisecond)
