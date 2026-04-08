@@ -333,12 +333,9 @@ func SetJellyfinUserPassword(s *ServiceClients, id, newPw string) error {
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	// Step 1: clear the existing password. Ignore failure — the user may have
-	// no password yet, in which case Jellyfin returns 400 and we proceed anyway.
 	_, _ = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
 		"ResetPassword": true,
 	})
-	// Step 2: set the new password. CurrentPw is "" because step 1 cleared it.
 	body, err := jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
 		"CurrentPw": "",
 		"NewPw":     newPw,

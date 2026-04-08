@@ -1389,7 +1389,31 @@ function updateStaleBanner() {
     }
 }
 
+// ── Storage Explorer ──────────────────────────────────────────────────────────
+
+function openStorageExplorer() {
+    const section = document.getElementById('storage-explorer-section');
+    if (section) {
+        section.classList.remove('hidden');
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    if (!window._seLoaded) {
+        window._seLoaded = true;
+        const s = document.createElement('script');
+        s.src = '/import.js';
+        document.head.appendChild(s);
+    }
+}
+
+function closeStorageExplorer() {
+    const section = document.getElementById('storage-explorer-section');
+    if (section) section.classList.add('hidden');
+}
+
 checkAuth();
+if (window.location.hash === '#storage-explorer') {
+    setTimeout(openStorageExplorer, 0);
+}
 setTimeout(refresh, 500);
 setTimeout(loadStorageSettings, 600);
 // Update check runs once on load — backend caches for 24h so no need to poll.

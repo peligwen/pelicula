@@ -637,36 +637,12 @@ function renderApplyResult(result, validate) {
     content.innerHTML = html;
 }
 
-// ── Storage explorer lifecycle (dashboard mode) ──────────────────────────────
-
-// openStorageExplorer shows the inline explorer panel and loads the browse tree
-// the first time it is called. Works on both the dashboard and /import.
-function openStorageExplorer() {
-    const section = document.getElementById('storage-explorer-section');
-    if (section) {
-        section.classList.remove('hidden');
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    if (!window._seInitialized) {
-        window._seInitialized = true;
-        loadBrowseRoots();
-    }
-}
-
-function closeStorageExplorer() {
-    const section = document.getElementById('storage-explorer-section');
-    if (section) section.classList.add('hidden');
-}
-
 // ── Init ────────────────────────────────────────────────────────────────────
 
-// On the standalone /import page (no data-dashboard), auto-init the wizard.
-// On the dashboard, openStorageExplorer() is called on demand.
-if (!document.body.dataset.dashboard) {
-    loadBrowseRoots();
-} else if (window.location.hash === '#storage-explorer') {
-    openStorageExplorer();
-}
+// On the dashboard this script is loaded on demand by openStorageExplorer()
+// in dashboard.js. Auto-init the browse tree immediately.
+// On the standalone /import page (legacy redirect), also init.
+loadBrowseRoots();
 
 // ── Re-transcode mode ────────────────────────────────────────────────────────
 
