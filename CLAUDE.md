@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./pelicula rebuild             # rebuild and restart middleware/procula containers
 ./pelicula reset-config        # soft reset: wipe service configs, preserve API keys/VPN/certs/auth
 ./pelicula reset-config [svc]  # per-service reset: sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs
-./pelicula reset-config all    # hard reset: wipe entire config dir, keep Prowlarr indexers + .env + media
+./pelicula reset-config all    # hard reset: wipe config dir + regenerate .env (keeps Prowlarr indexers, VPN key, paths)
 ./pelicula configure           # interactive menu: auth, notifications, transcoding, remote access (Peligrosa)
 ./pelicula import              # import local media files via the browser wizard
 ./pelicula export              # export watchlist / library backup
