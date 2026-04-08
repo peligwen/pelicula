@@ -201,7 +201,7 @@ services:
     container_name: pelicula-api
     environment:
       - TZ=${TZ}
-      - PELICULA_AUTH=${PELICULA_AUTH:-true}
+      - PELICULA_AUTH=${PELICULA_AUTH:-off}
       - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
       - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
