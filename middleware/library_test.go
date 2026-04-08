@@ -1,8 +1,11 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -430,5 +433,226 @@ func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
 	// original must remain untouched
 	if _, err := os.Stat(escapeSrc); os.IsNotExist(err) {
 		t.Error("escapeSrc should be untouched")
+	}
+}
+
+// ── extractEpisode ────────────────────────────────────────────────────────────
+
+func TestExtractEpisode(t *testing.T) {
+	cases := []struct {
+		filename string
+		want     int
+	}{
+		{"Show.S01E01.mkv", 1},
+		{"Show.S01E12.mkv", 12},
+		{"Show.S12E05.mkv", 5},
+		{"Movie.2020.mkv", 0},
+		{"show s3e10 720p.mkv", 10},
+		{"S01E01.mkv", 1},
+		{"no episode info.mkv", 0},
+		{"", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.filename, func(t *testing.T) {
+			got := extractEpisode(c.filename)
+			if got != c.want {
+				t.Errorf("extractEpisode(%q) = %d, want %d", c.filename, got, c.want)
+			}
+		})
+	}
+}
+
+// ── collapseHardlinks ─────────────────────────────────────────────────────────
+
+func TestCollapseHardlinks_NoLinks(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.mkv")
+	b := filepath.Join(dir, "b.mkv")
+	if err := os.WriteFile(a, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	files := []ScanFile{{Path: a, Size: 1}, {Path: b, Size: 1}}
+	got := collapseHardlinks(files)
+	if len(got) != 2 {
+		t.Errorf("expected 2 files, got %d", len(got))
+	}
+	for _, f := range got {
+		if len(f.Aliases) != 0 {
+			t.Errorf("file %s should have no aliases, got %v", f.Path, f.Aliases)
+		}
+	}
+}
+
+func TestCollapseHardlinks_WithLink(t *testing.T) {
+	dir := t.TempDir()
+	orig := filepath.Join(dir, "original.mkv")
+	link := filepath.Join(dir, "hardlink.mkv")
+	if err := os.WriteFile(orig, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(orig, link); err != nil {
+		t.Fatal(err)
+	}
+
+	files := []ScanFile{{Path: orig, Size: 4}, {Path: link, Size: 4}}
+	got := collapseHardlinks(files)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 file after hardlink collapse, got %d", len(got))
+	}
+	if got[0].Path != orig {
+		t.Errorf("expected canonical path %q, got %q", orig, got[0].Path)
+	}
+	if len(got[0].Aliases) != 1 || got[0].Aliases[0] != link {
+		t.Errorf("expected aliases [%q], got %v", link, got[0].Aliases)
+	}
+}
+
+func TestCollapseHardlinks_NonExistentFile(t *testing.T) {
+	// Files that cannot be stat'd should be passed through as-is.
+	files := []ScanFile{{Path: "/nonexistent/ghost.mkv", Size: 100}}
+	got := collapseHardlinks(files)
+	if len(got) != 1 {
+		t.Errorf("expected 1 file, got %d", len(got))
+	}
+}
+
+// ── matchItemGroupKey / assignGroupKeys ───────────────────────────────────────
+
+func TestMatchItemGroupKey(t *testing.T) {
+	cases := []struct {
+		name string
+		item MatchItem
+		want string
+	}{
+		{
+			"movie",
+			MatchItem{Match: &MediaMatch{Type: "movie", TmdbID: 123}},
+			"movie:123",
+		},
+		{
+			"series episode",
+			MatchItem{Match: &MediaMatch{Type: "series", TvdbID: 456, Season: 1, Episode: 3}},
+			"series:456:s1e3",
+		},
+		{
+			"unmatched uses file path",
+			MatchItem{File: "/downloads/foo.mkv"},
+			"unmatched:/downloads/foo.mkv",
+		},
+		{
+			"series with zero tvdbId falls back to unmatched",
+			MatchItem{File: "/downloads/foo.mkv", Match: &MediaMatch{Type: "series", TvdbID: 0}},
+			"unmatched:/downloads/foo.mkv",
+		},
+		{
+			"movie with zero tmdbId falls back to unmatched",
+			MatchItem{File: "/downloads/foo.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 0}},
+			"unmatched:/downloads/foo.mkv",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := matchItemGroupKey(c.item)
+			if got != c.want {
+				t.Errorf("matchItemGroupKey = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestAssignGroupKeys(t *testing.T) {
+	items := []MatchItem{
+		{File: "/a.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 1}},
+		{File: "/b.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 1}}, // dup
+		{File: "/c.mkv", Match: &MediaMatch{Type: "series", TvdbID: 2, Season: 1, Episode: 1}},
+		{File: "/d.mkv"},                                                // unmatched
+	}
+	assignGroupKeys(items)
+
+	if items[0].GroupKey != "movie:1" {
+		t.Errorf("items[0].GroupKey = %q, want %q", items[0].GroupKey, "movie:1")
+	}
+	if items[1].GroupKey != "movie:1" {
+		t.Errorf("items[1].GroupKey = %q, want %q", items[1].GroupKey, "movie:1")
+	}
+	if items[0].GroupKey != items[1].GroupKey {
+		t.Error("two files for the same movie should have the same GroupKey")
+	}
+	if items[2].GroupKey != "series:2:s1e1" {
+		t.Errorf("items[2].GroupKey = %q, want %q", items[2].GroupKey, "series:2:s1e1")
+	}
+	if !strings.HasPrefix(items[3].GroupKey, "unmatched:") {
+		t.Errorf("unmatched item GroupKey = %q, should start with 'unmatched:'", items[3].GroupKey)
+	}
+}
+
+// ── handleLibraryApply duplicate guard ───────────────────────────────────────
+
+func TestHandleLibraryApply_DuplicateGuard(t *testing.T) {
+	// Two items with the same movie group key must be rejected with 400.
+	body := `{
+		"items": [
+			{"type":"movie","tmdbId":999,"title":"Alien","year":1979,"rootFolderPath":"/movies","sourcePath":"/a/alien_1.mkv"},
+			{"type":"movie","tmdbId":999,"title":"Alien","year":1979,"rootFolderPath":"/movies","sourcePath":"/a/alien_2.mkv"}
+		],
+		"strategy":"keep"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/library/apply",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handleLibraryApply(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for duplicate group keys, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "movie:999") {
+		t.Errorf("error response should mention the duplicate group key, got: %s", w.Body.String())
+	}
+}
+
+func TestHandleLibraryApply_DupEpisodeGuard(t *testing.T) {
+	// Two items for the same episode must be rejected with 400.
+	body := `{
+		"items": [
+			{"type":"series","tvdbId":888,"title":"Breaking Bad","season":1,"episode":1,"rootFolderPath":"/tv","sourcePath":"/a/bb_s01e01_720p.mkv"},
+			{"type":"series","tvdbId":888,"title":"Breaking Bad","season":1,"episode":1,"rootFolderPath":"/tv","sourcePath":"/a/bb_s01e01_1080p.mkv"}
+		],
+		"strategy":"keep"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/library/apply",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handleLibraryApply(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for duplicate episode group keys, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestApplyGroupKey_DifferentEpisodes_NotDups(t *testing.T) {
+	// Two different episodes of the same series must produce different group keys
+	// so the duplicate guard does NOT reject them.
+	ep1 := ApplyItem{Type: "series", TvdbID: 888, Season: 1, Episode: 1}
+	ep2 := ApplyItem{Type: "series", TvdbID: 888, Season: 1, Episode: 2}
+
+	k1 := applyGroupKey(ep1)
+	k2 := applyGroupKey(ep2)
+
+	if k1 == k2 {
+		t.Errorf("different episodes should have different group keys; both got %q", k1)
+	}
+	if k1 != "series:888:s1e1" {
+		t.Errorf("ep1 group key = %q, want %q", k1, "series:888:s1e1")
+	}
+	if k2 != "series:888:s1e2" {
+		t.Errorf("ep2 group key = %q, want %q", k2, "series:888:s1e2")
 	}
 }

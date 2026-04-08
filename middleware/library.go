@@ -11,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 )
@@ -26,8 +28,9 @@ type ScanRequest struct {
 }
 
 type ScanFile struct {
-	Path string `json:"path"`
-	Size int64  `json:"size"`
+	Path    string   `json:"path"`
+	Size    int64    `json:"size"`
+	Aliases []string `json:"-"` // populated server-side during hardlink collapse; not part of client input
 }
 
 type MatchItem struct {
@@ -36,6 +39,8 @@ type MatchItem struct {
 	Match         *MediaMatch `json:"match,omitempty"`
 	Status        string      `json:"status"` // new / exists / unmatched
 	SuggestedPath string      `json:"suggestedPath,omitempty"`
+	GroupKey      string      `json:"groupKey,omitempty"`
+	Aliases       []string    `json:"aliases,omitempty"` // other paths that are hardlinks to the same inode
 }
 
 type MediaMatch struct {
@@ -44,6 +49,8 @@ type MediaMatch struct {
 	Year       int    `json:"year"`
 	TmdbID     int    `json:"tmdbId,omitempty"`
 	TvdbID     int    `json:"tvdbId,omitempty"`
+	Season     int    `json:"season,omitempty"`
+	Episode    int    `json:"episode,omitempty"`
 	Confidence string `json:"confidence"` // high / medium / low
 }
 
@@ -61,6 +68,8 @@ type ApplyItem struct {
 	TvdbID         int    `json:"tvdbId,omitempty"`
 	Title          string `json:"title"`
 	Year           int    `json:"year"`
+	Season         int    `json:"season,omitempty"`
+	Episode        int    `json:"episode,omitempty"`
 	RootFolderPath string `json:"rootFolderPath"`
 	Monitored      bool   `json:"monitored"`
 	SourcePath     string `json:"sourcePath,omitempty"` // original file path, used for FS ops and Procula
@@ -421,6 +430,10 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Collapse hardlinks — multiple paths to the same inode become one entry,
+	// with the extra paths recorded in Aliases so the UI can display them.
+	req.Files = collapseHardlinks(req.Files)
+
 	if len(req.Files) == 0 {
 		writeJSON(w, []MatchItem{})
 		return
@@ -470,6 +483,9 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 	close(jobs)
 	wg.Wait()
 
+	// Assign stable group keys so the UI can identify duplicate sets.
+	assignGroupKeys(results)
+
 	high, medium, low, unmatched, exists := 0, 0, 0, 0, 0
 	for _, r := range results {
 		switch r.Status {
@@ -512,6 +528,31 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ── Duplicate guard ──────────────────────────────────────────────────────
+	// Reject the request if any group key (movie:tmdbId or
+	// series:tvdbId:s_e_) appears more than once.  The UI should have
+	// resolved all duplicate groups before calling apply; this check
+	// prevents stale UIs or direct API callers from clobbering files.
+	{
+		gkCount := make(map[string]int, len(req.Items))
+		for _, item := range req.Items {
+			gkCount[applyGroupKey(item)]++
+		}
+		var dups []string
+		for k, n := range gkCount {
+			if n > 1 {
+				dups = append(dups, k)
+			}
+		}
+		if len(dups) > 0 {
+			sort.Strings(dups)
+			writeError(w,
+				"duplicate group keys in apply request (resolve before applying): "+strings.Join(dups, ", "),
+				http.StatusBadRequest)
+			return
+		}
+	}
+
 	sonarrKey, radarrKey, _ := services.Keys()
 	if radarrKey == "" || sonarrKey == "" {
 		writeError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
@@ -529,8 +570,8 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	// register a path that doesn't exist yet.  "keep" skips this section.
 	applyFSOps(req.Items, req.Strategy, nil, nil)
 
-	// Deduplicate by (type, id) — multiple files from the same title map to
-	// one Radarr/Sonarr entry.
+	// Deduplicate *arr registration by (type, id) — when multiple episodes of
+	// the same series are imported, applySeries only needs to be called once.
 	type dedupeKey struct {
 		kind string
 		id   int
@@ -556,6 +597,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if seen[k] {
+			// FS op already ran; skip *arr registration for this duplicate series episode.
 			mu.Lock()
 			result.Skipped++
 			mu.Unlock()
@@ -669,9 +711,14 @@ func matchFile(
 			return lookupSeries(sonarrKey, encoded, title, year)
 		})
 		if m != nil {
-			item.Match = m
 			season := extractSeason(filename)
+			episode := extractEpisode(filename)
+			mc := *m // copy — do not mutate the shared cache entry
+			mc.Season = season
+			mc.Episode = episode
+			item.Match = &mc
 			item.SuggestedPath = suggestedTVPath(m.Title, season, filename)
+			item.Aliases = f.Aliases
 			if existingSeries[m.TvdbID] {
 				item.Status = "exists"
 			} else {
@@ -689,8 +736,9 @@ func matchFile(
 			})
 		}
 		if m != nil {
-			item.Match = m
+			item.Aliases = f.Aliases
 			if m.Type == "movie" {
+				item.Match = m // movie matches have no Season/Episode; safe to share
 				item.SuggestedPath = suggestedMoviePath(m.Title, m.Year, filename)
 				if existingMovies[m.TmdbID] {
 					item.Status = "exists"
@@ -699,6 +747,11 @@ func matchFile(
 				}
 			} else {
 				season := extractSeason(filename)
+				episode := extractEpisode(filename)
+				mc := *m
+				mc.Season = season
+				mc.Episode = episode
+				item.Match = &mc
 				item.SuggestedPath = suggestedTVPath(m.Title, season, filename)
 				if existingSeries[m.TvdbID] {
 					item.Status = "exists"
@@ -804,6 +857,8 @@ var (
 	tvEpRe = regexp.MustCompile(`(?i)\bS\d{1,2}E\d{1,2}\b`)
 	// seasonRe captures the season number from a TV filename.
 	seasonRe = regexp.MustCompile(`(?i)\bS(\d{1,2})E\d{1,2}\b`)
+	// episodeRe captures the episode number from a TV filename.
+	episodeRe = regexp.MustCompile(`(?i)\bS\d{1,2}E(\d{1,2})\b`)
 )
 
 // cleanFilename extracts a search-ready title, year, and TV flag from a
@@ -854,6 +909,81 @@ func extractSeason(filename string) int {
 		return s
 	}
 	return 0
+}
+
+// extractEpisode returns the episode number from a TV filename, or 0 if unknown.
+func extractEpisode(filename string) int {
+	name := strings.NewReplacer(".", " ", "_", " ").Replace(filename)
+	if m := episodeRe.FindStringSubmatch(name); m != nil {
+		e, _ := strconv.Atoi(m[1])
+		return e
+	}
+	return 0
+}
+
+// collapseHardlinks deduplicates files that share an inode (hardlinks).
+// The first path encountered for a given inode is kept as the canonical file;
+// subsequent paths for the same inode are appended to its Aliases slice.
+// Files that cannot be stat'd are included as-is.
+func collapseHardlinks(files []ScanFile) []ScanFile {
+	type inodeKey struct{ dev, ino uint64 }
+	seen := make(map[inodeKey]int) // value = index in result
+	result := make([]ScanFile, 0, len(files))
+	for _, f := range files {
+		var st syscall.Stat_t
+		if err := syscall.Stat(f.Path, &st); err != nil {
+			result = append(result, f)
+			continue
+		}
+		key := inodeKey{uint64(st.Dev), uint64(st.Ino)}
+		if idx, ok := seen[key]; ok {
+			result[idx].Aliases = append(result[idx].Aliases, f.Path)
+		} else {
+			seen[key] = len(result)
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+// matchItemGroupKey returns a stable group key for a MatchItem.
+// Movies: "movie:<tmdbId>". TV episodes: "series:<tvdbId>:s<season>e<episode>".
+// Unmatched items each get a unique key derived from their file path.
+func matchItemGroupKey(item MatchItem) string {
+	if item.Match == nil {
+		return "unmatched:" + item.File
+	}
+	switch item.Match.Type {
+	case "movie":
+		if item.Match.TmdbID > 0 {
+			return fmt.Sprintf("movie:%d", item.Match.TmdbID)
+		}
+	case "series":
+		if item.Match.TvdbID > 0 {
+			return fmt.Sprintf("series:%d:s%de%d", item.Match.TvdbID, item.Match.Season, item.Match.Episode)
+		}
+	}
+	return "unmatched:" + item.File
+}
+
+// assignGroupKeys sets GroupKey on each MatchItem in place.
+func assignGroupKeys(items []MatchItem) {
+	for i, item := range items {
+		items[i].GroupKey = matchItemGroupKey(item)
+	}
+}
+
+// applyGroupKey computes the group key from an ApplyItem. Used in the
+// duplicate guard inside handleLibraryApply.
+func applyGroupKey(item ApplyItem) string {
+	switch item.Type {
+	case "movie":
+		return fmt.Sprintf("movie:%d", item.TmdbID)
+	case "series":
+		return fmt.Sprintf("series:%d:s%de%d", item.TvdbID, item.Season, item.Episode)
+	default:
+		return "unknown:" + item.SourcePath
+	}
 }
 
 func suggestedMoviePath(title string, year int, filename string) string {
