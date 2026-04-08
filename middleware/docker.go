@@ -10,7 +10,7 @@ import (
 )
 
 // dockerHost returns the Docker Engine API base URL.
-// Reads DOCKER_HOST env; defaults to the socket proxy sidecar.
+// Reads DOCKER_HOST env; defaults to the docker-socket-proxy sidecar.
 func dockerHost() string {
 	if h := strings.TrimSpace(os.Getenv("DOCKER_HOST")); h != "" {
 		return h
@@ -52,7 +52,7 @@ func dockerRestart(name string) error {
 	}
 	resp, err := dockerClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("docker restart %s: %w", name, err)
+		return fmt.Errorf("docker restart %s: %w (is the Docker socket proxy reachable?)", name, err)
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
@@ -73,7 +73,7 @@ func dockerLogs(name string, tail int) ([]byte, error) {
 		dockerHost(), name, tail)
 	resp, err := dockerClient.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("docker logs %s: %w", name, err)
+		return nil, fmt.Errorf("docker logs %s: %w (is the Docker socket proxy reachable?)", name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {

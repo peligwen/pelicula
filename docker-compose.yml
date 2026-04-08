@@ -195,13 +195,12 @@ services:
 
   # ═══════════════════════════════════════════════════
   # Docker socket proxy — exposes only containers/restart+logs
-  # to pelicula-api. Contains a middleware compromise to the
-  # Docker API verbs we actually use (no exec, no images, no
-  # volumes — just restart + logs). The real socket is never
-  # mounted into pelicula-api.
+  # to pelicula-api. Verb allowlist enforced by tecnativa proxy;
+  # defense-in-depth on top of the in-process container allowlist.
+  # The real socket is never mounted into pelicula-api.
   # ═══════════════════════════════════════════════════
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:0.3
+    image: tecnativa/docker-socket-proxy:0.3.0
     container_name: pelicula-docker-proxy
     restart: unless-stopped
     environment:
@@ -219,6 +218,10 @@ services:
       - /run
     security_opt:
       - no-new-privileges:true
+    networks:
+      pelicula:
+        aliases:
+          - docker-proxy
 
   # ═══════════════════════════════════════════════════
   # Middleware — auto-wiring, search, downloads API
@@ -247,11 +250,17 @@ services:
       - ${LIBRARY_DIR}/movies:/movies
       - ${LIBRARY_DIR}/tv:/tv
       - ${WORK_DIR}/downloads:/downloads:ro
+    networks:
+      default: {}
+      pelicula:
+        aliases:
+          - pelicula-api
     depends_on:
       - sonarr
       - radarr
       - prowlarr
       - gluetun
+      - docker-proxy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/api/pelicula/status || exit 1"]
       interval: 30s
@@ -336,3 +345,8 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+networks:
+  pelicula:
+    name: pelicula
+    driver: bridge
