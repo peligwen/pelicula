@@ -29,7 +29,8 @@ func main() {
 			w.Write([]byte(`{"status":"setup"}`))
 		})
 		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
-		mux.HandleFunc("/api/pelicula/setup", handleSetupSubmit)
+		// Peligrosa: requireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
+		mux.Handle("/api/pelicula/setup", requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
 		if err := http.ListenAndServe(":8181", mux); err != nil {
 			slog.Error("server exited", "component", "main", "error", err)
@@ -122,21 +123,24 @@ func main() {
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
 	// admin only: settings (read and update .env)
-	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(http.HandlerFunc(handleSettings)))
-	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(http.HandlerFunc(handleSettingsReset)))
+	// Peligrosa: requireLocalOriginStrict guards the POST paths against cross-origin mutations.
+	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(requireLocalOriginStrict(http.HandlerFunc(handleSettings))))
+	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(requireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
 
 	// admin only: backup export / import
 	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
 	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))
 
 	// admin only: Jellyfin user management (list + create)
-	mux.Handle("/api/pelicula/users", auth.GuardAdmin(http.HandlerFunc(handleUsers)))
+	// Peligrosa: requireLocalOriginSoft allows API callers, blocks browser cross-origin.
+	mux.Handle("/api/pelicula/users", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleUsers))))
 	// admin only: per-user operations (delete + password reset)
-	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(http.HandlerFunc(handleUsersWithID)))
+	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
 
 	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
-	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(http.HandlerFunc(handleInvites)))
-	mux.HandleFunc("/api/pelicula/invites/", handleInviteOp)
+	// Peligrosa: requireLocalOriginSoft on both routes — redeem is public but invite-gated.
+	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleInvites))))
+	mux.HandleFunc("/api/pelicula/invites/", requireLocalOriginSoft(http.HandlerFunc(handleInviteOp)).ServeHTTP)
 	// read: active Jellyfin sessions for the now-playing card.
 	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.
 	// Relax to GuardAuthenticated when viewer/manager roles land on the dashboard.

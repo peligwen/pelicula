@@ -225,7 +225,7 @@ func TestHandleUsers_PostForeignOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/users", body)
 	req.Header.Set("Origin", "https://evil.example")
 	w := httptest.NewRecorder()
-	handleUsers(w, req)
+	requireLocalOriginSoft(http.HandlerFunc(handleUsers)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
@@ -811,7 +811,7 @@ func TestHandleUsersWithID_ForeignOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	w := httptest.NewRecorder()
-	handleUsersWithID(w, req)
+	requireLocalOriginSoft(http.HandlerFunc(handleUsersWithID)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)

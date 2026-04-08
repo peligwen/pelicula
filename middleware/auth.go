@@ -1,3 +1,7 @@
+// Peligrosa: trust boundary layer.
+// Sessions, password hashing, login rate limiter, CSRF origin guard, and
+// role-based access guards (Guard/GuardManager/GuardAdmin). Changes here
+// affect the core authentication surface — see ../PELIGROSA.md.
 package main
 
 import (
@@ -8,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -389,4 +395,81 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// isStateMutating reports whether the HTTP method changes server state.
+// CSRF guards only apply to mutating methods; safe methods pass through.
+func isStateMutating(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// requireLocalOriginStrict is a Peligrosa CSRF middleware. For state-mutating
+// requests it rejects Origins that are missing or not a LAN/localhost address.
+// Safe methods (GET/HEAD/OPTIONS) pass through.
+// Use for admin-only endpoints where only a LAN browser should send POSTs.
+func requireLocalOriginStrict(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isStateMutating(r.Method) && !isLocalOrigin(r.Header.Get("Origin")) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireLocalOriginSoft is a Peligrosa CSRF middleware. For state-mutating
+// requests it allows empty Origin (API/curl callers) but rejects non-empty
+// Origins that are not LAN/localhost (browser cross-origin).
+// Safe methods pass through.
+// Use for endpoints where programmatic callers without an Origin are valid.
+func requireLocalOriginSoft(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isStateMutating(r.Method) {
+			if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLocalOrigin returns true if the request Origin is a localhost or
+// private-network address. Parses the origin as a URL and checks the hostname
+// to prevent substring-match bypasses. Returns false for empty Origin so that
+// unauthenticated curl requests (no Origin header) cannot bypass strict checks.
+//
+// Peligrosa: Use the middleware wrappers (requireLocalOriginStrict /
+// requireLocalOriginSoft) rather than calling this directly from handlers.
+func isLocalOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range []string{
+		"192.168.0.0/16",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+	} {
+		_, network, _ := net.ParseCIDR(cidr)
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

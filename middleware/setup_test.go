@@ -34,7 +34,7 @@ func TestHandleSetupSubmit_RejectsForeignOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
@@ -44,9 +44,9 @@ func TestHandleSetupSubmit_RejectsForeignOrigin(t *testing.T) {
 func TestHandleSetupSubmit_RejectsEmptyOrigin(t *testing.T) {
 	body, _ := json.Marshal(SetupRequest{WireguardKey: strings.Repeat("A", 43) + "="})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
-	// No Origin header — should be rejected by the CSRF guard.
+	// No Origin header — should be rejected by the strict CSRF guard.
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin", w.Code)

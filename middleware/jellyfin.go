@@ -535,12 +535,6 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, users)
 
 	case http.MethodPost:
-		// CSRF guard: reject cross-origin requests (mirrors handleSettingsUpdate).
-		if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
-			writeError(w, "forbidden", http.StatusForbidden)
-			return
-		}
-
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap
 		var req struct {
 			Username string `json:"username"`
@@ -587,12 +581,6 @@ func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return
 	}
-	// CSRF guard for all methods (this handler has no safe read-only calls).
-	if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
-		writeError(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
 	// Strip the route prefix to get "{id}" or "{id}/password".
 	tail := strings.TrimPrefix(r.URL.Path, "/api/pelicula/users/")
 

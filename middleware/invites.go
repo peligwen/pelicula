@@ -1,3 +1,7 @@
+// Peligrosa: trust boundary layer.
+// Invite token lifecycle: creation, validation, redemption into Jellyfin user
+// accounts. Public endpoints are invite-gated; admin endpoints are admin-only.
+// See ../PELIGROSA.md.
 package main
 
 import (
@@ -292,10 +296,6 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, inviteStore.ListInvites())
 
 	case http.MethodPost:
-		if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
-			writeError(w, "forbidden", http.StatusForbidden)
-			return
-		}
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		var req struct {
 			Label          string `json:"label"`
@@ -386,15 +386,11 @@ func handleInviteOp(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkInviteAdmin verifies admin auth for invite management operations.
-// Also enforces CSRF and off-mode block. Returns false and writes the error if
-// the check fails.
+// CSRF is enforced at the route level via requireLocalOriginSoft in main.go.
+// Returns false and writes the error if the check fails.
 func checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if authMiddleware != nil && authMiddleware.IsOffMode() {
 		writeError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
-		return false
-	}
-	if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
-		writeError(w, "forbidden", http.StatusForbidden)
 		return false
 	}
 	if authMiddleware == nil || authMiddleware.mode == "off" {

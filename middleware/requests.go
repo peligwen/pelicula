@@ -1,3 +1,7 @@
+// Peligrosa: trust boundary layer.
+// Viewer-created media request queue. Viewers submit; admins approve or deny.
+// The viewer/admin split is structural: Guard vs GuardAdmin in main.go.
+// See ../PELIGROSA.md.
 package main
 
 import (

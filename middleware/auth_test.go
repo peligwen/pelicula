@@ -591,3 +591,124 @@ func TestSession_CookieAttributes(t *testing.T) {
 	}
 	t.Error("no pelicula_session cookie found")
 }
+
+// ── requireLocalOriginStrict ──────────────────────────────────────────────────
+
+func TestRequireLocalOriginStrict_GET_PassesThrough(t *testing.T) {
+	handler := requireLocalOriginStrict(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	// GET with no Origin must pass — reads should never be blocked
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("GET with no origin: want 200, got %d", w.Code)
+	}
+}
+
+func TestRequireLocalOriginStrict_POST_EmptyOrigin_Rejected(t *testing.T) {
+	handler := requireLocalOriginStrict(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST with empty origin: want 403, got %d", w.Code)
+	}
+}
+
+func TestRequireLocalOriginStrict_POST_LocalOrigin_Allowed(t *testing.T) {
+	handler := requireLocalOriginStrict(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for _, origin := range []string{"http://localhost:7354", "http://192.168.1.50:7354", "http://10.0.0.1"} {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("POST origin %q: want 200, got %d", origin, w.Code)
+		}
+	}
+}
+
+func TestRequireLocalOriginStrict_POST_ForeignOrigin_Rejected(t *testing.T) {
+	handler := requireLocalOriginStrict(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST with foreign origin: want 403, got %d", w.Code)
+	}
+}
+
+// ── requireLocalOriginSoft ────────────────────────────────────────────────────
+
+func TestRequireLocalOriginSoft_GET_PassesThrough(t *testing.T) {
+	handler := requireLocalOriginSoft(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("GET with no origin: want 200, got %d", w.Code)
+	}
+}
+
+func TestRequireLocalOriginSoft_POST_EmptyOrigin_Allowed(t *testing.T) {
+	handler := requireLocalOriginSoft(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	// Empty origin must pass — API/curl callers don't send Origin
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("POST with empty origin: want 200, got %d", w.Code)
+	}
+}
+
+func TestRequireLocalOriginSoft_POST_LocalOrigin_Allowed(t *testing.T) {
+	handler := requireLocalOriginSoft(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Origin", "http://192.168.1.50:7354")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("POST with LAN origin: want 200, got %d", w.Code)
+	}
+}
+
+func TestRequireLocalOriginSoft_POST_ForeignOrigin_Rejected(t *testing.T) {
+	handler := requireLocalOriginSoft(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST with foreign origin: want 403, got %d", w.Code)
+	}
+}
+
+func TestRequireLocalOriginSoft_DELETE_ForeignOrigin_Rejected(t *testing.T) {
+	handler := requireLocalOriginSoft(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodDelete, "/", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("DELETE with foreign origin: want 403, got %d", w.Code)
+	}
+}

@@ -181,7 +181,7 @@ func TestHandleSettingsUpdate_RejectsForeignOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
-	handleSettingsUpdate(w, req)
+	requireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
@@ -189,12 +189,12 @@ func TestHandleSettingsUpdate_RejectsForeignOrigin(t *testing.T) {
 }
 
 func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
-	// After the CSRF fix, empty Origin must be rejected (not treated as safe).
+	// Empty Origin must be rejected by the strict CSRF guard.
 	body, _ := json.Marshal(SettingsResponse{Country: "Netherlands"})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	// No Origin header set
 	w := httptest.NewRecorder()
-	handleSettingsUpdate(w, req)
+	requireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for missing Origin (CSRF guard)", w.Code)
@@ -248,7 +248,7 @@ func TestHandleSettingsReset_RejectsEmptyOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings/reset", bytes.NewReader(body))
 	// No Origin header
 	w := httptest.NewRecorder()
-	handleSettingsReset(w, req)
+	requireLocalOriginStrict(http.HandlerFunc(handleSettingsReset)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin on reset", w.Code)

@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -209,11 +207,6 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
-	if !isLocalOrigin(r.Header.Get("Origin")) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SettingsResponse
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -404,11 +397,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isLocalOrigin(r.Header.Get("Origin")) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -520,39 +508,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"restart_required": true,
 		"password":         password,
 	})
-}
-
-// isLocalOrigin returns true if the request Origin is a localhost or
-// private-network address. Parses the origin as a URL and checks the hostname
-// to prevent substring-match bypasses. Returns false for empty Origin so that
-// unauthenticated curl requests (no Origin header) cannot bypass CSRF checks.
-func isLocalOrigin(origin string) bool {
-	if origin == "" {
-		return false
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	host := u.Hostname()
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	for _, cidr := range []string{
-		"192.168.0.0/16",
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-	} {
-		_, network, _ := net.ParseCIDR(cidr)
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 func orDefault(s, fallback string) string {
