@@ -2519,6 +2519,7 @@ SERVER_COUNTRIES="Netherlands"
 PELICULA_PORT="${test_port}"
 PELICULA_AUTH="off"
 PELICULA_PASSWORD="test-only"
+JELLYFIN_PASSWORD="test-jellyfin-pw"
 PROCULA_API_KEY="${test_api_key}"
 JELLYSEERR_ENABLED=false
 TRANSCODING_ENABLED=false
@@ -2553,6 +2554,10 @@ WebUI\CSRFProtection=false
 
 [BitTorrent]
 Session\DefaultSavePath=/downloads/'
+
+    # nginx bind-mounts this file; without it Docker creates a directory and nginx fails to start
+    mkdir -p "$test_config_dir/nginx"
+    echo "# Remote access disabled" > "$test_config_dir/nginx/remote.conf"
 
     t_pass "Environment initialized"
 
@@ -2700,10 +2705,12 @@ EOPROFILE
 
     info "Triggering import webhook..."
     local webhook_resp
-    webhook_resp="$(curl -sf --max-time 10 \
-        -X POST "http://localhost:${test_port}/api/pelicula/hooks/import" \
-        -H "Content-Type: application/json" \
-        -d "{
+    # Send from inside the Docker network so nginx's RFC1918 allow-list passes.
+    # (On macOS Docker Desktop, host→published-port traffic is not 127.0.0.1 to nginx.)
+    webhook_resp="$($NEEDS_SUDO docker exec pelicula-test-api \
+        wget -qO- --timeout=10 \
+        --header="Content-Type: application/json" \
+        --post-data="{
             \"eventType\": \"Download\",
             \"movie\": {
                 \"id\": 1,
@@ -2718,7 +2725,8 @@ EOPROFILE
                 \"mediaInfo\": { \"runTimeSeconds\": 10 }
             },
             \"downloadId\": \"test-e2e-$(date +%s)\"
-        }" 2>/dev/null || echo "")"
+        }" \
+        "http://localhost:8181/api/pelicula/hooks/import" 2>/dev/null || echo "")"
 
     if echo "$webhook_resp" | grep -q '"status":"queued"'; then
         t_pass "Import webhook accepted"
@@ -2812,13 +2820,13 @@ except Exception as e:
 
     info "Verifying movie appears in Jellyfin library..."
 
-    # Authenticate with Jellyfin (password is empty by default from auto-wire)
+    # Authenticate with Jellyfin using the password set in the test env
     local jf_auth_resp jf_token=""
     jf_auth_resp="$(curl -sf --max-time 10 \
         -X POST "http://localhost:${test_port}/jellyfin/Users/AuthenticateByName" \
         -H "Content-Type: application/json" \
         -H 'X-Emby-Authorization: MediaBrowser Client="PeliculaTest", Device="e2e", DeviceId="pelicula-e2e-test", Version="1.0"' \
-        -d '{"Username":"admin","Pw":""}' 2>/dev/null || echo "")"
+        -d '{"Username":"admin","Pw":"test-jellyfin-pw"}' 2>/dev/null || echo "")"
     jf_token="$(echo "$jf_auth_resp" | python3 -c "
 import json, sys
 try:
@@ -2872,10 +2880,11 @@ except Exception:
 
     info "Enabling authentication and testing routing..."
 
-    # Update .env to enable password auth and restart pelicula-api
+    # Update .env to enable password auth and recreate pelicula-api to pick up new env vars.
+    # "restart" does not re-read env changes; "up -d" recreates the container when config changes.
     sed -i.bak 's/PELICULA_AUTH="off"/PELICULA_AUTH="password"/' "$test_env"
     sed -i.bak 's/PELICULA_PASSWORD="test-only"/PELICULA_PASSWORD="e2e-test-secret"/' "$test_env"
-    test_compose restart pelicula-api >/dev/null 2>&1
+    test_compose up -d pelicula-api >/dev/null 2>&1
 
     # Wait for pelicula-api to come back up
     local auth_ready=false

@@ -131,14 +131,19 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		return fmt.Errorf("set startup config: %w", err)
 	}
 
-	// Step 2: create admin user. Uses JELLYFIN_PASSWORD if set; defaults to no password.
-	// Note: Jellyfin 10.11+ requires a non-empty password via this endpoint.
-	// Set JELLYFIN_PASSWORD in .env if the default empty password is rejected.
+	// Step 2: set admin user name and password.
+	// Jellyfin 10.11+ changed /Startup/User to update an auto-created initial user
+	// rather than creating one from scratch. The user is initialized lazily — a GET
+	// to /Startup/User triggers the creation; only then does POST succeed.
 	pass := os.Getenv("JELLYFIN_PASSWORD")
 	if pass == "" {
 		slog.Info("creating Jellyfin admin user with no password — set JELLYFIN_PASSWORD in .env for Jellyfin 10.11+", "component", "autowire")
 	} else {
 		slog.Info("creating Jellyfin admin user with configured password", "component", "autowire")
+	}
+	// GET first to trigger lazy user initialization (Jellyfin 10.11+).
+	if _, err = jellyfinGet(s, "/Startup/User", ""); err != nil {
+		slog.Warn("could not fetch initial Jellyfin startup user", "component", "autowire", "error", err)
 	}
 	_, err = jellyfinPost(s, "/Startup/User", "", map[string]any{
 		"Name":     "admin",
@@ -154,7 +159,7 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		return fmt.Errorf("complete wizard: %w", err)
 	}
 
-	slog.Info("Jellyfin wizard completed (admin user, no password)", "component", "autowire")
+	slog.Info("Jellyfin wizard completed", "component", "autowire")
 	return nil
 }
 
