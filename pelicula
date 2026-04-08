@@ -281,6 +281,7 @@ EOF
     pass "Wrote ${ENV_FILE}"
 
     setup_dirs "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR"
+    pass "Created directories"
     setup_cert "$CONFIG_DIR"
     setup_tun
     echo ""
@@ -314,7 +315,6 @@ setup_dirs() {
         "$work_dir/downloads/radarr" \
         "$work_dir/downloads/tv-sonarr" \
         "$work_dir/processing"
-    pass "Created directory structure"
 }
 
 # Generate self-signed TLS cert if not present
@@ -327,9 +327,7 @@ setup_cert() {
             -subj "/CN=pelicula" \
             -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
             2>/dev/null
-        pass "Generated self-signed TLS certificate (valid 10 years)"
-    else
-        pass "TLS certificate exists"
+        pass "Generated TLS certificate"
     fi
 }
 
@@ -1321,11 +1319,8 @@ render_remote_configs() {
             # nginx needs a cert on disk to start; bootstrap with self-signed if absent.
             # Certbot replaces it with a real LE cert on first successful issuance.
             if [[ ! -f "$cert_dir/fullchain.pem" ]] || [[ ! -f "$cert_dir/privkey.pem" ]]; then
-                info "No cert yet — generating bootstrap self-signed for nginx startup"
                 _remote_ensure_selfsigned_cert "$cert_dir" "$hostname"
-                warn "Certbot will replace this with a real Let's Encrypt cert on first run"
-            else
-                pass "Certificate found ($(openssl x509 -noout -issuer -in "$cert_dir/fullchain.pem" 2>/dev/null | sed 's/.*CN *= *//' || echo unknown))"
+                warn "No cert yet — certbot will issue one on first run"
             fi
             ;;
     esac
@@ -1501,7 +1496,7 @@ cmd_up() {
     fi
 
     load_env
-    info "Starting media stack..."
+    info "Starting stack..."
 
     setup_dirs "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR"
     setup_cert "$CONFIG_DIR"
@@ -1554,20 +1549,20 @@ Session\TempPath=/downloads/incomplete/'
     compose_cmd ${profile_args[@]+"${profile_args[@]}"} up -d
 
     # Wait for gluetun health
-    info "Waiting for VPN connection..."
+    info "Connecting to VPN..."
     local attempts=0
     while [[ $attempts -lt 30 ]]; do
         local health
         health="$(docker_cmd inspect --format='{{.State.Health.Status}}' gluetun 2>/dev/null || echo "unknown")"
         if [[ "$health" == "healthy" ]]; then
-            pass "Gluetun VPN connected"
+            pass "VPN connected"
             break
         fi
         sleep 2
         attempts=$((attempts + 1))
     done
     if [[ $attempts -ge 30 ]]; then
-        warn "Gluetun did not become healthy within 60s. Check logs: ./pelicula logs gluetun"
+        warn "VPN not ready — check: ./pelicula logs gluetun"
     fi
 
     echo ""
@@ -1589,14 +1584,12 @@ Session\TempPath=/downloads/incomplete/'
         r_host="$(get_env_var REMOTE_HOSTNAME "")"
         r_https="$(get_env_var REMOTE_HTTPS_PORT 8920)"
         echo ""
-        echo -e "  ${CYAN}Remote Jellyfin:${NC} https://${r_host}:${r_https}/"
-        echo "  (Ensure router forwards ports $(get_env_var REMOTE_HTTP_PORT 80) and ${r_https} to this machine)"
+        echo "  Remote Jellyfin  https://${r_host}:${r_https}/"
     fi
 }
 
 cmd_down() {
     load_env
-    info "Stopping media stack..."
     compose_cmd --profile apprise down --remove-orphans
     pass "Stack stopped"
 }
