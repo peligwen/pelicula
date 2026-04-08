@@ -151,6 +151,10 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 **Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs via `./pelicula configure`.
 
+**Bazarr** — automatic subtitle acquisition from OpenSubtitles, Addic7ed, Podnapisi, and others. Wired to Sonarr and Radarr automatically on startup. Set which languages to acquire via `./pelicula configure` → Subtitles (`PELICULA_SUB_LANGS`).
+
+**Dual subtitles** — optional post-Bazarr pipeline stage that stacks two subtitle tracks into a single ASS sidecar file (e.g. `Movie.en-es.ass`) for language learners. Base language appears bottom-center; learning language appears top-center. Configure via `DUALSUB_ENABLED` / `DUALSUB_PAIRS` or the Procula settings UI. See [PROCULA.md](PROCULA.md) for details.
+
 ## Auth
 
 Pelicula supports three modes via `PELICULA_AUTH` in `.env`:

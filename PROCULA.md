@@ -262,31 +262,11 @@ Add a **Processing** section between Downloads and Services:
 
 The dashboard polls `GET /api/pelicula/processing` on the same 15-second refresh cycle.
 
-## Bazarr Integration *(Planned — not yet shipped)*
+## Bazarr Integration
 
-Add Bazarr to docker-compose.yml:
+Bazarr runs as a standard stack container (port 6767, proxied at `/bazarr`). On startup, `middleware/autowire.go` reads the API key from `$CONFIG_DIR/bazarr/config/config.ini`, connects Bazarr to both Sonarr and Radarr, and creates a language profile from `PELICULA_SUB_LANGS` (set via `./pelicula configure` → Subtitles). Bazarr polls Sonarr/Radarr on its own schedule — Procula does not call Bazarr directly.
 
-```yaml
-bazarr:
-  image: lscr.io/linuxserver/bazarr:latest
-  container_name: bazarr
-  restart: unless-stopped
-  environment:
-    - PUID=${PUID}
-    - PGID=${PGID}
-    - TZ=${TZ}
-  volumes:
-    - ${CONFIG_DIR}/bazarr:/config
-    - ${MEDIA_DIR}/movies:/movies
-    - ${MEDIA_DIR}/tv:/tv
-  healthcheck:
-    test: ["CMD", "wget", "--spider", "-q", "http://localhost:6767/bazarr/ping"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-```
-
-Auto-wire in middleware: connect Bazarr to Sonarr and Radarr (similar to Prowlarr wiring). Seed config with `UrlBase: /bazarr`.
+After the `catalog` stage, Procula scans each imported file for embedded subtitle streams and checks them against `PELICULA_SUB_LANGS`. Any languages that are missing are recorded in the job's `missing_subs` field and surfaced in the dashboard job card. This is a read-only flag; Bazarr handles the actual download.
 
 ## nginx additions
 
@@ -422,6 +402,12 @@ Build in this order — each stage is independently useful:
 4. **Result:** Storage manages itself; library stays clean
 
 ## Dual Subtitles
+
+### Relationship to Bazarr
+
+Dual subtitles is a **post-Bazarr** stage. The typical flow is: Bazarr acquires a `.es.srt` sidecar → Procula's dualsub stage stacks it with the existing English track into `Movie.en-es.ass`. Argos Translate (`DUALSUB_TRANSLATOR=argos`) is a fallback for when no secondary track is available after Bazarr's pass — human-authored subtitles are preferred. If `DUALSUB_TRANSLATOR=none` (the default), the stage skips silently when the secondary track is missing rather than machine-translating.
+
+### Overview
 
 Procula can generate **stacked dual-language subtitle files** (`.en-es.ass`) alongside any media file. These ASS sidecar files are automatically picked up by Jellyfin as an external subtitle track that works on every client — web, mobile, and TV — with no plugin or player changes needed.
 
