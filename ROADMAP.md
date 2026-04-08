@@ -58,17 +58,18 @@ Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `p
 
 Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md) for the full threat model and current surface.
 
-- [ ] **[Peligrosa] bcrypt/argon2id** — replace salted SHA-256 KDF with a proper slow hash for user passwords. SHA-256 is fast on GPUs; argon2id is the preferred migration target.
+- [ ] **[Peligrosa] bcrypt/argon2id** — replace salted SHA-256 KDF with a proper slow hash for user passwords (`users` mode only). SHA-256 is fast on GPUs; argon2id is the preferred migration target. Not applicable to `jellyfin` mode (Jellyfin owns hashing).
 - [ ] **[Peligrosa] HMAC invite tokens** — sign tokens with a server secret so validity is verifiable without a DB lookup. Prevents brute-force token enumeration.
 - [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
-- [ ] **[Peligrosa] `middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Requires splitting `jellyfin.go` (user CRUD moves; library/setup-wizard code stays) and designing a constructor that accepts config + Jellyfin client.
-- [ ] **[Peligrosa] SSO** — layer Jellyfin/Plex auth over the Phase B user model. Delegates auth to Jellyfin or Plex; Pelicula user model is the standalone fallback.
+- [ ] **[Peligrosa] `middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Blocked on `JellyfinClient` interface, `Fulfiller` injection, and shared HTTP helpers extraction. See plan file for incremental path.
+- [x] **[Peligrosa] Jellyfin SSO** — `PELICULA_AUTH=jellyfin`: credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles (no passwords) stored in `roles.json`; Jellyfin admins auto-promoted. Plex SSO deferred.
+- [ ] **[Peligrosa] Plex SSO** — deferred; different API shape (plex.tv OAuth dance).
 
 ---
 
 ## Deferred
 
-- **Jellyfin/Plex SSO**: moved to Peligrosa initiative above.
+- **Plex SSO**: moved to Peligrosa initiative above (Jellyfin SSO shipped).
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
 - **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; `./pelicula up` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.

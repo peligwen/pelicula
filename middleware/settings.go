@@ -265,10 +265,10 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	// Validate auth mode if being changed
 	if req.AuthMode != "" {
 		switch req.AuthMode {
-		case "off", "true", "password", "users":
+		case "off", "true", "password", "users", "jellyfin":
 			// valid
 		default:
-			http.Error(w, "auth_mode must be one of: off, password, users", http.StatusBadRequest)
+			http.Error(w, "auth_mode must be one of: off, password, users, jellyfin", http.StatusBadRequest)
 			return
 		}
 	}

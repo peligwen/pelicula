@@ -60,11 +60,14 @@ func main() {
 	//   PELICULA_AUTH=off (or empty/false) — no auth
 	//   PELICULA_AUTH=true or =password    — single shared password (legacy)
 	//   PELICULA_AUTH=users                — user model from /config/pelicula/users.json
+	//   PELICULA_AUTH=jellyfin             — credentials verified against Jellyfin
 	authEnv := os.Getenv("PELICULA_AUTH")
 	var authMode string
 	switch authEnv {
 	case "users":
 		authMode = "users"
+	case "jellyfin":
+		authMode = "jellyfin"
 	case "true", "password":
 		authMode = "password"
 	default:
@@ -75,7 +78,12 @@ func main() {
 		slog.Error("PELICULA_AUTH=password requires PELICULA_PASSWORD to be set — run ./pelicula setup to configure authentication")
 		os.Exit(1)
 	}
-	authMiddleware = NewAuth(authMode, peliculaPassword, "/config/pelicula/users.json")
+	authMiddleware = NewAuth(AuthConfig{
+		Mode:      authMode,
+		Password:  peliculaPassword,
+		UsersFile: "/config/pelicula/users.json",
+		RolesFile: "/config/pelicula/roles.json",
+	})
 	auth := authMiddleware
 
 	// Health check — no auth, called by bash check-vpn and optionally by the dashboard

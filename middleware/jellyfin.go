@@ -23,6 +23,67 @@ const embyAuthHeader = `MediaBrowser Client="Pelicula", Device="pelicula-api", D
 // ErrPasswordRequired is returned by CreateJellyfinUser when password is empty.
 var ErrPasswordRequired = errors.New("password is required")
 
+// JellyfinLoginResult holds the fields Peligrosa needs after authenticating a
+// user against Jellyfin's /Users/AuthenticateByName endpoint.
+type JellyfinLoginResult struct {
+	UserID          string
+	Username        string
+	IsAdministrator bool
+	AccessToken     string
+}
+
+// jellyfinAuthenticateByName authenticates username/password against Jellyfin.
+// Uses the package-level jellyfinURL so tests can point it at an httptest.Server.
+// Returns a *jellyfinHTTPError (with StatusCode 401) for bad credentials.
+func jellyfinAuthenticateByName(client *http.Client, username, password string) (*JellyfinLoginResult, error) {
+	payload, err := json.Marshal(map[string]string{"Username": username, "Pw": password})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodPost, jellyfinURL+"/Users/AuthenticateByName", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	setEmbyAuth(req, "")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, &jellyfinHTTPError{resp.StatusCode}
+	}
+
+	var result struct {
+		User struct {
+			Id     string `json:"Id"`
+			Name   string `json:"Name"`
+			Policy struct {
+				IsAdministrator bool `json:"IsAdministrator"`
+			} `json:"Policy"`
+		} `json:"User"`
+		AccessToken string `json:"AccessToken"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("invalid Jellyfin auth response: %w", err)
+	}
+	if result.User.Id == "" || result.AccessToken == "" {
+		return nil, fmt.Errorf("incomplete Jellyfin auth response")
+	}
+	return &JellyfinLoginResult{
+		UserID:          result.User.Id,
+		Username:        result.User.Name,
+		IsAdministrator: result.User.Policy.IsAdministrator,
+		AccessToken:     result.AccessToken,
+	}, nil
+}
+
 // jellyfinHTTPError captures the HTTP status code from a Jellyfin API response.
 type jellyfinHTTPError struct {
 	StatusCode int

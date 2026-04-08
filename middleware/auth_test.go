@@ -11,6 +11,38 @@ import (
 	"time"
 )
 
+// fakeJellyfinAuthServer starts an httptest.Server with a /Users/AuthenticateByName
+// handler. succeed controls whether it returns 200 (with isAdmin payload) or 401.
+// The caller is responsible for closing the server.
+func fakeJellyfinAuthServer(t *testing.T, succeed bool, isAdmin bool) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Users/AuthenticateByName", func(w http.ResponseWriter, r *http.Request) {
+		if !succeed {
+			http.Error(w, `{"Message":"Username or password is incorrect"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"User":{"Id":"jf-user-001","Name":"alice","Policy":{"IsAdministrator":` +
+			boolStr(isAdmin) + `}},"AccessToken":"test-jf-token","ServerId":"srv1"}`))
+	})
+	srv := httptest.NewServer(mux)
+	orig := jellyfinURL
+	jellyfinURL = srv.URL
+	t.Cleanup(func() {
+		srv.Close()
+		jellyfinURL = orig
+	})
+	return srv
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // testHash is a test helper that hashes a password, panicking on error.
 // crypto/rand.Read never returns an error in practice (Go 1.20+ guarantee).
 func testHash(username, plaintext string) string {
@@ -32,6 +64,26 @@ func newTestAuth(mode, password string, users []User) *Auth {
 		users:    users,
 	}
 	return a
+}
+
+// newTestJellyfinAuth creates an Auth in "jellyfin" mode for testing.
+// store may be nil — a fresh in-memory RolesStore backed by a temp file is used.
+// httpClient should point at an httptest.Server serving the Jellyfin API.
+func newTestJellyfinAuth(t *testing.T, store *RolesStore, httpClient *http.Client) *Auth {
+	t.Helper()
+	if store == nil {
+		store = NewRolesStore(t.TempDir() + "/roles.json")
+	}
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &Auth{
+		mode:       "jellyfin",
+		sessions:   make(map[string]session),
+		failures:   make(map[string]*loginAttempts),
+		rolesStore: store,
+		httpClient: httpClient,
+	}
 }
 
 // insertSession adds a session directly for testing and returns the token.
@@ -710,5 +762,176 @@ func TestRequireLocalOriginSoft_DELETE_ForeignOrigin_Rejected(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("DELETE with foreign origin: want 403, got %d", w.Code)
+	}
+}
+
+// ── HandleLogin: jellyfin mode ────────────────────────────────────────────────
+
+func TestLogin_JellyfinMode_ValidCreds_DefaultsToViewer(t *testing.T) {
+	srv := fakeJellyfinAuthServer(t, true, false)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	m := parseJSONBody(t, w)
+	if m["role"] != "viewer" {
+		t.Errorf("role = %v, want viewer (default for new non-admin user)", m["role"])
+	}
+	// Confirm role was persisted in store
+	role, ok := a.rolesStore.Lookup("jf-user-001")
+	if !ok {
+		t.Error("expected user to be persisted in roles store")
+	} else if role != RoleViewer {
+		t.Errorf("stored role = %q, want viewer", role)
+	}
+}
+
+func TestLogin_JellyfinMode_JellyfinAdmin_GetsAdminRole(t *testing.T) {
+	srv := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["role"] != "admin" {
+		t.Errorf("role = %v, want admin (Jellyfin admin always gets admin)", m["role"])
+	}
+}
+
+func TestLogin_JellyfinMode_StoredRolePreserved(t *testing.T) {
+	srv := fakeJellyfinAuthServer(t, true, false)
+	store := NewRolesStore(t.TempDir() + "/roles.json")
+	// Pre-seed a manager role for this user.
+	_ = store.Upsert("jf-user-001", "alice", RoleManager)
+	a := newTestJellyfinAuth(t, store, srv.Client())
+
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["role"] != "manager" {
+		t.Errorf("role = %v, want manager (stored role preserved)", m["role"])
+	}
+}
+
+func TestLogin_JellyfinMode_InvalidCreds_Returns401(t *testing.T) {
+	srv := fakeJellyfinAuthServer(t, false, false)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+
+	body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestLogin_JellyfinMode_InvalidCreds_RecordsFailure(t *testing.T) {
+	srv := fakeJellyfinAuthServer(t, false, false)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+	ip := "10.0.0.1"
+
+	for i := 0; i < 5; i++ {
+		body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		req.Header.Set("X-Real-IP", ip)
+		a.HandleLogin(httptest.NewRecorder(), req)
+	}
+	// 6th attempt should be rate-limited (no Jellyfin call)
+	body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	req.Header.Set("X-Real-IP", ip)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 after 5 failed attempts", w.Code)
+	}
+}
+
+func TestLogin_JellyfinMode_JellyfinDown_Returns503(t *testing.T) {
+	// Start a server then close it immediately to simulate unreachable Jellyfin.
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	srv.Close() // force connection refused
+
+	orig := jellyfinURL
+	jellyfinURL = srv.URL
+	t.Cleanup(func() { jellyfinURL = orig })
+
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 when Jellyfin is down", w.Code)
+	}
+}
+
+// ── RolesStore ─────────────────────────────────────────────────────────────────
+
+func TestRolesStore_RoundTrip(t *testing.T) {
+	path := t.TempDir() + "/roles.json"
+	rs := NewRolesStore(path)
+
+	if !rs.IsEmpty() {
+		t.Error("fresh store should be empty")
+	}
+
+	if err := rs.Upsert("id1", "alice", RoleViewer); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := rs.Upsert("id2", "bob", RoleManager); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// Reload from disk
+	rs2 := NewRolesStore(path)
+	role, ok := rs2.Lookup("id1")
+	if !ok || role != RoleViewer {
+		t.Errorf("id1: got (%q, %v), want (viewer, true)", role, ok)
+	}
+	role, ok = rs2.Lookup("id2")
+	if !ok || role != RoleManager {
+		t.Errorf("id2: got (%q, %v), want (manager, true)", role, ok)
+	}
+
+	// Upsert update
+	if err := rs2.Upsert("id1", "alice", RoleAdmin); err != nil {
+		t.Fatalf("Upsert update: %v", err)
+	}
+	role, _ = rs2.Lookup("id1")
+	if role != RoleAdmin {
+		t.Errorf("after update: id1 role = %q, want admin", role)
+	}
+	// Entry count must not grow on update
+	if len(rs2.All()) != 2 {
+		t.Errorf("expected 2 entries after upsert-update, got %d", len(rs2.All()))
+	}
+
+	// Unknown ID
+	if _, ok := rs2.Lookup("unknown"); ok {
+		t.Error("Lookup of unknown ID should return false")
 	}
 }

@@ -27,17 +27,18 @@ Pelicula is **LAN-first**. The design baseline assumes:
 
 ### Authentication (`middleware/auth.go`)
 
-Three modes via `PELICULA_AUTH`:
+Four modes via `PELICULA_AUTH`:
 
 | Mode | Behavior |
 |------|----------|
 | `off` (default) | All requests pass through. No session required. |
 | `password` / `true` | Single shared password; caller is always admin. Legacy alias: `true` stored in `.env`, accepted at runtime. |
 | `users` | Full user model from `/config/pelicula/users.json`. Roles: `viewer`, `manager`, `admin`. |
+| `jellyfin` | Credentials verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `/config/pelicula/roles.json` (no passwords). Jellyfin admins automatically get `admin` role. |
 
 **Sessions:** In-memory `map[token]session`, `pelicula_session` HttpOnly cookie, `SameSite=Lax`. 24-hour session lifetime; 10-minute cleanup goroutine removes expired sessions and stale rate-limit entries.
 
-**Password hashing:** `sha256v2:SALT:HASH` — `sha256(SALT + ":" + username + ":" + plaintext)`. Legacy unsalted SHA-256 accepted on read, never written. bcrypt/argon2 migration is a [Peligrosa roadmap item](#roadmap).
+**Password hashing (`users` mode):** `sha256v2:SALT:HASH` — `sha256(SALT + ":" + username + ":" + plaintext)`. Legacy unsalted SHA-256 accepted on read, never written. bcrypt/argon2 migration is a [Peligrosa roadmap item](#roadmap) for `users`-mode installs. In `jellyfin` mode no passwords are stored by Pelicula — Jellyfin is the authority.
 
 **Login rate limiter:** 5 failed attempts per IP in a 5-minute sliding window → HTTP 429. In-memory; resets on restart.
 

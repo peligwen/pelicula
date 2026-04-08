@@ -202,7 +202,7 @@ func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
 }
 
 func TestHandleSettingsUpdate_AcceptsValidAuthMode(t *testing.T) {
-	for _, mode := range []string{"off", "password", "users", "true"} {
+	for _, mode := range []string{"off", "password", "users", "true", "jellyfin"} {
 		t.Run(mode, func(t *testing.T) {
 			body, _ := json.Marshal(SettingsResponse{AuthMode: mode})
 			req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))

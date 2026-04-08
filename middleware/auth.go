@@ -10,6 +10,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -55,28 +56,49 @@ type loginAttempts struct {
 // mode "off"      — all requests pass through
 // mode "password" — single shared password (legacy, PELICULA_AUTH=true)
 // mode "users"    — user model from usersFile
+// mode "jellyfin" — credentials verified against Jellyfin; roles from rolesFile
 type Auth struct {
-	mode      string
-	password  string
-	usersFile string
-	users     []User
-	sessions  map[string]session
-	failures  map[string]*loginAttempts // IP → recent failure timestamps
-	mu        sync.RWMutex
+	mode       string
+	password   string
+	usersFile  string
+	users      []User
+	rolesStore *RolesStore  // non-nil in "jellyfin" mode
+	httpClient *http.Client // used for Jellyfin auth calls
+	sessions   map[string]session
+	failures   map[string]*loginAttempts // IP → recent failure timestamps
+	mu         sync.RWMutex
 }
 
-func NewAuth(mode, password, usersFile string) *Auth {
-	a := &Auth{
-		mode:      mode,
-		password:  password,
-		usersFile: usersFile,
-		sessions:  make(map[string]session),
-		failures:  make(map[string]*loginAttempts),
+// AuthConfig holds all parameters for NewAuth. Use zero values for unused fields.
+type AuthConfig struct {
+	Mode       string
+	Password   string       // for "password" mode
+	UsersFile  string       // for "users" mode
+	RolesFile  string       // for "jellyfin" mode
+	HTTPClient *http.Client // for "jellyfin" mode; nil → 10-second default client
+}
+
+func NewAuth(cfg AuthConfig) *Auth {
+	hc := cfg.HTTPClient
+	if hc == nil {
+		hc = &http.Client{Timeout: 10 * time.Second}
 	}
-	if mode == "users" {
+	a := &Auth{
+		mode:       cfg.Mode,
+		password:   cfg.Password,
+		usersFile:  cfg.UsersFile,
+		sessions:   make(map[string]session),
+		failures:   make(map[string]*loginAttempts),
+		httpClient: hc,
+	}
+	switch cfg.Mode {
+	case "users":
 		if err := a.loadUsers(); err != nil {
-			slog.Warn("could not load users", "component", "auth", "path", usersFile, "error", err)
+			slog.Warn("could not load users", "component", "auth", "path", cfg.UsersFile, "error", err)
 		}
+	case "jellyfin":
+		a.rolesStore = NewRolesStore(cfg.RolesFile)
+		slog.Info("auth mode: jellyfin — credentials verified against Jellyfin", "component", "auth")
 	}
 	go a.cleanupSessions()
 	return a
@@ -293,6 +315,33 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		role = u.Role
+	case "jellyfin":
+		result, err := jellyfinAuthenticateByName(a.httpClient, req.Username, req.Password)
+		if err != nil {
+			var httpErr *jellyfinHTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
+				a.recordFailure(ip)
+				writeError(w, "invalid credentials", http.StatusUnauthorized)
+				return
+			}
+			slog.Error("Jellyfin auth call failed", "component", "auth", "error", err)
+			writeError(w, "authentication service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		// Jellyfin admins always get the admin role in Pelicula.
+		// Other users keep their stored role, defaulting to viewer on first login.
+		if result.IsAdministrator {
+			role = RoleAdmin
+		} else if stored, ok := a.rolesStore.Lookup(result.UserID); ok {
+			role = stored
+		} else {
+			role = RoleViewer
+		}
+		if err := a.rolesStore.Upsert(result.UserID, result.Username, role); err != nil {
+			slog.Warn("failed to persist role", "component", "auth", "user", result.Username, "error", err)
+		}
+		// Override username to the one Jellyfin returned (canonical casing).
+		req.Username = result.Username
 	default:
 		writeError(w, "auth misconfigured", http.StatusInternalServerError)
 		return

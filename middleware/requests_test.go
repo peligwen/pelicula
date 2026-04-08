@@ -241,7 +241,7 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 	// Set up a store and users-mode auth (no active sessions → 401).
 	s := newRequestStore(t)
 	requestStore = s
-	authMiddleware = NewAuth("users", "", os.DevNull)
+	authMiddleware = NewAuth(AuthConfig{Mode: "users", UsersFile: os.DevNull})
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",
@@ -261,7 +261,7 @@ func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
 	dir := t.TempDir()
 	s := NewRequestStore(filepath.Join(dir, "requests.json"))
 	requestStore = s
-	authMiddleware = NewAuth("off", "", os.DevNull)
+	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",
@@ -289,7 +289,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 	dir := t.TempDir()
 	s := NewRequestStore(filepath.Join(dir, "requests.json"))
 	requestStore = s
-	authMiddleware = NewAuth("off", "", os.DevNull)
+	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
 	// Seed an existing request.
 	s.mu.Lock()
@@ -326,7 +326,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
 	dir := t.TempDir()
 	requestStore = NewRequestStore(filepath.Join(dir, "requests.json"))
-	authMiddleware = NewAuth("off", "", os.DevNull)
+	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "anime",
@@ -347,7 +347,7 @@ func TestHandleRequestList_ViewerSeesOnlyOwn(t *testing.T) {
 	dir := t.TempDir()
 	s := NewRequestStore(filepath.Join(dir, "requests.json"))
 	requestStore = s
-	authMiddleware = NewAuth("off", "", os.DevNull)
+	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
 	s.mu.Lock()
 	s.requests = []*MediaRequest{
