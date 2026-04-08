@@ -2,9 +2,10 @@
 
 const state = {
     step: 'browse',
-    selected: [],        // [{path, name, size, isDir}]
-    scanResults: [],     // from /library/scan
+    selected: [],           // [{path, name, size, isDir}]
+    scanResults: [],        // from /library/scan
     dismissed: new Set(),
+    groupSelections: {},    // groupKey → chosen file path (for dup groups)
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -272,6 +273,7 @@ async function doScan() {
         }
         state.scanResults = await res.json();
         state.dismissed = new Set();
+        state.groupSelections = {};
         renderMatchResults();
     } catch (e) {
         results.innerHTML = '<div class="no-items">Scan failed: ' + esc(e.message) + '</div>';
@@ -282,35 +284,149 @@ function renderMatchResults() {
     const container = document.getElementById('match-results');
     container.innerHTML = '';
 
-    const groups = { new: [], exists: [], unmatched: [] };
+    const buckets = { new: [], exists: [], unmatched: [] };
     state.scanResults.forEach((item, i) => {
         const status = item.status || 'unmatched';
-        if (groups[status]) groups[status].push({ ...item, idx: i });
-        else groups.unmatched.push({ ...item, idx: i });
+        if (buckets[status]) buckets[status].push({ ...item, idx: i });
+        else buckets.unmatched.push({ ...item, idx: i });
     });
 
-    let newCount = groups.new.length;
-    let existsCount = groups.exists.length;
-    let unmatchedCount = groups.unmatched.length;
-
     document.getElementById('match-stats').textContent =
-        newCount + ' new, ' + existsCount + ' existing, ' + unmatchedCount + ' unmatched';
+        buckets.new.length + ' new, ' + buckets.exists.length + ' existing, ' + buckets.unmatched.length + ' unmatched';
 
-    if (groups.new.length) {
-        container.appendChild(groupHeader('New (' + groups.new.length + ')'));
-        groups.new.forEach(item => container.appendChild(createMatchItem(item)));
+    // Group "new" items by groupKey so duplicates get a picker card.
+    const newByKey = new Map(); // groupKey → [item, ...]
+    buckets.new.forEach(item => {
+        const key = item.groupKey || ('singleton:' + item.idx);
+        if (!newByKey.has(key)) newByKey.set(key, []);
+        newByKey.get(key).push(item);
+    });
+
+    // Count unresolved dup groups (>1 candidate, none dismissed, no selection).
+    let unresolvedDups = 0;
+    newByKey.forEach((items, key) => {
+        if (items.length > 1) {
+            const allDismissed = items.every(it => state.dismissed.has(it.idx));
+            const hasPick = key in state.groupSelections;
+            if (!allDismissed && !hasPick) unresolvedDups++;
+        }
+    });
+
+    if (newByKey.size) {
+        container.appendChild(groupHeader('New (' + buckets.new.length + ')'));
+
+        // Render dup banner if any unresolved groups exist.
+        if (unresolvedDups > 0) {
+            const banner = document.createElement('div');
+            banner.className = 'dup-banner';
+            banner.id = 'dup-banner';
+            banner.textContent = unresolvedDups + ' duplicate group' + (unresolvedDups > 1 ? 's' : '') +
+                ' need a selection before applying';
+            container.appendChild(banner);
+        }
+
+        newByKey.forEach((items, key) => {
+            if (items.length === 1) {
+                container.appendChild(createMatchItem(items[0]));
+            } else {
+                container.appendChild(createDupGroup(items, key));
+            }
+        });
     }
-    if (groups.exists.length) {
-        container.appendChild(groupHeader('Already in library (' + groups.exists.length + ')'));
-        groups.exists.forEach(item => container.appendChild(createMatchItem(item)));
+    if (buckets.exists.length) {
+        container.appendChild(groupHeader('Already in library (' + buckets.exists.length + ')'));
+        buckets.exists.forEach(item => container.appendChild(createMatchItem(item)));
     }
-    if (groups.unmatched.length) {
-        container.appendChild(groupHeader('Unmatched (' + groups.unmatched.length + ')'));
-        groups.unmatched.forEach(item => container.appendChild(createMatchItem(item)));
+    if (buckets.unmatched.length) {
+        container.appendChild(groupHeader('Unmatched (' + buckets.unmatched.length + ')'));
+        buckets.unmatched.forEach(item => container.appendChild(createMatchItem(item)));
     }
 
-    const activeNewCount = groups.new.filter(item => !state.dismissed.has(item.idx)).length;
-    document.getElementById('btn-configure').disabled = activeNewCount === 0;
+    // Enable "Next" only if there are active new items and no unresolved dup groups.
+    const activeNewCount = buckets.new.filter(item => !state.dismissed.has(item.idx)).length;
+    document.getElementById('btn-configure').disabled = activeNewCount === 0 || unresolvedDups > 0;
+}
+
+// createDupGroup renders a single card for a duplicate group (multiple files
+// that match the same title/episode). The user must pick one before applying.
+function createDupGroup(items, groupKey) {
+    const card = document.createElement('div');
+    card.className = 'dup-group';
+    card.id = 'dup-group-' + groupKey.replace(/[^a-z0-9]/gi, '_');
+
+    // All dismissed?
+    const allDismissed = items.every(it => state.dismissed.has(it.idx));
+    if (allDismissed) card.classList.add('dismissed');
+
+    // Header showing the title once.
+    const hdr = document.createElement('div');
+    hdr.className = 'dup-group-header';
+    const firstMatch = items[0].match;
+    let titleText = firstMatch ? firstMatch.title : items[0].file.split('/').pop();
+    if (firstMatch && firstMatch.year) titleText += ' (' + firstMatch.year + ')';
+    if (firstMatch && firstMatch.type === 'series' && firstMatch.season) {
+        titleText += '  S' + String(firstMatch.season).padStart(2, '0') +
+                     'E' + String(firstMatch.episode || 0).padStart(2, '0');
+    }
+    hdr.innerHTML =
+        '<span class="dup-group-title">' + esc(titleText) + '</span>' +
+        '<span class="dup-group-hint">Pick one file to import</span>';
+    card.appendChild(hdr);
+
+    // Radio list — one row per candidate.
+    const currentPick = state.groupSelections[groupKey] || null;
+    items.forEach(item => {
+        const row = document.createElement('label');
+        row.className = 'dup-candidate' + (state.dismissed.has(item.idx) ? ' dismissed' : '');
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'dup-' + groupKey.replace(/[^a-z0-9]/gi, '_');
+        radio.value = item.file;
+        radio.checked = currentPick === item.file;
+        radio.addEventListener('change', () => {
+            state.groupSelections[groupKey] = item.file;
+            renderMatchResults();
+        });
+        row.appendChild(radio);
+
+        const info = document.createElement('span');
+        info.className = 'dup-candidate-info';
+        const filename = item.file.split('/').pop();
+        let infoHtml = '<span class="dup-candidate-filename" title="' + escAttr(item.file) + '">' + esc(filename) + '</span>';
+        if (item.size) infoHtml += ' <span class="browse-size">' + formatSize(item.size) + '</span>';
+        if (item.match && item.match.confidence) {
+            infoHtml += ' <span class="match-badge badge-' + esc(item.match.confidence) + '">' + esc(item.match.confidence) + '</span>';
+        }
+        if (item.aliases && item.aliases.length) {
+            infoHtml += ' <span class="dup-alias-hint">+ ' + item.aliases.length + ' hardlink' + (item.aliases.length > 1 ? 's' : '') + '</span>';
+        }
+        if (item.suggestedPath) {
+            infoHtml += '<div class="match-dest" title="' + escAttr(item.suggestedPath) + '">' +
+                        '<span class="match-dest-arrow">&rarr;</span>' + esc(item.suggestedPath) + '</div>';
+        }
+        info.innerHTML = infoHtml;
+        row.appendChild(info);
+
+        card.appendChild(row);
+    });
+
+    // Dismiss-all / restore button.
+    const dismiss = document.createElement('button');
+    dismiss.className = 'match-dismiss';
+    dismiss.textContent = allDismissed ? 'Restore group' : 'Dismiss all';
+    dismiss.addEventListener('click', () => {
+        if (allDismissed) {
+            items.forEach(it => state.dismissed.delete(it.idx));
+        } else {
+            items.forEach(it => state.dismissed.add(it.idx));
+            delete state.groupSelections[groupKey];
+        }
+        renderMatchResults();
+    });
+    card.appendChild(dismiss);
+
+    return card;
 }
 
 function groupHeader(text) {
@@ -399,14 +515,27 @@ async function doApply() {
     const strategy = document.querySelector('input[name="strategy"]:checked').value;
     const validate = document.getElementById('validate-toggle').checked;
 
+    // Build the item list, respecting group selections for duplicate groups.
+    // For a duplicate group, only the selected file is included.
     const items = state.scanResults
-        .filter((r, i) => r.status === 'new' && r.match && !state.dismissed.has(i))
+        .filter((r, i) => {
+            if (r.status !== 'new' || !r.match || state.dismissed.has(i)) return false;
+            const key = r.groupKey;
+            if (!key) return true;
+            // If a group selection exists for this key, only include the chosen file.
+            if (key in state.groupSelections) {
+                return state.groupSelections[key] === r.file;
+            }
+            return true; // singleton group — no selection needed
+        })
         .map(r => ({
             type: r.match.type === 'series' ? 'series' : 'movie',
             tmdbId: r.match.tmdbId || 0,
             tvdbId: r.match.tvdbId || 0,
             title: r.match.title,
             year: r.match.year || 0,
+            season: r.match.season || 0,
+            episode: r.match.episode || 0,
             rootFolderPath: r.match.type === 'movie' ? '/movies' : '/tv',
             monitored: strategy !== 'keep',
             sourcePath: r.file,
