@@ -863,23 +863,22 @@ function renderPipeline(data) {
         attentionEl.style.display = 'none';
     }
 
-    // Active lanes
-    let hasActive = false;
+    // Active lanes — always visible; empty lanes show a dash placeholder
     for (const laneKey of ACTIVE_LANES) {
         const items = lanes[laneKey] || [];
         const laneEl = document.getElementById('pipeline-lane-' + laneKey);
         const cardsEl = document.getElementById('pipeline-cards-' + laneKey);
         if (!laneEl || !cardsEl) continue;
-        if (!items.length) { laneEl.style.display = 'none'; continue; }
-        hasActive = true;
-        laneEl.style.display = '';
-        cardsEl.innerHTML = items.map(function(item) { return renderPipelineCard(item); }).join('');
+        if (!items.length) {
+            cardsEl.innerHTML = '<div class="pl-empty">—</div>';
+        } else {
+            cardsEl.innerHTML = items.map(function(item) { return renderPipelineCard(item); }).join('');
+        }
     }
 
     // Completed tail
     const completedItems = lanes['completed'] || [];
     if (completedItems.length && completedWrap) {
-        hasActive = true;
         completedWrap.style.display = '';
         const el = document.getElementById('pipeline-cards-completed');
         if (el) el.innerHTML = completedItems.map(function(item) { return renderPipelineCard(item); }).join('');
@@ -887,7 +886,7 @@ function renderPipeline(data) {
         completedWrap.style.display = 'none';
     }
 
-    section.style.display = (hasActive || failedItems.length) ? '' : 'none';
+    section.style.display = '';
 
     // ── FLIP Last+Invert+Play: animate cards that moved ───────────────────────
     section.querySelectorAll('[data-key]').forEach(function(el) {

@@ -664,11 +664,46 @@ details[open] .add-user-summary::before { content: '− '; }
     color: #444;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    margin: 0.85rem 0 0.4rem;
+    margin: 0 0 0.4rem;
 }
-.pl-lane-header:first-child { margin-top: 0; }
 .pl-lane-header-alert { color: #f87171; }
 .pl-lane-header-done { color: #7dda93; }
+
+/* Pastel lane wrappers */
+.pl-lane {
+    border-left: 2px solid transparent;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem 0.35rem;
+    margin-bottom: 0.5rem;
+}
+.pl-lane-downloading {
+    border-color: rgba(125,178,242,.35);
+    background: rgba(125,178,242,.06);
+}
+.pl-lane-imported {
+    border-color: rgba(125,218,147,.35);
+    background: rgba(125,218,147,.06);
+}
+.pl-lane-validating {
+    border-color: rgba(240,224,120,.35);
+    background: rgba(240,224,120,.06);
+}
+.pl-lane-processing {
+    border-color: rgba(240,192,128,.40);
+    background: rgba(240,192,128,.07);
+}
+.pl-lane-cataloging {
+    border-color: rgba(200,162,255,.35);
+    background: rgba(200,162,255,.06);
+}
+
+/* Empty lane placeholder */
+.pl-empty {
+    font-size: 0.75rem;
+    color: #555;
+    font-style: italic;
+    padding: 0.1rem 0 0.2rem;
+}
 
 /* Failed card — red left border */
 .pl-card-failed {
