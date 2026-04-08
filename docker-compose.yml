@@ -213,9 +213,6 @@ services:
       # defaults to 0 — not exposed.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    read_only: true
-    tmpfs:
-      - /run
     security_opt:
       - no-new-privileges:true
     networks:

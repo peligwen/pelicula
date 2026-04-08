@@ -1644,7 +1644,7 @@ Session\TempPath=/downloads/incomplete/'
 cmd_down() {
     load_env
     info "Stopping media stack..."
-    compose_cmd down
+    compose_cmd --profile jellyseerr --profile apprise down --remove-orphans
     pass "Stack stopped"
 }
 
