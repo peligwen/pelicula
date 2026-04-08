@@ -36,10 +36,10 @@ func AutoWire(s *ServiceClients) error {
 
 	slog.Info("services ready, checking configuration", "component", "autowire")
 
-	sonarrWired := wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3") &&
+	sonarrWired := wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "tv-sonarr") &&
 		wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "/tv")
 
-	radarrWired := wireDownloadClient(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3") &&
+	radarrWired := wireDownloadClient(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "radarr") &&
 		wireRootFolder(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "/movies")
 
 	prowlarrWired := wireProwlarrApp(s, "Sonarr", sonarrURL, s.SonarrKey) &&
@@ -105,7 +105,7 @@ func waitForServices(s *ServiceClients) error {
 	return fmt.Errorf("timeout waiting for services")
 }
 
-func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath string) bool {
+func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath, category string) bool {
 	// Check existing download clients
 	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/downloadclient")
 	if err != nil {
@@ -139,7 +139,7 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath string
 			{"name": "port", "value": 8080},
 			{"name": "username", "value": ""},
 			{"name": "password", "value": ""},
-			{"name": "category", "value": ""},
+			{"name": "category", "value": category},
 		},
 	}
 

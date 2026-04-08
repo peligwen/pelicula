@@ -312,6 +312,9 @@ setup_dirs() {
         "$library_dir/movies" \
         "$library_dir/tv" \
         "$work_dir/downloads" \
+        "$work_dir/downloads/incomplete" \
+        "$work_dir/downloads/radarr" \
+        "$work_dir/downloads/tv-sonarr" \
         "$work_dir/processing"
     pass "Created directory structure"
 }
@@ -1545,7 +1548,11 @@ WebUI\LocalHostAuth=false
 WebUI\CSRFProtection=false
 
 [BitTorrent]
-Session\DefaultSavePath=/downloads/'
+Session\DefaultSavePath=/downloads/
+Session\TempPathEnabled=true
+Session\TempPath=/downloads/incomplete/'
+    seed_config "$CONFIG_DIR/qbittorrent/qBittorrent/categories.json" \
+'{"radarr":{"save_path":"/downloads/radarr/"},"tv-sonarr":{"save_path":"/downloads/tv-sonarr/"}}'
 
     local -a profile_args=()
     [[ "$(get_env_var JELLYSEERR_ENABLED false)" == "true" ]] && profile_args+=("--profile" "jellyseerr")
@@ -1605,19 +1612,97 @@ cmd_down() {
     pass "Stack stopped"
 }
 
+# Helper: extract <ApiKey> from a *arr config.xml
+_extract_api_key() {
+    local file="$1"
+    [[ -f "$file" ]] || { echo ""; return; }
+    grep -o '<ApiKey>[^<]*</ApiKey>' "$file" | sed 's|<[^>]*>||g'
+}
+
+# Wipe a *arr dir and re-seed config.xml with preserved API key
+_reset_arr() {
+    local name="$1" dir="$2" urlbase="$3" key="$4"
+    info "Resetting ${name}..."
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    local key_xml=""
+    [[ -n "$key" ]] && key_xml="<ApiKey>${key}</ApiKey>"
+    echo "<Config><UrlBase>${urlbase}</UrlBase>${key_xml}<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>" \
+        > "$dir/config.xml"
+}
+
+_reset_svc_jellyfin() {
+    info "Resetting Jellyfin..."
+    rm -rf "$CONFIG_DIR/jellyfin"
+    mkdir -p "$CONFIG_DIR/jellyfin"
+    echo '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>' \
+        > "$CONFIG_DIR/jellyfin/network.xml"
+}
+
+_reset_svc_qbittorrent() {
+    info "Resetting qBittorrent..."
+    rm -rf "$CONFIG_DIR/qbittorrent"
+    mkdir -p "$CONFIG_DIR/qbittorrent/qBittorrent"
+    cat > "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" <<'EOF'
+[Preferences]
+WebUI\AuthSubnetWhitelistEnabled=true
+WebUI\AuthSubnetWhitelist=172.16.0.0/12
+WebUI\LocalHostAuth=false
+WebUI\CSRFProtection=false
+
+[BitTorrent]
+Session\DefaultSavePath=/downloads/
+Session\TempPathEnabled=true
+Session\TempPath=/downloads/incomplete/
+EOF
+    cat > "$CONFIG_DIR/qbittorrent/qBittorrent/categories.json" <<'EOF'
+{"radarr":{"save_path":"/downloads/radarr/"},"tv-sonarr":{"save_path":"/downloads/tv-sonarr/"}}
+EOF
+}
+
+_reset_svc_procula_jobs() {
+    info "Clearing Procula job queue..."
+    rm -rf "$CONFIG_DIR/procula/jobs"
+    mkdir -p "$CONFIG_DIR/procula/jobs"
+}
+
+# Ensure stack is stopped; noop if already down
+_ensure_stack_down() {
+    if compose_cmd ps --services --filter "status=running" 2>/dev/null | grep -q .; then
+        warn "Stack is running — stopping it first..."
+        compose_cmd down
+    fi
+}
+
 cmd_reset_config() {
     load_env
+    local arg="${1:-}"
 
+    case "$arg" in
+        "")         _reset_config_soft ;;
+        all|full)   _reset_config_all ;;
+        sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs)
+                    _reset_config_service "$arg" ;;
+        *)
+            err "Unknown reset target: ${arg}"
+            echo "Usage: ./pelicula reset-config [sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs|all]"
+            return 1
+            ;;
+    esac
+}
+
+# Soft reset: wipe service configs, preserve API keys / gluetun / certs / user auth
+_reset_config_soft() {
     echo -e "${BOLD}Reset configuration${NC}"
     echo ""
     echo "This wipes service config and databases so auto-wiring runs fresh."
     echo "Your API keys, VPN config, TLS certs, and user auth are preserved."
     echo ""
     echo -e "${BOLD}What will be cleared:${NC}"
-    echo "  sonarr/    — all config except API key"
-    echo "  radarr/    — all config except API key"
-    echo "  prowlarr/  — config only (indexer database kept)"
-    echo "  jellyfin/  — full wipe (wizard re-runs on next up)"
+    echo "  sonarr/      — all config except API key"
+    echo "  radarr/      — all config except API key"
+    echo "  prowlarr/    — config only (indexer database kept)"
+    echo "  jellyfin/    — full wipe (wizard re-runs on next up)"
     echo "  qbittorrent/ — full wipe (re-seeded on next up)"
     echo "  procula/jobs/ — pending job queue"
     echo ""
@@ -1631,38 +1716,15 @@ cmd_reset_config() {
     read -r confirm
     [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; return; }
 
-    # Check stack is down
-    if compose_cmd ps --services --filter "status=running" 2>/dev/null | grep -q .; then
-        warn "Stack is running — stopping it first..."
-        compose_cmd down
-    fi
-
-    # Helper: extract <ApiKey> from a *arr config.xml
-    extract_api_key() {
-        local file="$1"
-        [[ -f "$file" ]] || { echo ""; return; }
-        grep -o '<ApiKey>[^<]*</ApiKey>' "$file" | sed 's|<[^>]*>||g'
-    }
+    _ensure_stack_down
 
     local sonarr_key radarr_key prowlarr_key
-    sonarr_key="$(extract_api_key "$CONFIG_DIR/sonarr/config.xml")"
-    radarr_key="$(extract_api_key "$CONFIG_DIR/radarr/config.xml")"
-    prowlarr_key="$(extract_api_key "$CONFIG_DIR/prowlarr/config.xml")"
+    sonarr_key="$(_extract_api_key "$CONFIG_DIR/sonarr/config.xml")"
+    radarr_key="$(_extract_api_key "$CONFIG_DIR/radarr/config.xml")"
+    prowlarr_key="$(_extract_api_key "$CONFIG_DIR/prowlarr/config.xml")"
 
-    # Wipe *arr configs and re-seed with preserved key
-    reset_arr() {
-        local name="$1" dir="$2" urlbase="$3" key="$4"
-        info "Resetting ${name}..."
-        rm -rf "$dir"
-        mkdir -p "$dir"
-        local key_xml=""
-        [[ -n "$key" ]] && key_xml="<ApiKey>${key}</ApiKey>"
-        echo "<Config><UrlBase>${urlbase}</UrlBase>${key_xml}<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>" \
-            > "$dir/config.xml"
-    }
-
-    reset_arr "Sonarr"   "$CONFIG_DIR/sonarr"   "/sonarr"   "$sonarr_key"
-    reset_arr "Radarr"   "$CONFIG_DIR/radarr"   "/radarr"   "$radarr_key"
+    _reset_arr "Sonarr"  "$CONFIG_DIR/sonarr"  "/sonarr"  "$sonarr_key"
+    _reset_arr "Radarr"  "$CONFIG_DIR/radarr"  "/radarr"  "$radarr_key"
 
     # Prowlarr: only reset config.xml — preserve the database (indexers live there)
     info "Resetting Prowlarr config (keeping indexer database)..."
@@ -1671,32 +1733,101 @@ cmd_reset_config() {
     echo "<Config><UrlBase>/prowlarr</UrlBase>${key_xml}<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>" \
         > "$CONFIG_DIR/prowlarr/config.xml"
 
-    info "Resetting Jellyfin..."
-    rm -rf "$CONFIG_DIR/jellyfin"
-    mkdir -p "$CONFIG_DIR/jellyfin"
-    echo '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>' \
-        > "$CONFIG_DIR/jellyfin/network.xml"
-
-    info "Resetting qBittorrent..."
-    rm -rf "$CONFIG_DIR/qbittorrent"
-    mkdir -p "$CONFIG_DIR/qbittorrent/qBittorrent"
-    cat > "$CONFIG_DIR/qbittorrent/qBittorrent/qBittorrent.conf" <<'EOF'
-[Preferences]
-WebUI\AuthSubnetWhitelistEnabled=true
-WebUI\AuthSubnetWhitelist=172.16.0.0/12
-WebUI\LocalHostAuth=false
-WebUI\CSRFProtection=false
-
-[BitTorrent]
-Session\DefaultSavePath=/downloads/
-EOF
-
-    info "Clearing Procula job queue..."
-    rm -rf "$CONFIG_DIR/procula/jobs"
-    mkdir -p "$CONFIG_DIR/procula/jobs"
+    _reset_svc_jellyfin
+    _reset_svc_qbittorrent
+    _reset_svc_procula_jobs
 
     echo ""
     pass "Config reset — run ${BOLD}./pelicula up${NC} to start fresh with auto-wiring."
+}
+
+# Per-service reset (keeps keys where applicable)
+_reset_config_service() {
+    local svc="$1"
+    _ensure_stack_down
+    case "$svc" in
+        sonarr)
+            local key; key="$(_extract_api_key "$CONFIG_DIR/sonarr/config.xml")"
+            _reset_arr "Sonarr" "$CONFIG_DIR/sonarr" "/sonarr" "$key"
+            ;;
+        radarr)
+            local key; key="$(_extract_api_key "$CONFIG_DIR/radarr/config.xml")"
+            _reset_arr "Radarr" "$CONFIG_DIR/radarr" "/radarr" "$key"
+            ;;
+        prowlarr)
+            info "Resetting Prowlarr config (keeping indexer database)..."
+            local key key_xml=""
+            key="$(_extract_api_key "$CONFIG_DIR/prowlarr/config.xml")"
+            [[ -n "$key" ]] && key_xml="<ApiKey>${key}</ApiKey>"
+            echo "<Config><UrlBase>/prowlarr</UrlBase>${key_xml}<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>" \
+                > "$CONFIG_DIR/prowlarr/config.xml"
+            ;;
+        jellyfin)      _reset_svc_jellyfin ;;
+        qbittorrent)   _reset_svc_qbittorrent ;;
+        procula-jobs)  _reset_svc_procula_jobs ;;
+    esac
+    echo ""
+    pass "${svc} reset — run ${BOLD}./pelicula up${NC} to apply."
+}
+
+# Hard/full reset: wipe entire CONFIG_DIR except Prowlarr indexer database
+_reset_config_all() {
+    # Safety guard
+    [[ -n "$CONFIG_DIR" && "$CONFIG_DIR" != "/" && "$CONFIG_DIR" != "$HOME" ]] || {
+        err "Unsafe CONFIG_DIR: '${CONFIG_DIR}' — aborting"
+        return 1
+    }
+
+    echo -e "${RED}${BOLD}Full configuration reset${NC}"
+    echo ""
+    echo "This wipes the entire config directory and rebuilds from scratch."
+    echo "Your .env, media files, downloads, and VPN key are NOT affected."
+    echo ""
+    echo -e "${BOLD}What will be cleared:${NC}"
+    echo "  ALL service configs, databases, and caches under ${CONFIG_DIR}"
+    echo "  Jellyfin library metadata (media files in ${LIBRARY_DIR} are kept)"
+    echo "  Sonarr/Radarr API keys, series/movie databases"
+    echo "  Pelicula admin accounts and invite tokens"
+    echo "  Procula custom transcoding profiles and notification settings"
+    echo "  TLS certificates (regenerated on next up)"
+    echo ""
+    echo -e "${BOLD}What is kept:${NC}"
+    echo "  Prowlarr indexer database (indexers survive)"
+    echo "  .env — all credentials and config values"
+    echo "  ${LIBRARY_DIR} — all media files"
+    echo "  ${WORK_DIR}/downloads — torrents and seeding files"
+    echo ""
+    echo -en "${RED}Type 'reset' to confirm, or anything else to abort:${NC} "
+    read -r confirm
+    [[ "$confirm" == "reset" ]] || { info "Aborted."; return; }
+
+    _ensure_stack_down
+
+    # Stash Prowlarr indexer database
+    local prowlarr_stash=""
+    if [[ -f "$CONFIG_DIR/prowlarr/prowlarr.db" ]]; then
+        prowlarr_stash="$(mktemp -d)"
+        cp "$CONFIG_DIR/prowlarr/prowlarr.db"* "$prowlarr_stash/" 2>/dev/null || true
+        info "Prowlarr indexer database stashed"
+    fi
+
+    info "Wiping ${CONFIG_DIR}..."
+    rm -rf "$CONFIG_DIR"
+
+    # Rebuild directory structure and TLS cert
+    setup_dirs "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR"
+    setup_cert "$CONFIG_DIR"
+
+    # Restore Prowlarr indexer database
+    if [[ -n "$prowlarr_stash" ]]; then
+        mkdir -p "$CONFIG_DIR/prowlarr"
+        mv "$prowlarr_stash"/prowlarr.db* "$CONFIG_DIR/prowlarr/" 2>/dev/null || true
+        rm -rf "$prowlarr_stash"
+        info "Prowlarr indexer database restored"
+    fi
+
+    echo ""
+    pass "Full reset complete — run ${BOLD}./pelicula up${NC} to start fresh."
 }
 
 cmd_restart() {
@@ -2893,7 +3024,9 @@ usage() {
     echo "  logs [svc]          Tail logs (optionally for one service)"
     echo "  rebuild [svc...]    Rebuild Go services in-place (default: pelicula-api procula)"
     echo "                      Use 'nginx' to reload nginx config/static files"
-    echo "  reset-config        Wipe service config (keeps keys/VPN/certs) for a clean re-wire"
+    echo "  reset-config        Soft reset: wipe service config (keeps API keys/VPN/certs) for a clean re-wire"
+    echo "  reset-config <svc>  Reset a single service (sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs)"
+    echo "  reset-config all    Hard reset: wipe entire config dir (keeps Prowlarr indexers + .env + media)"
     echo "  check-vpn           Verify VPN and service health"
     echo "  update              Pull latest images and recreate containers"
     echo "  export [file]       Export library metadata to JSON (default: pelicula-backup-YYYY-MM-DD.json)"
@@ -2915,7 +3048,7 @@ case "${1:-}" in
     restart)         cmd_restart ;;
     restart-acquire) cmd_restart_acquire ;;
     rebuild)         cmd_rebuild "${@:2}" ;;
-    reset-config)    cmd_reset_config ;;
+    reset-config)    cmd_reset_config "${2:-}" ;;
     status)          cmd_status ;;
     logs)            cmd_logs "${2:-}" ;;
     check-vpn)       cmd_check_vpn ;;
