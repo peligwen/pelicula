@@ -138,7 +138,6 @@ func newSettingsEnv(t *testing.T) string {
 		"PELICULA_PASSWORD":     "",
 		"PROCULA_API_KEY":       "testkey",
 		"WEBHOOK_SECRET":        "testsecret",
-		"JELLYSEERR_ENABLED":    "false",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",

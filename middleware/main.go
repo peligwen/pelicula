@@ -41,6 +41,7 @@ func main() {
 	services = NewServiceClients("/config")
 	inviteStore = NewInviteStore("/config/pelicula/invites.json")
 	dismissedStore = NewDismissedStore("/config/pelicula/dismissed.json")
+	requestStore = NewRequestStore("/config/pelicula/requests.json")
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -105,6 +106,12 @@ func main() {
 	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(handleStorageScanProxy)))
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(handleUpdatesProxy)))
 	mux.Handle("/api/pelicula/events", auth.Guard(http.HandlerFunc(handleEventsProxy)))
+
+	// viewer+: request queue (list own requests + create)
+	mux.Handle("/api/pelicula/requests", auth.Guard(http.HandlerFunc(handleRequests)))
+	// admin only: per-request approve/deny/delete and *arr metadata for settings dropdowns
+	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(http.HandlerFunc(handleRequestOp)))
+	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(handleArrMeta)))
 
 	// manager+: search and add content, pause/resume downloads
 	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(handleSearch)))
@@ -179,17 +186,11 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jsPort := os.Getenv("JELLYSEERR_PORT")
-	if jsPort == "" {
-		jsPort = "5055"
-	}
 	status := map[string]any{
-		"status":             "ok",
-		"services":           services.CheckHealth(),
-		"wired":              services.IsWired(),
-		"indexers":           indexerCount,
-		"jellyseerr_enabled": os.Getenv("JELLYSEERR_ENABLED") == "true",
-		"jellyseerr_port":    jsPort,
+		"status":   "ok",
+		"services": services.CheckHealth(),
+		"wired":    services.IsWired(),
+		"indexers": indexerCount,
 	}
 	writeJSON(w, status)
 }

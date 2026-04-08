@@ -424,16 +424,7 @@ func handleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "invite " + state, "state": state})
 		return
 	}
-	// Include Jellyseerr info so the registration page knows where to send the user.
-	jsPort := os.Getenv("JELLYSEERR_PORT")
-	if jsPort == "" {
-		jsPort = "5055"
-	}
-	writeJSON(w, map[string]any{
-		"valid":               true,
-		"jellyseerr_enabled":  os.Getenv("JELLYSEERR_ENABLED") == "true",
-		"jellyseerr_port":     jsPort,
-	})
+	writeJSON(w, map[string]any{"valid": true})
 }
 
 func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {

@@ -193,7 +193,6 @@
                 <div class="um-hero-title-row">
                     <span class="um-hero-icon">👥</span>
                     <h2 class="um-hero-title">User Management</h2>
-                    <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
                 </div>
                 <p class="um-hero-sub">Invites, accounts, and active sessions</p>
             </div>
@@ -243,6 +242,52 @@
                     </details>
                 </div>
             </div>
+        </div>
+
+        <!-- Requests (visible to all authenticated users) -->
+        <div class="section hidden" id="requests-section">
+            <div class="section-header">
+                <span>Requests</span>
+                <button class="section-action admin-only" id="requests-settings-btn" onclick="toggleRequestsSettings()" title="Configure request profiles">Settings</button>
+            </div>
+
+            <!-- Admin: request profile settings (collapsed by default) -->
+            <div class="hidden" id="requests-settings-panel">
+                <div class="requests-settings-grid">
+                    <div class="requests-settings-group">
+                        <div class="requests-settings-label">Movies (Radarr)</div>
+                        <label class="requests-settings-field">Quality profile
+                            <select id="req-radarr-profile"></select>
+                        </label>
+                        <label class="requests-settings-field">Root folder
+                            <select id="req-radarr-root"></select>
+                        </label>
+                    </div>
+                    <div class="requests-settings-group">
+                        <div class="requests-settings-label">TV Shows (Sonarr)</div>
+                        <label class="requests-settings-field">Quality profile
+                            <select id="req-sonarr-profile"></select>
+                        </label>
+                        <label class="requests-settings-field">Root folder
+                            <select id="req-sonarr-root"></select>
+                        </label>
+                    </div>
+                </div>
+                <button class="section-action" id="requests-settings-save-btn" onclick="saveRequestsSettings()">Save settings</button>
+                <p class="requests-settings-note">Changes take effect after restarting the pelicula-api container.</p>
+            </div>
+
+            <!-- Admin pending requests -->
+            <div class="admin-only">
+                <div class="requests-lane-header">Pending approval</div>
+                <ul id="requests-pending-list" class="requests-list"></ul>
+                <p class="requests-empty hidden" id="requests-pending-empty">No pending requests.</p>
+            </div>
+
+            <!-- Viewer's own requests -->
+            <div class="requests-lane-header">My requests</div>
+            <ul id="requests-mine-list" class="requests-list"></ul>
+            <p class="requests-empty hidden" id="requests-mine-empty">No requests yet. Search for a title and click <strong>Request</strong>.</p>
         </div>
 
         <!-- Services -->
@@ -337,12 +382,6 @@
                     <span class="service-status unknown">&#9888;</span>
                     <div class="service-name">Bazarr</div>
                     <div class="service-desc">Subtitles</div>
-                </a>
-                <a class="service service-stage-request hidden" id="service-jellyseerr" data-service="jellyseerr" data-svc="jellyseerr" target="_blank" rel="noopener" href="#" data-check="">
-                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'jellyseerr')" title="View logs">logs ›</button>
-                    <span class="service-status unknown">&#9888;</span>
-                    <div class="service-name">Jellyseerr</div>
-                    <div class="service-desc">Request &amp; share</div>
                 </a>
             </div>
         </div>

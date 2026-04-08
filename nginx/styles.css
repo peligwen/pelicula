@@ -928,6 +928,163 @@ details[open] .add-user-summary::before { content: '− '; }
 #pipeline-attention .pl-lane-header { margin-top: 0; }
 #pipeline-attention .download-item { border-color: rgba(248, 113, 113, 0.2); }
 
+/* ── Requests section ───────────────────── */
+.requests-lane-header {
+    font-size: 0.6rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 0.75rem 0 0.4rem;
+}
+.requests-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.requests-empty {
+    font-size: 0.8rem;
+    color: #444;
+    padding: 0.4rem 0;
+}
+.request-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.65rem 0.85rem;
+    background: #131313;
+    border: 1px solid #1e1e1e;
+    border-radius: 8px;
+}
+.request-item-pending  { border-left: 2px solid rgba(240, 192, 96, 0.45); }
+.request-item-grabbed  { border-left: 2px solid rgba(109, 179, 242, 0.45); }
+.request-item-available{ border-left: 2px solid rgba(125, 218, 147, 0.45); }
+.request-item-denied   { border-left: 2px solid rgba(248, 113, 113, 0.35); opacity: 0.65; }
+.request-poster {
+    width: 36px;
+    height: 54px;
+    object-fit: cover;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+.request-poster-placeholder {
+    width: 36px;
+    height: 54px;
+    background: #222;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+.request-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.request-title {
+    font-size: 0.82rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.request-year { font-size: 0.72rem; color: #555; }
+.request-meta { font-size: 0.7rem; color: #555; }
+.request-reason { font-size: 0.72rem; color: #f87171; margin-top: 0.1rem; }
+.request-state {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    align-self: flex-start;
+    margin-top: 0.25rem;
+    font-weight: 500;
+}
+.request-state-pending   { background: rgba(240,192,96,0.12);  color: #f0c060; }
+.request-state-grabbed   { background: rgba(109,179,242,0.12); color: #6db3f2; }
+.request-state-available { background: rgba(125,218,147,0.12); color: #7dda93; }
+.request-state-denied    { background: rgba(248,113,113,0.10); color: #f87171; }
+.request-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+.request-btn {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid #2a2a2a;
+    border-radius: 5px;
+    background: #1a1a1a;
+    color: #888;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+.request-btn-approve { color: #7dda93; border-color: #2a4a30; }
+.request-btn-approve:hover { background: #1a2e22; color: #a0f0b8; }
+.request-btn-deny { color: #f87171; border-color: #5a2020; }
+.request-btn-deny:hover { background: #2e1a1a; color: #fca5a5; }
+
+/* Request button on search result cards */
+.search-request {
+    font-size: 0.72rem;
+    padding: 0.3rem 0.65rem;
+    border: 1px solid #2a3a4a;
+    border-radius: 5px;
+    background: #151e2a;
+    color: #6db3f2;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.search-request:hover { background: #1a2a3e; color: #93c5fd; border-color: #3a5070; }
+
+/* Requests settings panel */
+.requests-settings-grid {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+.requests-settings-group {
+    flex: 1;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.requests-settings-label {
+    font-size: 0.65rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.requests-settings-field {
+    font-size: 0.78rem;
+    color: #888;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.requests-settings-field select {
+    padding: 0.45rem 0.6rem;
+    background: #0a0a0a;
+    border: 1px solid #222;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 0.8rem;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 0l6 6 6-6' fill='%23666'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+}
+.requests-settings-note {
+    font-size: 0.7rem;
+    color: #444;
+    margin-top: 0.4rem;
+}
+
 /* Card FLIP animation target (used in Slice 3) */
 .pl-card-moving {
     pointer-events: none;

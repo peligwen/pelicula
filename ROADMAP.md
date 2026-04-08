@@ -10,7 +10,7 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 Content arrives fully validated and transcoded, but subtitles are not yet automatic. Bazarr is the standard *arr-ecosystem solution and wires in cleanly alongside the existing auto-wire pattern.
 
-- [ ] Add `bazarr` service to `docker-compose.yml` (Docker Compose profile, opt-in — same pattern as Jellyseerr and Apprise)
+- [ ] Add `bazarr` service to `docker-compose.yml` (Docker Compose profile, opt-in — same pattern as Apprise)
 - [ ] Auto-wire in `middleware/autowire.go`: connect Bazarr to Sonarr and Radarr (mirror Prowlarr wiring), seed config with `UrlBase: /bazarr`
 - [ ] Add nginx proxy at `/bazarr`
 - [ ] Add Bazarr card to dashboard services grid
@@ -72,7 +72,7 @@ Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `p
 
 **Phase C — In-Dashboard Notifications:** Procula catalog stage writes to `/config/procula/notifications_feed.json` (ring buffer, 50 events), bell icon with unread badge, Processing section on dashboard with job cards and progress bars.
 
-**Phase D — Jellyseerr:** Auto-wired to Jellyfin + Radarr + Sonarr on first boot, on by default, nginx proxy at `/jellyseerr`, dashboard Users section (list Jellyfin accounts, create accounts, share Jellyseerr URL).
+**Phase D — Request Queue:** First-party viewer request queue built into the dashboard. Viewers request from search; admins approve/deny with configurable Radarr/Sonarr quality profiles. Apprise notifies on state change. Import webhook auto-transitions requests to "available".
 
 **Phase E — Transcoding:** `procula/process.go` with FFmpeg progress tracking (parses `time=` from stderr), profile matching on codec or resolution, two default profiles shipped disabled (`compatibility-h264.json`, `mobile-1080p.json`).
 

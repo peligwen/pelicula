@@ -370,6 +370,19 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SessionFor returns the authenticated username and role for the request.
+// Returns ("", "", false) if not authenticated. In off mode, returns ("", RoleAdmin, true).
+func (a *Auth) SessionFor(r *http.Request) (username string, role UserRole, ok bool) {
+	if a.mode == "off" {
+		return "", RoleAdmin, true
+	}
+	sess, sOk := a.getSession(r)
+	if !sOk {
+		return "", "", false
+	}
+	return sess.username, sess.role, true
+}
+
 func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

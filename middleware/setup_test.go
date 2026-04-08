@@ -127,7 +127,6 @@ func TestSetupUsesWriteEnvFile(t *testing.T) {
 		"PELICULA_AUTH":         "off",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
-		"JELLYSEERR_ENABLED":    "true",
 		"CONFIG_DIR":            "/config",
 	}
 	if err := writeEnvFile(path, vars); err != nil {
@@ -142,9 +141,6 @@ func TestSetupUsesWriteEnvFile(t *testing.T) {
 	// Booleans must be unquoted
 	if !strings.Contains(content, "TRANSCODING_ENABLED=false\n") {
 		t.Error("expected TRANSCODING_ENABLED=false (unquoted)")
-	}
-	if !strings.Contains(content, "JELLYSEERR_ENABLED=true\n") {
-		t.Error("expected JELLYSEERR_ENABLED=true (unquoted)")
 	}
 	// Strings must be quoted
 	if !strings.Contains(content, `CONFIG_DIR="/config"`) {

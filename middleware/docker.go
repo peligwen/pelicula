@@ -35,7 +35,6 @@ var allowedContainers = map[string]bool{
 	"jellyfin":     true,
 	"bazarr":       true,
 	"gluetun":      true,
-	"jellyseerr":   true,
 }
 
 // isAllowedContainer reports whether name is in the allowlist.

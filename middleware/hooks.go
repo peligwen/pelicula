@@ -79,6 +79,14 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mark any matching pending request as available now that the content has landed.
+	// Webhook type is "movie" or "episode"; requests use "movie" or "series".
+	reqType := source.Type
+	if reqType == "episode" {
+		reqType = "series"
+	}
+	go MarkRequestAvailable(reqType, source.TmdbID, source.TvdbID, source.Title)
+
 	// When SEEDING_REMOVE_ON_COMPLETE is set, delete the torrent from qBittorrent
 	// immediately after *arr has imported (and hardlinked) the file. The file itself
 	// is preserved; only the torrent entry is removed.
@@ -108,6 +116,7 @@ func normalizeHookPayload(raw map[string]any) (source ProculaJobSource, err erro
 		source.Title, _ = movie["title"].(string)
 		source.Year = int(floatVal(movie, "year"))
 		source.ArrID = int(floatVal(movie, "id"))
+		source.TmdbID = int(floatVal(movie, "tmdbId"))
 
 		if mf, ok := raw["movieFile"].(map[string]any); ok {
 			source.Path, _ = mf["path"].(string)
@@ -124,6 +133,8 @@ func normalizeHookPayload(raw map[string]any) (source ProculaJobSource, err erro
 		source.Title, _ = series["title"].(string)
 		source.Year = int(floatVal(series, "year"))
 		source.ArrID = int(floatVal(series, "id"))
+		source.TvdbID = int(floatVal(series, "tvdbId"))
+		source.TmdbID = int(floatVal(series, "tmdbId"))
 
 		if ef, ok := raw["episodeFile"].(map[string]any); ok {
 			source.Path, _ = ef["path"].(string)
@@ -157,6 +168,8 @@ type ProculaJobSource struct {
 	Size                   int64  `json:"size"`
 	ArrID                  int    `json:"arr_id"`
 	ArrType                string `json:"arr_type"`
+	TmdbID                 int    `json:"tmdb_id,omitempty"`
+	TvdbID                 int    `json:"tvdb_id,omitempty"`
 	DownloadHash           string `json:"download_hash"`
 	ExpectedRuntimeMinutes int    `json:"expected_runtime_minutes"`
 }

@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -55,9 +53,6 @@ func AutoWire(s *ServiceClients) error {
 	// Wire Bazarr: connect Sonarr/Radarr and set subtitle languages
 	wireBazarr(s)
 
-	// Wire Jellyseerr if enabled (opt-in via JELLYSEERR_ENABLED=true)
-	wireJellyseerr(s)
-
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
 		slog.Info("all services wired successfully", "component", "autowire")
@@ -75,9 +70,6 @@ func waitForServices(s *ServiceClients) error {
 		"prowlarr":    prowlarrURL + "/ping",
 		"qbittorrent": "http://gluetun:8080/",
 		"jellyfin":    jellyfinURL + "/System/Info/Public",
-	}
-	if os.Getenv("JELLYSEERR_ENABLED") == "true" {
-		endpoints["jellyseerr"] = "http://jellyseerr:5055/api/v1/status"
 	}
 	endpoints["bazarr"] = bazarrURL + "/api/system/status"
 
@@ -417,193 +409,6 @@ func bzPost(s *ServiceClients, path string, payload any) ([]byte, error) {
 	return s.arrDo("POST", bazarrURL, key, path, payload)
 }
 
-// ── Jellyseerr ─────────────────────────────────────────────────────────────
-
-func wireJellyseerr(s *ServiceClients) {
-	if os.Getenv("JELLYSEERR_ENABLED") != "true" {
-		return
-	}
-	slog.Info("checking Jellyseerr", "component", "autowire")
-
-	// Check initialization status
-	data, err := jsGet(s, "/api/v1/settings/public", "")
-	if err != nil {
-		slog.Warn("Jellyseerr not reachable", "component", "autowire", "error", err)
-		return
-	}
-
-	var pub map[string]any
-	json.Unmarshal(data, &pub) //nolint:errcheck
-	initialized, _ := pub["initialized"].(bool)
-
-	if !initialized {
-		slog.Info("completing Jellyseerr setup wizard", "component", "autowire")
-		if err := completeJellyseerrWizard(s); err != nil {
-			slog.Error("Jellyseerr wizard setup failed", "component", "autowire", "error", err)
-			return
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	// Get API key: read from settings.json (always present, even before wizard completes).
-	apiKey, err := readJellyseerrAPIKey()
-	if err != nil {
-		slog.Error("can't get Jellyseerr API key", "component", "autowire", "error", err)
-		return
-	}
-
-	s.mu.Lock()
-	s.JellyseerrKey = apiKey
-	s.mu.Unlock()
-	slog.Info("Jellyseerr API key loaded", "component", "autowire")
-
-	// Wire Radarr and Sonarr into Jellyseerr
-	s.mu.RLock()
-	radarrKey := s.RadarrKey
-	sonarrKey := s.SonarrKey
-	s.mu.RUnlock()
-
-	wireJellyseerrService(s, apiKey, "radarr", "radarr", 7878, "/radarr", radarrKey, "/movies")
-	wireJellyseerrService(s, apiKey, "sonarr", "sonarr", 8989, "/sonarr", sonarrKey, "/tv")
-	slog.Info("Jellyseerr wired", "component", "autowire")
-}
-
-func completeJellyseerrWizard(s *ServiceClients) error {
-	// Read the API key Jellyseerr generates at startup from its settings.json.
-	// Jellyseerr creates this key before any wizard interaction, so it's always available.
-	// We use it with X-API-Key to avoid cookie session issues in Go's http client.
-	apiKey, err := readJellyseerrAPIKey()
-	if err != nil {
-		return fmt.Errorf("read jellyseerr api key: %w", err)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	// Step 1: authenticate via Jellyfin — creates the initial admin user in Jellyseerr
-	// and saves the Jellyfin server connection in settings.
-	// hostname/port/urlBase are separate fields; Jellyseerr rejects a full URL with INVALID_URL.
-	// serverType=2 is MediaServerType.JELLYFIN; required on first-run or Jellyseerr throws NoAdminUser.
-	authPayload, _ := json.Marshal(map[string]any{
-		"username":   "admin",
-		"password":   os.Getenv("JELLYFIN_PASSWORD"),
-		"hostname":   "jellyfin",
-		"port":       8096,
-		"urlBase":    "/jellyfin",
-		"useSsl":     false,
-		"serverType": 2, // MediaServerType.JELLYFIN
-	})
-	authReq, _ := http.NewRequest("POST", "http://jellyseerr:5055/api/v1/auth/jellyfin",
-		bytes.NewReader(authPayload))
-	authReq.Header.Set("Content-Type", "application/json")
-	authReq.Header.Set("X-API-Key", apiKey)
-	authResp, err := client.Do(authReq)
-	if err != nil {
-		return fmt.Errorf("jellyfin auth: %w", err)
-	}
-	authResp.Body.Close()
-	if authResp.StatusCode >= 400 {
-		return fmt.Errorf("jellyfin auth HTTP %d", authResp.StatusCode)
-	}
-
-	// Step 2: mark initialization complete using the same API key.
-	initReq, _ := http.NewRequest("POST", "http://jellyseerr:5055/api/v1/settings/initialize",
-		bytes.NewReader([]byte("{}")))
-	initReq.Header.Set("Content-Type", "application/json")
-	initReq.Header.Set("X-API-Key", apiKey)
-	initResp, err := client.Do(initReq)
-	if err != nil {
-		return fmt.Errorf("initialize: %w", err)
-	}
-	initResp.Body.Close()
-	if initResp.StatusCode >= 400 {
-		return fmt.Errorf("initialize HTTP %d", initResp.StatusCode)
-	}
-
-	slog.Info("Jellyseerr wizard completed", "component", "autowire")
-	return nil
-}
-
-// readJellyseerrAPIKey reads the API key from Jellyseerr's settings.json.
-// Jellyseerr generates this key at startup before any wizard interaction,
-// so it is available even on first run. The file is mounted read-only at
-// /config/jellyseerr/settings.json inside the middleware container.
-func readJellyseerrAPIKey() (string, error) {
-	data, err := os.ReadFile("/config/jellyseerr/settings.json")
-	if err != nil {
-		return "", fmt.Errorf("read settings.json: %w", err)
-	}
-	var settings struct {
-		Main struct {
-			APIKey string `json:"apiKey"`
-		} `json:"main"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return "", fmt.Errorf("parse settings.json: %w", err)
-	}
-	if settings.Main.APIKey == "" {
-		return "", fmt.Errorf("no apiKey in settings.json")
-	}
-	return settings.Main.APIKey, nil
-}
-
-
-func wireJellyseerrService(s *ServiceClients, apiKey, svcType, hostname string, port int, urlBase, svcAPIKey, mediaDir string) {
-	// Check if already configured
-	data, err := jsGet(s, "/api/v1/settings/"+svcType, apiKey)
-	if err != nil {
-		slog.Error("can't check Jellyseerr service", "component", "autowire", "service_type", svcType, "error", err)
-		return
-	}
-
-	var existing []map[string]any
-	if json.Unmarshal(data, &existing) == nil && len(existing) > 0 {
-		slog.Info("Jellyseerr service already configured, skipping", "component", "autowire", "service_type", svcType)
-		return
-	}
-
-	name := strings.ToUpper(svcType[:1]) + svcType[1:]
-	payload := map[string]any{
-		"name":              name,
-		"hostname":          hostname,
-		"port":              port,
-		"apiKey":            svcAPIKey,
-		"urlBase":           urlBase,
-		"useSsl":            false,
-		"is4k":             false,
-		"isDefault":         true,
-		"syncEnabled":       false,
-		"preventSearch":     false,
-		"activeProfileId":   1,
-		"activeProfileName": "Any",
-		"activeDirectory":   mediaDir,
-	}
-	if svcType == "radarr" {
-		payload["minimumAvailability"] = "released"
-		payload["activeMinimumAvailability"] = "released"
-	}
-	if svcType == "sonarr" {
-		payload["activeAnimeProfileId"] = 1
-		payload["activeAnimeDirectory"] = mediaDir
-		payload["enableSeasonFolders"] = true
-	}
-
-	_, err = jsPost(s, "/api/v1/settings/"+svcType, apiKey, payload)
-	if err != nil {
-		slog.Error("failed to add Jellyseerr service", "component", "autowire", "service_type", svcType, "error", err)
-		return
-	}
-	slog.Info("added Jellyseerr service", "component", "autowire", "service_type", svcType)
-}
-
-const jellyseerrBase = "http://jellyseerr:5055"
-
-func jsGet(s *ServiceClients, path, apiKey string) ([]byte, error) {
-	return s.arrDo("GET", jellyseerrBase, apiKey, path, nil)
-}
-
-func jsPost(s *ServiceClients, path, apiKey string, payload any) ([]byte, error) {
-	return s.arrDo("POST", jellyseerrBase, apiKey, path, payload)
-}
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
 	// Check existing applications

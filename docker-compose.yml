@@ -233,8 +233,6 @@ services:
       - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
       - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
-      - JELLYSEERR_ENABLED=${JELLYSEERR_ENABLED:-false}
-      - JELLYSEERR_PORT=${JELLYSEERR_PORT:-5055}
       - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
     volumes:
       - ./.env:/project/.env
@@ -242,7 +240,6 @@ services:
       - ${CONFIG_DIR}/radarr:/config/radarr:ro
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
-      - ${CONFIG_DIR}/jellyseerr:/config/jellyseerr:ro
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${LIBRARY_DIR}/movies:/movies
       - ${LIBRARY_DIR}/tv:/tv
@@ -260,29 +257,6 @@ services:
       - docker-proxy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/api/pelicula/status || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
-
-  # ═══════════════════════════════════════════════════
-  # Request Management — opt-in (profile: jellyseerr)
-  # Enable: set JELLYSEERR_ENABLED=true in .env
-  # ═══════════════════════════════════════════════════
-  jellyseerr:
-    image: fallenbagel/jellyseerr:latest
-    container_name: jellyseerr
-    profiles: [jellyseerr]
-    environment:
-      - TZ=${TZ}
-      - LOG_LEVEL=info
-    ports:
-      - "${JELLYSEERR_PORT:-5055}:5055"
-    volumes:
-      - ${CONFIG_DIR}/jellyseerr:/app/config
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:5055/api/v1/status || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

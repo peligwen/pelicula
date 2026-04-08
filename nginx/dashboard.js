@@ -15,7 +15,7 @@ async function checkAuth() {
         const data = await res.json();
         if (!data.auth) {
             // Auth is off — no login needed, full access
-            applyRole('admin');
+            applyRole('admin', '');
             return;
         }
         if (!data.valid) {
@@ -25,7 +25,7 @@ async function checkAuth() {
             }
             document.getElementById('login-overlay').classList.remove('hidden');
         } else {
-            applyRole(data.role || 'admin');
+            applyRole(data.role || 'admin', data.username || '');
         }
     } catch {
         // Network error — default to locked state rather than granting admin
@@ -46,7 +46,7 @@ async function doLogin() {
         if (res.ok) {
             document.getElementById('login-overlay').classList.add('hidden');
             errEl.style.display = 'none';
-            applyRole(data.role || 'admin');
+            applyRole(data.role || 'admin', data.username || '');
             refresh();
         } else {
             errEl.style.display = 'block';
@@ -58,8 +58,9 @@ async function doLogin() {
 // viewer:  no search, no download actions
 // manager: search + add, pause/resume; no cancel/blocklist
 // admin:   everything
-function applyRole(role) {
+function applyRole(role, username) {
     currentRole = role;
+    document.body.dataset.username = username || '';
     const isManager = role === 'manager' || role === 'admin';
     const isAdmin = role === 'admin';
 
@@ -72,10 +73,31 @@ function applyRole(role) {
         el.style.display = isAdmin ? '' : 'none';
     });
 
+    // Requests section: visible to all authenticated users
+    const requestsSection = document.getElementById('requests-section');
+    if (requestsSection) {
+        requestsSection.classList.remove('hidden');
+        if (!requestsLoaded) { loadRequests(); requestsLoaded = true; }
+        if (isAdmin && !arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
+    }
+
+    // Users section: visible to admins
+    const usersSection = document.getElementById('users-section');
+    if (usersSection) {
+        if (isAdmin) {
+            usersSection.classList.remove('hidden');
+            if (!usersLoaded) { loadUsers(); loadInvites(); usersLoaded = true; }
+        } else {
+            usersSection.classList.add('hidden');
+        }
+    }
+
     // Download action buttons (rendered dynamically — use a data attribute approach)
     // Store role for use in renderDownloads
     document.body.dataset.role = role;
 }
+
+let usersLoaded = false;
 
 document.getElementById('login-username').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-password').focus(); });
 document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -91,32 +113,6 @@ async function checkStatus() {
             toast.classList.add('visible');
         } else {
             toast.classList.remove('visible');
-        }
-        // Show Jellyseerr service card when enabled
-        const jsCard = document.getElementById('service-jellyseerr');
-        if (jsCard) {
-            if (data.jellyseerr_enabled) {
-                // Jellyseerr doesn't support sub-path hosting, so link directly to its port.
-                const jsPort = data.jellyseerr_port || 5055;
-                const jsProto = window.location.protocol;
-                jsCard.href = `${jsProto}//${window.location.hostname}:${jsPort}`;
-                jsCard.dataset.check = `${jsProto}//${window.location.hostname}:${jsPort}/api/v1/status`;
-                jsCard.classList.remove('hidden');
-            } else {
-                jsCard.classList.add('hidden');
-            }
-        }
-        // Show Users section when Jellyseerr is enabled
-        const usersSection = document.getElementById('users-section');
-        if (usersSection) {
-            if (data.jellyseerr_enabled) {
-                usersSection.classList.remove('hidden');
-                const jsPort = data.jellyseerr_port || 5055;
-                window._jellyseerrURL = `${window.location.protocol}//${window.location.hostname}:${jsPort}/`;
-                if (!usersLoaded) { loadUsers(); loadInvites(); usersLoaded = true; }
-            } else {
-                usersSection.classList.add('hidden');
-            }
         }
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
@@ -175,13 +171,17 @@ async function doSearch(q) {
 function renderResultCard(r) {
     const poster = r.poster ? `<img src="${r.poster}" alt="">` : '<div class="no-poster"></div>';
     const badge = r.type === 'movie' ? 'Movie' : 'Series';
-    const id = r.type === 'movie' ? r.tmdbId : r.tvdbId;
+    const tmdbId = r.tmdbId || 0;
+    const tvdbId = r.tvdbId || 0;
+    const id = r.type === 'movie' ? tmdbId : tvdbId;
     const idKey = r.type === 'movie' ? 'tmdb' : 'tvdb';
     const added = r.added || isAddedLocally(idKey, id);
-    const btnClass = added ? 'search-add added' : 'search-add';
-    const btnText = added ? 'Added' : 'Add';
-    const disabled = added ? 'disabled' : '';
-    return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div><button class="${btnClass}" ${disabled} data-type="${esc(r.type)}" data-id="${id}" onclick="addMedia(this.dataset.type, parseInt(this.dataset.id), this)">${btnText}</button></div>`;
+    const isManager = currentRole === 'manager' || currentRole === 'admin';
+    // Managers and admins get the direct Add button; viewers get a Request button.
+    const actionBtn = isManager
+        ? `<button class="${added ? 'search-add added' : 'search-add'}" ${added ? 'disabled' : ''} data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" onclick="addMedia(this.dataset.type, this.dataset.type==='movie'?parseInt(this.dataset.tmdb):parseInt(this.dataset.tvdb), this)">${added ? 'Added' : 'Add'}</button>`
+        : `<button class="search-request" data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-title="${esc(r.title)}" data-year="${r.year||0}" data-poster="${esc(r.poster||'')}" onclick="submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true">Request</button>`;
+    return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div>${actionBtn}</div>`;
 }
 function renderResults(results, collapsed) {
     if (!results.length) {
@@ -204,7 +204,7 @@ function expandResults() {
     searchFilters.classList.add('visible');
 }
 async function addMedia(type, id, btn) {
-    btn.disabled = true; btn.textContent = '...';
+    btn.disabled = true; btn.textContent = '…';
     try {
         const body = type === 'movie' ? {type, tmdbId: id} : {type, tvdbId: id};
         const res = await fetch('/api/pelicula/search/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
@@ -1402,8 +1402,6 @@ setInterval(updateStaleBanner, 5000);
 setInterval(function() { if (!document.hidden) checkPipeline(); }, 3000);
 
 // ── Users ─────────────────────────────────
-let usersLoaded = false;
-
 async function loadUsers() {
     const list = document.getElementById('users-list');
     if (!list) return;
@@ -1590,36 +1588,182 @@ document.getElementById('add-user-form')?.addEventListener('submit', async (e) =
     }
 });
 
-document.getElementById('share-jellyseerr-btn')?.addEventListener('click', () => {
-    const url = window._jellyseerrURL || window.location.origin;
-    const btn = document.getElementById('share-jellyseerr-btn');
-    const showURL = () => {
-        // Fall back: show the URL inline so the user can select+copy manually.
-        let urlDisplay = document.getElementById('jellyseerr-share-url');
-        if (!urlDisplay) {
-            urlDisplay = document.createElement('input');
-            urlDisplay.id = 'jellyseerr-share-url';
-            urlDisplay.type = 'text';
-            urlDisplay.readOnly = true;
-            urlDisplay.className = 'share-url-input';
-            btn.parentNode.insertBefore(urlDisplay, btn.nextSibling);
-        }
-        urlDisplay.value = url;
-        urlDisplay.select();
-    };
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(() => {
-            const prev = btn.textContent;
-            btn.textContent = 'Copied!';
-            setTimeout(() => { btn.textContent = prev; }, 2000);
-        }).catch(showURL);
-    } else {
-        showURL();
-    }
-});
 
 function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Requests ──────────────────────────────
+let requestsLoaded = false;
+let arrMetaLoaded = false;
+let _arrMeta = null;
+
+async function loadRequests() {
+    try {
+        const resp = await fetch('/api/pelicula/requests');
+        if (!resp.ok) return;
+        const requests = await resp.json();
+        renderRequests(requests || []);
+    } catch (e) { console.warn('[pelicula] loadRequests error', e); }
+}
+
+function renderRequests(requests) {
+    const isAdmin = currentRole === 'admin';
+    const username = document.body.dataset.username || '';
+
+    const pendingList = document.getElementById('requests-pending-list');
+    const pendingEmpty = document.getElementById('requests-pending-empty');
+    const mineList = document.getElementById('requests-mine-list');
+    const mineEmpty = document.getElementById('requests-mine-empty');
+
+    const pending = requests.filter(r => r.state === 'pending' && isAdmin);
+    const mine = requests.filter(r => r.requested_by === username || (!username && !isAdmin));
+
+    if (pendingList) {
+        pendingList.innerHTML = pending.map(r => `
+            <li class="request-item" data-id="${escapeHtml(r.id)}">
+                ${r.poster ? `<img class="request-poster" src="${escapeHtml(r.poster)}" alt="">` : '<div class="request-poster request-poster-placeholder"></div>'}
+                <div class="request-info">
+                    <div class="request-title">${escapeHtml(r.title)}${r.year ? ` <span class="request-year">(${r.year})</span>` : ''}</div>
+                    <div class="request-meta">${escapeHtml(r.type)} · requested by ${escapeHtml(r.requested_by)}</div>
+                </div>
+                <div class="request-actions">
+                    <button class="request-btn request-btn-approve" onclick="approveRequest('${escapeHtml(r.id)}')">Approve</button>
+                    <button class="request-btn request-btn-deny" onclick="denyRequest('${escapeHtml(r.id)}')">Deny</button>
+                </div>
+            </li>`).join('');
+        if (pendingEmpty) pendingEmpty.classList.toggle('hidden', pending.length > 0);
+    }
+
+    if (mineList) {
+        mineList.innerHTML = mine.map(r => `
+            <li class="request-item request-item-${escapeHtml(r.state)}" data-id="${escapeHtml(r.id)}">
+                ${r.poster ? `<img class="request-poster" src="${escapeHtml(r.poster)}" alt="">` : '<div class="request-poster request-poster-placeholder"></div>'}
+                <div class="request-info">
+                    <div class="request-title">${escapeHtml(r.title)}${r.year ? ` <span class="request-year">(${r.year})</span>` : ''}</div>
+                    <div class="request-meta">${escapeHtml(r.type)}</div>
+                    ${r.reason ? `<div class="request-reason">${escapeHtml(r.reason)}</div>` : ''}
+                </div>
+                <span class="request-state request-state-${escapeHtml(r.state)}">${escapeHtml(r.state)}</span>
+            </li>`).join('');
+        if (mineEmpty) mineEmpty.classList.toggle('hidden', mine.length > 0);
+    }
+}
+
+async function approveRequest(id) {
+    const btn = document.querySelector(`.request-item[data-id="${id}"] .request-btn-approve`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+    try {
+        const resp = await fetch(`/api/pelicula/requests/${id}/approve`, {method: 'POST'});
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            alert('Approve failed: ' + (data.error || resp.status));
+            if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+            return;
+        }
+        await loadRequests();
+    } catch (e) {
+        alert('Network error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+    }
+}
+
+async function denyRequest(id) {
+    const reason = prompt('Reason for denial (optional):') ?? null;
+    if (reason === null) return; // cancelled
+    try {
+        const resp = await fetch(`/api/pelicula/requests/${id}/deny`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reason})
+        });
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            alert('Deny failed: ' + (data.error || resp.status));
+            return;
+        }
+        await loadRequests();
+    } catch (e) { alert('Network error'); }
+}
+
+async function submitRequest(type, tmdbId, tvdbId, title, year, poster) {
+    try {
+        const body = {type, title, year, poster};
+        if (type === 'movie') body.tmdb_id = tmdbId;
+        else body.tvdb_id = tvdbId;
+        const resp = await fetch('/api/pelicula/requests', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert('Request failed: ' + (data.error || resp.status));
+            return;
+        }
+        requestsLoaded = false; // force reload
+        await loadRequests();
+        const requestsSection = document.getElementById('requests-section');
+        if (requestsSection) requestsSection.scrollIntoView({behavior: 'smooth'});
+    } catch (e) { alert('Network error'); }
+}
+
+// arr-meta for admin request settings dropdowns
+async function loadArrMeta() {
+    try {
+        const resp = await fetch('/api/pelicula/arr-meta');
+        if (!resp.ok) return;
+        _arrMeta = await resp.json();
+        populateRequestsSettings(_arrMeta);
+    } catch (e) { console.warn('[pelicula] loadArrMeta error', e); }
+}
+
+function toggleRequestsSettings() {
+    const panel = document.getElementById('requests-settings-panel');
+    if (panel) panel.classList.toggle('hidden');
+}
+
+function populateRequestsSettings(meta) {
+    const fillProfiles = (selectId, profiles) => {
+        const el = document.getElementById(selectId);
+        if (!el || !profiles) return;
+        el.innerHTML = '<option value="">— use default —</option>' +
+            profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    };
+    const fillRoots = (selectId, roots) => {
+        const el = document.getElementById(selectId);
+        if (!el || !roots) return;
+        el.innerHTML = '<option value="">— use default —</option>' +
+            roots.map(r => `<option value="${escapeHtml(r.path)}">${escapeHtml(r.path)}</option>`).join('');
+    };
+    fillProfiles('req-radarr-profile', meta?.radarr?.qualityProfiles);
+    fillRoots('req-radarr-root', meta?.radarr?.rootFolders);
+    fillProfiles('req-sonarr-profile', meta?.sonarr?.qualityProfiles);
+    fillRoots('req-sonarr-root', meta?.sonarr?.rootFolders);
+}
+
+async function saveRequestsSettings() {
+    const profileEl = id => document.getElementById(id);
+    const body = {};
+    const radarrProfile = profileEl('req-radarr-profile')?.value;
+    const radarrRoot = profileEl('req-radarr-root')?.value;
+    const sonarrProfile = profileEl('req-sonarr-profile')?.value;
+    const sonarrRoot = profileEl('req-sonarr-root')?.value;
+    if (radarrProfile) body.requests_radarr_profile_id = radarrProfile;
+    if (radarrRoot) body.requests_radarr_root = radarrRoot;
+    if (sonarrProfile) body.requests_sonarr_profile_id = sonarrProfile;
+    if (sonarrRoot) body.requests_sonarr_root = sonarrRoot;
+    try {
+        const resp = await fetch('/api/pelicula/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Origin': window.location.origin},
+            body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (!resp.ok) { alert('Save failed: ' + (data.error || resp.status)); return; }
+        const btn = document.getElementById('requests-settings-save-btn');
+        if (btn) { const prev = btn.textContent; btn.textContent = 'Saved!'; setTimeout(() => btn.textContent = prev, 2000); }
+    } catch (e) { alert('Network error'); }
 }
 
 // ── Invites ────────────────────────────────

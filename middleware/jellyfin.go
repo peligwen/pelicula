@@ -383,10 +383,7 @@ func GetJellyfinSessions(s *ServiceClients) ([]JellyfinSession, error) {
 }
 
 // CreateJellyfinUser creates a new Jellyfin user with the given name and password.
-// password must be non-empty; Jellyfin users without passwords should not be created
-// via this API since they would have unrestricted access to Jellyseerr.
-// CreateJellyfinUser creates a new Jellyfin user with the given name and password.
-// Returns the new user's Jellyfin ID on success.
+// password must be non-empty. Returns the new user's Jellyfin ID on success.
 func CreateJellyfinUser(s *ServiceClients, username, password string) (string, error) {
 	if password == "" {
 		return "", ErrPasswordRequired
@@ -513,7 +510,7 @@ func setEmbyAuth(req *http.Request, token string) {
 // handleUsers handles GET /api/pelicula/users (list) and POST /api/pelicula/users (create).
 func handleUsers(w http.ResponseWriter, r *http.Request) {
 	// Block state-mutating requests when auth is off: anyone on the network could
-	// create Jellyfin accounts (immediately usable via Jellyseerr) without credentials.
+	// create accounts without credentials.
 	// Read-only GET is fine in off mode since the dashboard uses it for display only.
 	if r.Method != http.MethodGet && authMiddleware != nil && authMiddleware.IsOffMode() {
 		writeError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)

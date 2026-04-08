@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -365,10 +364,6 @@ func TestHandleInviteRedeem(t *testing.T) {
 
 	s := newTestInviteStore(t)
 	setInviteStore(t, s)
-
-	os.Setenv("JELLYSEERR_ENABLED", "true")
-	os.Setenv("JELLYSEERR_PORT", "5055")
-	t.Cleanup(func() { os.Unsetenv("JELLYSEERR_ENABLED"); os.Unsetenv("JELLYSEERR_PORT") })
 
 	maxUses := 2
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)

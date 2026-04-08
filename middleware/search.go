@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
-	"time"
 )
 
 type SearchResult struct {
@@ -130,7 +127,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		for _, s := range shows {
 			tvdbID := int(floatVal(s, "tvdbId"))
-			tmdbID := int(floatVal(s, "tmdbId")) // present in Sonarr for many shows; used for Jellyseerr routing
+			tmdbID := int(floatVal(s, "tmdbId")) // present in Sonarr for many shows
 			poster := ""
 			if images, ok := s["images"].([]any); ok {
 				for _, img := range images {
@@ -192,155 +189,196 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// When Jellyseerr is enabled and configured, route add requests through it.
-	// This gives request tracking, approval workflow, and per-user attribution.
-	// Falls back to direct *arr if Jellyseerr has no key yet or TMDB ID is unavailable.
-	if os.Getenv("JELLYSEERR_ENABLED") == "true" {
-		services.mu.RLock()
-		jsKey := services.JellyseerrKey
-		services.mu.RUnlock()
-		if jsKey != "" && req.TmdbID != 0 {
-			requestViaJellyseerr(w, req.Type, req.TmdbID, jsKey)
-			return
-		}
-	}
-
 	switch req.Type {
 	case "movie":
-		addMovie(w, req.TmdbID)
+		arrID, err := addMovieInternal(req.TmdbID, 0, "")
+		if err != nil {
+			writeError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})
 	case "series":
-		addSeries(w, req.TvdbID)
+		arrID, err := addSeriesInternal(req.TvdbID, 0, "")
+		if err != nil {
+			writeError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})
 	default:
 		writeError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
 	}
 }
 
-func requestViaJellyseerr(w http.ResponseWriter, mediaType string, tmdbID int, apiKey string) {
-	jType := "movie"
-	if mediaType == "series" {
-		jType = "tv"
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"mediaType": jType,
-		"mediaId":   tmdbID,
-	})
-	req, err := http.NewRequest("POST", "http://jellyseerr:5055/api/v1/request",
-		bytes.NewReader(payload))
-	if err != nil {
-		writeError(w, "request build failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("X-Api-Key", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		writeError(w, "Jellyseerr unreachable: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeError(w, fmt.Sprintf("Jellyseerr returned HTTP %d", resp.StatusCode), http.StatusBadGateway)
-		return
-	}
-	writeJSON(w, map[string]string{"status": "requested"})
-}
-
-func addMovie(w http.ResponseWriter, tmdbID int) {
+// addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.
+// If profileID is 0 the first available quality profile is used.
+// If rootPath is "" the default "/movies" path is used.
+func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 	_, radarrKey, _ := services.Keys()
-	// Look up movie details first
 	data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
 	if err != nil {
-		writeError(w, "failed to look up movie: "+err.Error(), http.StatusBadGateway)
-		return
+		return 0, fmt.Errorf("look up movie: %w", err)
 	}
-
 	var movie map[string]any
 	if err := json.Unmarshal(data, &movie); err != nil {
-		writeError(w, "failed to parse movie data", http.StatusInternalServerError)
-		return
+		return 0, fmt.Errorf("parse movie data: %w", err)
 	}
 
-	// Get first quality profile
-	profileID := 1
-	profData, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
-	if err == nil {
-		var profiles []map[string]any
-		if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
-			if id, ok := profiles[0]["id"].(float64); ok {
-				profileID = int(id)
+	if profileID == 0 {
+		profData, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
+		if err == nil {
+			var profiles []map[string]any
+			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
+				if id, ok := profiles[0]["id"].(float64); ok {
+					profileID = int(id)
+				}
 			}
 		}
+		if profileID == 0 {
+			profileID = 1
+		}
+	}
+	if rootPath == "" {
+		rootPath = "/movies"
 	}
 
 	payload := map[string]any{
 		"tmdbId":           tmdbID,
 		"title":            movie["title"],
 		"qualityProfileId": profileID,
-		"rootFolderPath":   "/movies",
+		"rootFolderPath":   rootPath,
 		"monitored":        true,
 		"addOptions": map[string]any{
 			"searchForMovie": true,
 		},
 	}
-
-	_, err = services.ArrPost(radarrURL, radarrKey, "/api/v3/movie", payload)
+	resp, err := services.ArrPost(radarrURL, radarrKey, "/api/v3/movie", payload)
 	if err != nil {
-		writeError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
-		return
+		return 0, fmt.Errorf("add movie: %w", err)
 	}
-
-	writeJSON(w, map[string]string{"status": "added"})
+	var added map[string]any
+	json.Unmarshal(resp, &added)
+	return int(floatVal(added, "id")), nil
 }
 
-func addSeries(w http.ResponseWriter, tvdbID int) {
+// addSeriesInternal adds a series to Sonarr and returns the Sonarr internal ID.
+// If profileID is 0 the first available quality profile is used.
+// If rootPath is "" the default "/tv" path is used.
+func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 	sonarrKey, _, _ := services.Keys()
-	// Look up series details
 	data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
 	if err != nil {
-		writeError(w, "failed to look up series: "+err.Error(), http.StatusBadGateway)
-		return
+		return 0, fmt.Errorf("look up series: %w", err)
 	}
-
 	var shows []map[string]any
 	if err := json.Unmarshal(data, &shows); err != nil || len(shows) == 0 {
-		writeError(w, "series not found", http.StatusNotFound)
-		return
+		return 0, fmt.Errorf("series not found")
 	}
 	show := shows[0]
 
-	// Get first quality profile
-	profileID := 1
-	profData, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
-	if err == nil {
-		var profiles []map[string]any
-		if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
-			if id, ok := profiles[0]["id"].(float64); ok {
-				profileID = int(id)
+	if profileID == 0 {
+		profData, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		if err == nil {
+			var profiles []map[string]any
+			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
+				if id, ok := profiles[0]["id"].(float64); ok {
+					profileID = int(id)
+				}
 			}
 		}
+		if profileID == 0 {
+			profileID = 1
+		}
+	}
+	if rootPath == "" {
+		rootPath = "/tv"
 	}
 
 	payload := map[string]any{
 		"tvdbId":           tvdbID,
 		"title":            show["title"],
 		"qualityProfileId": profileID,
-		"rootFolderPath":   "/tv",
+		"rootFolderPath":   rootPath,
 		"monitored":        true,
 		"seasonFolder":     true,
 		"addOptions": map[string]any{
 			"searchForMissingEpisodes": true,
 		},
 	}
-
-	_, err = services.ArrPost(sonarrURL, sonarrKey, "/api/v3/series", payload)
+	resp, err := services.ArrPost(sonarrURL, sonarrKey, "/api/v3/series", payload)
 	if err != nil {
-		writeError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
+		return 0, fmt.Errorf("add series: %w", err)
+	}
+	var added map[string]any
+	json.Unmarshal(resp, &added)
+	return int(floatVal(added, "id")), nil
+}
+
+// handleArrMeta returns quality profiles and root folders from Radarr and Sonarr.
+// Used by the admin settings UI to populate request profile dropdowns.
+func handleArrMeta(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	writeJSON(w, map[string]string{"status": "added"})
+	sonarrKey, radarrKey, _ := services.Keys()
+
+	type profileEntry struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	type rootEntry struct {
+		Path string `json:"path"`
+	}
+	type arrMeta struct {
+		QualityProfiles []profileEntry `json:"qualityProfiles"`
+		RootFolders     []rootEntry    `json:"rootFolders"`
+	}
+
+	fetchProfiles := func(baseURL, apiKey string) []profileEntry {
+		data, err := services.ArrGet(baseURL, apiKey, "/api/v3/qualityprofile")
+		if err != nil {
+			return nil
+		}
+		var raw []map[string]any
+		if json.Unmarshal(data, &raw) != nil {
+			return nil
+		}
+		var out []profileEntry
+		for _, p := range raw {
+			out = append(out, profileEntry{
+				ID:   int(floatVal(p, "id")),
+				Name: strVal(p, "name"),
+			})
+		}
+		return out
+	}
+	fetchRoots := func(baseURL, apiKey string) []rootEntry {
+		data, err := services.ArrGet(baseURL, apiKey, "/api/v3/rootfolder")
+		if err != nil {
+			return nil
+		}
+		var raw []map[string]any
+		if json.Unmarshal(data, &raw) != nil {
+			return nil
+		}
+		var out []rootEntry
+		for _, f := range raw {
+			out = append(out, rootEntry{Path: strVal(f, "path")})
+		}
+		return out
+	}
+
+	writeJSON(w, map[string]any{
+		"radarr": arrMeta{
+			QualityProfiles: fetchProfiles(radarrURL, radarrKey),
+			RootFolders:     fetchRoots(radarrURL, radarrKey),
+		},
+		"sonarr": arrMeta{
+			QualityProfiles: fetchProfiles(sonarrURL, sonarrKey),
+			RootFolders:     fetchRoots(sonarrURL, sonarrKey),
+		},
+	})
 }
 
 func itoa(i int) string {

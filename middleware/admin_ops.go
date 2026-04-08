@@ -135,7 +135,7 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	// qbittorrent is omitted: it shares gluetun's network namespace and
 	// comes back automatically when gluetun restarts.
 	order := []string{"nginx", "procula", "sonarr", "radarr", "prowlarr",
-		"qbittorrent", "jellyfin", "bazarr", "gluetun", "jellyseerr"}
+		"qbittorrent", "jellyfin", "bazarr", "gluetun"}
 	var errs []string
 	for _, svc := range order {
 		if !isAllowedContainer(svc) {

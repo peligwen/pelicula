@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./pelicula reset-config        # soft reset: wipe service configs, preserve API keys/VPN/certs/auth
 ./pelicula reset-config [svc]  # per-service reset: sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs
 ./pelicula reset-config all    # hard reset: wipe entire config dir, keep Prowlarr indexers + .env + media
-./pelicula configure           # interactive menu: auth, notifications, Jellyseerr, transcoding, remote access (Peligrosa)
+./pelicula configure           # interactive menu: auth, notifications, transcoding, remote access (Peligrosa)
 ./pelicula import              # import local media files via the browser wizard
 ./pelicula export              # export watchlist / library backup
 ./pelicula import-backup       # restore from a backup exported by pelicula export
@@ -46,7 +46,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-Nine Docker containers via Docker Compose (plus two opt-in profile services: Jellyseerr, Apprise):
+Nine Docker containers via Docker Compose (plus one opt-in profile service: Apprise):
 
 ```
 nginx (:7354) ─── /                → dashboard (static HTML)

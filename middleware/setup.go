@@ -168,7 +168,6 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"PELICULA_PASSWORD":     password,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
-		"JELLYSEERR_ENABLED":    "true",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",

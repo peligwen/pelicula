@@ -17,11 +17,10 @@ type ServiceClients struct {
 	configDir string
 	client    *http.Client
 
-	SonarrKey     string
-	RadarrKey     string
-	ProwlarrKey   string
-	JellyseerrKey string
-	BazarrKey     string
+	SonarrKey   string
+	RadarrKey   string
+	ProwlarrKey string
+	BazarrKey   string
 
 	wired bool
 	mu    sync.RWMutex
@@ -228,10 +227,6 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 		"procula":     "http://procula:8282/ping",
 		"bazarr":      "http://bazarr:6767/bazarr/",
 	}
-	if os.Getenv("JELLYSEERR_ENABLED") == "true" {
-		checks["jellyseerr"] = "http://jellyseerr:5055/api/v1/status"
-	}
-
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 

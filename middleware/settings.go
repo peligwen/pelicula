@@ -31,7 +31,6 @@ type SettingsResponse struct {
 	AuthMode             string `json:"auth_mode"`
 	Password             string `json:"password"`
 	ProculaAPIKey        string `json:"procula_api_key"`
-	JellyseerrEnabled    string `json:"jellyseerr_enabled"`
 	TranscodingEnabled   string `json:"transcoding_enabled"`
 	NotificationsEnabled string `json:"notifications_enabled"`
 	NotificationsMode    string `json:"notifications_mode"`
@@ -49,6 +48,11 @@ type SettingsResponse struct {
 	RemoteLEStaging     string `json:"remote_le_staging"`
 	// Seeding
 	SeedingRemoveOnComplete string `json:"seeding_remove_on_complete"`
+	// Request queue: per-type quality profile and root folder for approved requests
+	RequestsRadarrProfileID string `json:"requests_radarr_profile_id"`
+	RequestsRadarrRoot      string `json:"requests_radarr_root"`
+	RequestsSonarrProfileID string `json:"requests_sonarr_profile_id"`
+	RequestsSonarrRoot      string `json:"requests_sonarr_root"`
 }
 
 // parseEnvFile reads a .env file and returns a key→value map.
@@ -93,9 +97,11 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
 		"PELICULA_PORT", "PELICULA_AUTH", "PELICULA_PASSWORD",
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
-		"JELLYSEERR_ENABLED", "TRANSCODING_ENABLED",
+		"TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
 		"PELICULA_SUB_LANGS",
+		"REQUESTS_RADARR_PROFILE_ID", "REQUESTS_RADARR_ROOT",
+		"REQUESTS_SONARR_PROFILE_ID", "REQUESTS_SONARR_ROOT",
 		"REMOTE_ACCESS_ENABLED", "REMOTE_HOSTNAME",
 		"REMOTE_HTTP_PORT", "REMOTE_HTTPS_PORT",
 		"REMOTE_CERT_MODE", "REMOTE_LE_EMAIL", "REMOTE_LE_STAGING",
@@ -177,7 +183,6 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		AuthMode:             vars["PELICULA_AUTH"],
 		Password:             maskedValue,
 		ProculaAPIKey:        maskedValue,
-		JellyseerrEnabled:    vars["JELLYSEERR_ENABLED"],
 		TranscodingEnabled:   vars["TRANSCODING_ENABLED"],
 		NotificationsEnabled: vars["NOTIFICATIONS_ENABLED"],
 		NotificationsMode:    vars["NOTIFICATIONS_MODE"],
@@ -193,6 +198,10 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		RemoteLEEmail:           vars["REMOTE_LE_EMAIL"],
 		RemoteLEStaging:         vars["REMOTE_LE_STAGING"],
 		SeedingRemoveOnComplete: vars["SEEDING_REMOVE_ON_COMPLETE"],
+		RequestsRadarrProfileID: vars["REQUESTS_RADARR_PROFILE_ID"],
+		RequestsRadarrRoot:      vars["REQUESTS_RADARR_ROOT"],
+		RequestsSonarrProfileID: vars["REQUESTS_SONARR_PROFILE_ID"],
+		RequestsSonarrRoot:      vars["REQUESTS_SONARR_ROOT"],
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -323,9 +332,6 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.PGID != "" {
 		vars["PGID"] = req.PGID
 	}
-	if req.JellyseerrEnabled != "" {
-		vars["JELLYSEERR_ENABLED"] = req.JellyseerrEnabled
-	}
 	if req.TranscodingEnabled != "" {
 		vars["TRANSCODING_ENABLED"] = req.TranscodingEnabled
 	}
@@ -367,6 +373,18 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "seeding_remove_on_complete must be true or false", http.StatusBadRequest)
 			return
 		}
+	}
+	if req.RequestsRadarrProfileID != "" {
+		vars["REQUESTS_RADARR_PROFILE_ID"] = req.RequestsRadarrProfileID
+	}
+	if req.RequestsRadarrRoot != "" {
+		vars["REQUESTS_RADARR_ROOT"] = req.RequestsRadarrRoot
+	}
+	if req.RequestsSonarrProfileID != "" {
+		vars["REQUESTS_SONARR_PROFILE_ID"] = req.RequestsSonarrProfileID
+	}
+	if req.RequestsSonarrRoot != "" {
+		vars["REQUESTS_SONARR_ROOT"] = req.RequestsSonarrRoot
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
@@ -475,7 +493,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"PELICULA_PASSWORD":     password,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
-		"JELLYSEERR_ENABLED":    "false",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",

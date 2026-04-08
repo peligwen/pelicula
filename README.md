@@ -26,7 +26,7 @@ Prefer a browser? Run `./pelicula up` and open `http://localhost:7354/setup` —
 On `./pelicula up`, the stack:
 
 1. Seeds service configs (URL bases, auth bypass, download paths)
-2. Starts 10 containers behind an nginx reverse proxy on port 7354
+2. Starts 9 containers behind an nginx reverse proxy on port 7354
 3. Waits for VPN connection and port forwarding
 4. Auto-wires qBittorrent as the download client in Sonarr and Radarr
 5. Connects Prowlarr indexers to both Sonarr and Radarr
@@ -71,7 +71,6 @@ Everything runs behind nginx on one port:
 | `/prowlarr/` | Prowlarr | Indexer management |
 | `/qbt/` | qBittorrent | Torrent client (VPN-only traffic) |
 | `/jellyfin/` | Jellyfin | Media server and streaming |
-| `/jellyseerr/` | Jellyseerr | Multi-user request management (opt-in) |
 
 All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, qBittorrent loses internet (kill-switch).
 
@@ -89,7 +88,7 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
 ./pelicula restart-acquire     # Restart and re-run VPN port-forward acquisition
 ./pelicula rebuild             # Rebuild and restart middleware/procula containers
 ./pelicula reset-config [svc]  # Delete seeded configs so they regenerate on next up
-./pelicula configure           # Interactive menu: auth, notifications, Jellyseerr, transcoding
+./pelicula configure           # Interactive menu: auth, notifications, transcoding, remote access
 ./pelicula import              # Open the browser-based local media import wizard
 ./pelicula export              # Export watchlist/library backup
 ./pelicula import-backup       # Restore from a backup exported by pelicula export
@@ -119,7 +118,6 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
         |                    /downloads -> /movies, /tv
         |
         +-- /jellyfin/       -> Jellyfin (streams your library)
-        +-- /jellyseerr/     -> Jellyseerr (request management, opt-in)
 ```
 
 ## Download Management
@@ -139,18 +137,15 @@ Progress bars are green (active), amber (paused), or blue (seeding).
 
 A background process checks every 2 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
 
-## Sharing with Others (Jellyseerr)
+## Content Requests
 
-Jellyseerr is included and on by default. It gives friends and family a clean interface to request movies and TV shows without accessing the admin tools directly.
+Viewers can request movies and TV shows directly from the dashboard search results. Admins approve or deny requests from the Requests section; approval automatically adds the item to Radarr or Sonarr using the quality profile and root folder configured in the Requests settings panel. When the download completes and is imported, the request flips to "available" and Apprise notifies the requester.
 
 **How it works:**
-1. Pelicula auto-wires Jellyseerr to Jellyfin, Radarr, and Sonarr on first boot.
-2. Create Jellyfin accounts for your users from the **Users** section of the Pelicula dashboard (or in the Jellyfin admin UI at `/jellyfin`).
-3. Share your Jellyseerr URL (`http://your-host:5055/`) — users log in with their Jellyfin credentials and can start requesting content immediately.
-
-Requests route through Jellyseerr's approval workflow before hitting Sonarr/Radarr. Admin searches from the Pelicula dashboard bypass Jellyseerr and go directly to the *arr apps.
-
-To disable Jellyseerr: run `./pelicula configure`, choose **Jellyseerr**, and select disable. Searches will fall back to direct *arr calls.
+1. Generate an invite link from the **Users** section and share it with your viewers.
+2. Recipients redeem the link, set a username and password, and log in.
+3. Viewers search for a title and click **Request** — the request appears in the admin's Requests section.
+4. Admin approves (or denies with a reason) from the dashboard. No external tools needed.
 
 ## Optional Services
 
@@ -164,7 +159,7 @@ Pelicula supports three modes via `PELICULA_AUTH` in `.env`:
 - `password` (or legacy `true`) — shared password via `PELICULA_PASSWORD`. Everyone who logs in gets admin role.
 - `users` — multi-user with roles. Users live in `/config/pelicula/users.json`. Manage them via `./pelicula configure`.
 
-Role capabilities: **viewer** sees the dashboard and can request content via Jellyseerr; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
+Role capabilities: **viewer** sees the dashboard and can submit content requests; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
 
 **Invites:** Admins can generate shareable invite links from the Users section of the dashboard. Recipients open the link, choose a username and password, and get a Jellyfin viewer account automatically. No admin involvement after the link is shared.
 

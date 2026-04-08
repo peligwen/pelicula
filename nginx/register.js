@@ -4,7 +4,6 @@
 
   const params = new URLSearchParams(window.location.search);
   const token = params.get('t') || '';
-  let jellyseerrURL = null;
 
   // ── Boot: validate the token before showing the form ─────────────────────
   async function boot() {
@@ -19,10 +18,9 @@
       return;
     }
 
-    let data;
     try {
       const resp = await fetch(`/api/pelicula/invites/${encodeURIComponent(token)}/check`);
-      data = await resp.json().catch(() => ({}));
+      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         const state = data.state || '';
         if (state === 'expired') {
@@ -39,11 +37,6 @@
     } catch (e) {
       showDead('Cannot reach server', 'Could not connect to Pelicula. Try again in a moment.');
       return;
-    }
-
-    // Build Jellyseerr URL from current hostname + returned port
-    if (data.jellyseerr_enabled && data.jellyseerr_port) {
-      jellyseerrURL = `${window.location.protocol}//${window.location.hostname}:${data.jellyseerr_port}/`;
     }
 
     // Token is valid — hide the loading state, show the registration form.
@@ -118,15 +111,12 @@
       const data = await resp.json().catch(() => ({}));
 
       if (resp.ok) {
-        showSuccess(username);
+        showSuccess();
         return;
       }
 
       if (resp.status === 409 && data.code === 'username_taken') {
-        const jsLink = jellyseerrURL
-          ? `<a href="${escapeHTML(jellyseerrURL)}" target="_blank" rel="noopener">sign in to Jellyseerr</a>`
-          : 'sign in to Jellyseerr';
-        showError('', `That username is already taken. Try a different one, or ${jsLink} if you already have an account.`);
+        showError('', 'That username is already taken. Try a different one, or sign in to the dashboard if you already have an account.');
         return;
       }
       if (resp.status === 410) {
@@ -146,32 +136,9 @@
     }
   });
 
-  function showSuccess(username) {
+  function showSuccess() {
     document.getElementById('reg-form-wrap').style.display = 'none';
-    const successEl = document.getElementById('reg-success');
-    successEl.style.display = 'block';
-
-    if (jellyseerrURL) {
-      const link = document.getElementById('reg-jellyseerr-link');
-      link.href = jellyseerrURL;
-
-      // QR code pointing at Jellyseerr
-      if (typeof qrSVG === 'function') {
-        const svg = qrSVG(jellyseerrURL, 5);
-        if (svg) {
-          const qrWrap = document.getElementById('reg-qr');
-          document.getElementById('reg-qr-svg').innerHTML = svg;
-          qrWrap.style.display = 'flex';
-        }
-      }
-    } else {
-      // Jellyseerr not enabled — hide the button
-      document.getElementById('reg-jellyseerr-link').style.display = 'none';
-    }
-  }
-
-  function escapeHTML(s) {
-    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    document.getElementById('reg-success').style.display = 'block';
   }
 
   boot();
