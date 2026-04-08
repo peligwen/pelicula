@@ -168,6 +168,18 @@ Role capabilities: **viewer** sees the dashboard and can request content via Jel
 
 **Invites:** Admins can generate shareable invite links from the Users section of the dashboard. Recipients open the link, choose a username and password, and get a Jellyfin viewer account automatically. No admin involvement after the link is shared.
 
+## Security
+
+Pelicula is designed for a trusted LAN. See [SECURITY.md](SECURITY.md) for
+the threat model, known limitations (e.g. salted-SHA-256 password hashing),
+and how to report a vulnerability privately. The opt-in Peligrosa remote
+access feature exposes **only Jellyfin** over TLS — never the admin stack.
+
+## License
+
+AGPL-3.0 — see [LICENSE](LICENSE). If you run a modified version of Pelicula
+as a network service, you must make your source available to its users.
+
 ## Post-Setup: Add Indexers
 
 1. Open Prowlarr at `http://localhost:7354/prowlarr/`
