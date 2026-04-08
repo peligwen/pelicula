@@ -2465,6 +2465,15 @@ cmd_test() {
     }
 
     cleanup_test() {
+        # Always restore the original .env — the test containers have env vars baked in
+        # from the initial `up -d` and are unaffected by the file on disk. Leaving the
+        # test .env in place (dummy WireGuard key etc.) breaks `./pelicula up` for prod.
+        if [[ -n "${test_env_backup:-}" ]] && [[ -f "${test_env_backup:-}" ]]; then
+            mv "$test_env_backup" "${test_env:-$SCRIPT_DIR/.env}"
+        elif [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]]; then
+            rm -f "${test_env:-$SCRIPT_DIR/.env}"
+        fi
+
         if [[ ${keep:-0} -eq 0 ]]; then
             info "Cleaning up test stack..."
             $NEEDS_SUDO docker compose \
@@ -2474,18 +2483,12 @@ cmd_test() {
                 -p pelicula-test \
                 down -v --remove-orphans 2>/dev/null || true
             rm -rf "${test_dir:-}"
-            # Restore original .env (or delete the test-generated one)
-            if [[ -n "${test_env_backup:-}" ]] && [[ -f "${test_env_backup:-}" ]]; then
-                mv "$test_env_backup" "${test_env:-$SCRIPT_DIR/.env}"
-            elif [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]]; then
-                rm -f "${test_env:-$SCRIPT_DIR/.env}"
-            fi
         else
             echo ""
             warn "Test stack left running (--keep is set)."
-            warn "Clean up manually: docker compose -p pelicula-test down -v"
+            warn "Original .env has been restored — prod stack is safe."
+            warn "Clean up test stack: docker compose -p pelicula-test down -v"
             warn "Temp dirs: ${test_dir:-<unknown>}"
-            warn "Test env:  ${test_env:-<unknown>} (original backed up to ${test_env_backup:-none})"
         fi
     }
     trap cleanup_test EXIT
