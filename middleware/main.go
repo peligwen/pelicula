@@ -40,6 +40,7 @@ func main() {
 
 	services = NewServiceClients("/config")
 	inviteStore = NewInviteStore("/config/pelicula/invites.json")
+	dismissedStore = NewDismissedStore("/config/pelicula/dismissed.json")
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -82,6 +83,11 @@ func main() {
 	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
 	// Jellyfin refresh is called by Procula internally — no session auth needed.
 	mux.HandleFunc("/api/pelicula/jellyfin/refresh", handleJellyfinRefresh)
+
+	// viewer+: pipeline board (unified downloads + processing view)
+	mux.Handle("/api/pelicula/pipeline", auth.Guard(http.HandlerFunc(handlePipelineGet)))
+	// admin only: dismiss a failed job from the needs-attention lane
+	mux.Handle("/api/pelicula/pipeline/dismiss", auth.GuardAdmin(http.HandlerFunc(handlePipelineDismiss)))
 
 	// viewer+: read-only dashboard data
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(handleStatus)))

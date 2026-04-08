@@ -385,7 +385,7 @@ cmd_configure() {
         echo -e "${BOLD}Pelicula Configuration${NC}"
         echo ""
 
-        local auth_mode notifications transcoding jellyseerr port vpn_country remote_enabled remote_hostname
+        local auth_mode notifications transcoding jellyseerr port vpn_country remote_enabled remote_hostname seeding_remove
         auth_mode="$(get_env_var PELICULA_AUTH off)"
         [[ "$auth_mode" == "true" ]] && auth_mode="password"
         notifications="$(get_env_var NOTIFICATIONS_MODE internal)"
@@ -395,10 +395,12 @@ cmd_configure() {
         vpn_country="$(get_env_var SERVER_COUNTRIES Netherlands)"
         remote_enabled="$(get_env_var REMOTE_ACCESS_ENABLED false)"
         remote_hostname="$(get_env_var REMOTE_HOSTNAME "")"
+        seeding_remove="$(get_env_var SEEDING_REMOVE_ON_COMPLETE false)"
 
-        local transcode_label jellyseerr_label remote_label
+        local transcode_label jellyseerr_label remote_label seeding_label
         [[ "$transcoding" == "true" ]] && transcode_label="enabled" || transcode_label="off"
         [[ "$jellyseerr" == "true" ]] && jellyseerr_label="enabled" || jellyseerr_label="off"
+        [[ "$seeding_remove" == "true" ]] && seeding_label="remove on import" || seeding_label="keep seeding"
         if [[ "$remote_enabled" == "true" ]] && [[ -n "$remote_hostname" ]]; then
             remote_label="on (${remote_hostname})"
         else
@@ -413,9 +415,10 @@ cmd_configure() {
         echo "  6) Paths"
         echo "  7) VPN Key"
         echo "  8) Remote access ${remote_label}"
+        echo "  9) Seeding       ${seeding_label}"
         echo "  q) Quit"
         echo ""
-        echo -en "Select [1-8, q]: "
+        echo -en "Select [1-9, q]: "
         read -r choice
         case "$choice" in
             1) configure_auth ;;
@@ -426,6 +429,7 @@ cmd_configure() {
             6) configure_paths ;;
             7) configure_vpn_key ;;
             8) configure_remote_access ;;
+            9) configure_seeding ;;
             q|Q) echo ""; break ;;
             *) warn "Unknown option" ;;
         esac
@@ -852,6 +856,38 @@ configure_transcoding() {
             ;;
         4)
             toggle_profile "$profiles_dir"
+            ;;
+        *)
+            warn "Unknown option"
+            ;;
+    esac
+}
+
+configure_seeding() {
+    echo ""
+    echo -e "${BOLD}Seeding${NC}"
+    echo ""
+    local current
+    current="$(get_env_var SEEDING_REMOVE_ON_COMPLETE false)"
+    echo "  Current: remove on import = ${current}"
+    echo ""
+    echo "  When enabled, the torrent is deleted from qBittorrent immediately after"
+    echo "  Radarr/Sonarr imports the file. The media file itself is kept — *arr"
+    echo "  hardlinks it to your library before the webhook fires."
+    echo ""
+    echo "  1) Keep seeding  (default — torrent stays until ratio limit or manual removal)"
+    echo "  2) Remove on import"
+    echo ""
+    echo -en "Select [1-2]: "
+    read -r choice
+    case "$choice" in
+        1)
+            set_env_var SEEDING_REMOVE_ON_COMPLETE false
+            pass "Seeding: keep seeding after import"
+            ;;
+        2)
+            set_env_var SEEDING_REMOVE_ON_COMPLETE true
+            pass "Seeding: torrent will be removed on import"
             ;;
         *)
             warn "Unknown option"

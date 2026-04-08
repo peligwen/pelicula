@@ -319,7 +319,7 @@ async function dlPause(hash, paused) {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({hash, paused})
         });
-        setTimeout(checkDownloads, 500);
+        setTimeout(checkPipeline, 500);
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 async function dlCancel(hash, category, name, blocklist, reason) {
@@ -329,7 +329,7 @@ async function dlCancel(hash, category, name, blocklist, reason) {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({hash, category, blocklist, reason: reason || ''})
         });
-        setTimeout(checkDownloads, 500);
+        setTimeout(checkPipeline, 500);
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
@@ -791,26 +791,256 @@ function renderJobCard(j) {
 async function retryJob(id) {
     try {
         await fetch(`/api/procula/jobs/${id}/retry`, {method: 'POST'});
-        setTimeout(checkProcessing, 500);
+        setTimeout(checkPipeline, 500);
     } catch (e) { console.warn('[pelicula] retry error:', e); }
 }
 
 async function cancelJob(id) {
     try {
         await fetch(`/api/procula/jobs/${id}/cancel`, {method: 'POST'});
-        setTimeout(checkProcessing, 500);
+        setTimeout(checkPipeline, 500);
     } catch (e) { console.warn('[pelicula] cancel error:', e); }
 }
 
 function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
+
+// ── Pipeline board ────────────────────────
+const LANE_BADGE = {
+    downloading:    '',
+    imported:       '<span class="proc-badge proc-active">Imported</span>',
+    validating:     '<span class="proc-badge proc-active">Validating</span>',
+    processing:     '<span class="proc-badge proc-active">Processing</span>',
+    cataloging:     '<span class="proc-badge proc-active">Cataloging</span>',
+    completed:      '<span class="proc-badge proc-done">Done</span>',
+    needs_attention:'<span class="proc-badge proc-failed">Failed</span>',
+};
+const ACTIVE_LANES = ['downloading', 'imported', 'validating', 'processing', 'cataloging'];
+
+async function checkPipeline() {
+    try {
+        const res = await tfetch('/api/pelicula/pipeline');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        renderPipeline(data);
+        // Update VPN card speed stats (replaces checkDownloads)
+        const s = data.stats || {};
+        document.getElementById('t-dl').textContent = formatSpeed(s.dl_speed || 0);
+        document.getElementById('t-dl').classList.remove('loading');
+        document.getElementById('t-ul').textContent = formatSpeed(s.up_speed || 0);
+        document.getElementById('t-ul').classList.remove('loading');
+    } catch (e) { console.warn('[pelicula] pipeline error:', e); }
+}
+
+function renderPipeline(data) {
+    const section = document.getElementById('pipeline-section');
+    const statsEl = document.getElementById('pipeline-stats');
+    const attentionEl = document.getElementById('pipeline-attention');
+    const attentionList = document.getElementById('pipeline-attention-list');
+    const completedWrap = document.getElementById('pipeline-completed-wrap');
+    if (!section) return;
+
+    const lanes = data.lanes || {};
+    const stats = data.stats || {};
+
+    // ── FLIP First: snapshot card positions before DOM changes ────────────────
+    const firstRects = {};
+    section.querySelectorAll('[data-key]').forEach(function(el) {
+        firstRects[el.dataset.key] = el.getBoundingClientRect();
+    });
+
+    // Stats summary in header
+    const parts = [];
+    if (stats.active > 0) parts.push(stats.active + ' active');
+    if (stats.failed > 0) parts.push(stats.failed + ' failed');
+    if (statsEl) statsEl.textContent = parts.join(' / ');
+
+    // Needs attention
+    const failedItems = lanes['needs_attention'] || [];
+    if (failedItems.length && attentionEl && attentionList) {
+        attentionEl.style.display = '';
+        attentionList.innerHTML = failedItems.map(function(item) { return renderPipelineCard(item); }).join('');
+    } else if (attentionEl) {
+        attentionEl.style.display = 'none';
+    }
+
+    // Active lanes
+    let hasActive = false;
+    for (const laneKey of ACTIVE_LANES) {
+        const items = lanes[laneKey] || [];
+        const laneEl = document.getElementById('pipeline-lane-' + laneKey);
+        const cardsEl = document.getElementById('pipeline-cards-' + laneKey);
+        if (!laneEl || !cardsEl) continue;
+        if (!items.length) { laneEl.style.display = 'none'; continue; }
+        hasActive = true;
+        laneEl.style.display = '';
+        cardsEl.innerHTML = items.map(function(item) { return renderPipelineCard(item); }).join('');
+    }
+
+    // Completed tail
+    const completedItems = lanes['completed'] || [];
+    if (completedItems.length && completedWrap) {
+        hasActive = true;
+        completedWrap.style.display = '';
+        const el = document.getElementById('pipeline-cards-completed');
+        if (el) el.innerHTML = completedItems.map(function(item) { return renderPipelineCard(item); }).join('');
+    } else if (completedWrap) {
+        completedWrap.style.display = 'none';
+    }
+
+    section.style.display = (hasActive || failedItems.length) ? '' : 'none';
+
+    // ── FLIP Last+Invert+Play: animate cards that moved ───────────────────────
+    section.querySelectorAll('[data-key]').forEach(function(el) {
+        const key = el.dataset.key;
+        const first = firstRects[key];
+        if (!first) {
+            // New card: fade in
+            el.style.opacity = '0';
+            requestAnimationFrame(function() {
+                el.style.transition = 'opacity 0.25s';
+                el.style.opacity = '';
+                var cleanup = function() { el.style.transition = ''; el.removeEventListener('transitionend', cleanup); };
+                el.addEventListener('transitionend', cleanup);
+            });
+            return;
+        }
+        var last = el.getBoundingClientRect();
+        var dx = first.left - last.left;
+        var dy = first.top - last.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // no visible movement
+        // Invert
+        el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+        el.style.transition = 'none';
+        // Play (two rAFs ensure the browser commits the inverted position first)
+        requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+                el.style.transform = '';
+                el.style.transition = 'transform 0.35s cubic-bezier(0.2,0,0.2,1)';
+                var cleanup = function() { el.style.transition = ''; el.removeEventListener('transitionend', cleanup); };
+                el.addEventListener('transitionend', cleanup);
+            });
+        });
+    });
+}
+
+function renderPipelineCard(item) {
+    const pct = Math.round((item.progress || 0) * 100);
+    const isFailed = item.state === 'failed';
+    const isDone = item.state === 'done';
+    const isPaused = item.state === 'paused';
+    const title = item.title || (item.source && item.source.qbt_hash) || item.key || '?';
+    const year = item.year ? ' (' + item.year + ')' : '';
+    const fullTitle = title + year;
+
+    const barClass = isFailed ? 'proc-bar-failed'
+        : isDone ? 'proc-bar-done'
+        : isPaused ? 'paused'
+        : item.lane === 'imported' ? 'seeding'
+        : item.lane === 'processing' ? 'proc-bar-active'
+        : 'active';
+
+    // Right-side meta: speed, ETA, or detail
+    let speedText = '';
+    if (item.lane === 'downloading' && item.speed_down > 0) {
+        speedText = formatSpeed(item.speed_down);
+        if (item.eta_seconds > 0 && item.eta_seconds < 8640000) {
+            speedText += ' \u00b7 ' + formatETA(item.eta_seconds);
+        }
+    } else if (item.lane === 'imported' && item.speed_up > 0) {
+        speedText = '\u2191 ' + formatSpeed(item.speed_up);
+    } else if (item.lane === 'processing' && item.eta_seconds > 0) {
+        speedText = 'ETA ' + formatETA(item.eta_seconds);
+    } else if (item.detail) {
+        speedText = esc(item.detail);
+    }
+
+    // Left-side meta: pct + error snippet
+    const metaLeft = pct + '%' + (item.error ? ' \u2014 ' + esc(item.error.substring(0, 80)) : '');
+
+    const badge = LANE_BADGE[item.lane] || '';
+    const missingSubsBadge = (item.missing_subs && item.missing_subs.length)
+        ? '<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ' + item.missing_subs.map(esc).join(', ') + '</span>'
+        : '';
+
+    const role = document.body.dataset.role || currentRole;
+    const canAdmin = role === 'admin';
+    const canManage = role === 'manager' || role === 'admin';
+    const actions = item.actions || [];
+    const src = item.source || {};
+    const qbtHash = esc(src.qbt_hash || '');
+    const arrType = esc(src.arr_type || '');
+    const jobId = esc(src.job_id || '');
+    const safeTitle = esc(fullTitle);
+
+    let actionBtns = '';
+    if (actions.includes('pause') && canManage) {
+        actionBtns += isPaused
+            ? '<button class="dl-btn resume" title="Resume" data-hash="' + qbtHash + '" onclick="dlPauseFromBtn(this,false)">&#9654;</button>'
+            : '<button class="dl-btn pause" title="Pause" data-hash="' + qbtHash + '" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>';
+    }
+    if (actions.includes('cancel') && canAdmin) {
+        actionBtns += '<button class="dl-btn cancel" title="Cancel" data-hash="' + qbtHash + '" data-category="' + arrType + '" data-name="' + safeTitle + '" onclick="dlCancelFromBtn(this,false)">&#10005;</button>';
+    }
+    if (actions.includes('blocklist') && canAdmin) {
+        actionBtns += '<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="' + qbtHash + '" data-category="' + arrType + '" data-name="' + safeTitle + '" onclick="openBlocklistFromBtn(this)">&#8856;</button>';
+    }
+    if (actions.includes('retry') && canAdmin) {
+        actionBtns += '<button class="dl-btn resume" title="Retry" data-job-id="' + jobId + '" onclick="retryFromBtn(this)">&#8635;</button>';
+    }
+    if (actions.includes('cancel_job') && canAdmin) {
+        actionBtns += '<button class="dl-btn cancel" title="Cancel job" data-job-id="' + jobId + '" onclick="cancelJobFromBtn(this)">&#10005;</button>';
+    }
+    if (actions.includes('view_log') && src.job_id) {
+        actionBtns += '<a class="dl-btn" href="/procula/#job=' + jobId + '" target="_blank" title="View log" style="font-size:0.7rem;padding:0.2rem 0.4rem;text-decoration:none">&#9654;</a>';
+    }
+    if (actions.includes('dismiss') && canAdmin) {
+        actionBtns += '<button class="dl-btn" title="Dismiss" data-job-id="' + jobId + '" onclick="dismissJobFromBtn(this)" style="color:#555">&#10006;</button>';
+    }
+
+    // Validation checks for failed items
+    let checksHTML = '';
+    if (isFailed && item.checks) {
+        const c = item.checks;
+        checksHTML = '<div class="proc-check-list">' +
+            [['integrity', c.integrity], ['duration', c.duration], ['sample', c.sample]].map(function(pair) {
+                const v = pair[1]; if (!v) return '';
+                const cls = ['pass', 'fail', 'warn'].includes(v) ? v : 'skip';
+                return '<span class="proc-check proc-check-' + cls + '">' + pair[0] + ': ' + v + '</span>';
+            }).join('') + '</div>';
+    }
+
+    const cardClass = 'download-item' + (isFailed ? ' pl-card-failed' : isDone ? ' pl-card-done' : '');
+    const yearSpan = year ? '<span class="pl-year">' + esc(year) + '</span>' : '';
+
+    return '<div class="' + cardClass + '" data-key="' + esc(item.key) + '" data-lane="' + esc(item.lane) + '">' +
+        '<div class="download-header">' +
+        '<div class="download-name" onclick="this.classList.toggle(\'expanded\')" title="' + safeTitle + '">' + esc(title) + yearSpan + '</div>' +
+        '<div class="download-actions">' + badge + missingSubsBadge + actionBtns + '</div>' +
+        '</div>' +
+        '<div class="download-bar-bg"><div class="download-bar ' + barClass + '" style="width:' + pct + '%"></div></div>' +
+        '<div class="download-meta"><span>' + metaLeft + '</span><span>' + speedText + '</span></div>' +
+        checksHTML +
+        '</div>';
+}
+
+function dismissJobFromBtn(btn) { dismissJob(btn.dataset.jobId); }
+async function dismissJob(id) {
+    try {
+        await fetch('/api/pelicula/pipeline/dismiss', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({job_id: id})
+        });
+        setTimeout(checkPipeline, 300);
+    } catch (e) { console.warn('[pelicula] dismiss error:', e); }
+}
 
 let lastRefreshAt = 0;
 
 async function refresh() {
     console.log('[pelicula] refresh start');
     const results = await Promise.allSettled([
-        checkServices(), checkVPN(), checkDownloads(), checkStatus(),
-        checkNotifications(), checkProcessing(), checkStorage(), loadSessions()
+        checkServices(), checkVPN(), checkPipeline(), checkStatus(),
+        checkNotifications(), checkStorage(), loadSessions()
     ]);
     const failed = results.filter(r => r.status === 'rejected').length;
     console.log('[pelicula] refresh done' + (failed ? ' (' + failed + ' failed)' : ''));
@@ -838,6 +1068,8 @@ setTimeout(refresh, 500);
 setTimeout(checkUpdates, 1000);
 setInterval(refresh, 15000);
 setInterval(updateStaleBanner, 5000);
+// Pipeline polls faster than the main cycle so cards update as items progress.
+setInterval(function() { if (!document.hidden) checkPipeline(); }, 3000);
 
 // ── Users ─────────────────────────────────
 let usersLoaded = false;

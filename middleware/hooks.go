@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,6 +77,20 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
 		writeJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
 		return
+	}
+
+	// When SEEDING_REMOVE_ON_COMPLETE is set, delete the torrent from qBittorrent
+	// immediately after *arr has imported (and hardlinked) the file. The file itself
+	// is preserved; only the torrent entry is removed.
+	if os.Getenv("SEEDING_REMOVE_ON_COMPLETE") == "true" && source.DownloadHash != "" {
+		if err := services.QbtPost("/api/v2/torrents/delete",
+			"hashes="+url.QueryEscape(source.DownloadHash)+"&deleteFiles=false"); err != nil {
+			slog.Warn("remove-on-complete: failed to delete torrent", "component", "hooks",
+				"hash", shortHash(source.DownloadHash), "error", err)
+		} else {
+			slog.Info("remove-on-complete: torrent removed", "component", "hooks",
+				"hash", shortHash(source.DownloadHash))
+		}
 	}
 
 	writeJSON(w, map[string]string{"status": "queued"})

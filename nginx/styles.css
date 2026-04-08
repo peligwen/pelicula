@@ -657,3 +657,47 @@ a.service:hover { border-color: #333; background: #181818; }
 .add-user-summary::before { content: '+ '; }
 details[open] .add-user-summary::before { content: '− '; }
 .add-user-summary:hover { color: #888; }
+
+/* ── Pipeline board ─────────────────────── */
+.pl-lane-header {
+    font-size: 0.6rem;
+    color: #444;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 0.85rem 0 0.4rem;
+}
+.pl-lane-header:first-child { margin-top: 0; }
+.pl-lane-header-alert { color: #f87171; }
+.pl-lane-header-done { color: #7dda93; }
+
+/* Failed card — red left border */
+.pl-card-failed {
+    border-left: 2px solid rgba(248, 113, 113, 0.45) !important;
+}
+/* Completed card — dimmed */
+.pl-card-done {
+    opacity: 0.55;
+    transition: opacity 0.2s;
+}
+.pl-card-done:hover { opacity: 0.85; }
+
+/* Year annotation in title */
+.pl-year { font-size: 0.75em; color: #555; font-weight: 400; }
+
+/* Needs attention wrapper */
+#pipeline-attention {
+    border: 1px solid rgba(248, 113, 113, 0.18);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem 0.25rem;
+    margin-bottom: 0.75rem;
+    background: rgba(248, 113, 113, 0.03);
+}
+#pipeline-attention .pl-lane-header { margin-top: 0; }
+#pipeline-attention .download-item { border-color: rgba(248, 113, 113, 0.2); }
+
+/* Card FLIP animation target (used in Slice 3) */
+.pl-card-moving {
+    pointer-events: none;
+    position: fixed;
+    z-index: 200;
+}

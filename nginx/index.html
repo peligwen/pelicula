@@ -89,27 +89,42 @@
         <div class="search-results" id="search-results"></div>
         </div><!-- /.search-section -->
 
-        <!-- Downloads -->
-        <div class="section">
+        <!-- Pipeline Board -->
+        <div class="section" id="pipeline-section" style="display:none">
             <div class="section-header">
-                <span>Downloads</span>
-                <span id="dl-stats"></span>
+                <span>Pipeline</span>
+                <span id="pipeline-stats"></span>
             </div>
-            <div id="downloads-list">
-                <div class="no-items">No active downloads</div>
+            <!-- Needs attention banner (failed jobs) -->
+            <div id="pipeline-attention" style="display:none">
+                <div class="pl-lane-header pl-lane-header-alert">Needs attention</div>
+                <div id="pipeline-attention-list"></div>
             </div>
-        </div>
-
-        <!-- Processing -->
-        <div class="section" id="processing-section" style="display:none">
-            <div class="section-header">
-                <span>Processing</span>
-                <span id="processing-stats"></span>
+            <!-- Active lanes -->
+            <div id="pipeline-lane-downloading" style="display:none">
+                <div class="pl-lane-header">Downloading</div>
+                <div id="pipeline-cards-downloading"></div>
             </div>
-            <div id="processing-active"></div>
-            <div id="processing-failed" style="display:none">
-                <div class="section-subheader">Needs attention</div>
-                <div id="processing-failed-list"></div>
+            <div id="pipeline-lane-imported" style="display:none">
+                <div class="pl-lane-header">Imported</div>
+                <div id="pipeline-cards-imported"></div>
+            </div>
+            <div id="pipeline-lane-validating" style="display:none">
+                <div class="pl-lane-header">Validating</div>
+                <div id="pipeline-cards-validating"></div>
+            </div>
+            <div id="pipeline-lane-processing" style="display:none">
+                <div class="pl-lane-header">Processing</div>
+                <div id="pipeline-cards-processing"></div>
+            </div>
+            <div id="pipeline-lane-cataloging" style="display:none">
+                <div class="pl-lane-header">Cataloging</div>
+                <div id="pipeline-cards-cataloging"></div>
+            </div>
+            <!-- Completed tail -->
+            <div id="pipeline-completed-wrap" style="display:none">
+                <div class="pl-lane-header pl-lane-header-done">Recently completed</div>
+                <div id="pipeline-cards-completed"></div>
             </div>
         </div>
 

@@ -47,6 +47,8 @@ type SettingsResponse struct {
 	RemoteCertMode      string `json:"remote_cert_mode"`
 	RemoteLEEmail       string `json:"remote_le_email"`
 	RemoteLEStaging     string `json:"remote_le_staging"`
+	// Seeding
+	SeedingRemoveOnComplete string `json:"seeding_remove_on_complete"`
 }
 
 // parseEnvFile reads a .env file and returns a key→value map.
@@ -97,6 +99,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"REMOTE_ACCESS_ENABLED", "REMOTE_HOSTNAME",
 		"REMOTE_HTTP_PORT", "REMOTE_HTTPS_PORT",
 		"REMOTE_CERT_MODE", "REMOTE_LE_EMAIL", "REMOTE_LE_STAGING",
+		"SEEDING_REMOVE_ON_COMPLETE",
 	}
 	inOrder := make(map[string]bool, len(order))
 	for _, k := range order {
@@ -182,13 +185,14 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		TZ:                   vars["TZ"],
 		PUID:                 vars["PUID"],
 		PGID:                 vars["PGID"],
-		RemoteAccessEnabled: vars["REMOTE_ACCESS_ENABLED"],
-		RemoteHostname:      vars["REMOTE_HOSTNAME"],
-		RemoteHTTPPort:      vars["REMOTE_HTTP_PORT"],
-		RemoteHTTPSPort:     vars["REMOTE_HTTPS_PORT"],
-		RemoteCertMode:      vars["REMOTE_CERT_MODE"],
-		RemoteLEEmail:       vars["REMOTE_LE_EMAIL"],
-		RemoteLEStaging:     vars["REMOTE_LE_STAGING"],
+		RemoteAccessEnabled:     vars["REMOTE_ACCESS_ENABLED"],
+		RemoteHostname:          vars["REMOTE_HOSTNAME"],
+		RemoteHTTPPort:          vars["REMOTE_HTTP_PORT"],
+		RemoteHTTPSPort:         vars["REMOTE_HTTPS_PORT"],
+		RemoteCertMode:          vars["REMOTE_CERT_MODE"],
+		RemoteLEEmail:           vars["REMOTE_LE_EMAIL"],
+		RemoteLEStaging:         vars["REMOTE_LE_STAGING"],
+		SeedingRemoveOnComplete: vars["SEEDING_REMOVE_ON_COMPLETE"],
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -355,6 +359,15 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.RemoteLEStaging != "" {
 		vars["REMOTE_LE_STAGING"] = req.RemoteLEStaging
 	}
+	if req.SeedingRemoveOnComplete != "" {
+		switch req.SeedingRemoveOnComplete {
+		case "true", "false":
+			vars["SEEDING_REMOVE_ON_COMPLETE"] = req.SeedingRemoveOnComplete
+		default:
+			http.Error(w, "seeding_remove_on_complete must be true or false", http.StatusBadRequest)
+			return
+		}
+	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
 		slog.Error("failed to write .env", "error", err)
@@ -467,13 +480,14 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
 		"PELICULA_SUB_LANGS":    "en",
-		"REMOTE_ACCESS_ENABLED": "false",
-		"REMOTE_HOSTNAME":       "",
-		"REMOTE_HTTP_PORT":      "80",
-		"REMOTE_HTTPS_PORT":     "8920",
-		"REMOTE_CERT_MODE":      "self-signed",
-		"REMOTE_LE_EMAIL":       "",
-		"REMOTE_LE_STAGING":     "false",
+		"REMOTE_ACCESS_ENABLED":    "false",
+		"REMOTE_HOSTNAME":          "",
+		"REMOTE_HTTP_PORT":         "80",
+		"REMOTE_HTTPS_PORT":        "8920",
+		"REMOTE_CERT_MODE":         "self-signed",
+		"REMOTE_LE_EMAIL":          "",
+		"REMOTE_LE_STAGING":        "false",
+		"SEEDING_REMOVE_ON_COMPLETE": "false",
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
