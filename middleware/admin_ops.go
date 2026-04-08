@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -175,7 +176,7 @@ func handleStackRebuild(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleServiceLogs returns recent log lines for a named container.
-// GET /api/pelicula/admin/logs?svc=<name>&tail=200
+// GET /api/pelicula/admin/logs?svc=<name>&tail=<n>  (default 200, max 500)
 func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -184,12 +185,20 @@ func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	if !requireAuthOrLocalOrigin(w, r) {
 		return
 	}
+	if !checkAdminRate(w, r) {
+		return
+	}
 	svc := r.URL.Query().Get("svc")
 	if !isAllowedContainer(svc) {
 		writeError(w, "unknown service", http.StatusBadRequest)
 		return
 	}
 	tail := 200
+	if s := r.URL.Query().Get("tail"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			tail = n
+		}
+	}
 	logs, err := dockerLogs(svc, tail)
 	if err != nil {
 		slog.Warn("logs failed", "component", "admin_ops", "svc", svc, "error", err)
