@@ -183,7 +183,7 @@
             </div>
         </div>
 
-        <!-- Storage Explorer (inline import + re-transcode wizard) -->
+        <!-- Storage Explorer (media browser with import + transcode actions) -->
         <div class="section hidden" id="storage-explorer-section">
             <div class="um-hero">
                 <div class="um-hero-title-row">
@@ -191,174 +191,163 @@
                     <h2 class="um-hero-title">Storage Explorer</h2>
                     <button class="section-action" onclick="closeStorageExplorer()">&#10005; Close</button>
                 </div>
-                <p class="um-hero-sub">Import new media or re-transcode existing files</p>
+                <p class="um-hero-sub">Browse, import, and transcode media files</p>
             </div>
 
-            <!-- Mode toggle: Import vs Re-transcode -->
-            <div class="mode-toggle" id="mode-toggle">
-                <button class="mode-pill active" data-mode="import" onclick="setMode('import')">Import new media</button>
-                <button class="mode-pill" data-mode="retranscode" onclick="setMode('retranscode')">Re-transcode existing</button>
+            <!-- Browse tree -->
+            <div class="section-header">
+                <span>Media files</span>
+                <span class="import-selected-count" id="selected-count"></span>
+            </div>
+            <div class="browse-tree" id="browse-tree">
+                <div class="no-items">Loading directories...</div>
             </div>
 
-            <!-- Step indicator -->
-            <div class="import-steps" id="import-steps">
-                <div class="import-step active" data-step="browse">
-                    <span class="step-num">1</span> Browse
+            <!-- Bulk action bar (shown when selection > 0) -->
+            <div class="action-bar hidden" id="action-bar">
+                <div class="action-bar-left">
+                    <span id="action-bar-count"></span>
+                    <button class="import-btn" onclick="clearSelection()">Clear</button>
                 </div>
-                <div class="step-divider"></div>
-                <div class="import-step" data-step="match">
-                    <span class="step-num">2</span> Match
-                </div>
-                <div class="step-divider"></div>
-                <div class="import-step" data-step="configure">
-                    <span class="step-num">3</span> Configure
-                </div>
-                <div class="step-divider"></div>
-                <div class="import-step" data-step="apply">
-                    <span class="step-num">4</span> Apply
+                <div class="action-bar-right">
+                    <button class="import-btn" id="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
+                    <button class="import-btn" id="btn-transcode" onclick="onTranscodeClick()" disabled title="">&#8635; Transcode</button>
                 </div>
             </div>
 
-            <!-- Step 1: Browse -->
-            <div class="import-panel" id="step-browse">
-                <div class="section-header">
-                    <span>Select files to import</span>
-                    <span class="import-selected-count" id="selected-count"></span>
-                </div>
-                <div class="browse-tree" id="browse-tree">
-                    <div class="no-items">Loading directories...</div>
-                </div>
-                <div class="import-nav">
-                    <div></div>
-                    <button class="import-btn primary" id="btn-scan" onclick="doScan()" disabled>Scan Selected</button>
-                </div>
-            </div>
-
-            <!-- Step 2: Match -->
-            <div class="import-panel hidden" id="step-match">
-                <div class="section-header">
-                    <span>Match Results</span>
-                    <span id="match-stats"></span>
-                </div>
-                <div id="match-results"></div>
-                <div class="import-nav">
-                    <button class="import-btn" onclick="goToStep('browse')">Back</button>
-                    <button class="import-btn primary" id="btn-configure" onclick="goToStep('configure')">Configure Import</button>
-                </div>
-            </div>
-
-            <!-- Step 3: Configure -->
-            <div class="import-panel hidden" id="step-configure">
-                <div class="section-header"><span>Import Settings</span></div>
-                <div class="config-group">
-                    <label class="config-label">Strategy</label>
-                    <div class="strategy-options">
-                        <label class="strategy-option">
-                            <input type="radio" name="strategy" value="hardlink" checked>
-                            <div class="strategy-card">
-                                <div class="strategy-name">Hardlink</div>
-                                <div class="strategy-desc"><strong>Same file, two names.</strong> Zero extra disk use. Deleting the original doesn't free space until both names are gone. Requires source and library on the same volume.</div>
-                                <div class="strategy-example" id="strategy-example-hardlink">/downloads/The.Batman.2022.mkv &rarr; /movies/The Batman (2022)/The Batman (2022).mkv</div>
-                            </div>
-                        </label>
-                        <label class="strategy-option">
-                            <input type="radio" name="strategy" value="migrate">
-                            <div class="strategy-card">
-                                <div class="strategy-name">Migrate</div>
-                                <div class="strategy-desc"><strong>Moves</strong> the file to your library. The original location is freed.</div>
-                                <div class="strategy-example" id="strategy-example-migrate">/downloads/The.Batman.2022.mkv &rarr; /movies/The Batman (2022)/The Batman (2022).mkv</div>
-                            </div>
-                        </label>
-                        <label class="strategy-option">
-                            <input type="radio" name="strategy" value="symlink">
-                            <div class="strategy-card">
-                                <div class="strategy-name">Soft link</div>
-                                <div class="strategy-desc"><strong>Library path points to the original.</strong> Works across volumes. If the source is moved or deleted, the library entry breaks.</div>
-                                <div class="strategy-example" id="strategy-example-symlink">/movies/The Batman (2022)/The Batman (2022).mkv &rarr; /downloads/The.Batman.2022.mkv</div>
-                            </div>
-                        </label>
-                        <label class="strategy-option">
-                            <input type="radio" name="strategy" value="keep">
-                            <div class="strategy-card">
-                                <div class="strategy-name">Keep</div>
-                                <div class="strategy-desc"><strong>Registers</strong> in Sonarr/Radarr without touching files. Use when an external tool already manages your layout.</div>
-                            </div>
-                        </label>
+            <!-- Import modal -->
+            <div class="se-modal hidden" id="import-modal">
+                <div class="se-modal-inner">
+                    <div class="se-modal-header">
+                        <span class="se-modal-title">Import</span>
+                        <button class="section-action" onclick="closeImportModal()">&#10005;</button>
                     </div>
-                </div>
-                <div class="config-group">
-                    <label class="config-label">
-                        <input type="checkbox" id="validate-toggle" checked>
-                        Validate through Procula
-                    </label>
-                    <div class="config-hint">Run FFprobe validation on imported files to catch corrupt or sample files</div>
-                </div>
-                <div class="import-nav">
-                    <button class="import-btn" onclick="goToStep('match')">Back</button>
-                    <button class="import-btn primary" onclick="doApply()">Apply Import</button>
-                </div>
-            </div>
 
-            <!-- Step 4: Apply -->
-            <div class="import-panel hidden" id="step-apply">
-                <div class="section-header"><span>Import Progress</span></div>
-                <div id="apply-content">
-                    <div class="apply-progress">
-                        <div class="apply-spinner"></div>
-                        <span>Applying import...</span>
+                    <div class="import-steps" id="import-steps">
+                        <div class="import-step active" data-step="match"><span class="step-num">1</span> Match</div>
+                        <div class="step-divider"></div>
+                        <div class="import-step" data-step="configure"><span class="step-num">2</span> Configure</div>
+                        <div class="step-divider"></div>
+                        <div class="import-step" data-step="apply"><span class="step-num">3</span> Apply</div>
                     </div>
-                </div>
-                <div class="import-nav hidden" id="apply-nav">
-                    <div></div>
-                    <button class="import-btn primary" onclick="closeStorageExplorer()">Done</button>
-                </div>
-            </div>
 
-            <!-- Re-transcode flow (hidden by default) -->
-            <div id="retranscode-flow" class="hidden">
-
-                <!-- RT Step 1: Browse + select files -->
-                <div class="import-panel" id="retranscode-browse">
-                    <div class="section-header">
-                        <span>Select files to re-transcode</span>
-                        <span class="import-selected-count" id="rt-selected-count"></span>
-                    </div>
-                    <div class="browse-tree" id="retranscode-tree">
-                        <div class="no-items">Loading library...</div>
-                    </div>
-                    <div class="import-nav">
-                        <div></div>
-                        <button class="import-btn primary" id="rt-btn-next" onclick="rtGoToConfigure()" disabled>Choose Profile</button>
-                    </div>
-                </div>
-
-                <!-- RT Step 2: Profile picker -->
-                <div class="import-panel hidden" id="retranscode-configure">
-                    <div class="section-header"><span>Select a transcode profile</span></div>
-                    <div id="rt-profiles-container">
-                        <div class="no-items">Loading profiles...</div>
-                    </div>
-                    <div class="import-nav">
-                        <button class="import-btn" onclick="rtGoToBrowse()">Back</button>
-                        <button class="import-btn primary" id="rt-btn-apply" onclick="doRetranscode()" disabled>Apply</button>
-                    </div>
-                </div>
-
-                <!-- RT Step 3: Result -->
-                <div class="import-panel hidden" id="retranscode-apply">
-                    <div class="section-header"><span>Re-transcode</span></div>
-                    <div id="rt-apply-content">
-                        <div class="apply-progress">
-                            <div class="apply-spinner"></div>
-                            <span>Queuing transcode jobs...</span>
+                    <!-- Match -->
+                    <div class="import-panel" id="step-match">
+                        <div class="section-header">
+                            <span>Match Results</span>
+                            <span id="match-stats"></span>
+                        </div>
+                        <div id="match-results"></div>
+                        <div class="import-nav">
+                            <button class="import-btn" onclick="closeImportModal()">Cancel</button>
+                            <button class="import-btn primary" id="btn-configure" onclick="importGoToStep('configure')" disabled>Configure Import</button>
                         </div>
                     </div>
-                    <div class="import-nav hidden" id="rt-apply-nav">
-                        <button class="import-btn" onclick="rtGoToBrowse()">Transcode more</button>
-                        <button class="import-btn primary" onclick="closeStorageExplorer()">Done</button>
+
+                    <!-- Configure -->
+                    <div class="import-panel hidden" id="step-configure">
+                        <div class="section-header"><span>Import Settings</span></div>
+                        <div class="config-group">
+                            <label class="config-label">Strategy</label>
+                            <div class="strategy-options">
+                                <label class="strategy-option">
+                                    <input type="radio" name="strategy" value="hardlink" checked>
+                                    <div class="strategy-card">
+                                        <div class="strategy-name">Hardlink</div>
+                                        <div class="strategy-desc"><strong>Same file, two names.</strong> Zero extra disk use. Deleting the original doesn't free space until both names are gone. Requires source and library on the same volume.</div>
+                                        <div class="strategy-example" id="strategy-example-hardlink">/downloads/The.Batman.2022.mkv &rarr; /movies/The Batman (2022)/The Batman (2022).mkv</div>
+                                    </div>
+                                </label>
+                                <label class="strategy-option">
+                                    <input type="radio" name="strategy" value="migrate">
+                                    <div class="strategy-card">
+                                        <div class="strategy-name">Migrate</div>
+                                        <div class="strategy-desc"><strong>Moves</strong> the file to your library. The original location is freed.</div>
+                                        <div class="strategy-example" id="strategy-example-migrate">/downloads/The.Batman.2022.mkv &rarr; /movies/The Batman (2022)/The Batman (2022).mkv</div>
+                                    </div>
+                                </label>
+                                <label class="strategy-option">
+                                    <input type="radio" name="strategy" value="symlink">
+                                    <div class="strategy-card">
+                                        <div class="strategy-name">Soft link</div>
+                                        <div class="strategy-desc"><strong>Library path points to the original.</strong> Works across volumes. If the source is moved or deleted, the library entry breaks.</div>
+                                        <div class="strategy-example" id="strategy-example-symlink">/movies/The Batman (2022)/The Batman (2022).mkv &rarr; /downloads/The.Batman.2022.mkv</div>
+                                    </div>
+                                </label>
+                                <label class="strategy-option">
+                                    <input type="radio" name="strategy" value="keep">
+                                    <div class="strategy-card">
+                                        <div class="strategy-name">Keep</div>
+                                        <div class="strategy-desc"><strong>Registers</strong> in Sonarr/Radarr without touching files. Use when an external tool already manages your layout.</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="config-group">
+                            <label class="config-label">
+                                <input type="checkbox" id="validate-toggle" checked>
+                                Validate through Procula
+                            </label>
+                            <div class="config-hint">Run FFprobe validation on imported files to catch corrupt or sample files</div>
+                        </div>
+                        <div class="import-nav">
+                            <button class="import-btn" onclick="importGoToStep('match')">Back</button>
+                            <button class="import-btn primary" onclick="doApply()">Apply Import</button>
+                        </div>
+                    </div>
+
+                    <!-- Apply -->
+                    <div class="import-panel hidden" id="step-apply">
+                        <div class="section-header"><span>Import Progress</span></div>
+                        <div id="apply-content">
+                            <div class="apply-progress">
+                                <div class="apply-spinner"></div>
+                                <span>Applying import...</span>
+                            </div>
+                        </div>
+                        <div class="import-nav hidden" id="apply-nav">
+                            <div></div>
+                            <button class="import-btn primary" onclick="closeImportModal()">Done</button>
+                        </div>
                     </div>
                 </div>
+            </div>
 
+            <!-- Transcode modal -->
+            <div class="se-modal hidden" id="transcode-modal">
+                <div class="se-modal-inner">
+                    <div class="se-modal-header">
+                        <span class="se-modal-title">Transcode</span>
+                        <button class="section-action" onclick="closeTranscodeModal()">&#10005;</button>
+                    </div>
+
+                    <!-- Profile picker -->
+                    <div class="import-panel" id="transcode-configure">
+                        <div class="section-header"><span>Select a transcode profile</span></div>
+                        <div id="rt-profiles-container">
+                            <div class="no-items">Loading profiles...</div>
+                        </div>
+                        <div class="import-nav">
+                            <button class="import-btn" onclick="closeTranscodeModal()">Cancel</button>
+                            <button class="import-btn primary" id="rt-btn-apply" onclick="doRetranscode()" disabled>Apply</button>
+                        </div>
+                    </div>
+
+                    <!-- Result -->
+                    <div class="import-panel hidden" id="transcode-apply">
+                        <div class="section-header"><span>Re-transcode</span></div>
+                        <div id="rt-apply-content">
+                            <div class="apply-progress">
+                                <div class="apply-spinner"></div>
+                                <span>Queuing transcode jobs...</span>
+                            </div>
+                        </div>
+                        <div class="import-nav hidden" id="rt-apply-nav">
+                            <button class="import-btn" onclick="openTranscodeModal()">Transcode more</button>
+                            <button class="import-btn primary" onclick="closeTranscodeModal()">Done</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 

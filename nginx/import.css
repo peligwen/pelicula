@@ -1,26 +1,60 @@
 /* ── Import page styles ─────────────────── */
 
-/* Mode toggle (Import / Re-transcode) */
-.mode-toggle {
+/* Bulk action bar */
+.action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    background: #131313;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+}
+.action-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.82rem;
+    color: #999;
+}
+.action-bar-right {
     display: flex;
     gap: 0.5rem;
+}
+
+/* Action modals */
+.se-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4rem 1rem 2rem;
+    overflow-y: auto;
+}
+.se-modal.hidden { display: none; }
+.se-modal-inner {
+    background: #0f0f0f;
+    border: 1px solid #222;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 720px;
+    padding: 1.5rem;
+}
+.se-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 1.25rem;
 }
-.mode-pill {
-    padding: 0.45rem 1rem;
-    background: #131313;
-    border: 1px solid #222;
-    border-radius: 20px;
-    color: #666;
-    font-size: 0.78rem;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.mode-pill:hover { color: #aaa; border-color: #333; }
-.mode-pill.active {
-    background: rgba(200,162,255,0.1);
-    border-color: rgba(200,162,255,0.3);
-    color: #c8a2ff;
+.se-modal-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #eee;
 }
 
 .back-btn, .back-btn:visited {

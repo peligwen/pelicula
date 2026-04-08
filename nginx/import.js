@@ -1,14 +1,20 @@
-// ── Import wizard state ─────────────────────────────────────────────────────
+// ── Media browser state ──────────────────────────────────────────────────────
+
+const LIBRARY_ROOTS = ['/movies', '/tv'];
+
+function isInLibrary(path) {
+    return LIBRARY_ROOTS.some(r => path === r || path.startsWith(r + '/'));
+}
 
 const state = {
-    step: 'browse',
     selected: [],           // [{path, name, size, isDir}]
     scanResults: [],        // from /library/scan
     dismissed: new Set(),
     groupSelections: {},    // groupKey → chosen file path (for dup groups)
+    profile: null,          // selected transcode profile name
 };
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function esc(s) {
     const d = document.createElement('div');
@@ -37,17 +43,16 @@ function formatSize(bytes) {
     return (bytes / 1073741824).toFixed(2) + ' GB';
 }
 
-// ── Step navigation ─────────────────────────────────────────────────────────
+// ── Import modal navigation ──────────────────────────────────────────────────
 
-function goToStep(step) {
-    state.step = step;
-    const steps = ['browse', 'match', 'configure', 'apply'];
+function importGoToStep(step) {
+    const steps = ['match', 'configure', 'apply'];
     const idx = steps.indexOf(step);
 
-    document.querySelectorAll('.import-panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('#import-modal .import-panel').forEach(p => p.classList.add('hidden'));
     document.getElementById('step-' + step).classList.remove('hidden');
 
-    document.querySelectorAll('.import-step').forEach((el, i) => {
+    document.querySelectorAll('#import-modal .import-step').forEach((el, i) => {
         el.classList.remove('active', 'done');
         if (i < idx) el.classList.add('done');
         if (i === idx) el.classList.add('active');
@@ -74,7 +79,7 @@ function updateStrategyExamples() {
     if (el('strategy-example-symlink'))  el('strategy-example-symlink').textContent  = bwd;
 }
 
-// ── Step 1: Browse ──────────────────────────────────────────────────────────
+// ── Browse tree ──────────────────────────────────────────────────────────────
 
 async function loadBrowseRoots() {
     try {
@@ -240,7 +245,7 @@ function toggleFolderSelection(entry, checked) {
     } else {
         state.selected = state.selected.filter(s => s.path !== entry.path);
     }
-    updateSelectedCount();
+    updateActionBar();
 }
 
 function toggleFileSelection(entry, checked) {
@@ -252,24 +257,79 @@ function toggleFileSelection(entry, checked) {
     } else {
         state.selected = state.selected.filter(s => s.path !== entry.path);
     }
-    updateSelectedCount();
+    updateActionBar();
 }
 
-function updateSelectedCount() {
+// ── Action bar ───────────────────────────────────────────────────────────────
+
+function updateActionBar() {
+    const n = state.selected.length;
+    const bar = document.getElementById('action-bar');
+
+    if (n === 0) {
+        bar.classList.add('hidden');
+        // Also keep the old #selected-count in sync for any code still reading it
+        const sc = document.getElementById('selected-count');
+        if (sc) sc.textContent = '';
+        return;
+    }
+    bar.classList.remove('hidden');
+
+    // Selection count label
     const folders = state.selected.filter(s => s.isDir).length;
     const files = state.selected.filter(s => !s.isDir).length;
-    const el = document.getElementById('selected-count');
     const parts = [];
     if (folders) parts.push(folders + ' folder' + (folders > 1 ? 's' : ''));
     if (files) parts.push(files + ' file' + (files > 1 ? 's' : ''));
-    el.textContent = parts.length ? parts.join(', ') + ' selected' : '';
-    document.getElementById('btn-scan').disabled = state.selected.length === 0;
+    document.getElementById('action-bar-count').textContent = parts.join(', ') + ' selected';
+
+    // Classify paths (folders count as their root path for library detection)
+    const paths = state.selected.map(s => s.path);
+    const anyOutside = paths.some(p => !isInLibrary(p));
+    const allInLibrary = paths.every(p => isInLibrary(p));
+
+    // Import: enabled if at least one selected path is outside library roots
+    const btnImport = document.getElementById('btn-import');
+    btnImport.disabled = !anyOutside;
+    btnImport.title = anyOutside ? '' : 'Select files outside /movies and /tv to import';
+
+    // Transcode: enabled only if every selected path is inside library roots
+    const btnTranscode = document.getElementById('btn-transcode');
+    btnTranscode.disabled = !allInLibrary;
+    btnTranscode.title = allInLibrary ? '' : 'Select only files inside /movies or /tv to transcode';
 }
 
-// ── Step 2: Scan / Match ────────────────────────────────────────────────────
+function clearSelection() {
+    state.selected = [];
+    document.querySelectorAll('#browse-tree .browse-checkbox').forEach(cb => {
+        cb.checked = false;
+        cb.disabled = false;
+    });
+    updateActionBar();
+}
 
-async function doScan() {
-    goToStep('match');
+// ── Import action ────────────────────────────────────────────────────────────
+
+function openImportModal() {
+    document.getElementById('import-modal').classList.remove('hidden');
+    importGoToStep('match');
+}
+
+function closeImportModal() {
+    document.getElementById('import-modal').classList.add('hidden');
+    // Reset modal state for re-use
+    state.scanResults = [];
+    state.dismissed = new Set();
+    state.groupSelections = {};
+    document.getElementById('apply-content').innerHTML =
+        '<div class="apply-progress"><div class="apply-spinner"></div><span>Applying import...</span></div>';
+    document.getElementById('apply-nav').classList.add('hidden');
+    clearSelection();
+}
+
+async function onImportClick() {
+    openImportModal();
+
     const results = document.getElementById('match-results');
     const folderCount = state.selected.filter(s => s.isDir).length;
     const fileCount = state.selected.filter(s => !s.isDir).length;
@@ -299,6 +359,8 @@ async function doScan() {
         results.innerHTML = '<div class="no-items">Scan failed: ' + esc(e.message) + '</div>';
     }
 }
+
+// ── Match results ────────────────────────────────────────────────────────────
 
 function renderMatchResults() {
     const container = document.getElementById('match-results');
@@ -335,7 +397,6 @@ function renderMatchResults() {
     if (newByKey.size) {
         container.appendChild(groupHeader('New (' + buckets.new.length + ')'));
 
-        // Render dup banner if any unresolved groups exist.
         if (unresolvedDups > 0) {
             const banner = document.createElement('div');
             banner.className = 'dup-banner';
@@ -374,11 +435,9 @@ function createDupGroup(items, groupKey) {
     card.className = 'dup-group';
     card.id = 'dup-group-' + groupKey.replace(/[^a-z0-9]/gi, '_');
 
-    // All dismissed?
     const allDismissed = items.every(it => state.dismissed.has(it.idx));
     if (allDismissed) card.classList.add('dismissed');
 
-    // Header showing the title once.
     const hdr = document.createElement('div');
     hdr.className = 'dup-group-header';
     const firstMatch = items[0].match;
@@ -393,7 +452,6 @@ function createDupGroup(items, groupKey) {
         '<span class="dup-group-hint">Pick one file to import</span>';
     card.appendChild(hdr);
 
-    // Radio list — one row per candidate.
     const currentPick = state.groupSelections[groupKey] || null;
     items.forEach(item => {
         const row = document.createElement('label');
@@ -431,7 +489,6 @@ function createDupGroup(items, groupKey) {
         card.appendChild(row);
     });
 
-    // Dismiss-all / restore button.
     const dismiss = document.createElement('button');
     dismiss.className = 'match-dismiss';
     dismiss.textContent = allDismissed ? 'Restore group' : 'Dismiss all';
@@ -484,7 +541,6 @@ function createMatchItem(item) {
     }
     row.appendChild(info);
 
-    // Size
     if (item.size) {
         const size = document.createElement('span');
         size.className = 'browse-size';
@@ -492,7 +548,6 @@ function createMatchItem(item) {
         row.appendChild(size);
     }
 
-    // Confidence badge
     if (item.match) {
         const badge = document.createElement('span');
         badge.className = 'match-badge badge-' + item.match.confidence;
@@ -500,13 +555,11 @@ function createMatchItem(item) {
         row.appendChild(badge);
     }
 
-    // Status badge
     const statusBadge = document.createElement('span');
     statusBadge.className = 'match-badge badge-' + item.status;
     statusBadge.textContent = item.status;
     row.appendChild(statusBadge);
 
-    // Dismiss button (only for "new" items)
     if (item.status === 'new') {
         const dismiss = document.createElement('button');
         dismiss.className = 'match-dismiss';
@@ -525,10 +578,10 @@ function createMatchItem(item) {
     return row;
 }
 
-// ── Step 4: Apply ───────────────────────────────────────────────────────────
+// ── Import apply ─────────────────────────────────────────────────────────────
 
 async function doApply() {
-    goToStep('apply');
+    importGoToStep('apply');
     const content = document.getElementById('apply-content');
     content.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Applying import...</span></div>';
 
@@ -536,17 +589,15 @@ async function doApply() {
     const validate = document.getElementById('validate-toggle').checked;
 
     // Build the item list, respecting group selections for duplicate groups.
-    // For a duplicate group, only the selected file is included.
     const items = state.scanResults
         .filter((r, i) => {
             if (r.status !== 'new' || !r.match || state.dismissed.has(i)) return false;
             const key = r.groupKey;
             if (!key) return true;
-            // If a group selection exists for this key, only include the chosen file.
             if (key in state.groupSelections) {
                 return state.groupSelections[key] === r.file;
             }
-            return true; // singleton group — no selection needed
+            return true;
         })
         .map(r => ({
             type: r.match.type === 'series' ? 'series' : 'movie',
@@ -603,7 +654,6 @@ function renderApplyResult(result, validate) {
         html += '</div>';
     }
 
-    // Per-item file operation summary
     if (result.items && result.items.length) {
         html += '<div class="apply-items">';
         result.items.forEach(item => {
@@ -637,146 +687,39 @@ function renderApplyResult(result, validate) {
     content.innerHTML = html;
 }
 
-// ── Init ────────────────────────────────────────────────────────────────────
+// ── Transcode action ─────────────────────────────────────────────────────────
 
-// On the dashboard this script is loaded on demand by openStorageExplorer()
-// in dashboard.js. Auto-init the browse tree immediately.
-// On the standalone /import page (legacy redirect), also init.
-loadBrowseRoots();
-
-// ── Re-transcode mode ────────────────────────────────────────────────────────
-
-const rtState = {
-    selected: new Set(), // Set of file paths
-    profile: null,       // selected profile name
-};
-
-function setMode(mode) {
-    const importSteps = document.getElementById('import-steps');
-    const importPanels = document.querySelectorAll('.import-panel');
-    const rtFlow = document.getElementById('retranscode-flow');
-    document.querySelectorAll('.mode-pill').forEach(p => {
-        p.classList.toggle('active', p.dataset.mode === mode);
-    });
-    if (mode === 'retranscode') {
-        importSteps.classList.add('hidden');
-        importPanels.forEach(p => p.classList.add('hidden'));
-        rtFlow.classList.remove('hidden');
-        if (document.getElementById('retranscode-tree').querySelector('.no-items')) {
-            loadRetranscodeBrowse();
-        }
-        document.getElementById('retranscode-browse').classList.remove('hidden');
-        document.getElementById('retranscode-configure').classList.add('hidden');
-        document.getElementById('retranscode-apply').classList.add('hidden');
-    } else {
-        rtFlow.classList.add('hidden');
-        importSteps.classList.remove('hidden');
-        document.getElementById('step-browse').classList.remove('hidden');
-    }
-}
-
-// ── RT Browse ────────────────────────────────────────────────────────────────
-
-async function loadRetranscodeBrowse() {
-    const tree = document.getElementById('retranscode-tree');
-    try {
-        const res = await apiFetch('/api/pelicula/browse');
-        if (!res.ok) { tree.innerHTML = '<div class="no-items">Failed to load library</div>'; return; }
-        const data = await res.json();
-        // Filter to /movies and /tv only
-        const roots = (data.entries || []).filter(e => e.path === '/movies' || e.path === '/tv');
-        if (!roots.length) { tree.innerHTML = '<div class="no-items">No /movies or /tv directories found</div>'; return; }
-        tree.innerHTML = '';
-        roots.forEach(e => tree.appendChild(createRTBrowseEntry(e, 0)));
-    } catch (err) {
-        tree.innerHTML = '<div class="no-items">Error: ' + esc(err.message) + '</div>';
-    }
-}
-
-function createRTBrowseEntry(entry, depth) {
-    const div = document.createElement('div');
-    div.className = 'browse-entry';
-    div.style.paddingLeft = (depth * 1.25) + 'rem';
-
-    if (entry.isDir) {
-        div.innerHTML = `
-            <span class="browse-expand">▶</span>
-            <span class="browse-icon">📁</span>
-            <span class="browse-name">${esc(entry.name)}</span>
-            <div class="browse-children hidden"></div>`;
-        const expand = div.querySelector('.browse-expand');
-        const children = div.querySelector('.browse-children');
-        expand.addEventListener('click', async () => {
-            if (children.classList.contains('hidden')) {
-                expand.textContent = '▼';
-                children.classList.remove('hidden');
-                if (!children.dataset.loaded) {
-                    children.innerHTML = '<div class="browse-loading">Loading…</div>';
-                    children.dataset.loaded = '1';
-                    try {
-                        const res = await apiFetch('/api/pelicula/browse?path=' + encodeURIComponent(entry.path));
-                        const data = await res.json();
-                        children.innerHTML = '';
-                        (data.entries || []).forEach(child => children.appendChild(createRTBrowseEntry(child, depth + 1)));
-                        if (!children.children.length) children.innerHTML = '<div class="browse-loading" style="color:#444">Empty</div>';
-                        if (data.truncated) children.insertAdjacentHTML('beforeend', '<div class="browse-truncated">Results truncated</div>');
-                    } catch {
-                        children.innerHTML = '<div class="browse-loading" style="color:#f87171">Error</div>';
-                    }
-                }
-            } else {
-                expand.textContent = '▶';
-                children.classList.add('hidden');
-            }
-        });
-    } else {
-        const checked = rtState.selected.has(entry.path);
-        div.innerHTML = `
-            <input type="checkbox" class="browse-checkbox" ${checked ? 'checked' : ''}>
-            <span class="browse-icon">🎬</span>
-            <span class="browse-name">${esc(entry.name)}</span>
-            <span class="browse-size">${formatSize(entry.size)}</span>`;
-        div.querySelector('input').addEventListener('change', e => {
-            if (e.target.checked) rtState.selected.add(entry.path);
-            else rtState.selected.delete(entry.path);
-            updateRTCount();
-        });
-    }
-    return div;
-}
-
-function updateRTCount() {
-    const n = rtState.selected.size;
-    document.getElementById('rt-selected-count').textContent = n ? n + ' selected' : '';
-    document.getElementById('rt-btn-next').disabled = n === 0;
-}
-
-// ── RT Configure ─────────────────────────────────────────────────────────────
-
-function rtGoToConfigure() {
-    document.getElementById('retranscode-browse').classList.add('hidden');
-    document.getElementById('retranscode-configure').classList.remove('hidden');
+function openTranscodeModal() {
+    const modal = document.getElementById('transcode-modal');
+    modal.classList.remove('hidden');
+    document.getElementById('transcode-configure').classList.remove('hidden');
+    document.getElementById('transcode-apply').classList.add('hidden');
+    document.getElementById('rt-btn-apply').disabled = true;
+    document.getElementById('rt-apply-content').innerHTML =
+        '<div class="apply-progress"><div class="apply-spinner"></div><span>Queuing transcode jobs...</span></div>';
+    document.getElementById('rt-apply-nav').classList.add('hidden');
+    state.profile = null;
     loadRTProfiles();
 }
 
-function rtGoToBrowse() {
-    document.getElementById('retranscode-configure').classList.add('hidden');
-    document.getElementById('retranscode-apply').classList.add('hidden');
-    document.getElementById('retranscode-browse').classList.remove('hidden');
-    // Reset result panel for re-use
-    document.getElementById('rt-apply-content').innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Queuing transcode jobs...</span></div>';
-    document.getElementById('rt-apply-nav').classList.add('hidden');
+function closeTranscodeModal() {
+    document.getElementById('transcode-modal').classList.add('hidden');
+    clearSelection();
+}
+
+function onTranscodeClick() {
+    openTranscodeModal();
 }
 
 async function loadRTProfiles() {
     const container = document.getElementById('rt-profiles-container');
-    container.innerHTML = '<div class="no-items">Loading profiles…</div>';
+    container.innerHTML = '<div class="no-items">Loading profiles\u2026</div>';
     try {
         const res = await apiFetch('/api/pelicula/transcode/profiles');
         if (!res.ok) { container.innerHTML = '<div class="no-items">Could not load profiles</div>'; return; }
         const profiles = await res.json();
         if (!profiles || !profiles.length) {
-            container.innerHTML = '<div class="no-items">No profiles installed. Run <code>./pelicula configure → Transcoding → Install defaults</code>.</div>';
+            container.innerHTML = '<div class="no-items">No profiles installed. Run <code>./pelicula configure \u2192 Transcoding \u2192 Install defaults</code>.</div>';
             return;
         }
         let html = '<div class="strategy-options">';
@@ -788,7 +731,7 @@ async function loadRTProfiles() {
                 if (p.conditions.min_height)
                     conds.push('Min height: ' + p.conditions.min_height + 'p');
             }
-            const condStr = conds.length ? '<div class="strategy-desc" style="color:#666;font-size:0.72rem;margin-top:0.2rem">' + esc(conds.join(' · ')) + '</div>' : '';
+            const condStr = conds.length ? '<div class="strategy-desc" style="color:#666;font-size:0.72rem;margin-top:0.2rem">' + esc(conds.join(' \u00b7 ')) + '</div>' : '';
             const enabledBadge = p.enabled ? '' : ' <span style="color:#666;font-size:0.7rem">(disabled)</span>';
             html += `<label class="strategy-option">
                 <input type="radio" name="rt-profile" value="${esc(p.name)}" onchange="rtProfileSelected('${esc(p.name)}')">
@@ -807,27 +750,26 @@ async function loadRTProfiles() {
 }
 
 function rtProfileSelected(name) {
-    rtState.profile = name;
+    state.profile = name;
     document.getElementById('rt-btn-apply').disabled = false;
 }
 
-// ── RT Apply ─────────────────────────────────────────────────────────────────
-
 async function doRetranscode() {
-    if (!rtState.profile || !rtState.selected.size) return;
-    document.getElementById('retranscode-configure').classList.add('hidden');
-    document.getElementById('retranscode-apply').classList.remove('hidden');
+    if (!state.profile || !state.selected.length) return;
+    document.getElementById('transcode-configure').classList.add('hidden');
+    document.getElementById('transcode-apply').classList.remove('hidden');
 
     try {
+        const files = state.selected.filter(s => !s.isDir).map(s => s.path);
         const res = await apiFetch('/api/pelicula/library/retranscode', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files: [...rtState.selected], profile: rtState.profile }),
+            body: JSON.stringify({ files, profile: state.profile }),
         });
         const result = await res.json();
         renderRTResult(result);
     } catch (err) {
-        renderRTResult({ queued: 0, failed: rtState.selected.size, errors: [err.message] });
+        renderRTResult({ queued: 0, failed: state.selected.filter(s => !s.isDir).length, errors: [err.message] });
     }
 }
 
@@ -847,7 +789,10 @@ function renderRTResult(result) {
     }
     content.innerHTML = html;
     document.getElementById('rt-apply-nav').classList.remove('hidden');
-    // Clear state for re-use
-    rtState.selected.clear();
-    rtState.profile = null;
 }
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+// On the dashboard this script is loaded on demand by openStorageExplorer()
+// in dashboard.js. Auto-init the browse tree immediately.
+loadBrowseRoots();
