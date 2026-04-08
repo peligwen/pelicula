@@ -228,7 +228,7 @@ services:
     container_name: pelicula-api
     environment:
       - TZ=${TZ}
-      - PELICULA_AUTH=${PELICULA_AUTH:-off}
+      - PELICULA_AUTH=${PELICULA_AUTH:-password}
       - DOCKER_HOST=http://docker-proxy:2375
       - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
       - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:-}

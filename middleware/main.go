@@ -68,7 +68,12 @@ func main() {
 	default:
 		authMode = "off"
 	}
-	authMiddleware = NewAuth(authMode, os.Getenv("PELICULA_PASSWORD"), "/config/pelicula/users.json")
+	peliculaPassword := os.Getenv("PELICULA_PASSWORD")
+	if authMode == "password" && peliculaPassword == "" {
+		slog.Error("PELICULA_AUTH=password requires PELICULA_PASSWORD to be set — run ./pelicula setup to configure authentication")
+		os.Exit(1)
+	}
+	authMiddleware = NewAuth(authMode, peliculaPassword, "/config/pelicula/users.json")
 	auth := authMiddleware
 
 	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
