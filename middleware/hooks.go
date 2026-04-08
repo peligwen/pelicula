@@ -500,6 +500,52 @@ func proxyProcula(path string, forwardQuery ...bool) http.HandlerFunc {
 // handleStorageProxy proxies Procula's storage report for the dashboard Storage section.
 var handleStorageProxy = proxyProcula("/api/procula/storage")
 
+// handleProculaSettingsProxy proxies GET/POST to Procula's settings endpoint.
+var handleProculaSettingsProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		proxyProcula("/api/procula/settings")(w, r)
+		return
+	}
+	proxyProculaMutate("/api/procula/settings")(w, r)
+})
+
+// handleStorageScanProxy proxies a POST scan trigger to Procula.
+var handleStorageScanProxy = proxyProculaMutate("/api/procula/storage/scan")
+
+// proxyProculaMutate returns an http.HandlerFunc that forwards the request
+// (method, body, Content-Type) to the given Procula path, injecting
+// X-API-Key if PROCULA_API_KEY is set. Used for admin mutating endpoints.
+func proxyProculaMutate(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body io.Reader
+		if r.Body != nil {
+			body = r.Body
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, proculaBaseURL()+path, body)
+		if err != nil {
+			writeError(w, "proxy error", http.StatusInternalServerError)
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "" {
+			req.Header.Set("Content-Type", ct)
+		}
+		if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+			req.Header.Set("X-API-Key", key)
+		}
+		resp, err := services.client.Do(req)
+		if err != nil {
+			writeError(w, "procula unavailable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			slog.Warn("failed to stream proxy response", "component", "proxy", "path", path, "error", err)
+		}
+	}
+}
+
 // handleUpdatesProxy proxies Procula's update check result for the dashboard footer.
 var handleUpdatesProxy = proxyProcula("/api/procula/updates")
 

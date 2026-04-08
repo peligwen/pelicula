@@ -128,13 +128,57 @@
             </div>
         </div>
 
-        <!-- Storage -->
-        <div class="section" id="storage-section" style="display:none">
-            <div class="section-header">
-                <span>Storage</span>
-                <span id="storage-summary"></span>
+        <!-- Storage Management -->
+        <div class="section hidden" id="storage-section">
+            <div class="um-hero">
+                <div class="um-hero-title-row">
+                    <span class="um-hero-icon">&#128190;</span>
+                    <h2 class="um-hero-title">Storage Management</h2>
+                    <button class="section-action admin-only" id="storage-scan-btn" onclick="scanStorageNow()">Scan now</button>
+                </div>
+                <p class="um-hero-sub">Capacity, folders, and health</p>
             </div>
-            <div id="storage-list"></div>
+            <div class="um-metrics">
+                <div class="um-metric">
+                    <div class="um-metric-num" id="sm-metric-free">—</div>
+                    <div class="um-metric-label">Free</div>
+                </div>
+                <div class="um-metric">
+                    <div class="um-metric-num" id="sm-metric-pelicula">—</div>
+                    <div class="um-metric-label">Pelicula</div>
+                </div>
+                <div class="um-metric">
+                    <div class="um-metric-num" id="sm-metric-status">—</div>
+                    <div class="um-metric-label">Status</div>
+                </div>
+            </div>
+            <div class="um-lanes">
+                <div class="um-lane">
+                    <div class="um-lane-header"><span>Volumes</span></div>
+                    <div id="storage-list"></div>
+                </div>
+                <div class="um-lane">
+                    <div class="um-lane-header"><span>By folder</span></div>
+                    <div id="sm-folder-list"></div>
+                </div>
+                <div class="um-lane admin-only">
+                    <details class="users-details">
+                        <summary class="um-lane-header">
+                            <span>Settings</span>
+                            <span class="um-lane-hint">expand</span>
+                        </summary>
+                        <div class="sm-settings">
+                            <label class="sm-setting-row">Warn at
+                                <input type="number" id="sm-warn-pct" class="sm-threshold-input" min="50" max="99"> %
+                            </label>
+                            <label class="sm-setting-row">Critical at
+                                <input type="number" id="sm-crit-pct" class="sm-threshold-input" min="50" max="99"> %
+                            </label>
+                            <div class="sm-last-scan">Last scan: <span id="sm-last-scan">—</span></div>
+                        </div>
+                    </details>
+                </div>
+            </div>
         </div>
 
         <!-- Activity -->
@@ -143,98 +187,176 @@
             <div id="activity-list"></div>
         </div>
 
-        <!-- Services -->
-        <div class="section">
-            <div class="section-header"><span>Services</span></div>
-            <div class="services">
-                <!-- VPN card (wide, spans full row) -->
-                <div class="service service-vpn" id="vpn-card">
-                    <div class="service-vpn-left">
-                        <span class="status-dot unknown" id="vpn-dot"></span>
-                        <div>
-                            <div class="service-name">VPN</div>
-                            <div class="service-desc" id="vpn-desc">Checking&hellip;</div>
-                        </div>
+        <!-- User Management (moved above Services) -->
+        <div class="section hidden" id="users-section">
+            <div class="um-hero">
+                <div class="um-hero-title-row">
+                    <span class="um-hero-icon">👥</span>
+                    <h2 class="um-hero-title">User Management</h2>
+                    <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
+                </div>
+                <p class="um-hero-sub">Invites, accounts, and active sessions</p>
+            </div>
+
+            <div class="um-metrics">
+                <div class="um-metric">
+                    <div class="um-metric-num" id="um-metric-accounts">—</div>
+                    <div class="um-metric-label">Accounts</div>
+                </div>
+                <div class="um-metric">
+                    <div class="um-metric-num" id="um-metric-invites">—</div>
+                    <div class="um-metric-label">Active invites</div>
+                </div>
+                <div class="um-metric">
+                    <div class="um-metric-num" id="um-metric-sessions">—</div>
+                    <div class="um-metric-label">Now playing</div>
+                </div>
+            </div>
+
+            <div class="um-lanes">
+                <div class="um-lane">
+                    <div class="um-lane-header">
+                        <span>Invite links</span>
+                        <button class="section-action" onclick="openInviteModal()">+ Create</button>
                     </div>
-                    <div class="service-vpn-stats" id="vpn-stats">
-                        <div class="vpn-stat">
-                            <span class="vpn-stat-label">Region</span>
-                            <span class="vpn-stat-val loading" id="t-region">---</span>
-                        </div>
-                        <div class="vpn-stat">
-                            <span class="vpn-stat-label">IP</span>
-                            <span class="vpn-stat-val loading" id="t-vpn" title="Click to reveal">---</span>
-                        </div>
-                        <div class="vpn-stat">
-                            <span class="vpn-stat-label">Port</span>
-                            <span class="vpn-stat-val loading" id="t-port">---</span>
-                        </div>
-                        <div class="vpn-stat">
-                            <span class="vpn-stat-label">DL</span>
-                            <span class="vpn-stat-val loading" id="t-dl">---</span>
-                        </div>
-                        <div class="vpn-stat">
-                            <span class="vpn-stat-label">UL</span>
-                            <span class="vpn-stat-val loading" id="t-ul">---</span>
+                    <ul id="invites-list" class="invites-list"></ul>
+                </div>
+
+                <div class="um-lane">
+                    <details class="users-details">
+                        <summary class="um-lane-header">
+                            <span>Existing accounts<span id="users-count" class="um-count-pill"></span></span>
+                            <span class="um-lane-hint">expand</span>
+                        </summary>
+                        <p class="users-hint">Users log in at <a href="/jellyfin/" target="_blank" style="color:#c8a2ff">/jellyfin/</a> with their credentials.</p>
+                        <ul id="users-list" class="users-list"></ul>
+                        <details class="add-user-details">
+                            <summary class="add-user-summary">Add user manually</summary>
+                            <form id="add-user-form" class="add-user-form" style="margin-top:0.6rem">
+                                <input id="new-username" placeholder="Username" autocomplete="off" required>
+                                <input id="new-password" type="password" placeholder="Password" required>
+                                <button type="submit">Add user</button>
+                            </form>
+                            <p id="add-user-error" class="users-error hidden"></p>
+                            <p id="add-user-success" class="hidden" style="margin-top:0.5rem;font-size:0.8rem;color:#7dda93"></p>
+                        </details>
+                    </details>
+                </div>
+            </div>
+        </div>
+
+        <!-- Services -->
+        <div class="section" id="services-section">
+            <div class="section-header services-header">
+                <span>Services</span>
+                <span class="svc-totals" id="svc-totals"></span>
+                <div class="svc-header-actions">
+                    <span class="svc-refresh-status" id="svc-refresh-status"></span>
+                    <button class="section-action" id="svc-refresh-btn" title="Refresh now" onclick="manualRefreshServices()">&#8635;</button>
+                    <div class="svc-stack-menu-wrap admin-only">
+                        <button class="section-action" id="svc-menu-btn" onclick="toggleStackMenu()" title="Stack actions">&#8943;</button>
+                        <div class="svc-stack-menu hidden" id="svc-stack-menu">
+                            <button onclick="restartService('nginx')">Restart nginx</button>
+                            <button onclick="stackRestart()">Restart stack</button>
+                            <button onclick="stackRebuild()" title="Restarts pelicula-api + procula. For a true image rebuild, run ./pelicula rebuild from a shell.">Rebuild Go services</button>
                         </div>
                     </div>
                 </div>
-                <a class="service" target="_blank" rel="noopener" href="/sonarr/" data-check="/sonarr/ping">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Sonarr</div><div class="service-desc">TV Shows</div></div>
+            </div>
+            <div class="services">
+                <!-- VPN card (flip-on-click square tile) -->
+                <div class="service service-vpn service-stage-infra" id="vpn-card" onclick="toggleVpnFlip(event)">
+                    <div class="vpn-inner">
+                        <div class="vpn-face vpn-front">
+                            <span class="service-status unknown" id="vpn-status-badge">&#9888;</span>
+                            <div class="service-name">VPN</div>
+                            <div class="service-desc" id="vpn-desc">Checking&hellip;</div>
+                            <div class="vpn-front-region" id="t-region">---</div>
+                        </div>
+                        <div class="vpn-face vpn-back">
+                            <div class="vpn-back-stats">
+                                <div class="vpn-stat">
+                                    <span class="vpn-stat-label">IP</span>
+                                    <span class="vpn-stat-val loading" id="t-vpn" title="Click to reveal">---</span>
+                                </div>
+                                <div class="vpn-stat">
+                                    <span class="vpn-stat-label">Port</span>
+                                    <span class="vpn-stat-val loading" id="t-port">---</span>
+                                </div>
+                                <div class="vpn-stat">
+                                    <span class="vpn-stat-label">DL</span>
+                                    <span class="vpn-stat-val loading" id="t-dl">---</span>
+                                </div>
+                                <div class="vpn-stat">
+                                    <span class="vpn-stat-label">UL</span>
+                                    <span class="vpn-stat-val loading" id="t-ul">---</span>
+                                </div>
+                            </div>
+                            <div class="vpn-back-hint">tap to close</div>
+                        </div>
                     </div>
-                    <span class="service-arrow">&rarr;</span>
+                </div>
+                <a class="service service-stage-manage" target="_blank" rel="noopener" href="/sonarr/" data-check="/sonarr/ping" data-svc="sonarr">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'sonarr')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Sonarr</div>
+                    <div class="service-desc">TV Shows</div>
                 </a>
-                <a class="service" target="_blank" rel="noopener" href="/radarr/" data-check="/radarr/ping">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Radarr</div><div class="service-desc">Movies</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-manage" target="_blank" rel="noopener" href="/radarr/" data-check="/radarr/ping" data-svc="radarr">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'radarr')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Radarr</div>
+                    <div class="service-desc">Movies</div>
                 </a>
-                <a class="service" target="_blank" rel="noopener" href="/prowlarr/" data-check="/prowlarr/ping">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Prowlarr</div><div class="service-desc">Indexers</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-discover" target="_blank" rel="noopener" href="/prowlarr/" data-check="/prowlarr/ping" data-svc="prowlarr">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'prowlarr')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Prowlarr</div>
+                    <div class="service-desc">Indexers</div>
                 </a>
-                <a class="service" target="_blank" rel="noopener" href="/qbt/" data-check="/qbt/">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">qBittorrent</div><div class="service-desc">Downloads</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-transport" target="_blank" rel="noopener" href="/qbt/" data-check="/qbt/" data-svc="qbittorrent">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'qbittorrent')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">qBittorrent</div>
+                    <div class="service-desc">Downloads</div>
                 </a>
-                <a class="service" target="_blank" rel="noopener" href="/jellyfin/" data-check="/jellyfin/health">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Jellyfin</div><div class="service-desc">Media Server</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-serve" target="_blank" rel="noopener" href="/jellyfin/" data-check="/jellyfin/health" data-svc="jellyfin">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'jellyfin')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Jellyfin</div>
+                    <div class="service-desc">Media Server</div>
                 </a>
-                <a class="service" target="_blank" rel="noopener" href="/procula/">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Procula</div><div class="service-desc">Processing</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-process" target="_blank" rel="noopener" href="/procula/" data-svc="procula">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'procula')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Procula</div>
+                    <div class="service-desc">Processing</div>
                 </a>
-                <a class="service" target="_blank" rel="noopener" href="/bazarr/" data-check="/bazarr/api/system/status">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Bazarr</div><div class="service-desc">Subtitles</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-process" target="_blank" rel="noopener" href="/bazarr/" data-check="/bazarr/api/system/status" data-svc="bazarr">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'bazarr')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Bazarr</div>
+                    <div class="service-desc">Subtitles</div>
                 </a>
-                <a class="service hidden" id="service-jellyseerr" data-service="jellyseerr" target="_blank" rel="noopener" href="#" data-check="">
-                    <div class="service-left">
-                        <span class="status-dot unknown"></span>
-                        <div><div class="service-name">Jellyseerr</div><div class="service-desc">Request &amp; share</div></div>
-                    </div>
-                    <span class="service-arrow">&rarr;</span>
+                <a class="service service-stage-request hidden" id="service-jellyseerr" data-service="jellyseerr" data-svc="jellyseerr" target="_blank" rel="noopener" href="#" data-check="">
+                    <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'jellyseerr')" title="View logs">logs ›</button>
+                    <span class="service-status unknown">&#9888;</span>
+                    <div class="service-name">Jellyseerr</div>
+                    <div class="service-desc">Request &amp; share</div>
                 </a>
+            </div>
+        </div>
+
+        <!-- Log viewer modal -->
+        <div class="modal-overlay hidden" id="log-modal">
+            <div class="modal log-modal">
+                <h3 id="log-modal-title">Logs</h3>
+                <pre id="log-modal-pre"></pre>
+                <div class="modal-buttons">
+                    <button class="modal-btn-cancel" id="log-copy-btn" onclick="copyServiceLogs()">Copy</button>
+                    <button class="modal-btn-cancel" id="log-refresh-btn" onclick="refreshServiceLogs()">Refresh</button>
+                    <button class="modal-btn-confirm" onclick="closeLogModal()">Close</button>
+                </div>
             </div>
         </div>
 
@@ -293,63 +415,6 @@
                     <div class="modal-buttons" style="margin-top:1.25rem">
                         <button class="modal-btn-cancel" onclick="closeInviteModal()">Done</button>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="section hidden" id="users-section">
-            <div class="um-hero">
-                <div class="um-hero-title-row">
-                    <span class="um-hero-icon">👥</span>
-                    <h2 class="um-hero-title">User Management</h2>
-                    <button class="section-action" id="share-jellyseerr-btn" title="Copy Jellyseerr URL">Share link</button>
-                </div>
-                <p class="um-hero-sub">Invites, accounts, and active sessions</p>
-            </div>
-
-            <div class="um-metrics">
-                <div class="um-metric">
-                    <div class="um-metric-num" id="um-metric-accounts">—</div>
-                    <div class="um-metric-label">Accounts</div>
-                </div>
-                <div class="um-metric">
-                    <div class="um-metric-num" id="um-metric-invites">—</div>
-                    <div class="um-metric-label">Active invites</div>
-                </div>
-                <div class="um-metric">
-                    <div class="um-metric-num" id="um-metric-sessions">—</div>
-                    <div class="um-metric-label">Now playing</div>
-                </div>
-            </div>
-
-            <div class="um-lanes">
-                <div class="um-lane">
-                    <div class="um-lane-header">
-                        <span>Invite links</span>
-                        <button class="section-action" onclick="openInviteModal()">+ Create</button>
-                    </div>
-                    <ul id="invites-list" class="invites-list"></ul>
-                </div>
-
-                <div class="um-lane">
-                    <details class="users-details">
-                        <summary class="um-lane-header">
-                            <span>Existing accounts<span id="users-count" class="um-count-pill"></span></span>
-                            <span class="um-lane-hint">expand</span>
-                        </summary>
-                        <p class="users-hint">Users log in at <a href="/jellyfin/" target="_blank" style="color:#c8a2ff">/jellyfin/</a> with their credentials.</p>
-                        <ul id="users-list" class="users-list"></ul>
-                        <details class="add-user-details">
-                            <summary class="add-user-summary">Add user manually</summary>
-                            <form id="add-user-form" class="add-user-form" style="margin-top:0.6rem">
-                                <input id="new-username" placeholder="Username" autocomplete="off" required>
-                                <input id="new-password" type="password" placeholder="Password" required>
-                                <button type="submit">Add user</button>
-                            </form>
-                            <p id="add-user-error" class="users-error hidden"></p>
-                            <p id="add-user-success" class="hidden" style="margin-top:0.5rem;font-size:0.8rem;color:#7dda93"></p>
-                        </details>
-                    </details>
                 </div>
             </div>
         </div>

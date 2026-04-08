@@ -364,7 +364,7 @@ async function checkServices() {
         const data = await res.json();
         const svcMap = data.services || {};
         document.querySelectorAll('a.service').forEach(el => {
-            const dot = el.querySelector('.status-dot');
+            const icon = el.querySelector('.service-status');
             let name = el.dataset.service || '';
             if (!name) {
                 const href = el.getAttribute('href') || '';
@@ -376,8 +376,13 @@ async function checkServices() {
                 else if (href.includes('procula')) name = 'procula';
                 else if (href.includes('bazarr')) name = 'bazarr';
             }
-            dot.className = 'status-dot ' + (svcMap[name] === 'up' ? 'up' : 'down');
+            const up = svcMap[name] === 'up';
+            icon.className = 'service-status ' + (up ? 'up' : 'down');
+            icon.textContent = up ? '\u2713' : '!';
+            el.classList.remove('svc-up', 'svc-down', 'svc-unknown');
+            el.classList.add(up ? 'svc-up' : 'svc-down');
         });
+        updateSvcTotals();
         // Search depends on Radarr + Sonarr
         const radarrUp = svcMap['radarr'] === 'up';
         const sonarrUp = svcMap['sonarr'] === 'up';
@@ -399,7 +404,13 @@ async function checkServices() {
         }
     } catch (e) {
         console.warn('[pelicula] status check error:', e);
-        document.querySelectorAll('a.service .status-dot').forEach(d => d.className = 'status-dot unknown');
+        document.querySelectorAll('a.service').forEach(el => {
+            const d = el.querySelector('.service-status');
+            if (d) { d.className = 'service-status unknown'; d.textContent = '\u26a0'; }
+            el.classList.remove('svc-up', 'svc-down');
+            el.classList.add('svc-unknown');
+        });
+        updateSvcTotals();
         searchInput.disabled = true;
         searchInput.placeholder = 'Search unavailable';
         warn.textContent = 'Cannot reach services — search is disabled';
@@ -407,12 +418,229 @@ async function checkServices() {
     }
 }
 
+// ── Services auto-refresh + totals ────────
+
+let _svcRefreshTimer = null;
+let _svcCountdown = 0;
+const SVC_INTERVAL = 30; // seconds
+
+function startServicesAutoRefresh() {
+    _svcCountdown = SVC_INTERVAL;
+    updateSvcCountdown();
+    if (_svcRefreshTimer) clearInterval(_svcRefreshTimer);
+    _svcRefreshTimer = setInterval(() => {
+        if (document.hidden) return;
+        _svcCountdown--;
+        if (_svcCountdown <= 0) {
+            _svcCountdown = SVC_INTERVAL;
+            checkServices().then(updateSvcTotals);
+        }
+        updateSvcCountdown();
+    }, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            _svcCountdown = SVC_INTERVAL;
+            updateSvcCountdown();
+        }
+    }, { once: false });
+}
+
+function updateSvcCountdown() {
+    const el = document.getElementById('svc-refresh-status');
+    if (el) el.textContent = _svcCountdown > 0 ? 'next in ' + _svcCountdown + 's' : '';
+}
+
+function manualRefreshServices() {
+    _svcCountdown = SVC_INTERVAL;
+    updateSvcCountdown();
+    checkServices().then(updateSvcTotals);
+}
+
+function updateSvcTotals() {
+    const cards = document.querySelectorAll('.service');
+    let up = 0, down = 0;
+    cards.forEach(c => {
+        if (c.classList.contains('hidden')) return;
+        if (c.classList.contains('svc-up')) up++;
+        else if (c.classList.contains('svc-down')) down++;
+    });
+    const el = document.getElementById('svc-totals');
+    if (!el) return;
+    if (down === 0 && up > 0) {
+        el.textContent = 'All ' + up + ' up';
+        el.style.color = '#7dda93';
+    } else if (down > 0) {
+        el.textContent = up + ' up \u00b7 ' + down + ' down';
+        el.style.color = '#f87171';
+    } else {
+        el.textContent = '';
+    }
+}
+
+// ── Stack actions ──────────────────────────
+
+function toggleStackMenu() {
+    const menu = document.getElementById('svc-stack-menu');
+    if (menu) menu.classList.toggle('hidden');
+}
+
+document.addEventListener('click', (e) => {
+    const menu = document.getElementById('svc-stack-menu');
+    const wrap = document.querySelector('.svc-stack-menu-wrap');
+    if (menu && wrap && !wrap.contains(e.target)) {
+        menu.classList.add('hidden');
+    }
+});
+
+async function restartService(name) {
+    const btn = document.getElementById('svc-menu-btn');
+    if (!confirm('Restart ' + name + '?')) return;
+    toggleStackMenu();
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/pelicula/admin/restart?svc=' + encodeURIComponent(name), { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { showAdminToast(data.error || 'Restart failed', true); return; }
+        showAdminToast(name + ' restarted');
+        setTimeout(() => checkServices().then(updateSvcTotals), 3000);
+    } catch (e) {
+        showAdminToast('Network error', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function stackRestart() {
+    const btn = document.getElementById('svc-menu-btn');
+    if (!confirm('Restart all stack services? The dashboard will reconnect automatically.')) return;
+    toggleStackMenu();
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/pelicula/admin/stack/restart', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { showAdminToast(data.error || 'Restart failed', true); return; }
+        showAdminToast('Stack restarting\u2026');
+        setTimeout(() => checkServices().then(updateSvcTotals), 5000);
+    } catch (e) {
+        // pelicula-api restarted — response was lost. That's fine.
+        showAdminToast('Stack restarting\u2026');
+        setTimeout(() => checkServices().then(updateSvcTotals), 5000);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function stackRebuild() {
+    const btn = document.getElementById('svc-menu-btn');
+    if (!confirm('Restart pelicula-api and procula?\n\nFor a full image rebuild, run ./pelicula rebuild from a shell.')) return;
+    toggleStackMenu();
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/pelicula/admin/stack/rebuild', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { showAdminToast(data.error || 'Rebuild failed', true); return; }
+        showAdminToast('Go services restarting\u2026');
+        setTimeout(() => checkServices().then(updateSvcTotals), 5000);
+    } catch (e) {
+        showAdminToast('Go services restarting\u2026');
+        setTimeout(() => checkServices().then(updateSvcTotals), 5000);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+function showAdminToast(msg, isError) {
+    // Reuse the existing index toast element for one-liners,
+    // else fall back to alert for errors.
+    if (isError) { alert(msg); return; }
+    const el = document.getElementById('toast');
+    if (!el) return;
+    const prev = el.innerHTML;
+    el.innerHTML = '<span class="toast-icon">&#10003;</span><span>' + escapeHtml(msg) + '</span>';
+    el.classList.add('visible');
+    setTimeout(() => { el.classList.remove('visible'); el.innerHTML = prev; }, 3000);
+}
+
+// ── Log viewer modal ────────────────────────
+
+let _logCurrentSvc = '';
+
+function showServiceLogs(e, svc) {
+    e.stopPropagation();
+    e.preventDefault();
+    _logCurrentSvc = svc;
+    const modal = document.getElementById('log-modal');
+    const title = document.getElementById('log-modal-title');
+    const pre = document.getElementById('log-modal-pre');
+    if (!modal) return;
+    title.textContent = svc + ' logs';
+    pre.textContent = 'Loading\u2026';
+    modal.classList.remove('hidden');
+    fetchServiceLogs(svc);
+}
+
+function closeLogModal() {
+    const modal = document.getElementById('log-modal');
+    if (modal) modal.classList.add('hidden');
+    _logCurrentSvc = '';
+}
+
+function refreshServiceLogs() {
+    if (_logCurrentSvc) fetchServiceLogs(_logCurrentSvc);
+}
+
+function copyServiceLogs() {
+    const pre = document.getElementById('log-modal-pre');
+    const btn = document.getElementById('log-copy-btn');
+    if (!pre || !btn) return;
+    const text = pre.textContent || '';
+    const flash = () => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = prev; }, 1500);
+    };
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(flash).catch(() => {
+            const r = document.createRange();
+            r.selectNodeContents(pre);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(r);
+        });
+    }
+}
+
+async function fetchServiceLogs(svc) {
+    const pre = document.getElementById('log-modal-pre');
+    const btn = document.getElementById('log-refresh-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/pelicula/admin/logs?svc=' + encodeURIComponent(svc) + '&tail=200');
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            pre.textContent = 'Error: ' + (d.error || res.status);
+            return;
+        }
+        const text = await res.text();
+        pre.textContent = text || '(no output)';
+        pre.scrollTop = pre.scrollHeight;
+    } catch (e) {
+        pre.textContent = 'Network error: ' + e.message;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// Close log modal on overlay click
+document.getElementById('log-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('log-modal')) closeLogModal();
+});
+
 // ── VPN Telemetry ─────────────────────────
 async function checkVPN() {
     const vpnEl = document.getElementById('t-vpn');
     const regionEl = document.getElementById('t-region');
     const portEl = document.getElementById('t-port');
-    const dot = document.getElementById('vpn-dot');
+    const badge = document.getElementById('vpn-status-badge');
     const desc = document.getElementById('vpn-desc');
     const card = document.getElementById('vpn-card');
     try {
@@ -429,9 +657,11 @@ async function checkVPN() {
             vpnEl.className = 'vpn-stat-val vpn-ok';
             regionEl.textContent = data.country || '\u2014';
             regionEl.classList.remove('loading');
-            dot.className = 'status-dot up';
+            badge.className = 'service-status up';
+            badge.textContent = '\u2713';
             desc.textContent = 'Connected';
-            card.classList.remove('vpn-down');
+            card.classList.remove('vpn-down', 'svc-down', 'svc-unknown');
+            card.classList.add('svc-up');
         } else if (!ipRes) {
             throw new Error('VPN timeout');
         }
@@ -446,13 +676,16 @@ async function checkVPN() {
         vpnEl.className = 'vpn-stat-val vpn-err';
         regionEl.textContent = '-'; regionEl.classList.remove('loading');
         portEl.textContent = '-'; portEl.classList.remove('loading');
-        dot.className = 'status-dot down';
+        badge.className = 'service-status down';
+        badge.textContent = '!';
         desc.textContent = 'Down — downloads paused';
-        card.classList.add('vpn-down');
+        card.classList.remove('svc-up', 'svc-unknown');
+        card.classList.add('vpn-down', 'svc-down');
     }
 }
 
 function updateTimestamp() { document.getElementById('footer-time').textContent = new Date().toLocaleTimeString(); }
+function toggleVpnFlip(e) { e.stopPropagation(); document.getElementById('vpn-card').classList.toggle('flipped'); }
 document.getElementById('t-vpn').addEventListener('click', function() {
     const ip = this.getAttribute('data-ip');
     if (!ip || ip === '?') return;
@@ -570,14 +803,66 @@ function renderActivity(events) {
     }).join('');
 }
 
-// ── Storage section ───────────────────────
+// ── Storage Management ────────────────────
 async function checkStorage() {
     try {
         const res = await tfetch('/api/pelicula/storage');
         if (!res.ok) return;
         const data = await res.json();
+        const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
+        if (!filesystems.length) return;
+        document.getElementById('storage-section').classList.remove('hidden');
         renderStorage(data);
+        renderStorageMetrics(data);
+        renderStorageFolders(data);
+        renderStorageTimestamp(data.timestamp);
     } catch (e) { console.warn('[pelicula] storage error:', e); }
+}
+
+// Load threshold settings into the Settings lane (admin only, best-effort)
+async function loadStorageSettings() {
+    try {
+        const res = await tfetch('/api/pelicula/procula-settings');
+        if (!res.ok) return;
+        const cfg = await res.json();
+        const warnEl = document.getElementById('sm-warn-pct');
+        const critEl = document.getElementById('sm-crit-pct');
+        if (warnEl && cfg.storage_warning_pct) warnEl.value = cfg.storage_warning_pct;
+        if (critEl && cfg.storage_critical_pct) critEl.value = cfg.storage_critical_pct;
+        if (warnEl) warnEl.addEventListener('change', saveStorageThreshold);
+        if (critEl) critEl.addEventListener('change', saveStorageThreshold);
+    } catch (e) { /* non-admin: silently skip */ }
+}
+
+async function saveStorageThreshold() {
+    const warn = parseInt(document.getElementById('sm-warn-pct')?.value, 10);
+    const crit = parseInt(document.getElementById('sm-crit-pct')?.value, 10);
+    if (isNaN(warn) || isNaN(crit)) return;
+    try {
+        const res = await tfetch('/api/pelicula/procula-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ storage_warning_pct: warn, storage_critical_pct: crit })
+        });
+        if (res.ok) {
+            ['sm-warn-pct', 'sm-crit-pct'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.add('saved');
+                setTimeout(() => el.classList.remove('saved'), 1200);
+            });
+        }
+    } catch (e) { console.warn('[pelicula] save storage threshold error:', e); }
+}
+
+async function scanStorageNow() {
+    const btn = document.getElementById('storage-scan-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning\u2026'; }
+    try {
+        await tfetch('/api/pelicula/storage/scan', { method: 'POST' });
+        await checkStorage();
+    } catch (e) { console.warn('[pelicula] scan error:', e); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Scan now'; }
 }
 
 function folderColor(label) {
@@ -585,38 +870,83 @@ function folderColor(label) {
     return map[(label || '').toLowerCase()] || '#888';
 }
 
-function renderStorage(data) {
-    const section = document.getElementById('storage-section');
-    const list = document.getElementById('storage-list');
-    const summary = document.getElementById('storage-summary');
-
-    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
-    if (!filesystems.length) {
-        section.style.display = 'none';
-        return;
+function renderStorageMetrics(data) {
+    const filesystems = data.filesystems || [];
+    let free = 0, pelicula = 0, allKnown = true;
+    let hasCrit = false, hasWarn = false;
+    for (const fs of filesystems) {
+        free += fs.available || 0;
+        for (const f of (fs.folders || [])) {
+            if (f.size < 0) allKnown = false;
+            else pelicula += f.size;
+        }
+        if (fs.status === 'critical') hasCrit = true;
+        else if (fs.status === 'warning') hasWarn = true;
     }
-    section.style.display = '';
+    const freeEl = document.getElementById('sm-metric-free');
+    const pelEl = document.getElementById('sm-metric-pelicula');
+    const statEl = document.getElementById('sm-metric-status');
+    if (freeEl) freeEl.textContent = formatSize(free);
+    if (pelEl) pelEl.textContent = allKnown ? formatSize(pelicula) : 'Calculating\u2026';
+    if (statEl) {
+        if (hasCrit) { statEl.textContent = 'Critical'; statEl.className = 'um-metric-num sm-status-critical'; }
+        else if (hasWarn) { statEl.textContent = 'Warning'; statEl.className = 'um-metric-num sm-status-warning'; }
+        else { statEl.textContent = 'Healthy'; statEl.className = 'um-metric-num sm-status-ok'; }
+    }
+}
 
-    const hasCrit = filesystems.some(fs => fs.status === 'critical');
-    const hasWarn = filesystems.some(fs => fs.status === 'warning');
-    summary.textContent = hasCrit ? 'Critical' : hasWarn ? 'Warning' : '';
-    summary.className = hasCrit ? 'storage-status-critical' : hasWarn ? 'storage-status-warning' : '';
+function renderStorageFolders(data) {
+    const el = document.getElementById('sm-folder-list');
+    if (!el) return;
+    const filesystems = data.filesystems || [];
+    // Aggregate across filesystems by label
+    const totals = {};
+    let grandTotal = 0;
+    for (const fs of filesystems) {
+        for (const f of (fs.folders || [])) {
+            if (f.size < 0) continue;
+            totals[f.label] = (totals[f.label] || 0) + f.size;
+            grandTotal += f.size;
+        }
+    }
+    if (!Object.keys(totals).length) { el.innerHTML = '<div class="sm-last-scan">No data yet</div>'; return; }
+    el.innerHTML = Object.entries(totals).sort((a,b) => b[1]-a[1]).map(([label, size]) => {
+        const pct = grandTotal > 0 ? (size / grandTotal * 100).toFixed(0) : 0;
+        const color = folderColor(label);
+        return `<div class="sm-folder-row">
+            <div class="sm-folder-dot" style="background:${color}"></div>
+            <div class="sm-folder-label">${esc(label)}</div>
+            <div class="sm-folder-size">${formatSize(size)}</div>
+            <div class="sm-folder-pct">${pct}%</div>
+        </div>`;
+    }).join('');
+}
+
+function renderStorageTimestamp(ts) {
+    const el = document.getElementById('sm-last-scan');
+    if (!el || !ts) return;
+    const d = new Date(ts);
+    const diffMin = Math.round((Date.now() - d.getTime()) / 60000);
+    el.textContent = diffMin < 2 ? 'just now' : diffMin < 60 ? diffMin + ' min ago' : d.toLocaleTimeString();
+}
+
+function renderStorage(data) {
+    const list = document.getElementById('storage-list');
+    if (!list) return;
+    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
 
     list.innerHTML = filesystems.map(fs => {
         const pct = Math.round(fs.used_pct || 0);
         const folders = Array.isArray(fs.folders) ? fs.folders : [];
         const diskLabel = folders.map(f => esc(f.label)).join(', ') || esc(fs.fs_id);
 
-        // Sum of our monitored folder sizes
-        let oursTotal = 0;
-        let allKnown = true;
+        let oursTotal = 0, allKnown = true;
         for (const f of folders) {
-            if (f.size < 0) { allKnown = false; }
-            else { oursTotal += f.size; }
+            if (f.size < 0) allKnown = false;
+            else oursTotal += f.size;
         }
         const otherUsed = Math.max(0, fs.used - oursTotal);
 
-        // Stacked bar: one segment per folder + gray segment for other disk usage
         const folderSegs = fs.total > 0 ? folders.map(f => {
             if (f.size < 0) return '';
             const w = (f.size / fs.total * 100).toFixed(2);
@@ -626,7 +956,6 @@ function renderStorage(data) {
         const otherSeg = otherW > 0
             ? `<div class="storage-seg storage-seg-other" style="width:${otherW}%"></div>` : '';
 
-        // Show folder breakdown only when there are multiple folders
         const showFolders = folders.length > 1;
         const folderRows = folders.map(f => {
             const folderPct = (fs.total > 0 && f.size >= 0)
@@ -647,7 +976,6 @@ function renderStorage(data) {
         const chevron = showFolders
             ? `<span class="storage-chevron">&#9660;</span>` : '';
         const headerClick = showFolders ? ' onclick="toggleStorageDisk(this.parentElement)"' : '';
-
         const oursTotalText = allKnown ? formatSize(oursTotal) : 'Calculating\u2026';
 
         return `<div class="download-item storage-disk">
@@ -1063,8 +1391,11 @@ function updateStaleBanner() {
 
 checkAuth();
 setTimeout(refresh, 500);
+setTimeout(loadStorageSettings, 600);
 // Update check runs once on load — backend caches for 24h so no need to poll.
 setTimeout(checkUpdates, 1000);
+// Services auto-refresh starts after the first refresh fires.
+setTimeout(startServicesAutoRefresh, 1000);
 setInterval(refresh, 15000);
 setInterval(updateStaleBanner, 5000);
 // Pipeline polls faster than the main cycle so cards update as items progress.

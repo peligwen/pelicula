@@ -194,6 +194,33 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
+  # Docker socket proxy — exposes only containers/restart+logs
+  # to pelicula-api. Contains a middleware compromise to the
+  # Docker API verbs we actually use (no exec, no images, no
+  # volumes — just restart + logs). The real socket is never
+  # mounted into pelicula-api.
+  # ═══════════════════════════════════════════════════
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3
+    container_name: pelicula-docker-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1       # GET /containers/* (inspect, logs)
+      - POST=1             # allow POST verbs (restart)
+      - ALLOW_START=0
+      - ALLOW_STOP=0
+      - ALLOW_RESTARTS=1   # POST /containers/{id}/restart only
+      # Everything else (IMAGES, VOLUMES, NETWORKS, EXEC, BUILD, AUTH, INFO)
+      # defaults to 0 — not exposed.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    security_opt:
+      - no-new-privileges:true
+
+  # ═══════════════════════════════════════════════════
   # Middleware — auto-wiring, search, downloads API
   # ═══════════════════════════════════════════════════
   pelicula-api:
@@ -202,6 +229,7 @@ services:
     environment:
       - TZ=${TZ}
       - PELICULA_AUTH=${PELICULA_AUTH:-off}
+      - DOCKER_HOST=http://docker-proxy:2375
       - PELICULA_PASSWORD=${PELICULA_PASSWORD:-}
       - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}

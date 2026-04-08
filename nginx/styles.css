@@ -356,41 +356,116 @@ body.stale .reload-btn { color: #c8a060; }
 .modal-btn-confirm:hover { background: #4a1a1a; }
 
 /* Services */
-.services { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.5rem; }
-@media (max-width: 560px) { .services { grid-template-columns: 1fr; } }
+.services { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+@media (max-width: 720px) { .services { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px) { .services { grid-template-columns: 1fr; } }
 
-/* VPN service card — wide row */
-.service-vpn {
-    grid-column: 1 / -1;
+/* Services section header extras */
+.services-header { align-items: center; gap: 0.5rem; }
+.svc-totals { font-variant-numeric: tabular-nums; flex: 1; text-align: center; }
+.svc-header-actions { display: flex; align-items: center; gap: 0.4rem; position: relative; }
+.svc-refresh-status { font-variant-numeric: tabular-nums; min-width: 7ch; text-align: right; opacity: 0.6; font-size: 0.62rem; }
+.svc-stack-menu-wrap { position: relative; }
+.svc-stack-menu {
+    position: absolute; right: 0; top: calc(100% + 0.4rem);
+    background: #131313; border: 1px solid #222; border-radius: 6px;
+    padding: 0.25rem 0; min-width: 160px; z-index: 200;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.55);
+}
+.svc-stack-menu button {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; color: #bbb;
+    font-size: 0.75rem; padding: 0.45rem 0.9rem; cursor: pointer;
+}
+.svc-stack-menu button:hover { background: #1e1e1e; color: #eee; }
+/* Per-card log button (bottom-right text chip) */
+.svc-log-btn {
+    position: absolute; bottom: 0.35rem; right: 0.5rem;
+    background: none; border: none; padding: 0; cursor: pointer;
+    font-size: 0.6rem; letter-spacing: 0.06em; text-transform: uppercase;
+    color: #666; opacity: 0.5; line-height: 1;
+    z-index: 2; transition: all 0.15s;
+    font-family: inherit;
+}
+.service:hover .svc-log-btn { opacity: 1; color: #aaa; }
+.svc-log-btn:hover { color: #fff !important; }
+/* Log viewer modal */
+.log-modal { max-width: 700px; width: 94vw; }
+.log-modal pre {
+    font-family: ui-monospace, Menlo, 'Cascadia Code', monospace;
+    font-size: 0.72rem; line-height: 1.45;
+    max-height: 60vh; overflow: auto;
+    background: #0b0b0e; border: 1px solid #1e1e1e;
+    border-radius: 6px; padding: 0.75rem;
+    color: #ccc; white-space: pre-wrap; word-break: break-all;
+    margin: 0.5rem 0 1rem;
+}
+
+/* VPN service card — flip tile (shared base via div.service) */
+div.service {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.85rem 1rem;
+    justify-content: center;
+    aspect-ratio: 1 / 1;
+    min-height: 90px;
+    padding: 1rem;
+    gap: 0.25rem;
     background: #131313;
     border: 1px solid #1e1e1e;
     border-radius: 8px;
     color: #ccc;
+    text-align: center;
     transition: border-color 0.15s, background 0.15s;
 }
-.service-vpn.vpn-down { border-color: rgba(248,113,113,0.2); }
-.service-vpn-left { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
-.service-vpn-stats {
-    display: flex;
-    gap: 1.25rem;
-    flex-wrap: wrap;
-    justify-content: flex-end;
+div.service:hover { filter: brightness(1.12); }
+.service-vpn {
+    perspective: 600px;
+    cursor: pointer;
+    overflow: hidden;
 }
-.vpn-stat { display: flex; flex-direction: column; align-items: flex-end; }
+.service-vpn.vpn-down { border-color: rgba(248,113,113,0.25); }
+.vpn-inner {
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    transition: transform 0.45s ease;
+    border-radius: 8px;
+}
+.service-vpn.flipped .vpn-inner { transform: rotateY(180deg); }
+.vpn-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 1rem;
+    text-align: center;
+    border-radius: 8px;
+}
+.vpn-back { transform: rotateY(180deg); justify-content: center; gap: 0.6rem; }
+.vpn-front-region { font-size: 0.72rem; color: #777; margin-top: 0.1rem; }
+.vpn-back-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 0.6rem;
+    width: 100%;
+}
+.vpn-stat { display: flex; flex-direction: column; align-items: center; }
 .vpn-stat-label {
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     color: #555;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     margin-bottom: 0.1rem;
 }
 .vpn-stat-val {
-    font-size: 0.88rem;
+    font-size: 0.75rem;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     font-family: "SF Mono", "Menlo", "Consolas", monospace;
@@ -400,30 +475,62 @@ body.stale .reload-btn { color: #c8a060; }
 .vpn-stat-val.vpn-ok { color: #7dda93; }
 .vpn-stat-val.vpn-err { color: #f87171; }
 #t-vpn { cursor: pointer; }
-@media (max-width: 480px) {
-    .service-vpn { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
-    .service-vpn-stats { justify-content: flex-start; flex-wrap: nowrap; gap: 1rem; }
-    .vpn-stat { align-items: flex-start; }
-    .vpn-stat-label { text-align: left; }
-}
+.vpn-back-hint { font-size: 0.58rem; color: #3a3a3a; }
 
 a.service {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    padding: 0.85rem 1rem;
+    justify-content: center;
+    aspect-ratio: 1 / 1;
+    min-height: 90px;
+    padding: 1rem;
+    gap: 0.25rem;
     background: #131313;
     border: 1px solid #1e1e1e;
     border-radius: 8px;
     color: #ccc;
     text-decoration: none;
+    text-align: center;
     transition: border-color 0.15s, background 0.15s;
 }
-a.service:hover { border-color: #333; background: #181818; }
-.service-left { display: flex; align-items: center; gap: 0.6rem; }
+a.service:hover { filter: brightness(1.12); }
 .service-name { font-weight: 500; font-size: 0.9rem; }
-.service-desc { font-size: 0.75rem; color: #555; }
-.service-arrow { color: #333; font-size: 1rem; }
+.service-desc { font-size: 0.72rem; color: #666; }
+/* Stage pastel tints */
+.service-stage-infra     { background: rgba(160,210,210,.07); border-color: rgba(160,210,210,.25); }
+.service-stage-discover  { background: rgba(200,162,255,.08); border-color: rgba(200,162,255,.28); }
+.service-stage-manage    { background: rgba(125,178,242,.08); border-color: rgba(125,178,242,.28); }
+.service-stage-transport { background: rgba(240,224,120,.08); border-color: rgba(240,224,120,.28); }
+.service-stage-process   { background: rgba(240,192,128,.09); border-color: rgba(240,192,128,.32); }
+.service-stage-serve     { background: rgba(125,218,147,.08); border-color: rgba(125,218,147,.28); }
+.service-stage-request   { background: rgba(242,125,178,.08); border-color: rgba(242,125,178,.28); }
+/* Status-based background tint — higher specificity overrides stage tint */
+a.service.svc-up,   div.service.svc-up   { background: rgba(125,218,147,.08); border-color: rgba(125,218,147,.25); }
+a.service.svc-down, div.service.svc-down { background: rgba(248,113,113,.09); border-color: rgba(248,113,113,.28); }
+/* Status badge circle (top-right corner of tile) */
+.service-status {
+    position: absolute;
+    top: 0.45rem;
+    right: 0.55rem;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #0d0d0d;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
+}
+.service-status.up      { background: #7dda93; }
+.service-status.down    { background: #f87171; }
+.service-status.unknown,
+.service-status.checking { background: #f5c97b; }
+/* VPN dot (inline, keep dot style) */
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #222; flex-shrink: 0; transition: background 0.3s; }
 .status-dot.up { background: #7dda93; }
 .status-dot.down { background: #f87171; }
@@ -724,6 +831,30 @@ details.users-details[open] > .um-lane-header { margin-bottom: 0.5rem; }
 .add-user-summary::before { content: '+ '; }
 details[open] .add-user-summary::before { content: '− '; }
 .add-user-summary:hover { color: #888; }
+
+/* ── Storage Management ─────────────────── */
+.sm-settings { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.25rem 0; }
+.sm-setting-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: #666; }
+.sm-threshold-input {
+    width: 52px; padding: 0.2rem 0.35rem;
+    background: #161616; border: 1px solid #2a2a2a; border-radius: 4px;
+    color: #ccc; font-size: 0.78rem; text-align: center;
+    transition: border-color 0.2s;
+}
+.sm-threshold-input:focus { outline: none; border-color: #444; }
+.sm-threshold-input.saved { border-color: #7dda93; }
+.sm-last-scan { font-size: 0.7rem; color: #444; margin-top: 0.15rem; }
+.sm-status-ok { color: #7dda93; }
+.sm-status-warning { color: #f5c97b; }
+.sm-status-critical { color: #f87171; }
+
+/* By-folder rows */
+.sm-folder-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid #1a1a1a; }
+.sm-folder-row:last-child { border-bottom: none; }
+.sm-folder-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.sm-folder-label { font-size: 0.78rem; color: #ccc; flex: 1; }
+.sm-folder-size { font-size: 0.75rem; color: #666; font-variant-numeric: tabular-nums; min-width: 5rem; text-align: right; }
+.sm-folder-pct { font-size: 0.68rem; color: #444; min-width: 2.5rem; text-align: right; }
 
 /* ── Pipeline board ─────────────────────── */
 .pl-lane-header {

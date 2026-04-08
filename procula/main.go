@@ -79,6 +79,7 @@ func main() {
 	mux.HandleFunc("POST /api/procula/jobs/{id}/retry", requireAPIKey(srv.handleRetryJob))
 	mux.HandleFunc("POST /api/procula/jobs/{id}/cancel", requireAPIKey(srv.handleCancelJob))
 	mux.HandleFunc("GET /api/procula/storage", handleStorage)
+	mux.HandleFunc("POST /api/procula/storage/scan", requireAPIKey(handleStorageScan))
 	mux.HandleFunc("GET /api/procula/updates", handleUpdates)
 	mux.HandleFunc("GET /api/procula/notifications", srv.handleNotifications)
 	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
@@ -210,6 +211,11 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStorage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, buildStorageReport())
+}
+
+func handleStorageScan(w http.ResponseWriter, r *http.Request) {
+	computeFolderSizes()
 	writeJSON(w, buildStorageReport())
 }
 

@@ -96,6 +96,8 @@ func main() {
 	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
 	mux.Handle("/api/pelicula/notifications", auth.Guard(http.HandlerFunc(handleNotificationsProxy)))
 	mux.Handle("/api/pelicula/storage", auth.Guard(http.HandlerFunc(handleStorageProxy)))
+	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(handleProculaSettingsProxy))
+	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(handleStorageScanProxy)))
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(handleUpdatesProxy)))
 	mux.Handle("/api/pelicula/events", auth.Guard(http.HandlerFunc(handleEventsProxy)))
 
@@ -136,6 +138,12 @@ func main() {
 	// admin only: manual transcoding — list profiles, enqueue transcode jobs
 	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(handleTranscodeProfiles)))
 	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
+
+	// admin only: container control via docker-socket-proxy sidecar
+	mux.Handle("/api/pelicula/admin/restart", auth.GuardAdmin(http.HandlerFunc(handleServiceRestart)))
+	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
+	mux.Handle("/api/pelicula/admin/stack/rebuild", auth.GuardAdmin(http.HandlerFunc(handleStackRebuild)))
+	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
 	if err := http.ListenAndServe(":8181", mux); err != nil {
