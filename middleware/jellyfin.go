@@ -315,7 +315,10 @@ func DeleteJellyfinUser(s *ServiceClients, id string) error {
 }
 
 // SetJellyfinUserPassword sets a new password for a Jellyfin user.
-// Called with an admin token so CurrentPw is not required.
+// Uses a two-step flow: clear the existing password first (ResetPassword:true),
+// then set the new one with an empty CurrentPw. This works for users with or
+// without an existing password; Jellyfin rejects a bare NewPw when a password
+// is already set.
 func SetJellyfinUserPassword(s *ServiceClients, id, newPw string) error {
 	if newPw == "" {
 		return ErrPasswordRequired
@@ -330,8 +333,15 @@ func SetJellyfinUserPassword(s *ServiceClients, id, newPw string) error {
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
+	// Step 1: clear the existing password. Ignore failure — the user may have
+	// no password yet, in which case Jellyfin returns 400 and we proceed anyway.
+	_, _ = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
+		"ResetPassword": true,
+	})
+	// Step 2: set the new password. CurrentPw is "" because step 1 cleared it.
 	body, err := jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
-		"NewPw": newPw,
+		"CurrentPw": "",
+		"NewPw":     newPw,
 	})
 	if err != nil {
 		msg := "set password failed"

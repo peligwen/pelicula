@@ -52,6 +52,26 @@ function goToStep(step) {
         if (i < idx) el.classList.add('done');
         if (i === idx) el.classList.add('active');
     });
+
+    if (step === 'configure') {
+        updateStrategyExamples();
+    }
+}
+
+// updateStrategyExamples replaces the generic placeholder text in the strategy
+// cards with paths from the first matched scan result so the user sees their
+// actual files instead of a made-up example.
+function updateStrategyExamples() {
+    const first = state.scanResults.find(r => r.status === 'new' && r.suggestedPath);
+    if (!first) return;
+    const src = first.file;
+    const dst = first.suggestedPath;
+    const fwd = src + ' \u2192 ' + dst;
+    const bwd = dst + ' \u2192 ' + src;
+    const el = id => document.getElementById(id);
+    if (el('strategy-example-hardlink')) el('strategy-example-hardlink').textContent = fwd;
+    if (el('strategy-example-migrate'))  el('strategy-example-migrate').textContent  = fwd;
+    if (el('strategy-example-symlink'))  el('strategy-example-symlink').textContent  = bwd;
 }
 
 // ── Step 1: Browse ──────────────────────────────────────────────────────────
@@ -617,9 +637,36 @@ function renderApplyResult(result, validate) {
     content.innerHTML = html;
 }
 
+// ── Storage explorer lifecycle (dashboard mode) ──────────────────────────────
+
+// openStorageExplorer shows the inline explorer panel and loads the browse tree
+// the first time it is called. Works on both the dashboard and /import.
+function openStorageExplorer() {
+    const section = document.getElementById('storage-explorer-section');
+    if (section) {
+        section.classList.remove('hidden');
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    if (!window._seInitialized) {
+        window._seInitialized = true;
+        loadBrowseRoots();
+    }
+}
+
+function closeStorageExplorer() {
+    const section = document.getElementById('storage-explorer-section');
+    if (section) section.classList.add('hidden');
+}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 
-loadBrowseRoots();
+// On the standalone /import page (no data-dashboard), auto-init the wizard.
+// On the dashboard, openStorageExplorer() is called on demand.
+if (!document.body.dataset.dashboard) {
+    loadBrowseRoots();
+} else if (window.location.hash === '#storage-explorer') {
+    openStorageExplorer();
+}
 
 // ── Re-transcode mode ────────────────────────────────────────────────────────
 

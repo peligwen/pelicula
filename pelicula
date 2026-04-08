@@ -2019,19 +2019,21 @@ PYEOF
 
     echo ""
     echo -e "  Choose migration strategy:"
-    echo "    1) Migrate     — move files into library (frees original location)"
-    echo "    2) Symlink     — create symlinks in library pointing to originals"
-    echo "    3) Keep        — register with Sonarr/Radarr, leave files in place"
+    echo "    1) Hardlink  — same file, two names; zero extra disk (requires same volume)"
+    echo "    2) Migrate   — move files into library (frees original location)"
+    echo "    3) Soft link — symlinks in library pointing to originals (works across volumes)"
+    echo "    4) Keep      — register with Sonarr/Radarr, leave files in place"
     echo "    q) Quit"
     echo ""
     local choice
-    read -rp "  Enter choice [1-3/q]: " choice
+    read -rp "  Enter choice [1-4/q]: " choice
 
     case "$choice" in
         q|Q) info "Cancelled."; return ;;
-        1) _import_apply "migrate"  "$scan_body" ;;
-        2) _import_apply "symlink"  "$scan_body" ;;
-        3) _import_apply "keep"     "$scan_body" ;;
+        1) _import_apply "hardlink" "$scan_body" ;;
+        2) _import_apply "migrate"  "$scan_body" ;;
+        3) _import_apply "symlink"  "$scan_body" ;;
+        4) _import_apply "keep"     "$scan_body" ;;
         *) fail "Invalid choice"; exit 1 ;;
     esac
 }
@@ -2081,11 +2083,14 @@ for item in data:
         continue
 
     # Filesystem operation.
-    if strat in ("migrate", "symlink"):
+    if strat in ("migrate", "hardlink", "symlink"):
         try:
             os.makedirs(os.path.dirname(host_dst), exist_ok=True)
             if strat == "migrate":
                 shutil.move(item["file"], host_dst)
+            elif strat == "hardlink":
+                if not os.path.lexists(host_dst):
+                    os.link(item["file"], host_dst)
             else:
                 if not os.path.lexists(host_dst):
                     os.symlink(item["file"], host_dst)

@@ -735,8 +735,9 @@ func TestSetJellyfinUserPassword_HappyPath(t *testing.T) {
 	if err := SetJellyfinUserPassword(services, uid, "newpassword"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pwCalls.Load() != 1 {
-		t.Errorf("/Password POST called %d times, want 1", pwCalls.Load())
+	// Two POSTs: step 1 clears the password (ResetPassword:true), step 2 sets the new one.
+	if pwCalls.Load() != 2 {
+		t.Errorf("/Password POST called %d times, want 2", pwCalls.Load())
 	}
 }
 

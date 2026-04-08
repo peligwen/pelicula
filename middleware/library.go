@@ -266,6 +266,15 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 				item.SourcePath = dst
 				item.DestPath = dst
 			}
+		case "hardlink":
+			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+				if err := os.Link(src, dst); err != nil {
+					slog.Warn("import: hardlink failed", "component", "library",
+						"src", src, "dst", dst, "error", err)
+				} else {
+					item.DestPath = dst
+				}
+			}
 		case "symlink":
 			if _, err := os.Lstat(dst); os.IsNotExist(err) {
 				if err := os.Symlink(src, dst); err != nil {
@@ -618,6 +627,10 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		case "migrate":
 			if item.DestPath != "" {
 				fsOp = "moved"
+			}
+		case "hardlink":
+			if item.DestPath != "" {
+				fsOp = "hardlinked"
 			}
 		case "symlink":
 			if item.DestPath != "" {
