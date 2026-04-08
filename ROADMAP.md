@@ -17,19 +17,6 @@ Content arrives fully validated and transcoded, but subtitles are not yet automa
 - [ ] Procula validation stage: after `catalog`, flag jobs missing subtitles for configured languages — Bazarr handles acquisition via its own Sonarr/Radarr polling; Procula does not talk to Bazarr directly
 - [ ] `./pelicula configure` → Bazarr section: enable/disable
 
-### Invite Flow (Phase D follow-up)
-
-One-time invite links so admins can onboard users without creating their Jellyfin account manually first.
-
-- [ ] `POST /api/pelicula/invites` — generate a signed, single-use token (HMAC, stored in `/config/pelicula/invites.json` with expiry + optional email label)
-- [ ] `GET /api/pelicula/invites/accept?token=...` — validate token, create the Jellyfin account (name + password from the claimant), mark token used
-- [ ] Dashboard: "Create invite link" button in the Users section → copies `http://host:7354/join?token=...` to clipboard (or shows it inline as with the existing share URL fallback)
-- [ ] `/join` page (static HTML served by nginx) — a minimal form: choose username + password, submit to `/api/pelicula/invites/accept`
-- [ ] Invite expiry: configurable TTL (default 7 days); expired/used tokens return a clear error page
-- [ ] Notify admin (Apprise / internal feed) when an invite is claimed, so they know a new user has joined
-- [ ] `./pelicula configure` → Users section: list active invites, revoke
-
-**Notes:** Token must be unguessable (32-byte random, base64url-encoded). The `/join` page and `/api/pelicula/invites/accept` must be reachable without a Pelicula session (pre-auth). All other invite management endpoints are admin-guarded. No email sending from Pelicula itself — admin copies the link and sends it however they like.
 
 ### Pelicula for Windows
 
@@ -69,6 +56,9 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 ## Deferred
 
+- **Invite Apprise notification**: notify admin via Apprise/internal feed when an invite is claimed. Deferred; low priority since the dashboard shows active invites and redemption history.
+- **`./pelicula configure` invite management**: list active invites and revoke them from the CLI menu. Deferred; the dashboard Users section covers this via the UI.
+
 - **Plex SSO**: moved to Peligrosa initiative above (Jellyfin SSO shipped).
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
@@ -90,5 +80,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 **Phase E — Transcoding:** `procula/process.go` with FFmpeg progress tracking (parses `time=` from stderr), profile matching on codec or resolution, two default profiles shipped disabled (`compatibility-h264.json`, `mobile-1080p.json`).
 
 **Phase F — External Notifications (Apprise):** Apprise container (opt-in Docker Compose profile), `direct` mode for single-webhook setups (ntfy, Gotify, any webhook URL), config at `/config/procula/notifications.json`. Discord is not a supported provider.
+
+**Invite Flow (Phase D follow-up):** One-time shareable invite links for admin-free user onboarding. `POST /api/pelicula/invites` generates a 32-byte random base64url token (stored in `/config/pelicula/invites.json`) with configurable TTL (default 7 days) and optional max-uses cap. Admins create links via the dashboard Users section ("Create invite link" button). `/register` (static HTML, no Pelicula session required) renders a username+password form that submits to `POST /api/pelicula/invites/{token}/redeem`, creating the Jellyfin account on success. Expired, exhausted, and revoked tokens return clear error states. Admin can revoke or delete tokens from the dashboard.
 
 **Dual Subtitles:** Procula pipeline stage that generates stacked ASS sidecar files (`Movie.en-es.ass`) alongside source media. Base language (familiar) appears bottom-center in white; secondary (learning) appears top-center in yellow. Source cues are extracted from embedded subtitle streams or `.{lang}.srt` / `.{lang}.ass` sidecars; Argos Translate (offline, not bundled in image) synthesizes missing tracks. Cue alignment is base-anchored (secondary cue midpoint must fall within base cue range). Configurable via env vars (`DUALSUB_ENABLED`, `DUALSUB_PAIRS`, `DUALSUB_TRANSLATOR`) and Procula settings UI. Known limitations: no bitmap (PGS/DVD) sub support; font fallback required for Arial; per-title opt-out not yet implemented.
