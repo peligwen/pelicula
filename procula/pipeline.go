@@ -78,12 +78,35 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 			j.Progress = 0.33
 		})
 
+		checksDetail := map[string]any{
+			"integrity": result.Checks.Integrity,
+			"duration":  result.Checks.Duration,
+			"sample":    result.Checks.Sample,
+		}
+		if result.Checks.Codecs != nil {
+			checksDetail["video"] = result.Checks.Codecs.Video
+			checksDetail["audio"] = result.Checks.Codecs.Audio
+			checksDetail["width"] = result.Checks.Codecs.Width
+			checksDetail["height"] = result.Checks.Codecs.Height
+		}
+
 		if !result.Passed {
 			slog.Warn("validation failed", "component", "pipeline", "job_id", id, "reason", failReason)
 			_ = q.Update(id, func(j *Job) {
 				j.State = StateFailed
 				j.Stage = StageValidate
 				j.Error = failReason
+			})
+
+			emitEvent(PipelineEvent{
+				Type:      EventValidationFailed,
+				JobID:     id,
+				Title:     job.Source.Title,
+				Year:      job.Source.Year,
+				MediaType: job.Source.Type,
+				Stage:     string(StageValidate),
+				Details:   checksDetail,
+				Message:   failReason,
 			})
 
 			// Remove the bad file from the library only when explicitly enabled in settings
@@ -108,6 +131,17 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 			WriteValidationFailedNotification(job, configDir, failReason)
 			return
 		}
+
+		emitEvent(PipelineEvent{
+			Type:      EventValidationPassed,
+			JobID:     id,
+			Title:     job.Source.Title,
+			Year:      job.Source.Year,
+			MediaType: job.Source.Type,
+			Stage:     string(StageValidate),
+			Details:   checksDetail,
+			Message:   "Validation passed",
+		})
 
 		slog.Info("validation passed", "component", "pipeline", "job_id", id, "video", result.Checks.Codecs.Video, "audio", result.Checks.Codecs.Audio)
 
@@ -224,6 +258,18 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 		j.TranscodeProfile = profile.Name
 	})
 
+	emitEvent(PipelineEvent{
+		Type:      EventTranscodeStarted,
+		JobID:     job.ID,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Stage:     string(StageProcess),
+		Details:   map[string]any{"profile": profile.Name},
+		Message:   "Transcode started with profile " + profile.Name,
+	})
+	transcodeStart := time.Now()
+
 	outputPath, err := Process(ctx, job, profile, func(pct, etaSecs float64) {
 		// Map pct (0–1) into the 50–90% progress window
 		progress := 0.5 + pct*0.4
@@ -238,12 +284,34 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 			j.TranscodeDecision = "failed"
 			j.TranscodeError = err.Error()
 		})
+		emitEvent(PipelineEvent{
+			Type:      EventTranscodeFailed,
+			JobID:     job.ID,
+			Title:     job.Source.Title,
+			Year:      job.Source.Year,
+			MediaType: job.Source.Type,
+			Stage:     string(StageProcess),
+			Duration:  time.Since(transcodeStart).Seconds(),
+			Details:   map[string]any{"profile": profile.Name, "error": err.Error()},
+			Message:   "Transcode failed: " + err.Error(),
+		})
 		return err
 	}
 
 	_ = q.Update(job.ID, func(j *Job) {
 		j.TranscodeDecision = "transcoded"
 		j.TranscodeOutputs = append(j.TranscodeOutputs, outputPath)
+	})
+	emitEvent(PipelineEvent{
+		Type:      EventTranscodeDone,
+		JobID:     job.ID,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Stage:     string(StageProcess),
+		Duration:  time.Since(transcodeStart).Seconds(),
+		Details:   map[string]any{"profile": profile.Name, "output": outputPath},
+		Message:   "Transcode completed with profile " + profile.Name,
 	})
 	return nil
 }
@@ -287,6 +355,18 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 		j.Progress = 0.2
 	})
 
+	emitEvent(PipelineEvent{
+		Type:      EventTranscodeStarted,
+		JobID:     id,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Stage:     string(StageProcess),
+		Details:   map[string]any{"profile": profile.Name, "manual": true},
+		Message:   "Manual transcode started with profile " + profile.Name,
+	})
+	transcodeStart := time.Now()
+
 	outputPath, err := Process(ctx, job, profile, func(pct, etaSecs float64) {
 		progress := 0.2 + pct*0.7
 		q.Update(id, func(j *Job) { //nolint:errcheck
@@ -303,6 +383,17 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 			j.TranscodeDecision = "failed"
 			j.TranscodeError = err.Error()
 		})
+		emitEvent(PipelineEvent{
+			Type:      EventTranscodeFailed,
+			JobID:     id,
+			Title:     job.Source.Title,
+			Year:      job.Source.Year,
+			MediaType: job.Source.Type,
+			Stage:     string(StageProcess),
+			Duration:  time.Since(transcodeStart).Seconds(),
+			Details:   map[string]any{"profile": profile.Name, "manual": true, "error": err.Error()},
+			Message:   "Manual transcode failed: " + err.Error(),
+		})
 		job, _ = q.Get(id)
 		WriteTranscodeFailedNotification(job, configDir, err.Error())
 		return
@@ -312,6 +403,17 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 		j.TranscodeDecision = "transcoded"
 		j.TranscodeOutputs = append(j.TranscodeOutputs, outputPath)
 		j.Progress = 0.95
+	})
+	emitEvent(PipelineEvent{
+		Type:      EventTranscodeDone,
+		JobID:     id,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Stage:     string(StageProcess),
+		Duration:  time.Since(transcodeStart).Seconds(),
+		Details:   map[string]any{"profile": profile.Name, "manual": true, "output": outputPath},
+		Message:   "Manual transcode completed with profile " + profile.Name,
 	})
 
 	// Refresh Jellyfin so the sidecar appears as an alternate version
@@ -395,6 +497,15 @@ func blocklist(job *Job, peliculaAPI, reason string) {
 			hash = hash[:8]
 		}
 		slog.Info("blocklisted release", "component", "pipeline", "category", category, "hash", hash, "reason", reason)
+		emitEvent(PipelineEvent{
+			Type:      EventReleaseBlocklisted,
+			JobID:     job.ID,
+			Title:     job.Source.Title,
+			Year:      job.Source.Year,
+			MediaType: job.Source.Type,
+			Details:   map[string]any{"category": category, "hash": hash},
+			Message:   "Release blocklisted: " + reason,
+		})
 		return
 	}
 	slog.Error("failed to blocklist after 3 attempts", "component", "pipeline", "error", lastErr)

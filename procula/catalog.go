@@ -52,6 +52,16 @@ func CatalogEarly(job *Job, configDir, peliculaAPI string) {
 	event := buildEvent(job, "content_ready", contentReadyMessage(job))
 	appendToFeed(configDir, event)
 
+	emitEvent(PipelineEvent{
+		Type:      EventCatalogRefreshed,
+		JobID:     job.ID,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Stage:     string(StageCatalog),
+		Message:   contentReadyMessage(job),
+	})
+
 	// Send external notification if configured
 	cfg := loadNotificationConfig(configDir)
 	sendExternalNotification(cfg, event)

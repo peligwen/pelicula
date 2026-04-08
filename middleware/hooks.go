@@ -454,13 +454,21 @@ func isAllowedWebhookPath(p string) bool {
 // proxyProcula returns an http.HandlerFunc that forwards a GET to the given
 // Procula path and streams the JSON response back. Used for simple dashboard
 // proxy endpoints that need no request-side logic.
-func proxyProcula(path string) http.HandlerFunc {
+// When forwardQuery is true the incoming request's raw query string is appended.
+func proxyProcula(path string, forwardQuery ...bool) http.HandlerFunc {
+	fwd := len(forwardQuery) > 0 && forwardQuery[0]
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		resp, err := services.client.Get(proculaBaseURL() + path)
+		target := proculaBaseURL() + path
+		if fwd {
+			if q := r.URL.RawQuery; q != "" {
+				target += "?" + q
+			}
+		}
+		resp, err := services.client.Get(target)
 		if err != nil {
 			writeError(w, "procula unavailable", http.StatusBadGateway)
 			return
@@ -479,6 +487,9 @@ var handleStorageProxy = proxyProcula("/api/procula/storage")
 
 // handleUpdatesProxy proxies Procula's update check result for the dashboard footer.
 var handleUpdatesProxy = proxyProcula("/api/procula/updates")
+
+// handleEventsProxy proxies Procula's event log, forwarding pagination/filter query params.
+var handleEventsProxy = proxyProcula("/api/procula/events", true)
 
 func proculaBaseURL() string {
 	if v := strings.TrimSpace(os.Getenv("PROCULA_URL")); v != "" {

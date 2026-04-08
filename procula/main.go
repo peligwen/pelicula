@@ -55,6 +55,13 @@ func main() {
 	}
 	slog.Info("queue loaded", "component", "queue", "job_count", len(q.jobs))
 
+	el, err := NewEventLog(configDir)
+	if err != nil {
+		slog.Error("event log initialization failed", "component", "main", "error", err)
+		os.Exit(1)
+	}
+	eventLog = el
+
 	// Single worker processes jobs sequentially
 	go RunWorker(q, configDir, peliculaAPI)
 	go RunStorageMonitor(configDir)
@@ -78,6 +85,7 @@ func main() {
 	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(handleSaveSettings))
 	mux.HandleFunc("GET /api/procula/profiles", srv.handleListProfiles)
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
+	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
 	mux.HandleFunc("GET /", handleUI)
 	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 
@@ -151,6 +159,15 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 	}
 	job, _ := s.queue.Get(id)
 	slog.Info("job retry", "component", "api", "job_id", id, "attempt", job.RetryCount)
+	emitEvent(PipelineEvent{
+		Type:      EventJobRetried,
+		JobID:     id,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Details:   map[string]any{"retry_count": job.RetryCount},
+		Message:   "Job queued for retry",
+	})
 	writeJSON(w, job)
 }
 
@@ -162,6 +179,14 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 	job, _ := s.queue.Get(id)
 	slog.Info("job cancelled", "component", "api", "job_id", id)
+	emitEvent(PipelineEvent{
+		Type:      EventJobCancelled,
+		JobID:     id,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Message:   "Job cancelled",
+	})
 	writeJSON(w, job)
 }
 

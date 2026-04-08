@@ -702,13 +702,16 @@ async function checkProcessing() {
 
 function renderProcessing(data) {
     const section = document.getElementById('processing-section');
-    const list = document.getElementById('processing-list');
+    const activeEl = document.getElementById('processing-active');
+    const failedSection = document.getElementById('processing-failed');
+    const failedList = document.getElementById('processing-failed-list');
     const statsEl = document.getElementById('processing-stats');
 
     const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    // Show section only if there are non-idle jobs
-    const activeJobs = jobs.filter(j => j.state !== 'completed' || wasRecentlyCompleted(j));
-    if (!activeJobs.length) {
+    const activeJobs = jobs.filter(j => j.state === 'queued' || j.state === 'processing');
+    const failedJobs = jobs.filter(j => j.state === 'failed');
+
+    if (!activeJobs.length && !failedJobs.length) {
         section.style.display = 'none';
         return;
     }
@@ -716,53 +719,90 @@ function renderProcessing(data) {
 
     const status = data.status && data.status.queue ? data.status.queue : {};
     const processing = status.processing || 0;
-    const pending = status.pending || 0;
+    const pending = status.queued || status.pending || 0;
     const completed = status.completed || 0;
     statsEl.textContent = `${pending} queued / ${processing} active / ${completed} done`;
 
-    list.innerHTML = activeJobs.slice(0, 10).map(j => {
-        const pct = Math.round((j.progress || 0) * 100);
-        const stageName = {validate:'Validating', process:'Processing', catalog:'Cataloging', done:'Done'}[j.stage] || j.stage;
-        const stateClass = j.state === 'completed' ? 'proc-done' : j.state === 'failed' ? 'proc-failed' : 'proc-active';
-        const barClass = j.state === 'completed' ? 'proc-bar-done' : j.state === 'failed' ? 'proc-bar-failed' : 'proc-bar-active';
-        const retryBtn = j.state === 'failed'
-            ? `<button class="dl-btn resume" title="Retry" data-job-id="${esc(j.id)}" onclick="retryFromBtn(this)">&#8635;</button>`
-            : '';
-        const missingSubsBadge = (j.missing_subs && j.missing_subs.length)
-            ? `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`
-            : '';
-        return `<div class="download-item">
-            <div class="download-header">
-                <div class="download-name">${esc(j.source ? j.source.title : j.id)}</div>
-                <div class="download-actions">
-                    <span class="proc-badge ${stateClass}">${stageName}</span>
-                    ${missingSubsBadge}
-                    ${retryBtn}
-                </div>
-            </div>
-            <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
-            <div class="download-meta">
-                <span>${pct}%</span>
-                <span>${j.error ? esc(j.error) : ''}</span>
-            </div>
-        </div>`;
-    }).join('');
+    activeEl.innerHTML = activeJobs.map(j => renderJobCard(j)).join('');
+
+    if (failedJobs.length) {
+        failedSection.style.display = '';
+        failedList.innerHTML = failedJobs.map(j => renderJobCard(j)).join('');
+    } else {
+        failedSection.style.display = 'none';
+    }
 }
 
-function wasRecentlyCompleted(j) {
-    if (j.state !== 'completed') return false;
-    try {
-        const updated = new Date(j.updated_at);
-        return (Date.now() - updated) < 5 * 60 * 1000; // within last 5 minutes
-    } catch { return false; }
+function renderJobCard(j) {
+    const pct = Math.round((j.progress || 0) * 100);
+    const stageName = {validate:'Validating', process:'Processing', catalog:'Cataloging', done:'Done'}[j.stage] || j.stage;
+    const stateClass = j.state === 'failed' ? 'proc-failed' : 'proc-active';
+    const barClass = j.state === 'failed' ? 'proc-bar-failed' : 'proc-bar-active';
+    const title = j.source ? j.source.title : j.id;
+
+    const retryBtn = j.state === 'failed'
+        ? `<button class="dl-btn resume" title="Retry" data-job-id="${esc(j.id)}" onclick="retryFromBtn(this)">&#8635;</button>`
+        : '';
+    const cancelBtn = (j.state === 'queued' || j.state === 'processing' || j.state === 'failed')
+        ? `<button class="dl-btn cancel" title="Cancel" data-job-id="${esc(j.id)}" onclick="cancelJobFromBtn(this)">&#x2715;</button>`
+        : '';
+    const viewLogLink = `<a class="dl-btn" href="/procula/#job=${esc(j.id)}" target="_blank" title="View in Procula" style="font-size:0.7rem;padding:0.2rem 0.4rem;text-decoration:none">&#9654;</a>`;
+
+    const missingSubsBadge = (j.missing_subs && j.missing_subs.length)
+        ? `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`
+        : '';
+
+    let checksHTML = '';
+    if (j.state === 'failed' && j.validation) {
+        const checks = j.validation.checks || {};
+        const checkOrder = ['integrity', 'duration', 'sample'];
+        checksHTML = `<div class="proc-check-list">${checkOrder.map(k => {
+            const v = checks[k] || 'skip';
+            const cls = ['pass', 'fail', 'warn'].includes(v) ? v : 'skip';
+            return `<span class="proc-check proc-check-${cls}">${k}: ${v}</span>`;
+        }).join('')}</div>`;
+    }
+
+    let metaRight = '';
+    if (j.transcode_profile) {
+        metaRight = esc(j.transcode_profile) + (j.transcode_decision ? ' · ' + esc(j.transcode_decision) : '');
+    } else if (j.transcode_eta > 0) {
+        metaRight = `ETA ${Math.round(j.transcode_eta)}s`;
+    }
+
+    return `<div class="download-item">
+        <div class="download-header">
+            <div class="download-name">${esc(title)}</div>
+            <div class="download-actions">
+                <span class="proc-badge ${stateClass}">${stageName}</span>
+                ${missingSubsBadge}
+                ${retryBtn}${cancelBtn}${viewLogLink}
+            </div>
+        </div>
+        <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
+        <div class="download-meta">
+            <span>${pct}%${j.error ? ' — ' + esc(j.error) : ''}</span>
+            <span>${metaRight}</span>
+        </div>
+        ${checksHTML}
+    </div>`;
 }
 
 async function retryJob(id) {
     try {
         await fetch(`/api/procula/jobs/${id}/retry`, {method: 'POST'});
         setTimeout(checkProcessing, 500);
-    } catch (e) { console.warn('[pelicula] error:', e); }
+    } catch (e) { console.warn('[pelicula] retry error:', e); }
 }
+
+async function cancelJob(id) {
+    try {
+        await fetch(`/api/procula/jobs/${id}/cancel`, {method: 'POST'});
+        setTimeout(checkProcessing, 500);
+    } catch (e) { console.warn('[pelicula] cancel error:', e); }
+}
+
+function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 
 let lastRefreshAt = 0;
 
