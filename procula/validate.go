@@ -28,6 +28,7 @@ type ffprobeFormat struct {
 }
 
 type ffprobeStream struct {
+	Index     int               `json:"index"`
 	CodecType string            `json:"codec_type"` // "video", "audio", "subtitle"
 	CodecName string            `json:"codec_name"`
 	Width     int               `json:"width"`

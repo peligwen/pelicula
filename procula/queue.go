@@ -27,8 +27,9 @@ type JobStage string
 
 const (
 	StageValidate JobStage = "validate"
-	StageProcess  JobStage = "process"
 	StageCatalog  JobStage = "catalog"
+	StageDualSub  JobStage = "dualsub"
+	StageProcess  JobStage = "process"
 	StageDone     JobStage = "done"
 )
 
@@ -81,6 +82,10 @@ type Job struct {
 	// CatalogEarly and run a targeted transcode using the named profile.
 	// Set by the POST /api/procula/transcode endpoint.
 	ManualProfile string `json:"manual_profile,omitempty"`
+
+	// Dual-subtitle metadata (populated by GenerateDualSubs)
+	DualSubOutputs []string `json:"dualsub_outputs,omitempty"`
+	DualSubError   string   `json:"dualsub_error,omitempty"`
 
 	// Transcoding metadata (populated by maybeTranscode / runManualTranscode)
 	TranscodeProfile  string   `json:"transcode_profile,omitempty"`

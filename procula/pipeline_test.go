@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -658,5 +659,185 @@ func TestDeleteOnFailure_True_MoviesPath_Refused(t *testing.T) {
 	}
 	if !isAllowedPath("/processing/alien.mkv") {
 		t.Error("isAllowedPath should return true for /processing paths")
+	}
+}
+
+// ── Dual subtitle pipeline integration tests ─────────────────────────────────
+
+// TestProcessJob_DualSub_SidecarSource verifies the full pipeline when
+// DualSubEnabled=true and sidecar .srt files exist alongside the source.
+// A stacked .en-es.ass file should be written and reflected in DualSubOutputs.
+func TestProcessJob_DualSub_SidecarSource(t *testing.T) {
+	// Fake ffprobe returning valid metadata with no embedded subtitle streams
+	// so getCues falls through to the sidecar discovery path.
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "success")
+
+	dir := t.TempDir()
+	sourcePath := dir + "/Movie (2020).mkv"
+	os.WriteFile(sourcePath, []byte("fake media"), 0644)
+
+	enSRT := "1\n00:00:01,000 --> 00:00:03,000\nHello\n\n2\n00:00:05,000 --> 00:00:07,000\nWorld\n\n"
+	esSRT := "1\n00:00:01,500 --> 00:00:02,500\nHola\n\n2\n00:00:05,500 --> 00:00:06,500\nMundo\n\n"
+	os.WriteFile(dir+"/Movie (2020).en.srt", []byte(enSRT), 0644)
+	os.WriteFile(dir+"/Movie (2020).es.srt", []byte(esSRT), 0644)
+
+	cfgDir := t.TempDir()
+	overrideSettings(t, PipelineSettings{
+		ValidationEnabled:  false,
+		DualSubEnabled:     true,
+		DualSubPairs:       []string{"en-es"},
+		DualSubTranslator:  "none",
+		TranscodingEnabled: false,
+		CatalogEnabled:     false,
+	})
+
+	q := newTestQueue(t)
+	api := fakePeliculaAPI(t)
+	created, _ := q.Create(testSource(sourcePath))
+
+	processJob(q, created.ID, cfgDir, api)
+
+	job, _ := q.Get(created.ID)
+	if job.State != StateCompleted {
+		t.Fatalf("state = %q, want completed (DualSubError: %q)", job.State, job.DualSubError)
+	}
+	if len(job.DualSubOutputs) != 1 {
+		t.Fatalf("DualSubOutputs = %v, want 1 path", job.DualSubOutputs)
+	}
+
+	assPath := dir + "/Movie (2020).en-es.ass"
+	if job.DualSubOutputs[0] != assPath {
+		t.Errorf("DualSubOutputs[0] = %q, want %q", job.DualSubOutputs[0], assPath)
+	}
+
+	data, err := os.ReadFile(assPath)
+	if err != nil {
+		t.Fatalf("read .ass file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `{\an2}Hello`) {
+		t.Errorf("expected English bottom cue in ASS output")
+	}
+	if !strings.Contains(content, `{\an8}Hola`) {
+		t.Errorf("expected Spanish top cue in ASS output")
+	}
+	if job.DualSubError != "" {
+		t.Errorf("DualSubError should be empty on success, got %q", job.DualSubError)
+	}
+}
+
+// TestProcessJob_DualSub_Disabled verifies that the dualsub stage is skipped
+// when DualSubEnabled=false, leaving no .ass file and no DualSubOutputs.
+func TestProcessJob_DualSub_Disabled(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := dir + "/Movie.mkv"
+	os.WriteFile(sourcePath, []byte("fake"), 0644)
+
+	cfgDir := t.TempDir()
+	overrideSettings(t, PipelineSettings{
+		ValidationEnabled:  false,
+		DualSubEnabled:     false,
+		TranscodingEnabled: false,
+		CatalogEnabled:     false,
+	})
+
+	q := newTestQueue(t)
+	api := fakePeliculaAPI(t)
+	created, _ := q.Create(testSource(sourcePath))
+
+	processJob(q, created.ID, cfgDir, api)
+
+	job, _ := q.Get(created.ID)
+	if job.State != StateCompleted {
+		t.Errorf("state = %q, want completed", job.State)
+	}
+	if len(job.DualSubOutputs) != 0 {
+		t.Errorf("DualSubOutputs should be empty when disabled, got %v", job.DualSubOutputs)
+	}
+	if _, err := os.Stat(dir + "/Movie.en-es.ass"); !os.IsNotExist(err) {
+		t.Error(".ass file should not exist when dualsub is disabled")
+	}
+}
+
+// TestProcessJob_DualSub_NoSource verifies that when DualSubEnabled=true but
+// no subtitle source exists, DualSubError is recorded and the job still completes.
+func TestProcessJob_DualSub_NoSource(t *testing.T) {
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "success") // no subtitle streams in response
+
+	dir := t.TempDir()
+	sourcePath := dir + "/Movie.mkv"
+	os.WriteFile(sourcePath, []byte("fake"), 0644)
+	// No .en.srt or .es.srt sidecars created.
+
+	cfgDir := t.TempDir()
+	overrideSettings(t, PipelineSettings{
+		ValidationEnabled:  false,
+		DualSubEnabled:     true,
+		DualSubPairs:       []string{"en-es"},
+		DualSubTranslator:  "none",
+		TranscodingEnabled: false,
+		CatalogEnabled:     false,
+	})
+
+	q := newTestQueue(t)
+	api := fakePeliculaAPI(t)
+	created, _ := q.Create(testSource(sourcePath))
+
+	processJob(q, created.ID, cfgDir, api)
+
+	job, _ := q.Get(created.ID)
+	if job.State != StateCompleted {
+		t.Errorf("state = %q, want completed (dualsub failure must not block job)", job.State)
+	}
+	if len(job.DualSubOutputs) != 0 {
+		t.Errorf("DualSubOutputs should be empty, got %v", job.DualSubOutputs)
+	}
+	if job.DualSubError == "" {
+		t.Error("DualSubError should be set when no subtitle source is available")
+	}
+}
+
+// TestCatalogLate_TriggersOnDualSubOutputs verifies that a late Jellyfin refresh
+// fires when DualSubOutputs is populated — even without a transcode sidecar.
+func TestCatalogLate_TriggersOnDualSubOutputs(t *testing.T) {
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "success")
+
+	dir := t.TempDir()
+	sourcePath := dir + "/Movie.mkv"
+	os.WriteFile(sourcePath, []byte("fake"), 0644)
+	enSRT := "1\n00:00:01,000 --> 00:00:03,000\nHello\n\n"
+	esSRT := "1\n00:00:01,000 --> 00:00:03,000\nHola\n\n"
+	os.WriteFile(dir+"/Movie.en.srt", []byte(enSRT), 0644)
+	os.WriteFile(dir+"/Movie.es.srt", []byte(esSRT), 0644)
+
+	cfgDir := t.TempDir()
+	overrideSettings(t, PipelineSettings{
+		ValidationEnabled:  false,
+		DualSubEnabled:     true,
+		DualSubPairs:       []string{"en-es"},
+		DualSubTranslator:  "none",
+		TranscodingEnabled: false,
+		CatalogEnabled:     true, // enabled — should trigger CatalogEarly + CatalogLate
+	})
+
+	apiURL, refreshCount := countingServer(t)
+	q := newTestQueue(t)
+	created, _ := q.Create(testSource(sourcePath))
+
+	processJob(q, created.ID, cfgDir, apiURL)
+
+	job, _ := q.Get(created.ID)
+	if job.State != StateCompleted {
+		t.Fatalf("state = %q, want completed", job.State)
+	}
+	if len(job.DualSubOutputs) == 0 {
+		t.Fatal("DualSubOutputs should be non-empty")
+	}
+	// CatalogEarly (1 refresh) + CatalogLate triggered by DualSubOutputs (1 more)
+	if n := refreshCount.Load(); n < 2 {
+		t.Errorf("expected ≥2 Jellyfin refreshes (early + late for dual-sub), got %d", n)
 	}
 }

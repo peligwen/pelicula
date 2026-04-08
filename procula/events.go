@@ -18,14 +18,16 @@ import (
 type EventType string
 
 const (
-	EventValidationPassed  EventType = "validation_passed"
-	EventValidationFailed  EventType = "validation_failed"
-	EventTranscodeStarted  EventType = "transcode_started"
-	EventTranscodeDone     EventType = "transcode_done"
-	EventTranscodeFailed   EventType = "transcode_failed"
-	EventCatalogRefreshed  EventType = "catalog_refreshed"
-	EventJobCancelled      EventType = "job_cancelled"
-	EventJobRetried        EventType = "job_retried"
+	EventValidationPassed   EventType = "validation_passed"
+	EventValidationFailed   EventType = "validation_failed"
+	EventDualSubDone        EventType = "dualsub_done"
+	EventDualSubFailed      EventType = "dualsub_failed"
+	EventTranscodeStarted   EventType = "transcode_started"
+	EventTranscodeDone      EventType = "transcode_done"
+	EventTranscodeFailed    EventType = "transcode_failed"
+	EventCatalogRefreshed   EventType = "catalog_refreshed"
+	EventJobCancelled       EventType = "job_cancelled"
+	EventJobRetried         EventType = "job_retried"
 	EventReleaseBlocklisted EventType = "release_blocklisted"
 )
 

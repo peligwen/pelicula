@@ -421,12 +421,79 @@ Build in this order — each stage is independently useful:
 3. Tiered storage moves
 4. **Result:** Storage manages itself; library stays clean
 
+## Dual Subtitles
+
+Procula can generate **stacked dual-language subtitle files** (`.en-es.ass`) alongside any media file. These ASS sidecar files are automatically picked up by Jellyfin as an external subtitle track that works on every client — web, mobile, and TV — with no plugin or player changes needed.
+
+### How it works
+
+For each configured language pair (e.g. `en-es`), Procula:
+
+1. Finds the base-language subtitle track — first by checking embedded streams in the media file, then by looking for a sidecar `.{lang}.srt` or `.{lang}.ass` next to it.
+2. Finds (or generates) the secondary-language track the same way. If neither an embedded stream nor a sidecar exists, falls back to translating the base track cue-by-cue using Argos Translate.
+3. Aligns the two tracks: for each base-language cue, the secondary cue whose midpoint falls within the base cue's time range is matched to it.
+4. Writes a stacked ASS file where the base language appears at the **bottom in white** (`{\an2}`) and the secondary language appears at the **top in yellow** (`{\an8}`).
+
+The sidecar is written atomically (`.partial` → final rename) and is idempotent: if the output file already exists and is newer than the source media, the stage skips silently.
+
+### Language pairs and output filenames
+
+`DUALSUB_PAIRS=en-es,en-de` produces:
+- `Movie.en-es.ass` — English bottom, Spanish top
+- `Movie.en-de.ass` — English bottom, German top
+
+The first language in each pair is the familiar one (bottom); the second is the learning target (top).
+
+### Supported subtitle codecs
+
+Embedded tracks must be text-based to be extractable: `subrip`, `ass`, `ssa`, `webvtt`, `mov_text`, `text`. Bitmap tracks (PGS `hdmv_pgs_subtitle`, DVD `dvd_subtitle`) are silently skipped — they require OCR and are not currently supported.
+
+### Translator setup (Argos Translate)
+
+When a secondary-language track is not available, Procula can call [Argos Translate](https://github.com/argosopentech/argos-translate) to synthesize it. Argos runs fully offline — nothing is sent to an external service.
+
+Argos Translate is **not bundled in the Procula Docker image** by default. To enable it:
+
+```bash
+# Inside the procula container (or add to Dockerfile):
+pip install argostranslate
+python3 -c "import argostranslate.package; argostranslate.package.update_package_index(); \
+  pkgs = argostranslate.package.get_available_packages(); \
+  [p.install() for p in pkgs if p.from_code=='en' and p.to_code=='es']"
+```
+
+Models are ~200MB per language pair. Mount a persistent volume at `/root/.local/share/argos-translate/` so models survive container restarts.
+
+Set `DUALSUB_TRANSLATOR=argos` in `.env` (or via the Procula settings UI) to activate.
+
+### Translation cache
+
+Translated cues are cached by SHA-256 of `(fromLang, toLang, text)` in `/config/procula/dualsub-cache/`. Re-processing the same title skips already-translated cues. The cache is not invalidated when the Argos model version changes — delete the cache dir manually if you upgrade models and want fresh translations.
+
+### Configuration
+
+| Env var | Default | Notes |
+|---|---|---|
+| `DUALSUB_ENABLED` | `false` | Set `true` to enable the stage |
+| `DUALSUB_PAIRS` | `en-es` | Comma-separated list of `base-secondary` pairs |
+| `DUALSUB_TRANSLATOR` | `none` | `argos` or `none` |
+
+All settings are also exposed in the Procula dashboard under **Settings → Dual Subtitles**.
+
+### Known limitations
+
+- Timing alignment is base-language-anchored: secondary cues are matched by midpoint containment within the base cue's range. Fast-dialogue scenes with very short, overlapping cues may not align perfectly.
+- Font name in generated ASS is `Arial`. Jellyfin's libass will substitute its fallback font if Arial is not available; results are visually acceptable for Latin and CJK scripts. Arabic RTL rendering is not tested.
+- Per-title opt-out is not yet implemented. Enable/disable is stack-wide.
+- Forced/SDH subtitle tracks (`.en.forced.srt`, `.en.sdh.srt`) are not auto-detected as sidecars.
+
 ## Config Files (created in /config/procula/)
 
 ```
 /config/procula/
   jobs/                    # One JSON file per job
   profiles/                # Transcode profile JSON files
+  dualsub-cache/           # Translator cue cache (SHA-256-keyed .txt files)
   notifications.json       # Webhook URLs and preferences
   storage.json             # Retention policies, tier config, alert thresholds
   history.json             # Ring buffer of hourly disk usage samples

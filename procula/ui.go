@@ -250,6 +250,37 @@ const procualdashHTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Dual Subtitles -->
+    <div class="section">
+      <div class="section-header"><span>Dual Subtitles</span></div>
+      <div class="card">
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Generate stacked subtitle tracks</div>
+            <div class="toggle-desc">Produce .en-es.ass sidecars with two languages stacked top + bottom</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="opt-dualsub" onchange="updateDualsubExtras()">
+            <div class="toggle-track"></div>
+            <div class="toggle-thumb"></div>
+          </label>
+        </div>
+        <div id="dualsub-extras" class="hidden">
+          <div class="field-group">
+            <label class="field-label" for="dualsub-pairs">Language pairs (one per line, e.g. en-es)</label>
+            <textarea class="field-input" id="dualsub-pairs" placeholder="en-es&#10;en-de"></textarea>
+          </div>
+          <div class="field-group" style="margin-top:0.75rem">
+            <div class="field-label">Translator (for missing language tracks)</div>
+            <div class="radio-group">
+              <label class="radio-opt"><input type="radio" name="dualsub-translator" value="none"><span>None — require existing subs</span></label>
+              <label class="radio-opt"><input type="radio" name="dualsub-translator" value="argos"><span>Argos Translate (local, offline)</span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Notifications -->
     <div class="section">
       <div class="section-header"><span>Notifications</span></div>
@@ -396,12 +427,23 @@ async function loadSettings() {
         document.getElementById('opt-validation').checked = s.validation_enabled !== false;
         document.getElementById('opt-transcoding').checked = !!s.transcoding_enabled;
         document.getElementById('opt-catalog').checked = s.catalog_enabled !== false;
+        document.getElementById('opt-dualsub').checked = !!s.dualsub_enabled;
+        document.getElementById('dualsub-pairs').value = (s.dualsub_pairs || ['en-es']).join('\n');
+        const translator = s.dualsub_translator || 'none';
+        const tEl = document.querySelector('input[name="dualsub-translator"][value="' + translator + '"]');
+        if (tEl) tEl.checked = true;
+        updateDualsubExtras();
         const mode = s.notification_mode || 'internal';
         document.querySelector('input[name="notif-mode"][value="' + mode + '"]').checked = true;
         document.getElementById('apprise-urls').value = (s.apprise_urls || []).join('\n');
         document.getElementById('direct-url').value = s.direct_url || '';
         updateNotifExtras(mode);
     } catch {}
+}
+
+function updateDualsubExtras() {
+    const on = document.getElementById('opt-dualsub').checked;
+    document.getElementById('dualsub-extras').classList.toggle('hidden', !on);
 }
 
 function updateNotifExtras(mode) {
@@ -420,10 +462,15 @@ async function saveSettings() {
     msg.className = 'save-msg';
     const mode = document.querySelector('input[name="notif-mode"]:checked')?.value || 'internal';
     const appriseRaw = document.getElementById('apprise-urls').value.trim();
+    const pairsRaw = document.getElementById('dualsub-pairs').value.trim();
+    const translator = document.querySelector('input[name="dualsub-translator"]:checked')?.value || 'none';
     const s = {
         validation_enabled: document.getElementById('opt-validation').checked,
         transcoding_enabled: document.getElementById('opt-transcoding').checked,
         catalog_enabled: document.getElementById('opt-catalog').checked,
+        dualsub_enabled: document.getElementById('opt-dualsub').checked,
+        dualsub_pairs: pairsRaw ? pairsRaw.split('\n').map(p => p.trim()).filter(Boolean) : ['en-es'],
+        dualsub_translator: translator,
         notification_mode: mode,
         apprise_urls: appriseRaw ? appriseRaw.split('\n').map(u => u.trim()).filter(Boolean) : [],
         direct_url: document.getElementById('direct-url').value.trim(),
@@ -520,6 +567,14 @@ function openDrawer(j) {
     }
 
     // Transcode
+    if (j.dualsub_outputs && j.dualsub_outputs.length) {
+        html += '<div class="drawer-section"><div class="drawer-section-label">Dual Subtitles</div>';
+        html += '<div class="output-list">' + j.dualsub_outputs.map(o => '<div class="output-item">' + esc(o) + '</div>').join('') + '</div>';
+        html += '</div>';
+    } else if (j.dualsub_error) {
+        html += '<div class="drawer-section"><div class="drawer-section-label">Dual Subtitles</div><div class="error-box">' + esc(j.dualsub_error) + '</div></div>';
+    }
+
     if (j.transcode_profile || j.transcode_decision) {
         html += '<div class="drawer-section"><div class="drawer-section-label">Transcoding</div>';
         html += '<div class="check-grid">';

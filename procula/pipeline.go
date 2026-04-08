@@ -175,7 +175,58 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		slog.Info("catalog skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 	}
 
-	// ── Stage 3: Process ─────────────────────────────────────────────────
+	// ── Stage 3: Dual Subtitles ──────────────────────────────────────────
+	// Generate stacked ASS sidecar files (e.g. Movie.en-es.ass) before
+	// transcoding so Jellyfin picks them up in the late catalog refresh.
+	if job, _ = q.Get(id); job.State == StateCancelled {
+		return
+	}
+	_ = q.Update(id, func(j *Job) {
+		j.Stage = StageDualSub
+		j.Progress = 0.42
+	})
+	job, _ = q.Get(id)
+	if settings.DualSubEnabled {
+		dualSubStart := time.Now()
+		outputs, firstErr := GenerateDualSubs(ctx, job, settings, configDir)
+		if len(outputs) > 0 {
+			_ = q.Update(id, func(j *Job) {
+				j.DualSubOutputs = outputs
+			})
+			emitEvent(PipelineEvent{
+				Type:      EventDualSubDone,
+				JobID:     id,
+				Title:     job.Source.Title,
+				Year:      job.Source.Year,
+				MediaType: job.Source.Type,
+				Stage:     string(StageDualSub),
+				Duration:  time.Since(dualSubStart).Seconds(),
+				Details:   map[string]any{"count": len(outputs), "outputs": outputs},
+				Message:   fmt.Sprintf("Dual subtitles generated: %d pair(s)", len(outputs)),
+			})
+		} else {
+			errMsg := "no subtitle source available for configured pairs"
+			if firstErr != nil {
+				errMsg = firstErr.Error()
+			}
+			_ = q.Update(id, func(j *Job) { j.DualSubError = errMsg })
+			emitEvent(PipelineEvent{
+				Type:      EventDualSubFailed,
+				JobID:     id,
+				Title:     job.Source.Title,
+				Year:      job.Source.Year,
+				MediaType: job.Source.Type,
+				Stage:     string(StageDualSub),
+				Duration:  time.Since(dualSubStart).Seconds(),
+				Message:   "Dual subtitles skipped: " + errMsg,
+			})
+			slog.Info("dual sub produced no outputs", "component", "pipeline", "job_id", id, "reason", errMsg)
+		}
+	} else {
+		slog.Info("dual sub skipped (disabled in settings)", "component", "pipeline", "job_id", id)
+	}
+
+	// ── Stage 4: Process ─────────────────────────────────────────────────
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
@@ -191,13 +242,13 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	}
 	job, _ = q.Get(id)
 
-	// ── Stage 4: Catalog (late) ───────────────────────────────────────────
-	// Only trigger a second refresh if a sidecar was actually written —
-	// this makes the alternate version visible in Jellyfin's version picker.
+	// ── Stage 5: Catalog (late) ───────────────────────────────────────────
+	// Trigger a second refresh if any sidecar was written (dual-sub ASS or
+	// transcoded alternate) so the new file appears in Jellyfin's pickers.
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	if settings.CatalogEnabled && len(job.TranscodeOutputs) > 0 {
+	if settings.CatalogEnabled && (len(job.TranscodeOutputs) > 0 || len(job.DualSubOutputs) > 0) {
 		_ = q.Update(id, func(j *Job) { j.Progress = 0.95 })
 		job, _ = q.Get(id)
 		CatalogLate(job, peliculaAPI)

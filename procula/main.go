@@ -240,6 +240,14 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.NotifMode = "internal"
 	}
+	switch s.DualSubTranslator {
+	case "argos", "none":
+	default:
+		s.DualSubTranslator = "none"
+	}
+	if len(s.DualSubPairs) == 0 {
+		s.DualSubPairs = []string{"en-es"}
+	}
 	// Clamp storage thresholds to [0, 100] and ensure warning < critical.
 	if s.StorageWarningPct < 0 {
 		s.StorageWarningPct = 0
