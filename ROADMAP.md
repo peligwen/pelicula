@@ -6,18 +6,6 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 ## Active
 
-### Bazarr — Subtitle Acquisition
-
-Content arrives fully validated and transcoded, but subtitles are not yet automatic. Bazarr is the standard *arr-ecosystem solution and wires in cleanly alongside the existing auto-wire pattern.
-
-- [x] Add `bazarr` service to `docker-compose.yml`
-- [x] Auto-wire in `middleware/autowire.go`: connect Bazarr to Sonarr and Radarr, seed config with `UrlBase: /bazarr`, create language profile from `PELICULA_SUB_LANGS`
-- [x] Add nginx proxy at `/bazarr`
-- [x] Add Bazarr card to dashboard services grid
-- [x] Procula validation stage: after `catalog`, flag jobs missing subtitles for configured languages — `PELICULA_SUB_LANGS` drives both the Bazarr profile and the Procula check
-- [x] `./pelicula configure` → Subtitles section: set `PELICULA_SUB_LANGS` (comma-separated ISO 639-1 codes)
-
-
 ### Pelicula for Windows
 
 Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `pelicula.exe`) for true cross-platform support including native Windows without WSL.
@@ -82,5 +70,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 **Phase F — External Notifications (Apprise):** Apprise container (opt-in Docker Compose profile), `direct` mode for single-webhook setups (ntfy, Gotify, any webhook URL), config at `/config/procula/notifications.json`. Discord is not a supported provider.
 
 **Invite Flow (Phase D follow-up):** One-time shareable invite links for admin-free user onboarding. `POST /api/pelicula/invites` generates a 32-byte random base64url token (stored in `/config/pelicula/invites.json`) with configurable TTL (default 7 days) and optional max-uses cap. Admins create links via the dashboard Users section ("Create invite link" button). `/register` (static HTML, no Pelicula session required) renders a username+password form that submits to `POST /api/pelicula/invites/{token}/redeem`, creating the Jellyfin account on success. Expired, exhausted, and revoked tokens return clear error states. Admin can revoke or delete tokens from the dashboard.
+
+**Bazarr — Subtitle Acquisition:** Bazarr container wired into the stack alongside Sonarr/Radarr. Auto-wire creates a language profile from `PELICULA_SUB_LANGS` (set via `./pelicula configure` → Subtitles) and connects Bazarr to both *arr apps on startup. nginx proxies `/bazarr`. Procula flags imports that are missing subtitles for the configured languages; Bazarr handles acquisition via its own Sonarr/Radarr polling — Procula does not talk to Bazarr directly.
 
 **Dual Subtitles:** Procula pipeline stage that generates stacked ASS sidecar files (`Movie.en-es.ass`) alongside source media. Base language (familiar) appears bottom-center in white; secondary (learning) appears top-center in yellow. Source cues are extracted from embedded subtitle streams or `.{lang}.srt` / `.{lang}.ass` sidecars; Argos Translate (offline, not bundled in image) synthesizes missing tracks. Cue alignment is base-anchored (secondary cue midpoint must fall within base cue range). Configurable via env vars (`DUALSUB_ENABLED`, `DUALSUB_PAIRS`, `DUALSUB_TRANSLATOR`) and Procula settings UI. Known limitations: no bitmap (PGS/DVD) sub support; font fallback required for Arial; per-title opt-out not yet implemented.
