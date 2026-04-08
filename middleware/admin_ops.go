@@ -66,6 +66,25 @@ func auditLog(r *http.Request, action, target, result string) {
 		"actor", key, "action", action, "target", target, "result", result)
 }
 
+// ── Off-mode guard ───────────────────────────────────────────────────────────
+
+// requireAuthOrLocalOrigin enforces that when PELICULA_AUTH=off the request
+// carries a same-origin / localhost / RFC1918 Origin header. In auth modes
+// the caller is already authenticated via GuardAdmin; this guard is a no-op.
+// Returns false and writes 403 if the check fails.
+//
+// Pattern mirrors invites.go, jellyfin.go, and settings.go.
+func requireAuthOrLocalOrigin(w http.ResponseWriter, r *http.Request) bool {
+	if authMiddleware == nil || !authMiddleware.IsOffMode() {
+		return true
+	}
+	if origin := r.Header.Get("Origin"); origin == "" || !isLocalOrigin(origin) {
+		writeError(w, "forbidden: enable PELICULA_AUTH or access from a local origin", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 // handleServiceRestart restarts a single container by name.
@@ -73,6 +92,9 @@ func auditLog(r *http.Request, action, target, result string) {
 func handleServiceRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireAuthOrLocalOrigin(w, r) {
 		return
 	}
 	if !checkAdminRate(w, r) {
@@ -99,6 +121,9 @@ func handleServiceRestart(w http.ResponseWriter, r *http.Request) {
 func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireAuthOrLocalOrigin(w, r) {
 		return
 	}
 	if !checkAdminRate(w, r) {
@@ -132,6 +157,9 @@ func handleStackRebuild(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireAuthOrLocalOrigin(w, r) {
+		return
+	}
 	if !checkAdminRate(w, r) {
 		return
 	}
@@ -151,6 +179,9 @@ func handleStackRebuild(w http.ResponseWriter, r *http.Request) {
 func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireAuthOrLocalOrigin(w, r) {
 		return
 	}
 	svc := r.URL.Query().Get("svc")
