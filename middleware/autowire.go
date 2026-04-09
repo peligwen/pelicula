@@ -13,7 +13,7 @@ import (
 var (
 	sonarrURL   = envOr("SONARR_URL", "http://sonarr:8989/sonarr")
 	radarrURL   = envOr("RADARR_URL", "http://radarr:7878/radarr")
-	prowlarrURL = envOr("PROWLARR_URL", "http://prowlarr:9696/prowlarr")
+	prowlarrURL = envOr("PROWLARR_URL", "http://gluetun:9696/prowlarr")
 	bazarrURL   = envOr("BAZARR_URL", "http://bazarr:6767/bazarr")
 )
 
@@ -44,6 +44,7 @@ func AutoWire(s *ServiceClients) error {
 	if vpnConfigured {
 		if s.ProwlarrKey == "" {
 			slog.Warn("Prowlarr API key not found — skipping download client and indexer wiring", "component", "autowire")
+			prowlarrWired = false
 		} else {
 			sonarrWired = wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "tv-sonarr")
 			radarrWired = wireDownloadClient(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "radarr")

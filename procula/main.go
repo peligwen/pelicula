@@ -103,8 +103,6 @@ func main() {
 	mux.HandleFunc("GET /api/procula/profiles", srv.handleListProfiles)
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
-	mux.HandleFunc("GET /", handleUI)
-	mux.HandleFunc("GET /static/procula.css", handleUICSS)
 
 	slog.Info("listening", "component", "main", "addr", ":8282")
 	if err := http.ListenAndServe(":8282", mux); err != nil {

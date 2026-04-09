@@ -60,8 +60,10 @@ services:
   # ═══════════════════════════════════════════════════
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
-    container_name: prowlarr
     profiles: [vpn]
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -236,6 +238,7 @@ services:
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
       - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
     volumes:
       - ./.env:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
