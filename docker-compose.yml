@@ -6,6 +6,7 @@ services:
   gluetun:
     image: qmcgaw/gluetun:v3.41.0
     container_name: gluetun
+    profiles: [vpn]
     cap_add:
       - NET_ADMIN
     environment:
@@ -33,6 +34,7 @@ services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent
+    profiles: [vpn]
     network_mode: "service:gluetun"
     environment:
       - PUID=${PUID}
@@ -59,6 +61,7 @@ services:
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
+    profiles: [vpn]
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -251,8 +254,6 @@ services:
     depends_on:
       - sonarr
       - radarr
-      - prowlarr
-      - gluetun
       - docker-proxy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/api/pelicula/status || exit 1"]
@@ -302,8 +303,6 @@ services:
     ports:
       - "${PELICULA_PORT:-7354}:80"
     depends_on:
-      - gluetun
-      - prowlarr
       - sonarr
       - radarr
       - jellyfin
