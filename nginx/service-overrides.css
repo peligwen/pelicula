@@ -1,0 +1,123 @@
+/*
+ * service-overrides.css — Cotton Candy theme for *arr services
+ * Injected via nginx sub_filter into Sonarr/Radarr/Prowlarr/Bazarr HTML.
+ * Best-effort: targets known selectors in each app's dark theme.
+ * Relies on theme.css tokens loaded before this file.
+ */
+
+/* ── Sonarr / Radarr / Prowlarr shared (*arr v4 dark base) ─────────── */
+:root {
+  --sonarr-primary: var(--pink);
+  --accent: var(--pink);
+}
+
+/* Override *arr's dark background with Cotton panel colours */
+body, .page-content-wrapper, .container-fluid, .page, #app {
+  background-color: var(--bg) !important;
+  color: var(--ink) !important;
+}
+
+/* Navbar / topbar */
+.navbar, .topnav, header.navbar, .navbar-nav,
+.page-toolbar, .seriesmonitor-toolbar, .movie-toolbar {
+  background: rgba(255,255,255,0.92) !important;
+  backdrop-filter: blur(16px) !important;
+  border-bottom: 1px solid var(--border2) !important;
+  color: var(--ink) !important;
+}
+.navbar-brand, .navbar-brand a,
+.logo-container, .logo-text {
+  color: var(--ink) !important;
+  font-family: var(--font-display, 'Nunito', sans-serif) !important;
+  font-weight: 900 !important;
+}
+
+/* Cards / panels */
+.card, .series-poster-container, .movie-poster-container,
+.index-poster-overview, .queue-status-details,
+.detail-section, .episodes-section-container,
+.page-content, .settings-section {
+  background: var(--panel) !important;
+  border: 1.5px solid var(--border) !important;
+  border-radius: 16px !important;
+  color: var(--ink) !important;
+}
+
+/* Primary colour buttons */
+.btn-primary, button[class*="primary"], [class*="primary-btn"] {
+  background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8)) !important;
+  border: none !important;
+  border-radius: 50px !important;
+  color: #fff !important;
+  font-family: var(--font-display, 'Nunito', sans-serif) !important;
+  font-weight: 800 !important;
+}
+
+/* Secondary / ghost buttons */
+.btn-default, .btn-secondary, .btn-outline {
+  background: var(--panel2) !important;
+  border: 1.5px solid var(--border2) !important;
+  border-radius: 50px !important;
+  color: var(--muted) !important;
+}
+.btn-default:hover, .btn-secondary:hover { background: var(--pink-l) !important; color: var(--pink) !important; }
+
+/* Danger */
+.btn-danger { background: var(--pink-l) !important; border-color: rgba(240,96,168,0.4) !important; color: var(--pink) !important; border-radius: 50px !important; }
+.btn-danger:hover { background: var(--pink) !important; color: #fff !important; }
+
+/* Success state */
+.label-success, .badge-success { background: var(--mint-l) !important; color: var(--mint) !important; border-radius: 20px !important; }
+.label-warning, .badge-warning { background: var(--lemon-l) !important; color: #c09820 !important; border-radius: 20px !important; }
+.label-danger,  .badge-danger  { background: var(--pink-l) !important; color: var(--pink) !important; border-radius: 20px !important; }
+
+/* Inputs */
+input[type="text"], input[type="search"], input[type="password"], select, textarea {
+  background: var(--panel) !important;
+  border: 1.5px solid var(--border2) !important;
+  border-radius: 50px !important;
+  color: var(--ink) !important;
+}
+input[type="text"]:focus, input[type="search"]:focus, input[type="password"]:focus, select:focus {
+  border-color: var(--pink) !important;
+  box-shadow: 0 0 0 3px rgba(240,96,168,0.12) !important;
+  outline: none !important;
+}
+
+/* Progress bars */
+.progress-bar, [class*="progress-bar"] {
+  background: var(--gradient-bar, linear-gradient(90deg, #f060a8, #7080e8)) !important;
+  border-radius: 50px !important;
+}
+.progress { background: var(--border) !important; border-radius: 50px !important; height: 7px !important; }
+
+/* Sidebar / left nav */
+.sidebar, .nav-sidebar, .sidebar-nav, .menu-left {
+  background: var(--panel) !important;
+  border-right: 1px solid var(--border) !important;
+}
+.sidebar a, .nav-sidebar a { color: var(--ink) !important; }
+.sidebar a:hover, .nav-sidebar a:hover,
+.sidebar a.active, .nav-sidebar a.active { color: var(--pink) !important; background: var(--pink-l) !important; border-radius: 8px !important; }
+
+/* Dropdown menus */
+.dropdown-menu {
+  background: var(--panel) !important; border: 1.5px solid var(--border2) !important;
+  border-radius: 16px !important; box-shadow: 0 8px 24px rgba(180,140,220,0.2) !important;
+}
+.dropdown-item, .dropdown-menu li a { color: var(--ink) !important; }
+.dropdown-item:hover, .dropdown-menu li a:hover { background: var(--pink-l) !important; color: var(--pink) !important; }
+
+/* Table rows */
+table { border-color: var(--border) !important; }
+th { color: var(--muted) !important; font-family: var(--font-display, 'Nunito', sans-serif) !important; font-weight: 700 !important; font-size: 0.72rem !important; text-transform: uppercase !important; letter-spacing: 0.1em !important; border-bottom: 1px solid var(--border) !important; }
+td { border-bottom: 1px solid var(--border) !important; color: var(--ink) !important; }
+tr:hover td { background: var(--pink-l) !important; }
+
+/* Prowlarr / indexer tags */
+.tag, .label, .badge { border-radius: 20px !important; }
+
+/* ── Bazarr ─────────────────────────────────────────────────────────── */
+/* Bazarr uses Bootstrap 4 dark override — many of the above apply.
+   Add any Bazarr-specific selectors here as needed. */
+.navbar-dark .navbar-brand, .navbar-dark .navbar-nav .nav-link { color: var(--ink) !important; }

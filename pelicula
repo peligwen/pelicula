@@ -105,16 +105,21 @@ get_env_var() {
     echo "${val:-$default}"
 }
 
-# Enforce auth bypass in *arr config.xml files even if the app overwrote the seed.
+# Enforce auth bypass + dark theme in *arr config.xml files even if the app overwrote the seed.
 # The *arr apps rewrite config.xml on first boot with auth enabled; this patches it back.
 enforce_arr_auth() {
     local file="$1"
     [[ -f "$file" ]] || return 0
+    # Fix auth bypass
     if grep -q '<AuthenticationRequired>Enabled</AuthenticationRequired>' "$file" 2>/dev/null; then
         sed -i.bak \
             -e 's|<AuthenticationMethod>[^<]*</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' \
             -e 's|<AuthenticationRequired>[^<]*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' \
             "$file" && rm -f "${file}.bak"
+    fi
+    # Enforce dark theme (needed so service-overrides.css lands on a dark base)
+    if grep -q '<Theme>' "$file" 2>/dev/null; then
+        sed -i.bak 's|<Theme>[^<]*</Theme>|<Theme>dark</Theme>|' "$file" && rm -f "${file}.bak"
     fi
 }
 
@@ -1591,6 +1596,30 @@ cmd_up() {
 
     seed_config "$CONFIG_DIR/jellyfin/network.xml" \
         '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>'
+    # Seed Jellyfin branding with Cotton Candy CSS overrides
+    mkdir -p "$CONFIG_DIR/jellyfin/config"
+    seed_config "$CONFIG_DIR/jellyfin/config/branding.xml" \
+'<?xml version="1.0" encoding="utf-8"?>
+<BrandingOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <CustomCss>
+:root {
+  --accent: #f060a8;
+  --accent2: #7080e8;
+  --success: #40c8a8;
+  --warning: #f8d040;
+  --error: #f060a8;
+  --background-input: #ffffff;
+  --background-page: #f8f0fb;
+  --color-text-body: #2a1f35;
+  --color-text-header: #2a1f35;
+  --background-header: rgba(255,255,255,0.92);
+  --theme-border: rgba(180,140,220,0.3);
+}
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Nunito+Sans:wght@400;600&display=swap");
+body { font-family: "Nunito Sans", sans-serif !important; background: #f8f0fb !important; }
+.jellyfin-header-bar { background: rgba(255,255,255,0.92) !important; backdrop-filter: blur(16px) !important; }
+  </CustomCss>
+</BrandingOptions>'
     # Seed Bazarr base_url so the UI loads correctly behind the /bazarr reverse-proxy prefix
     mkdir -p "$CONFIG_DIR/bazarr/config"
     seed_config "$CONFIG_DIR/bazarr/config/config.ini" \
@@ -1685,9 +1714,26 @@ _reset_arr() {
 _reset_svc_jellyfin() {
     info "Resetting Jellyfin..."
     rm -rf "$CONFIG_DIR/jellyfin"
-    mkdir -p "$CONFIG_DIR/jellyfin"
+    mkdir -p "$CONFIG_DIR/jellyfin/config"
     echo '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>' \
         > "$CONFIG_DIR/jellyfin/network.xml"
+    cat > "$CONFIG_DIR/jellyfin/config/branding.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<BrandingOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <CustomCss>
+:root {
+  --accent: #f060a8;
+  --accent2: #7080e8;
+  --success: #40c8a8;
+  --background-page: #f8f0fb;
+  --color-text-body: #2a1f35;
+  --background-header: rgba(255,255,255,0.92);
+}
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Nunito+Sans:wght@400;600&display=swap");
+body { font-family: "Nunito Sans", sans-serif !important; background: #f8f0fb !important; }
+  </CustomCss>
+</BrandingOptions>
+EOF
 }
 
 _reset_svc_qbittorrent() {

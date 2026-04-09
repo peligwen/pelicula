@@ -9,3 +9,4 @@ middleware/pelicula-api
 procula/procula
 coverage.out
 procula/testcache/
+docs/design-exploration/_archive/

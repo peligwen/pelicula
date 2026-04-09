@@ -1,0 +1,61 @@
+/* Cotton Candy — shared design tokens */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Nunito+Sans:wght@300;400;600&display=swap');
+
+:root {
+  /* Surfaces */
+  --bg:      #f8f0fb;
+  --panel:   #ffffff;
+  --panel2:  #fdf5ff;
+
+  /* Text */
+  --ink:     #2a1f35;
+  --muted:   #9080a8;
+  --faint:   #c8b8d8;
+
+  /* Borders */
+  --border:  rgba(180,140,220,0.25);
+  --border2: rgba(180,140,220,0.4);
+
+  /* Accent palette */
+  --pink:       #f060a8;
+  --pink-l:     #fce8f4;
+  --periwinkle: #7080e8;
+  --peri-l:     #eaecfd;
+  --mint:       #40c8a8;
+  --mint-l:     #e4f8f4;
+  --peach:      #ff8060;
+  --peach-l:    #fff0ec;
+  --lemon:      #f8d040;
+  --lemon-l:    #fefae8;
+
+  /* Semantic aliases */
+  --status-ok:   var(--mint);
+  --status-ok-l: var(--mint-l);
+  --status-warn:   var(--lemon);
+  --status-warn-l: var(--lemon-l);
+  --status-err:    var(--pink);
+  --status-err-l:  var(--pink-l);
+
+  /* Typography */
+  --font-display: 'Nunito', sans-serif;
+  --font-body:    'Nunito Sans', sans-serif;
+
+  /* Gradients */
+  --gradient-cta:  linear-gradient(135deg, var(--pink) 0%, var(--periwinkle) 100%);
+  --gradient-bar:  linear-gradient(90deg, var(--pink), var(--periwinkle));
+  --gradient-foot: linear-gradient(90deg, var(--pink) 0%, var(--periwinkle) 100%);
+}
+
+/* Backdrop radial gradient applied to body — component stylesheets inherit tokens */
+body {
+  background: var(--bg);
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at -10% 110%, rgba(240,96,168,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 110% -10%, rgba(112,128,232,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(64,200,168,0.06) 0%, transparent 60%);
+  pointer-events: none; z-index: 0;
+}

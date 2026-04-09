@@ -5,179 +5,103 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <title>Join Pelicula</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/theme.css">
     <style>
-        /* Registration-specific layout */
+        html { font-size: 18px; }
+        body { font-family: var(--font-body, 'Nunito Sans', sans-serif); color: var(--ink, #2a1f35); min-height: 100vh; }
+
         .reg-wrap {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem 1.5rem;
+            min-height: 100vh; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 2rem 1.5rem; position: relative; z-index: 1;
         }
         .reg-card {
-            width: 100%;
-            max-width: 420px;
-            background: #111;
-            border: 1px solid #1e1e1e;
-            border-radius: 12px;
-            padding: 2rem 2rem 1.75rem;
+            width: 100%; max-width: 420px;
+            background: var(--panel, #fff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4));
+            border-radius: 24px; padding: 2rem 2rem 1.75rem;
+            box-shadow: 0 16px 48px rgba(180,140,220,0.2);
         }
         .reg-logo {
-            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-            font-weight: 700;
-            font-size: 1.8rem;
-            letter-spacing: 0.35em;
-            color: #fff;
-            margin-bottom: 0.2rem;
+            font-family: var(--font-display, 'Nunito', sans-serif);
+            font-weight: 900; font-size: 1.8rem; letter-spacing: 0.12em;
+            color: var(--ink, #2a1f35); margin-bottom: 0.2rem;
         }
-        .reg-logo .accent { color: #c8a2ff; }
+        .reg-logo .accent { color: var(--pink, #f060a8); }
         .reg-subtitle {
-            font-size: 0.7rem;
-            letter-spacing: 0.45em;
-            text-transform: uppercase;
-            color: #444;
-            margin-bottom: 1.75rem;
+            font-size: 0.58rem; letter-spacing: 0.2em; text-transform: lowercase;
+            color: var(--faint, #c8b8d8); margin-bottom: 1.75rem;
+            font-family: var(--font-body, 'Nunito Sans', sans-serif);
         }
         .reg-heading {
-            font-size: 1rem;
-            font-weight: 600;
-            color: #ccc;
-            margin-bottom: 0.35rem;
+            font-family: var(--font-display, 'Nunito', sans-serif);
+            font-size: 1rem; font-weight: 800; color: var(--ink, #2a1f35); margin-bottom: 0.35rem;
         }
         .reg-hint {
-            font-size: 0.78rem;
-            color: #555;
-            margin-bottom: 1.5rem;
-            line-height: 1.4;
+            font-size: 0.78rem; color: var(--muted, #9080a8); margin-bottom: 1.5rem; line-height: 1.4;
         }
-        .reg-field {
-            margin-bottom: 0.75rem;
-        }
+        .reg-field { margin-bottom: 0.75rem; }
         .reg-field label {
-            display: block;
-            font-size: 0.72rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.07em;
-            margin-bottom: 0.3rem;
+            display: block; font-size: 0.7rem; color: var(--muted, #9080a8);
+            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.3rem;
+            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
         }
         .reg-field input {
-            width: 100%;
-            padding: 0.65rem 0.85rem;
-            background: #0e0e0e;
-            border: 1px solid #222;
-            border-radius: 7px;
-            color: #e0e0e0;
-            font-size: 0.9rem;
-            outline: none;
-            transition: border-color 0.15s;
+            width: 100%; padding: 0.65rem 1rem;
+            background: var(--panel2, #fdf5ff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4));
+            border-radius: 50px; color: var(--ink, #2a1f35); font-size: 0.88rem; outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            font-family: var(--font-body, 'Nunito Sans', sans-serif);
         }
-        .reg-field input:focus { border-color: #444; }
-        .reg-strength {
-            height: 3px;
-            border-radius: 2px;
-            background: #1e1e1e;
-            margin-top: 0.35rem;
-            overflow: hidden;
-        }
-        .reg-strength-bar {
-            height: 100%;
-            width: 0;
-            border-radius: 2px;
-            transition: width 0.2s, background 0.2s;
-        }
+        .reg-field input:focus { border-color: var(--pink, #f060a8); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
+        .reg-strength { height: 5px; border-radius: 50px; background: var(--border, rgba(180,140,220,0.25)); margin-top: 0.35rem; overflow: hidden; }
+        .reg-strength-bar { height: 100%; width: 0; border-radius: 50px; transition: width 0.2s, background 0.2s; }
         .reg-submit {
-            width: 100%;
-            margin-top: 1.25rem;
-            padding: 0.7rem;
-            background: rgba(200,162,255,0.12);
-            border: 1px solid rgba(200,162,255,0.25);
-            border-radius: 7px;
-            color: #c8a2ff;
-            font-size: 0.88rem;
-            font-weight: 600;
-            letter-spacing: 0.05em;
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
+            width: 100%; margin-top: 1.25rem; padding: 0.75rem;
+            background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
+            border: none; border-radius: 50px; color: #fff;
+            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800;
+            font-size: 0.88rem; letter-spacing: 0.05em; cursor: pointer;
+            box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s, transform 0.1s;
         }
-        .reg-submit:hover:not(:disabled) {
-            background: rgba(200,162,255,0.22);
-            border-color: rgba(200,162,255,0.45);
-        }
-        .reg-submit:disabled { opacity: 0.5; cursor: not-allowed; }
-        .reg-error {
-            font-size: 0.8rem;
-            color: #f87171;
-            margin-top: 0.75rem;
-            line-height: 1.4;
-            display: none;
-        }
-        .reg-error a { color: #f87171; }
+        .reg-submit:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+        .reg-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .reg-error { font-size: 0.8rem; color: var(--pink, #f060a8); margin-top: 0.75rem; line-height: 1.4; display: none; }
+        .reg-error a { color: var(--pink, #f060a8); }
+
         /* Success card */
         .reg-success { display: none; text-align: center; }
-        .reg-success-icon {
-            font-size: 2.5rem;
-            margin-bottom: 0.75rem;
-        }
-        .reg-success-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #7dda93;
-            margin-bottom: 0.4rem;
-        }
-        .reg-success-text {
-            font-size: 0.82rem;
-            color: #666;
-            margin-bottom: 1.5rem;
-            line-height: 1.45;
-        }
+        .reg-success-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+        .reg-success-title { font-family: var(--font-display, 'Nunito', sans-serif); font-size: 1.1rem; font-weight: 800; color: var(--mint, #40c8a8); margin-bottom: 0.4rem; }
+        .reg-success-text { font-size: 0.82rem; color: var(--muted, #9080a8); margin-bottom: 1.5rem; line-height: 1.45; }
         .reg-open-btn {
-            display: inline-block;
-            padding: 0.65rem 1.5rem;
-            background: rgba(200,162,255,0.12);
-            border: 1px solid rgba(200,162,255,0.25);
-            border-radius: 7px;
-            color: #c8a2ff;
-            font-size: 0.88rem;
-            font-weight: 600;
-            text-decoration: none;
-            transition: background 0.15s, border-color 0.15s;
+            display: inline-block; padding: 0.65rem 1.5rem;
+            background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
+            border: none; border-radius: 50px; color: #fff;
+            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800;
+            font-size: 0.88rem; text-decoration: none;
+            box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s;
         }
-        .reg-open-btn:hover {
-            background: rgba(200,162,255,0.22);
-            border-color: rgba(200,162,255,0.45);
-        }
-        .reg-qr {
-            margin: 1.25rem auto 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .reg-qr-label {
-            font-size: 0.68rem;
-            color: #444;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
+        .reg-open-btn:hover { opacity: 0.9; }
+        .reg-qr { margin: 1.25rem auto 0; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+        .reg-qr-label { font-size: 0.68rem; color: var(--faint, #c8b8d8); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; }
+
         /* Dead link page */
         .reg-dead { text-align: center; }
-        .reg-dead-icon { font-size: 2rem; margin-bottom: 0.75rem; color: #444; }
-        .reg-dead-title { font-size: 1rem; font-weight: 600; color: #666; margin-bottom: 0.4rem; }
-        .reg-dead-text { font-size: 0.8rem; color: #444; line-height: 1.45; }
+        .reg-dead-icon { font-size: 2rem; margin-bottom: 0.75rem; color: var(--faint, #c8b8d8); }
+        .reg-dead-title { font-family: var(--font-display, 'Nunito', sans-serif); font-size: 1rem; font-weight: 800; color: var(--muted, #9080a8); margin-bottom: 0.4rem; }
+        .reg-dead-text { font-size: 0.8rem; color: var(--faint, #c8b8d8); line-height: 1.45; }
+
         /* Loading state */
-        .reg-loading { text-align: center; color: #444; font-size: 0.82rem; padding: 1rem 0; }
+        .reg-loading { text-align: center; color: var(--faint, #c8b8d8); font-size: 0.82rem; padding: 1rem 0; }
     </style>
 </head>
 <body>
     <div class="reg-wrap">
         <div class="reg-card">
             <div class="reg-logo">
-                <span>P</span><span class="accent">E</span><span>L</span><span>I</span><span>C</span><span>U</span><span>L</span><span>A</span>
+                <span>P</span><span class="accent">E</span><span>LICULA</span>
             </div>
-            <div class="reg-subtitle">Media Acquisition System</div>
+            <div class="reg-subtitle">media acquisition system</div>
 
             <!-- Checking link state (shown while the token is being validated) -->
             <div id="reg-loading" class="reg-loading">Checking link&hellip;</div>

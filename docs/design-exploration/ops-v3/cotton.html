@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PELICULA — Cotton Candy</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Nunito+Sans:wght@300;400;600&display=swap');
+
+:root {
+  --bg:      #f8f0fb;
+  --panel:   #ffffff;
+  --panel2:  #fdf5ff;
+  --ink:     #2a1f35;
+  --muted:   #9080a8;
+  --faint:   #c8b8d8;
+  --border:  rgba(180,140,220,0.25);
+  --border2: rgba(180,140,220,0.4);
+
+  --pink:    #f060a8;
+  --pink-l:  #fce8f4;
+  --periwinkle: #7080e8;
+  --peri-l:  #eaecfd;
+  --mint:    #40c8a8;
+  --mint-l:  #e4f8f4;
+  --peach:   #ff8060;
+  --peach-l: #fff0ec;
+  --lemon:   #f8d040;
+  --lemon-l: #fefae8;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 18px; }
+
+body {
+  font-family: 'Nunito Sans', sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at -10% 110%, rgba(240,96,168,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 110% -10%, rgba(112,128,232,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(64,200,168,0.06) 0%, transparent 60%);
+  pointer-events: none; z-index: 0;
+}
+
+.titlebar {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border2);
+  padding: 0 2rem;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 58px;
+  box-shadow: 0 2px 20px rgba(180,140,220,0.12);
+}
+.titlebar-left { display: flex; align-items: center; gap: 1.5rem; }
+.logo {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 900; font-size: 1.5rem;
+  letter-spacing: 0.12em; color: var(--ink);
+  text-decoration: none; display: flex; align-items: center;
+}
+.logo .accent { color: var(--pink); }
+.logo-sub {
+  font-family: 'Nunito Sans', sans-serif;
+  font-weight: 400; font-size: 0.6rem;
+  letter-spacing: 0.2em; color: var(--faint);
+  text-transform: lowercase; margin-left: 0.75rem;
+}
+.titlebar-right { display: flex; align-items: center; gap: 0.75rem; }
+.status-chip {
+  display: flex; align-items: center; gap: 0.35rem;
+  background: var(--mint-l); border: 1px solid rgba(64,200,168,0.35);
+  border-radius: 20px; padding: 0.3rem 0.8rem;
+  font-size: 0.65rem; font-weight: 700; color: var(--mint);
+}
+.status-chip.warn { background: var(--lemon-l); border-color: rgba(248,208,64,0.4); color: #c09820; }
+.pip { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.watch-btn {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800; font-size: 0.82rem;
+  color: #fff;
+  background: linear-gradient(135deg, var(--pink) 0%, var(--periwinkle) 100%);
+  border: none; border-radius: 50px;
+  padding: 0.5rem 1.4rem;
+  cursor: pointer; text-decoration: none;
+  display: flex; align-items: center; gap: 0.4rem;
+  box-shadow: 0 3px 12px rgba(240,96,168,0.35);
+  transition: opacity 0.15s, transform 0.1s;
+}
+.watch-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+.tabbar {
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem; display: flex;
+  position: sticky; top: 58px; z-index: 99;
+}
+.tab {
+  padding: 0.6rem 1.25rem;
+  font-family: 'Nunito', sans-serif; font-weight: 700;
+  font-size: 0.72rem; letter-spacing: 0.04em;
+  color: var(--faint); cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab.active { color: var(--pink); border-bottom-color: var(--pink); }
+.tab:hover  { color: var(--muted); }
+
+.main {
+  position: relative; z-index: 1;
+  display: grid; grid-template-columns: 1fr 300px;
+  min-height: calc(100vh - 58px - 36px);
+}
+.pane-main { padding: 1.75rem 2rem; border-right: 1px solid var(--border); }
+.pane-side  { background: var(--panel); }
+
+.pane-hdr {
+  font-family: 'Nunito', sans-serif; font-weight: 800;
+  font-size: 0.82rem; color: var(--muted);
+  display: flex; align-items: center; gap: 0.6rem;
+  padding-bottom: 0.6rem; margin-bottom: 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.pane-hdr-count { margin-left: auto; font-size: 0.62rem; font-weight: 600; color: var(--faint); }
+.sidebar-hdr {
+  font-family: 'Nunito', sans-serif; font-weight: 800;
+  font-size: 0.72rem; color: var(--pink);
+  padding: 0.75rem 1.25rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+
+.search-wrap { position: relative; max-width: 540px; margin-bottom: 0.75rem; }
+.search-input {
+  width: 100%;
+  background: var(--panel);
+  border: 1.5px solid var(--border2); border-radius: 50px;
+  color: var(--ink); font-family: 'Nunito Sans', sans-serif;
+  font-size: 0.82rem; padding: 0.72rem 1.25rem;
+  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(180,140,220,0.1);
+}
+.search-input::placeholder { color: var(--faint); }
+.search-input:focus { border-color: var(--pink); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
+
+.filter-row { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; }
+.filter-btn {
+  background: var(--panel); border: 1.5px solid var(--border2); border-radius: 50px;
+  color: var(--muted); font-family: 'Nunito', sans-serif; font-weight: 700;
+  font-size: 0.7rem; padding: 0.3rem 1rem;
+  cursor: pointer; transition: all 0.12s;
+}
+.filter-btn.active, .filter-btn:hover { background: var(--pink-l); border-color: rgba(240,96,168,0.4); color: var(--pink); }
+
+.data-table { width: 100%; border-collapse: collapse; max-width: 600px; margin-bottom: 2rem; }
+.data-table th {
+  text-align: left; font-family: 'Nunito', sans-serif; font-weight: 700;
+  font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint);
+  padding: 0.3rem 0.75rem; border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--border);
+  font-size: 0.82rem; vertical-align: middle;
+}
+.data-table tr:hover td { background: var(--pink-l); }
+.col-title { color: var(--ink); font-weight: 600; font-family: 'Nunito', sans-serif; }
+.col-year  { color: var(--muted); white-space: nowrap; }
+.col-type  { font-size: 0.65rem; font-weight: 800; letter-spacing: 0.08em; font-family: 'Nunito', sans-serif; }
+.type-film   { color: var(--peach); }
+.type-series { color: var(--periwinkle); }
+
+.req-btn {
+  background: linear-gradient(135deg, var(--pink-l), var(--peri-l));
+  border: 1.5px solid rgba(240,96,168,0.3); border-radius: 50px;
+  color: var(--pink); font-family: 'Nunito', sans-serif; font-weight: 800;
+  font-size: 0.68rem; padding: 0.3rem 0.85rem;
+  cursor: pointer; transition: all 0.12s;
+}
+.req-btn:hover { background: var(--pink); color: #fff; border-color: var(--pink); }
+
+.st { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.68rem; font-weight: 800; white-space: nowrap; border-radius: 50px; padding: 0.2rem 0.65rem; font-family: 'Nunito', sans-serif; }
+.st::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.st.dl   { background: var(--peach-l); color: var(--peach); }
+.st.imp  { background: var(--lemon-l); color: #c09820; }
+.st.done { background: var(--mint-l); color: var(--mint); }
+
+.prog-cell { width: 110px; }
+.prog-bar { height: 7px; background: var(--border); border-radius: 50px; overflow: hidden; }
+.prog-fill { height: 100%; border-radius: 50px; background: linear-gradient(90deg, var(--pink), var(--periwinkle)); }
+.prog-pct { font-size: 0.62rem; color: var(--muted); margin-top: 2px; font-family: 'Nunito Sans', sans-serif; }
+
+.svc-list { display: flex; flex-direction: column; }
+.svc-row {
+  display: grid; grid-template-columns: 10px 1fr auto;
+  gap: 0.7rem; align-items: center;
+  padding: 0.7rem 1.25rem; border-bottom: 1px solid var(--border);
+  text-decoration: none; transition: background 0.1s;
+}
+.svc-row:hover { background: var(--pink-l); }
+.svc-pip { width: 9px; height: 9px; border-radius: 50%; }
+.svc-pip.up   { background: var(--mint); box-shadow: 0 0 6px rgba(64,200,168,0.5); }
+.svc-pip.warn { background: var(--lemon); }
+.svc-pip.down { background: var(--pink); box-shadow: 0 0 6px rgba(240,96,168,0.4); }
+.svc-name { font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 0.8rem; color: var(--ink); }
+.svc-desc { font-size: 0.62rem; color: var(--muted); }
+
+.vpn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border); }
+.vpn-kv { display: flex; flex-direction: column; gap: 0.12rem; }
+.vpn-k { font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-family: 'Nunito Sans', sans-serif; }
+.vpn-v { font-size: 0.75rem; color: var(--periwinkle); font-family: 'Nunito', sans-serif; font-weight: 700; }
+
+.sysinfo { padding: 0.85rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.sysinfo-row { display: grid; grid-template-columns: 72px 1fr; gap: 0.4rem; font-size: 0.75rem; }
+.sysinfo-key { color: var(--muted); font-family: 'Nunito Sans', sans-serif; }
+.sysinfo-val { color: var(--ink); font-family: 'Nunito', sans-serif; font-weight: 700; }
+.sysinfo-bar { height: 5px; background: var(--border); border-radius: 50px; margin-top: 3px; overflow: hidden; }
+.sysinfo-fill { height: 100%; border-radius: 50px; background: linear-gradient(90deg, var(--mint), #a0e8d8); }
+
+.statusbar {
+  background: linear-gradient(90deg, var(--pink) 0%, var(--periwinkle) 100%);
+  color: rgba(255,255,255,0.9);
+  height: 36px; display: flex; align-items: center;
+  padding: 0 2rem; gap: 2rem;
+  font-family: 'Nunito', sans-serif; font-size: 0.72rem; font-weight: 700;
+  position: sticky; bottom: 0; z-index: 100;
+}
+.statusbar .hi { color: #fff; }
+.statusbar-right { margin-left: auto; display: flex; gap: 2rem; opacity: 0.75; }
+</style>
+</head>
+<body>
+<header class="titlebar">
+  <div class="titlebar-left">
+    <a href="/" class="logo">P<span class="accent">E</span>LICULA<span class="logo-sub">media acquisition system</span></a>
+  </div>
+  <div class="titlebar-right">
+    <div class="status-chip"><span class="pip"></span>all good!</div>
+    <div class="status-chip warn"><span class="pip"></span>indexers need attention</div>
+    <a href="/jellyfin/" class="watch-btn">▶ Watch</a>
+  </div>
+</header>
+<nav class="tabbar">
+  <div class="tab active">home</div>
+  <div class="tab">what's coming in</div>
+  <div class="tab">storage</div>
+  <div class="tab">people</div>
+  <div class="tab">settings</div>
+</nav>
+<div class="main">
+  <div class="pane-main">
+    <div class="pane-hdr">Find something to watch ✨</div>
+    <div class="search-wrap">
+      <input class="search-input" type="text" placeholder="Search for a title...">
+    </div>
+    <div class="filter-row">
+      <button class="filter-btn active">Everything</button>
+      <button class="filter-btn">Films</button>
+      <button class="filter-btn">TV Shows</button>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Year</th><th>Kind</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="col-title">Dune: Part Two</td><td class="col-year">2024</td><td class="col-type type-film">Film</td><td><button class="req-btn">+ Request</button></td></tr>
+        <tr><td class="col-title">Severance</td><td class="col-year">2022–</td><td class="col-type type-series">Series</td><td><button class="req-btn">+ Request</button></td></tr>
+        <tr><td class="col-title">The Brutalist</td><td class="col-year">2024</td><td class="col-type type-film">Film</td><td><button class="req-btn">+ Request</button></td></tr>
+      </tbody>
+    </table>
+    <div class="pane-hdr">On the way <span class="pane-hdr-count">4 active</span></div>
+    <table class="data-table">
+      <thead><tr><th>Status</th><th>Title</th><th>From</th><th class="prog-cell">Progress</th></tr></thead>
+      <tbody>
+        <tr><td><span class="st dl">Downloading</span></td><td class="col-title">Dune: Part Two (2024)</td><td class="col-year">RARBG · 18.4 GB</td><td class="prog-cell"><div class="prog-bar"><div class="prog-fill" style="width:67%"></div></div><div class="prog-pct">67% · 2h 14m</div></td></tr>
+        <tr><td><span class="st imp">Checking in</span></td><td class="col-title">Severance S02E03</td><td class="col-year">Procula · FFprobe</td><td class="prog-cell"><div class="prog-pct" style="color:#c09820">almost there…</div></td></tr>
+        <tr><td><span class="st done">Ready!</span></td><td class="col-title">The Brutalist (2024)</td><td class="col-year">In your library</td><td class="prog-cell"><div class="prog-pct" style="color:var(--mint)">✓ done</div></td></tr>
+        <tr><td><span class="st dl">Downloading</span></td><td class="col-title">Nosferatu (2024)</td><td class="col-year">Jackett · 12.1 GB</td><td class="prog-cell"><div class="prog-bar"><div class="prog-fill" style="width:23%"></div></div><div class="prog-pct">23% · 5h 40m</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pane-side">
+    <div class="sidebar-hdr">Services</div>
+    <div class="svc-list">
+      <a href="/sonarr/" class="svc-row"><span class="svc-pip up"></span><span class="svc-name">Sonarr</span><span class="svc-desc">TV shows</span></a>
+      <a href="/radarr/" class="svc-row"><span class="svc-pip up"></span><span class="svc-name">Radarr</span><span class="svc-desc">Films</span></a>
+      <a href="/jellyfin/" class="svc-row"><span class="svc-pip up"></span><span class="svc-name">Jellyfin</span><span class="svc-desc">Media server</span></a>
+      <a href="/qbt/" class="svc-row"><span class="svc-pip warn"></span><span class="svc-name">qBittorrent</span><span class="svc-desc">Downloads</span></a>
+      <a href="/prowlarr/" class="svc-row"><span class="svc-pip down"></span><span class="svc-name">Prowlarr</span><span class="svc-desc">Indexers</span></a>
+      <a href="/bazarr/" class="svc-row"><span class="svc-pip up"></span><span class="svc-name">Bazarr</span><span class="svc-desc">Subtitles</span></a>
+    </div>
+    <div class="sidebar-hdr">VPN</div>
+    <div class="vpn-grid">
+      <div class="vpn-kv"><span class="vpn-k">Region</span><span class="vpn-v">amsterdam</span></div>
+      <div class="vpn-kv"><span class="vpn-k">Port</span><span class="vpn-v">51820</span></div>
+      <div class="vpn-kv"><span class="vpn-k">Down</span><span class="vpn-v">↓ 4.2 MB/s</span></div>
+      <div class="vpn-kv"><span class="vpn-k">Up</span><span class="vpn-v">↑ 0.8 MB/s</span></div>
+    </div>
+    <div class="sidebar-hdr">Host</div>
+    <div class="sysinfo">
+      <div class="sysinfo-row"><span class="sysinfo-key">Running for</span><span class="sysinfo-val">3d 14h</span></div>
+      <div class="sysinfo-row"><span class="sysinfo-key">Space free</span><span class="sysinfo-val">3.8 TB<div class="sysinfo-bar"><div class="sysinfo-fill" style="width:48%"></div></div></span></div>
+      <div class="sysinfo-row"><span class="sysinfo-key">Library</span><span class="sysinfo-val">1,284 titles</span></div>
+      <div class="sysinfo-row"><span class="sysinfo-key">Time</span><span class="sysinfo-val" style="color:var(--pink)">04:31 UTC</span></div>
+    </div>
+  </div>
+</div>
+<footer class="statusbar">
+  <span>PELICULA</span>
+  <span class="hi">4 things on their way</span>
+  <span>Prowlarr needs an indexer to start finding things</span>
+  <div class="statusbar-right"><span>up 3d 14h</span><span>v0.9.0</span></div>
+</footer>
+</body>
+</html>
