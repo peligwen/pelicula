@@ -23,6 +23,7 @@
           if (heading) heading.textContent = 'Create Admin Account';
           const hint = document.querySelector('.reg-hint');
           if (hint) hint.textContent = 'Create your admin account. You\u2019ll use these credentials to log in and manage everything.';
+          suggestPassword();
           return;
         } else if (data.open_registration) {
           openRegMode = true;
@@ -30,6 +31,7 @@
           document.getElementById('reg-form-wrap').style.display = '';
           const hint = document.querySelector('.reg-hint');
           if (hint) hint.textContent = 'Create a viewer account. You\u2019ll use these credentials to log in.';
+          suggestPassword();
           return;
         }
       } catch (e) {
@@ -69,6 +71,7 @@
     // Token is valid — hide the loading state, show the registration form.
     document.getElementById('reg-loading').style.display = 'none';
     document.getElementById('reg-form-wrap').style.display = '';
+    suggestPassword();
   }
 
   function showDead(title, text) {
@@ -97,8 +100,7 @@
   }
 
   // ── Suggest password ─────────────────────────────────────────────────────
-  document.getElementById('suggest-pw').addEventListener('click', async function (e) {
-    e.preventDefault();
+  async function suggestPassword() {
     try {
       const resp = await fetch('/api/pelicula/generate-password');
       if (!resp.ok) return;
@@ -107,11 +109,15 @@
       const cfField = document.getElementById('reg-confirm');
       pwField.value = password;
       cfField.value = password;
-      // Show in plain text briefly so the user can note it
+      // Show in plain text so the user can note it
       pwField.type = 'text';
       pwField.dispatchEvent(new Event('input'));
-      setTimeout(() => { pwField.type = 'password'; }, 3000);
     } catch (_) {}
+  }
+
+  document.getElementById('suggest-pw').addEventListener('click', function (e) {
+    e.preventDefault();
+    suggestPassword();
   });
 
   // ── Password strength meter ───────────────────────────────────────────────
@@ -204,6 +210,14 @@
     document.getElementById('reg-form-wrap').style.display = 'none';
     document.getElementById('reg-success').style.display = 'block';
   }
+
+  // ── Password visibility toggle ────────────────────────────────────────────
+  document.getElementById('pw-toggle').addEventListener('click', function () {
+    const pwField = document.getElementById('reg-password');
+    const visible = pwField.type === 'text';
+    pwField.type = visible ? 'password' : 'text';
+    this.textContent = visible ? '👁' : '🙈';
+  });
 
   boot();
 })();

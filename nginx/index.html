@@ -58,9 +58,9 @@
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
                 <span class="titlebar-chip titlebar-chip-err hidden" id="chip-health-err"><span class="pip"></span><span id="chip-health-err-text"></span></span>
                 <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">&#9654; Watch</a>
-                <button class="settings-btn admin-only" title="Storage Explorer" onclick="openStorageExplorer()">&#8615;</button>
-                <a href="/settings" class="settings-btn admin-only" title="Settings">&#9881;</a>
-                <button class="reload-btn" id="reload-btn" title="Reload dashboard" onclick="refresh()">&#8635;</button>
+                <a href="/register/" class="register-btn" title="Register a new user">+ Register</a>
+                <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users" onclick="switchTab('users')"></button>
+                <button class="settings-btn admin-only" title="Settings" onclick="switchTab('settings')">&#9881;</button>
                 <div class="bell-wrap" id="bell-wrap">
                     <button class="bell-btn" id="bell-btn" title="Notifications" onclick="toggleNotifications()">
                         &#9679;
@@ -74,10 +74,10 @@
 
     <!-- Tabbar -->
     <nav class="tabbar" id="tabbar">
-        <button class="tab active" data-tab="home" onclick="switchTab('home')">home</button>
+        <button class="tab active" data-tab="search" onclick="switchTab('search')">search</button>
         <button class="tab" data-tab="coming" onclick="switchTab('coming')">pipeline</button>
         <button class="tab" data-tab="storage" onclick="switchTab('storage')">storage</button>
-        <button class="tab" data-tab="people" onclick="switchTab('people')">people</button>
+        <button class="tab" data-tab="users" onclick="switchTab('users')">users</button>
         <button class="tab" data-tab="settings" onclick="switchTab('settings')">settings</button>
     </nav>
 
@@ -99,7 +99,7 @@
                     <div class="search-warning" id="search-warning"></div>
                     <div class="search-filters" id="search-filters">
                         <button class="filter-btn active" data-type="" onclick="setFilter(this)">Everything</button>
-                        <button class="filter-btn" data-type="movie" onclick="setFilter(this)">Films</button>
+                        <button class="filter-btn" data-type="movie" onclick="setFilter(this)">Movies</button>
                         <button class="filter-btn" data-type="series" onclick="setFilter(this)">TV Shows</button>
                     </div>
                 </div>
@@ -111,6 +111,10 @@
                 <div class="section-header">
                     <span>On the way</span>
                     <span id="pipeline-stats"></span>
+                    <div class="svc-header-actions">
+                        <span class="svc-refresh-status" id="pl-refresh-status"></span>
+                        <button class="section-action" id="pl-refresh-btn" title="Refresh now" onclick="manualRefreshPipeline()">&#8635;</button>
+                    </div>
                 </div>
                 <!-- Needs attention banner (failed jobs) -->
                 <div id="pipeline-attention" style="display:none">
@@ -118,6 +122,10 @@
                     <div id="pipeline-attention-list"></div>
                 </div>
                 <!-- Active lanes -->
+                <div class="pl-lane pl-lane-monitoring" id="pipeline-lane-monitoring">
+                    <div class="pl-lane-header">Monitoring</div>
+                    <div id="pipeline-cards-monitoring"></div>
+                </div>
                 <div class="pl-lane pl-lane-downloading" id="pipeline-lane-downloading">
                     <div class="pl-lane-header">Downloading</div>
                     <div id="pipeline-cards-downloading"></div>
@@ -143,6 +151,22 @@
                     <div class="pl-lane-header pl-lane-header-done">Recently completed</div>
                     <div id="pipeline-cards-completed"></div>
                 </div>
+                <!-- Event log (admin only, lazy-loaded) -->
+                <details class="pl-event-log admin-only" id="pl-event-log-details" onToggle="onEventLogToggle(this)">
+                    <summary class="pl-lane-header pl-lane-header-log">
+                        <span>Event log</span>
+                        <span class="um-lane-hint">expand</span>
+                    </summary>
+                    <div class="pl-event-filter" id="pl-event-filter">
+                        <button class="pl-chip pl-chip-active" data-filter="" onclick="setEventFilter(this,'')">All</button>
+                        <button class="pl-chip" data-filter="validate" onclick="setEventFilter(this,'validate')">Validation</button>
+                        <button class="pl-chip" data-filter="transcode" onclick="setEventFilter(this,'transcode')">Transcode</button>
+                        <button class="pl-chip" data-filter="catalog" onclick="setEventFilter(this,'catalog')">Catalog</button>
+                        <button class="pl-chip" data-filter="action" onclick="setEventFilter(this,'action')">Actions</button>
+                    </div>
+                    <div id="pl-event-list"></div>
+                    <div class="pl-event-pager" id="pl-event-pager"></div>
+                </details>
             </div>
 
             <!-- Storage Management -->
@@ -152,7 +176,7 @@
                         <span class="um-hero-icon">&#128190;</span>
                         <h2 class="um-hero-title">Storage</h2>
                         <button class="section-action admin-only" id="storage-scan-btn" onclick="scanStorageNow()">Scan now</button>
-                        <button class="section-action admin-only" onclick="openStorageExplorer()">Browse files</button>
+                        <button class="section-action admin-only" onclick="openStorageExplorer()">&#8615; Import</button>
                     </div>
                     <p class="um-hero-sub">Capacity, folders, and health</p>
                 </div>
@@ -378,7 +402,7 @@
                 <div class="um-hero">
                     <div class="um-hero-title-row">
                         <span class="um-hero-icon">👥</span>
-                        <h2 class="um-hero-title">People</h2>
+                        <h2 class="um-hero-title">Users</h2>
                     </div>
                     <p class="um-hero-sub">Invites, accounts, and active sessions</p>
                 </div>
@@ -434,11 +458,98 @@
             <div class="section hidden" id="requests-section">
                 <div class="section-header">
                     <span>Requests</span>
-                    <button class="section-action admin-only" id="requests-settings-btn" onclick="toggleRequestsSettings()" title="Configure request profiles">Settings</button>
                 </div>
 
-                <!-- Admin: request profile settings (collapsed by default) -->
-                <div class="hidden" id="requests-settings-panel">
+                <!-- Admin pending requests -->
+                <div class="admin-only">
+                    <div class="requests-lane-header">Pending approval</div>
+                    <ul id="requests-pending-list" class="requests-list"></ul>
+                    <p class="requests-empty hidden" id="requests-pending-empty">No pending requests.</p>
+                </div>
+
+                <!-- Viewer's own requests -->
+                <div class="requests-lane-header">My requests</div>
+                <ul id="requests-mine-list" class="requests-list"></ul>
+                <p class="requests-empty hidden" id="requests-mine-empty">No requests yet. Search for a title and click <strong>Request</strong>.</p>
+            </div>
+
+            <!-- Settings tab content -->
+            <div class="section hidden" id="settings-section">
+                <div class="section-header">
+                    <span>Settings</span>
+                </div>
+
+                <!-- Pipeline toggles -->
+                <div class="settings-panel">
+                    <div class="settings-panel-title">Pipeline</div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Validation</span>
+                        <span class="toggle-sub">Verify file integrity before processing</span>
+                        <button class="toggle" id="st-validation" role="switch" onclick="toggleSetting(this)" data-key="validation_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Transcoding</span>
+                        <span class="toggle-sub">Re-encode files matching configured profiles</span>
+                        <button class="toggle" id="st-transcoding" role="switch" onclick="toggleSetting(this)" data-key="transcoding_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Cataloging</span>
+                        <span class="toggle-sub">Add imported files to Jellyfin library</span>
+                        <button class="toggle" id="st-cataloging" role="switch" onclick="toggleSetting(this)" data-key="catalog_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                </div>
+
+                <!-- Subtitles -->
+                <div class="settings-panel">
+                    <div class="settings-panel-title">Subtitles</div>
+                    <div class="settings-field-row">
+                        <label class="settings-field-label" for="st-sub-langs">Subtitle languages</label>
+                        <span class="settings-field-hint">Comma-separated language codes (e.g. <code>en,es</code>)</span>
+                        <input type="text" id="st-sub-langs" class="settings-input" placeholder="en">
+                    </div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Dual subtitles</span>
+                        <span class="toggle-sub">Generate stacked dual-language subtitle sidecars</span>
+                        <button class="toggle" id="st-dualsub" role="switch" onclick="toggleSetting(this)" data-key="dual_sub_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                    <div class="settings-field-row" id="st-dualsub-opts">
+                        <label class="settings-field-label" for="st-dualsub-pairs">Language pairs</label>
+                        <span class="settings-field-hint">One pair per line, e.g. <code>en-es</code></span>
+                        <textarea id="st-dualsub-pairs" class="settings-input settings-textarea" rows="3"></textarea>
+                        <label class="settings-field-label" style="margin-top:0.5rem">Translator</label>
+                        <div class="settings-radio-row">
+                            <label><input type="radio" name="st-translator" value="none"> None (style only)</label>
+                            <label><input type="radio" name="st-translator" value="argos"> Argos Translate</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notifications -->
+                <div class="settings-panel">
+                    <div class="settings-panel-title">Notifications</div>
+                    <div class="settings-radio-row">
+                        <label><input type="radio" name="st-notif" value="internal" onchange="updateNotifMode()"> Internal only</label>
+                        <label><input type="radio" name="st-notif" value="apprise" onchange="updateNotifMode()"> Apprise</label>
+                        <label><input type="radio" name="st-notif" value="direct" onchange="updateNotifMode()"> Direct webhook</label>
+                    </div>
+                </div>
+
+                <div class="settings-actions">
+                    <button class="settings-save-btn" onclick="saveSettingsTab()">Save settings</button>
+                    <span class="settings-save-status" id="st-save-status"></span>
+                </div>
+
+                <!-- Download defaults (quality profiles + root folders) -->
+                <div class="settings-panel admin-only">
+                    <div class="settings-panel-title">Download Defaults</div>
                     <div class="requests-settings-grid">
                         <div class="requests-settings-group">
                             <div class="requests-settings-label">Movies (Radarr)</div>
@@ -459,114 +570,17 @@
                             </label>
                         </div>
                     </div>
-                    <button class="section-action" id="requests-settings-save-btn" onclick="saveRequestsSettings()">Save settings</button>
+                    <div class="settings-actions" style="margin-top:0.75rem">
+                        <button class="settings-save-btn" id="requests-settings-save-btn" onclick="saveRequestsSettings()">Save defaults</button>
+                        <span class="settings-save-status" id="requests-settings-save-status"></span>
+                    </div>
                     <p class="requests-settings-note">Changes take effect after restarting the pelicula-api container.</p>
                 </div>
 
-                <!-- Admin pending requests -->
-                <div class="admin-only">
-                    <div class="requests-lane-header">Pending approval</div>
-                    <ul id="requests-pending-list" class="requests-list"></ul>
-                    <p class="requests-empty hidden" id="requests-pending-empty">No pending requests.</p>
-                </div>
-
-                <!-- Viewer's own requests -->
-                <div class="requests-lane-header">My requests</div>
-                <ul id="requests-mine-list" class="requests-list"></ul>
-                <p class="requests-empty hidden" id="requests-mine-empty">No requests yet. Search for a title and click <strong>Request</strong>.</p>
-            </div>
-
-            <!-- Services grid (full section, used on smaller screens / moved here for tab routing) -->
-            <div class="section hidden" id="services-section">
-                <div class="section-header services-header">
-                    <span>Services</span>
-                    <span class="svc-totals" id="svc-totals"></span>
-                    <div class="svc-header-actions">
-                        <span class="svc-refresh-status" id="svc-refresh-status"></span>
-                        <button class="section-action" id="svc-refresh-btn" title="Refresh now" onclick="manualRefreshServices()">&#8635;</button>
-                        <div class="svc-stack-menu-wrap admin-only">
-                            <button class="section-action" id="svc-menu-btn" onclick="toggleStackMenu()" title="Stack actions">&#8943;</button>
-                            <div class="svc-stack-menu hidden" id="svc-stack-menu">
-                                <button onclick="stackRestart()">Restart stack</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="services">
-                    <!-- VPN card (flip-on-click square tile) -->
-                    <div class="service service-vpn service-stage-infra" id="vpn-card" onclick="toggleVpnFlip(event)">
-                        <div class="vpn-inner">
-                            <div class="vpn-face vpn-front">
-                                <span class="service-status unknown" id="vpn-status-badge">&#9888;</span>
-                                <div class="service-name">VPN</div>
-                                <div class="service-desc" id="vpn-desc">Checking&hellip;</div>
-                                <div class="vpn-front-region" id="t-region">---</div>
-                            </div>
-                            <div class="vpn-face vpn-back">
-                                <div class="vpn-back-stats">
-                                    <div class="vpn-stat">
-                                        <span class="vpn-stat-label">IP</span>
-                                        <span class="vpn-stat-val loading" id="t-vpn" title="Click to reveal">---</span>
-                                    </div>
-                                    <div class="vpn-stat">
-                                        <span class="vpn-stat-label">Port</span>
-                                        <span class="vpn-stat-val loading" id="t-port">---</span>
-                                    </div>
-                                    <div class="vpn-stat">
-                                        <span class="vpn-stat-label">DL</span>
-                                        <span class="vpn-stat-val loading" id="t-dl">---</span>
-                                    </div>
-                                    <div class="vpn-stat">
-                                        <span class="vpn-stat-label">UL</span>
-                                        <span class="vpn-stat-val loading" id="t-ul">---</span>
-                                    </div>
-                                </div>
-                                <div class="vpn-back-hint">tap to close</div>
-                            </div>
-                        </div>
-                    </div>
-                    <a class="service service-stage-manage" target="_blank" rel="noopener" href="/sonarr/" data-check="/sonarr/ping" data-svc="sonarr">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'sonarr')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">Sonarr</div>
-                        <div class="service-desc">TV Shows</div>
-                    </a>
-                    <a class="service service-stage-manage" target="_blank" rel="noopener" href="/radarr/" data-check="/radarr/ping" data-svc="radarr">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'radarr')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">Radarr</div>
-                        <div class="service-desc">Movies</div>
-                    </a>
-                    <a class="service service-stage-discover" target="_blank" rel="noopener" href="/prowlarr/" data-check="/prowlarr/ping" data-svc="prowlarr">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'prowlarr')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">Prowlarr</div>
-                        <div class="service-desc">Indexers</div>
-                    </a>
-                    <a class="service service-stage-transport" target="_blank" rel="noopener" href="/qbt/" data-check="/qbt/" data-svc="qbittorrent">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'qbittorrent')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">qBittorrent</div>
-                        <div class="service-desc">Downloads</div>
-                    </a>
-                    <a class="service service-stage-serve" target="_blank" rel="noopener" href="/jellyfin/" data-check="/jellyfin/health" data-svc="jellyfin">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'jellyfin')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">Jellyfin</div>
-                        <div class="service-desc">Media Server</div>
-                    </a>
-                    <a class="service service-stage-process" target="_blank" rel="noopener" href="/procula/" data-svc="procula">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'procula')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">Procula</div>
-                        <div class="service-desc">Processing</div>
-                    </a>
-                    <a class="service service-stage-process" target="_blank" rel="noopener" href="/bazarr/" data-check="/bazarr/api/system/status" data-svc="bazarr">
-                        <button class="svc-log-btn admin-only" onclick="showServiceLogs(event,'bazarr')" title="View logs">logs ›</button>
-                        <span class="service-status unknown">&#9888;</span>
-                        <div class="service-name">Bazarr</div>
-                        <div class="service-desc">Subtitles</div>
-                    </a>
+                <!-- Advanced -->
+                <div class="settings-panel settings-panel-advanced">
+                    <div class="settings-panel-title">Advanced</div>
+                    <a href="/settings" class="settings-adv-link">Re-enter Setup Wizard ›</a>
                 </div>
             </div>
 
@@ -582,42 +596,62 @@
         <!-- ── Right sidebar ──────────────────────────────────── -->
         <div class="pane-side">
             <!-- Service health list -->
-            <div class="sidebar-hdr">Services</div>
+            <div class="sidebar-hdr sidebar-hdr-services">
+                <span>Services</span>
+                <span class="svc-totals" id="svc-totals"></span>
+                <div class="svc-header-actions">
+                    <span class="svc-refresh-status" id="svc-refresh-status"></span>
+                    <button class="section-action" id="svc-refresh-btn" title="Refresh now" onclick="manualRefreshServices()">&#8635;</button>
+                    <div class="svc-stack-menu-wrap admin-only">
+                        <button class="section-action" id="svc-menu-btn" onclick="toggleStackMenu()" title="Stack actions">&#8943;</button>
+                        <div class="svc-stack-menu hidden" id="svc-stack-menu">
+                            <button onclick="stackRestart()">Restart stack</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="svc-list" id="svc-sidebar-list">
                 <a class="svc-row" href="/sonarr/" target="_blank" rel="noopener" data-check="/sonarr/ping" data-svc="sonarr">
                     <span class="svc-pip unknown" id="svc-pip-sonarr"></span>
                     <span class="svc-name">Sonarr</span>
                     <span class="svc-desc">TV shows</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'sonarr')" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/radarr/" target="_blank" rel="noopener" data-check="/radarr/ping" data-svc="radarr">
                     <span class="svc-pip unknown" id="svc-pip-radarr"></span>
                     <span class="svc-name">Radarr</span>
-                    <span class="svc-desc">Films</span>
+                    <span class="svc-desc">Movies</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'radarr')" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/jellyfin/" target="_blank" rel="noopener" data-check="/jellyfin/health" data-svc="jellyfin">
                     <span class="svc-pip unknown" id="svc-pip-jellyfin"></span>
                     <span class="svc-name">Jellyfin</span>
                     <span class="svc-desc">Media server</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'jellyfin')" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/qbt/" target="_blank" rel="noopener" data-check="/qbt/" data-svc="qbittorrent">
                     <span class="svc-pip unknown" id="svc-pip-qbittorrent"></span>
                     <span class="svc-name">qBittorrent</span>
                     <span class="svc-desc">Downloads</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'qbittorrent')" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/prowlarr/" target="_blank" rel="noopener" data-check="/prowlarr/ping" data-svc="prowlarr">
                     <span class="svc-pip unknown" id="svc-pip-prowlarr"></span>
                     <span class="svc-name">Prowlarr</span>
                     <span class="svc-desc">Indexers</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'prowlarr')" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/bazarr/" target="_blank" rel="noopener" data-check="/bazarr/api/system/status" data-svc="bazarr">
                     <span class="svc-pip unknown" id="svc-pip-bazarr"></span>
                     <span class="svc-name">Bazarr</span>
                     <span class="svc-desc">Subtitles</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'bazarr')" title="View logs">logs</button>
                 </a>
-                <a class="svc-row" href="/procula/" target="_blank" rel="noopener" data-svc="procula">
+                <a class="svc-row" data-svc="procula">
                     <span class="svc-pip unknown" id="svc-pip-procula"></span>
                     <span class="svc-name">Procula</span>
                     <span class="svc-desc">Processing</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'procula')" title="View logs">logs</button>
                 </a>
             </div>
 
@@ -739,9 +773,23 @@
             document.body.dataset.tab = tab;
         };
         // Set default immediately (not on DOMContentLoaded) so CSS selectors apply from first paint.
-        document.body.dataset.tab = 'home';
+        document.body.dataset.tab = 'search';
     })();
     </script>
+    <!-- Job detail drawer -->
+    <div class="drawer-backdrop hidden" id="drawer-backdrop" onclick="closeJobDrawer()"></div>
+    <div class="drawer hidden" id="job-drawer">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title" id="drawer-title">Job Details</div>
+                <div class="drawer-sub" id="drawer-subtitle"></div>
+            </div>
+            <button class="drawer-close" onclick="closeJobDrawer()">&times;</button>
+        </div>
+        <div class="drawer-actions" id="drawer-actions"></div>
+        <div class="drawer-body" id="drawer-body"></div>
+    </div>
+
     <script src="/dashboard.js"></script>
 </body>
 </html>

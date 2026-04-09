@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 )
 
 type SearchResult struct {
@@ -18,6 +19,13 @@ type SearchResult struct {
 	TmdbID   int    `json:"tmdbId,omitempty"`
 	TvdbID   int    `json:"tvdbId,omitempty"`
 	Added    bool   `json:"added"`
+	// Enriched metadata
+	Genres        []string `json:"genres,omitempty"`
+	Certification string   `json:"certification,omitempty"`
+	Runtime       int      `json:"runtime,omitempty"` // minutes
+	Rating        float64  `json:"rating,omitempty"`  // IMDb preferred, falls back to TMDB
+	Network       string   `json:"network,omitempty"` // series only
+	SeasonCount   int      `json:"seasonCount,omitempty"` // series only
 }
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -83,15 +91,35 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			movies = append(movies, SearchResult{
-				Type:     "movie",
-				Title:    strVal(m, "title"),
-				Year:     int(floatVal(m, "year")),
-				Overview: strVal(m, "overview"),
-				Poster:   poster,
-				TmdbID:   tmdbID,
-				Added:    existingIDs[tmdbID],
-			})
+			sr := SearchResult{
+				Type:          "movie",
+				Title:         strVal(m, "title"),
+				Year:          int(floatVal(m, "year")),
+				Overview:      strVal(m, "overview"),
+				Poster:        poster,
+				TmdbID:        tmdbID,
+				Added:         existingIDs[tmdbID],
+				Certification: strVal(m, "certification"),
+				Runtime:       int(floatVal(m, "runtime")),
+			}
+			if genres, ok := m["genres"].([]any); ok {
+				for _, g := range genres {
+					if s, ok := g.(string); ok {
+						sr.Genres = append(sr.Genres, s)
+					}
+				}
+			}
+			if ratings, ok := m["ratings"].(map[string]any); ok {
+				if imdb, ok := ratings["imdb"].(map[string]any); ok {
+					sr.Rating = floatVal(imdb, "value")
+				}
+				if sr.Rating == 0 {
+					if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
+						sr.Rating = floatVal(tmdbR, "value")
+					}
+				}
+			}
+			movies = append(movies, sr)
 		}
 		mu.Unlock()
 	}()
@@ -139,16 +167,40 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			series = append(series, SearchResult{
-				Type:     "series",
-				Title:    strVal(s, "title"),
-				Year:     int(floatVal(s, "year")),
-				Overview: strVal(s, "overview"),
-				Poster:   poster,
-				TvdbID:   tvdbID,
-				TmdbID:   tmdbID,
-				Added:    existingIDs[tvdbID],
-			})
+			sr := SearchResult{
+				Type:          "series",
+				Title:         strVal(s, "title"),
+				Year:          int(floatVal(s, "year")),
+				Overview:      strVal(s, "overview"),
+				Poster:        poster,
+				TvdbID:        tvdbID,
+				TmdbID:        tmdbID,
+				Added:         existingIDs[tvdbID],
+				Certification: strVal(s, "certification"),
+				Runtime:       int(floatVal(s, "runtime")),
+				Network:       strVal(s, "network"),
+			}
+			if genres, ok := s["genres"].([]any); ok {
+				for _, g := range genres {
+					if gs, ok := g.(string); ok {
+						sr.Genres = append(sr.Genres, gs)
+					}
+				}
+			}
+			if ratings, ok := s["ratings"].(map[string]any); ok {
+				if imdb, ok := ratings["imdb"].(map[string]any); ok {
+					sr.Rating = floatVal(imdb, "value")
+				}
+				if sr.Rating == 0 {
+					if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
+						sr.Rating = floatVal(tmdbR, "value")
+					}
+				}
+			}
+			if stats, ok := s["statistics"].(map[string]any); ok {
+				sr.SeasonCount = int(floatVal(stats, "seasonCount"))
+			}
+			series = append(series, sr)
 		}
 		mu.Unlock()
 	}()
@@ -183,30 +235,64 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		Type   string `json:"type"`
 		TmdbID int    `json:"tmdbId"`
 		TvdbID int    `json:"tvdbId"`
+		Title  string `json:"title"`
+		Year   int    `json:"year"`
+		Poster string `json:"poster"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	var arrID int
+	var err error
 	switch req.Type {
 	case "movie":
-		arrID, err := addMovieInternal(req.TmdbID, 0, "")
+		arrID, err = addMovieInternal(req.TmdbID, 0, "")
 		if err != nil {
 			writeError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})
 	case "series":
-		arrID, err := addSeriesInternal(req.TvdbID, 0, "")
+		arrID, err = addSeriesInternal(req.TvdbID, 0, "")
 		if err != nil {
 			writeError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})
 	default:
 		writeError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
+		return
 	}
+
+	// Create a grabbed request so the item appears in the monitoring pipeline lane.
+	if requestStore != nil && req.Title != "" {
+		now := time.Now().UTC()
+		mreq := &MediaRequest{
+			ID:        generateRequestID(),
+			Type:      req.Type,
+			TmdbID:    req.TmdbID,
+			TvdbID:    req.TvdbID,
+			Title:     req.Title,
+			Year:      req.Year,
+			Poster:    req.Poster,
+			State:     RequestGrabbed,
+			ArrID:     arrID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if _, dbErr := requestStore.db.Exec(
+			`INSERT OR IGNORE INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
+			                                 requested_by, state, reason, arr_id, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, '', ?, ?, ?)`,
+			mreq.ID, mreq.Type, mreq.TmdbID, mreq.TvdbID, mreq.Title, mreq.Year, mreq.Poster,
+			string(mreq.State), mreq.ArrID,
+			mreq.CreatedAt.Format(time.RFC3339Nano), mreq.UpdatedAt.Format(time.RFC3339Nano),
+		); dbErr != nil {
+			slog.Warn("failed to create monitoring entry for search add", "component", "search", "title", req.Title, "error", dbErr)
+		}
+	}
+
+	writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})
 }
 
 // addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.

@@ -60,6 +60,13 @@ function applyRole(role, username) {
     const isManager = role === 'manager' || role === 'admin';
     const isAdmin = role === 'admin';
 
+    // User badge
+    const badge = document.getElementById('user-badge');
+    if (badge) {
+        if (username) { badge.textContent = username; badge.classList.remove('hidden'); }
+        else { badge.classList.add('hidden'); }
+    }
+
     // Search section
     const searchSection = document.querySelector('.search-section');
     if (searchSection) searchSection.style.display = isManager ? '' : 'none';
@@ -161,20 +168,38 @@ async function doSearch(q) {
         searchResults.className = 'search-results visible';
     }
 }
+function buildDetailChips(r) {
+    const chips = [];
+    if (r.rating > 0) chips.push(`<span class="search-detail-chip search-detail-rating">&#9733; ${r.rating.toFixed(1)}</span>`);
+    if (r.certification) chips.push(`<span class="search-detail-chip">${esc(r.certification)}</span>`);
+    if (r.runtime > 0) {
+        const label = r.type === 'series' ? `${r.runtime} min/ep` : `${r.runtime} min`;
+        chips.push(`<span class="search-detail-chip">${label}</span>`);
+    }
+    if (r.network) {
+        const networkLabel = r.seasonCount > 0 ? `${esc(r.network)} &middot; ${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}` : esc(r.network);
+        chips.push(`<span class="search-detail-chip">${networkLabel}</span>`);
+    } else if (r.seasonCount > 0) {
+        chips.push(`<span class="search-detail-chip">${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}</span>`);
+    }
+    if (r.genres && r.genres.length) chips.push(`<span class="search-detail-chip">${r.genres.slice(0, 3).map(esc).join(' &middot; ')}</span>`);
+    return chips.join('');
+}
 function renderResultCard(r) {
     const poster = r.poster ? `<img src="${r.poster}" alt="">` : '<div class="no-poster"></div>';
     const badge = r.type === 'movie' ? 'Movie' : 'Series';
     const tmdbId = r.tmdbId || 0;
     const tvdbId = r.tvdbId || 0;
-    const id = r.type === 'movie' ? tmdbId : tvdbId;
-    const idKey = r.type === 'movie' ? 'tmdb' : 'tvdb';
     const added = r.added;
     const isManager = currentRole === 'manager' || currentRole === 'admin';
+    const stopProp = 'event.stopPropagation();';
     // Managers and admins get the direct Add button; viewers get a Request button.
     const actionBtn = isManager
-        ? `<button class="${added ? 'search-add added' : 'search-add'}" ${added ? 'disabled' : ''} data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" onclick="addMedia(this.dataset.type, this.dataset.type==='movie'?parseInt(this.dataset.tmdb):parseInt(this.dataset.tvdb), this)">${added ? 'Added' : 'Add'}</button>`
-        : `<button class="search-request" data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-title="${esc(r.title)}" data-year="${r.year||0}" data-poster="${esc(r.poster||'')}" onclick="submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true">Request</button>`;
-    return `<div class="search-result">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div></div>${actionBtn}</div>`;
+        ? `<button class="${added ? 'search-add added' : 'search-add'}" ${added ? 'disabled' : ''} data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" onclick="${stopProp}addMedia(this.dataset.type, this.dataset.type==='movie'?parseInt(this.dataset.tmdb):parseInt(this.dataset.tvdb), this)">${added ? 'Added' : 'Add'}</button>`
+        : `<button class="search-request" data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-title="${esc(r.title)}" data-year="${r.year||0}" data-poster="${esc(r.poster||'')}" onclick="${stopProp}submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true">Request</button>`;
+    const detailChips = buildDetailChips(r);
+    const detail = detailChips ? `<div class="search-detail">${detailChips}</div>` : '';
+    return `<div class="search-result" onclick="this.classList.toggle('expanded')">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div>${detail}</div>${actionBtn}</div>`;
 }
 function renderResults(results, collapsed) {
     if (!results.length) {
@@ -199,12 +224,13 @@ function expandResults() {
 async function addMedia(type, id, btn) {
     btn.disabled = true; btn.textContent = '…';
     try {
+        const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
+        const hit = lastResults.find(r => r[idKey] === id);
         const body = type === 'movie' ? {type, tmdbId: id} : {type, tvdbId: id};
+        if (hit) { body.title = hit.title; body.year = hit.year || 0; body.poster = hit.poster || ''; }
         const res = await fetch('/api/pelicula/search/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         if (res.ok) {
             // Mark the matching result in lastResults so re-renders reflect the add immediately
-            const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
-            const hit = lastResults.find(r => r[idKey] === id);
             if (hit) { hit.added = true; }
             btn.textContent = 'Added'; btn.classList.add('added');
         } else { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
@@ -262,12 +288,8 @@ async function checkDownloads() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         renderDownloads(data);
-        // Update VPN card speeds
+        // Update VPN sidebar speeds
         var s = data.stats || {};
-        document.getElementById('t-dl').textContent = formatSpeed(s.dlspeed || 0);
-        document.getElementById('t-dl').classList.remove('loading');
-        document.getElementById('t-ul').textContent = formatSpeed(s.upspeed || 0);
-        document.getElementById('t-ul').classList.remove('loading');
         setText('s-dl', formatSpeed(s.dlspeed || 0));
         setText('s-ul', formatSpeed(s.upspeed || 0));
     } catch (e) { console.warn('[pelicula] error:', e); }
@@ -361,25 +383,6 @@ async function checkServices() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         const svcMap = data.services || {};
-        document.querySelectorAll('a.service').forEach(el => {
-            const icon = el.querySelector('.service-status');
-            let name = el.dataset.service || '';
-            if (!name) {
-                const href = el.getAttribute('href') || '';
-                if (href.includes('sonarr')) name = 'sonarr';
-                else if (href.includes('radarr')) name = 'radarr';
-                else if (href.includes('prowlarr')) name = 'prowlarr';
-                else if (href.includes('qbt')) name = 'qbittorrent';
-                else if (href.includes('jellyfin')) name = 'jellyfin';
-                else if (href.includes('procula')) name = 'procula';
-                else if (href.includes('bazarr')) name = 'bazarr';
-            }
-            const up = svcMap[name] === 'up';
-            icon.className = 'service-status ' + (up ? 'up' : 'down');
-            icon.textContent = up ? '\u2713' : '!';
-            el.classList.remove('svc-up', 'svc-down', 'svc-unknown');
-            el.classList.add(up ? 'svc-up' : 'svc-down');
-        });
         // Update sidebar pips
         Object.keys(svcMap).forEach(name => {
             const pip = document.getElementById('svc-pip-' + name);
@@ -411,12 +414,6 @@ async function checkServices() {
         }
     } catch (e) {
         console.warn('[pelicula] status check error:', e);
-        document.querySelectorAll('a.service').forEach(el => {
-            const d = el.querySelector('.service-status');
-            if (d) { d.className = 'service-status unknown'; d.textContent = '\u26a0'; }
-            el.classList.remove('svc-up', 'svc-down');
-            el.classList.add('svc-unknown');
-        });
         document.querySelectorAll('.svc-pip').forEach(pip => {
             pip.className = 'svc-pip unknown';
             const row = pip.closest('.svc-row');
@@ -469,23 +466,23 @@ function manualRefreshServices() {
 }
 
 function updateSvcTotals() {
-    const cards = document.querySelectorAll('.service');
+    const pips = document.querySelectorAll('#svc-sidebar-list .svc-pip');
     let up = 0, down = 0;
-    cards.forEach(c => {
-        if (c.classList.contains('hidden')) return;
-        if (c.classList.contains('svc-up')) up++;
-        else if (c.classList.contains('svc-down')) down++;
+    pips.forEach(p => {
+        if (p.classList.contains('up')) up++;
+        else if (p.classList.contains('down')) down++;
     });
     const el = document.getElementById('svc-totals');
     if (!el) return;
     if (down === 0 && up > 0) {
-        el.textContent = 'All ' + up + ' up';
+        el.textContent = up + '\u202f\u2713';
         el.style.color = '#7dda93';
     } else if (down > 0) {
-        el.textContent = up + ' up \u00b7 ' + down + ' down';
+        el.textContent = up + '\u2191\u00b7' + down + '\u2193';
         el.style.color = '#f87171';
     } else {
         el.textContent = '';
+        el.style.color = '';
     }
 }
 
@@ -612,12 +609,6 @@ document.getElementById('log-modal')?.addEventListener('click', (e) => {
 
 // ── VPN Telemetry ─────────────────────────
 async function checkVPN() {
-    const vpnEl = document.getElementById('t-vpn');
-    const regionEl = document.getElementById('t-region');
-    const portEl = document.getElementById('t-port');
-    const badge = document.getElementById('vpn-status-badge');
-    const desc = document.getElementById('vpn-desc');
-    const card = document.getElementById('vpn-card');
     try {
         const [ipResult, portResult] = await Promise.allSettled([
             tfetch('/api/vpn/v1/publicip/ip'),
@@ -627,37 +618,16 @@ async function checkVPN() {
         const portRes = portResult.status === 'fulfilled' ? portResult.value : null;
         if (ipRes && ipRes.ok) {
             const data = await ipRes.json();
-            vpnEl.setAttribute('data-ip', data.public_ip || '?');
-            vpnEl.textContent = '***.***';
-            vpnEl.className = 'vpn-stat-val vpn-ok';
-            regionEl.textContent = data.country || '\u2014';
-            regionEl.classList.remove('loading');
-            badge.className = 'service-status up';
-            badge.textContent = '\u2713';
-            desc.textContent = 'Connected';
-            card.classList.remove('vpn-down', 'svc-down', 'svc-unknown');
-            card.classList.add('svc-up');
             setText('s-region', data.country || '\u2014');
         } else if (!ipRes) {
             throw new Error('VPN timeout');
         }
         if (portRes && portRes.ok) {
             const pd = await portRes.json();
-            portEl.textContent = pd.port || '?';
-            portEl.classList.remove('loading');
             setText('s-port', pd.port || '\u2014');
         }
     } catch (e) {
         console.warn('[pelicula] VPN telemetry error:', e);
-        vpnEl.textContent = '---';
-        vpnEl.className = 'vpn-stat-val vpn-err';
-        regionEl.textContent = '-'; regionEl.classList.remove('loading');
-        portEl.textContent = '-'; portEl.classList.remove('loading');
-        badge.className = 'service-status down';
-        badge.textContent = '!';
-        desc.textContent = 'Down — downloads paused';
-        card.classList.remove('svc-up', 'svc-unknown');
-        card.classList.add('vpn-down', 'svc-down');
         setText('s-region', '\u2014');
         setText('s-port', '\u2014');
     }
@@ -700,12 +670,6 @@ async function checkHost() {
 }
 
 function updateTimestamp() { document.getElementById('footer-time').textContent = new Date().toLocaleTimeString(); }
-function toggleVpnFlip(e) { e.stopPropagation(); document.getElementById('vpn-card').classList.toggle('flipped'); }
-document.getElementById('t-vpn').addEventListener('click', function() {
-    const ip = this.getAttribute('data-ip');
-    if (!ip || ip === '?') return;
-    this.textContent = this.textContent === ip ? '***.***' : ip;
-});
 // ── Notifications bell ────────────────────
 let lastSeenTs = localStorage.getItem('peliculaLastSeen') || '1970-01-01T00:00:00Z';
 
@@ -1089,7 +1053,7 @@ function renderJobCard(j) {
     const cancelBtn = (j.state === 'queued' || j.state === 'processing' || j.state === 'failed')
         ? `<button class="dl-btn cancel" title="Cancel" data-job-id="${esc(j.id)}" onclick="cancelJobFromBtn(this)">&#x2715;</button>`
         : '';
-    const viewLogLink = `<a class="dl-btn" href="/procula/#job=${esc(j.id)}" target="_blank" title="View in Procula" style="font-size:0.7rem;padding:0.2rem 0.4rem;text-decoration:none">&#9654;</a>`;
+    const viewLogLink = `<button class="dl-btn" onclick="openJobDrawer('${esc(j.id)}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`;
 
     const missingSubsBadge = (j.missing_subs && j.missing_subs.length)
         ? `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`
@@ -1149,6 +1113,7 @@ function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 
 // ── Pipeline board ────────────────────────
 const LANE_BADGE = {
+    monitoring:     '<span class="proc-badge proc-waiting">Waiting</span>',
     downloading:    '',
     imported:       '<span class="proc-badge proc-active">Imported</span>',
     validating:     '<span class="proc-badge proc-active">Validating</span>',
@@ -1157,7 +1122,7 @@ const LANE_BADGE = {
     completed:      '<span class="proc-badge proc-done">Done</span>',
     needs_attention:'<span class="proc-badge proc-failed">Failed</span>',
 };
-const ACTIVE_LANES = ['downloading', 'imported', 'validating', 'processing', 'cataloging'];
+const ACTIVE_LANES = ['monitoring', 'downloading', 'imported', 'validating', 'processing', 'cataloging'];
 
 async function checkPipeline() {
     try {
@@ -1165,12 +1130,10 @@ async function checkPipeline() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         renderPipeline(data);
-        // Update VPN card speed stats (replaces checkDownloads)
+        // Update VPN sidebar speed stats
         const s = data.stats || {};
-        document.getElementById('t-dl').textContent = formatSpeed(s.dl_speed || 0);
-        document.getElementById('t-dl').classList.remove('loading');
-        document.getElementById('t-ul').textContent = formatSpeed(s.up_speed || 0);
-        document.getElementById('t-ul').classList.remove('loading');
+        setText('s-dl', formatSpeed(s.dl_speed || 0));
+        setText('s-ul', formatSpeed(s.up_speed || 0));
     } catch (e) { console.warn('[pelicula] pipeline error:', e); }
 }
 
@@ -1341,7 +1304,7 @@ function renderPipelineCard(item) {
         actionBtns += '<button class="dl-btn cancel" title="Cancel job" data-job-id="' + jobId + '" onclick="cancelJobFromBtn(this)">&#10005;</button>';
     }
     if (actions.includes('view_log') && src.job_id) {
-        actionBtns += '<a class="dl-btn" href="/procula/#job=' + jobId + '" target="_blank" title="View log" style="font-size:0.7rem;padding:0.2rem 0.4rem;text-decoration:none">&#9654;</a>';
+        actionBtns += '<button class="dl-btn" onclick="openJobDrawer(\'' + jobId + '\')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>';
     }
     if (actions.includes('dismiss') && canAdmin) {
         actionBtns += '<button class="dl-btn" title="Dismiss" data-job-id="' + jobId + '" onclick="dismissJobFromBtn(this)" style="color:#555">&#10006;</button>';
@@ -1463,8 +1426,41 @@ setTimeout(checkUpdates, 1000);
 setTimeout(startServicesAutoRefresh, 1000);
 setInterval(refresh, 15000);
 setInterval(updateStaleBanner, 5000);
-// Pipeline polls faster than the main cycle so cards update as items progress.
-setInterval(function() { if (!document.hidden) checkPipeline(); }, 3000);
+// Pipeline auto-refresh with 30s countdown (like services)
+let _plRefreshTimer = null;
+let _plCountdown = 0;
+const PL_INTERVAL = 30;
+
+function startPipelineAutoRefresh() {
+    _plCountdown = PL_INTERVAL;
+    updatePlCountdown();
+    if (_plRefreshTimer) clearInterval(_plRefreshTimer);
+    _plRefreshTimer = setInterval(() => {
+        if (document.hidden) return;
+        _plCountdown--;
+        if (_plCountdown <= 0) {
+            _plCountdown = PL_INTERVAL;
+            checkPipeline();
+        }
+        updatePlCountdown();
+    }, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) { _plCountdown = PL_INTERVAL; updatePlCountdown(); }
+    }, { once: false });
+}
+
+function updatePlCountdown() {
+    const el = document.getElementById('pl-refresh-status');
+    if (el) el.textContent = _plCountdown > 0 ? 'next in ' + _plCountdown + 's' : '';
+}
+
+window.manualRefreshPipeline = function() {
+    _plCountdown = PL_INTERVAL;
+    updatePlCountdown();
+    checkPipeline();
+};
+
+setTimeout(startPipelineAutoRefresh, 1200);
 
 // ── Users ─────────────────────────────────
 async function loadUsers() {
@@ -1784,11 +1780,6 @@ async function loadArrMeta() {
     } catch (e) { console.warn('[pelicula] loadArrMeta error', e); }
 }
 
-function toggleRequestsSettings() {
-    const panel = document.getElementById('requests-settings-panel');
-    if (panel) panel.classList.toggle('hidden');
-}
-
 function populateRequestsSettings(meta) {
     const fillProfiles = (selectId, profiles) => {
         const el = document.getElementById(selectId);
@@ -1826,9 +1817,13 @@ async function saveRequestsSettings() {
             body: JSON.stringify(body)
         });
         const data = await resp.json();
-        if (!resp.ok) { alert('Save failed: ' + (data.error || resp.status)); return; }
-        const btn = document.getElementById('requests-settings-save-btn');
-        if (btn) { const prev = btn.textContent; btn.textContent = 'Saved!'; setTimeout(() => btn.textContent = prev, 2000); }
+        if (!resp.ok) {
+            const statusEl = document.getElementById('requests-settings-save-status');
+            if (statusEl) statusEl.textContent = 'Save failed: ' + (data.error || resp.status);
+            return;
+        }
+        const statusEl = document.getElementById('requests-settings-save-status');
+        if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
     } catch (e) { alert('Network error'); }
 }
 
@@ -2027,4 +2022,252 @@ function copyInviteLink() {
     } else {
         input.select();
     }
+}
+
+// ── Job drawer ────────────────────────────
+window.openJobDrawer = async function(jobId) {
+    const backdrop = document.getElementById('drawer-backdrop');
+    const drawer = document.getElementById('job-drawer');
+    const title = document.getElementById('drawer-title');
+    const sub = document.getElementById('drawer-subtitle');
+    const body = document.getElementById('drawer-body');
+    const actions = document.getElementById('drawer-actions');
+    if (!drawer) return;
+    backdrop.classList.remove('hidden');
+    drawer.classList.remove('hidden');
+    title.textContent = 'Job Details';
+    sub.textContent = jobId;
+    body.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">Loading\u2026</div>';
+    actions.innerHTML = '';
+    try {
+        const res = await fetch('/api/procula/jobs/' + encodeURIComponent(jobId));
+        if (!res.ok) throw new Error('Not found');
+        const j = await res.json();
+        title.textContent = (j.source && j.source.title) ? j.source.title : jobId;
+        sub.textContent = j.state + (j.stage ? ' \u00b7 ' + j.stage : '');
+        // Action buttons
+        if (j.state === 'failed') {
+            actions.innerHTML = '<button class="dl-btn resume" onclick="retryJob(\'' + esc(j.id) + '\');closeJobDrawer()">&#8635; Retry</button>';
+        }
+        if (j.state === 'queued' || j.state === 'processing' || j.state === 'failed') {
+            actions.innerHTML += '<button class="dl-btn cancel" onclick="cancelJob(\'' + esc(j.id) + '\');closeJobDrawer()">&#10005; Cancel</button>';
+        }
+        // Body
+        let html = '';
+        // Validation checks
+        if (j.validation && j.validation.checks) {
+            html += '<div class="drawer-section"><div class="drawer-section-title">Validation</div><div class="drawer-check-list">';
+            const checks = j.validation.checks;
+            ['integrity', 'duration', 'sample'].forEach(k => {
+                const v = checks[k] || 'skip';
+                const cls = ['pass','fail','warn'].includes(v) ? v : 'skip';
+                html += '<span class="proc-check proc-check-' + cls + '">' + esc(k) + ': ' + esc(v) + '</span>';
+            });
+            html += '</div></div>';
+        }
+        // File info
+        if (j.source) {
+            html += '<div class="drawer-section"><div class="drawer-section-title">File</div>';
+            if (j.source.path) html += '<div class="drawer-kv"><span class="drawer-kv-key">Path</span><span class="drawer-kv-val" style="word-break:break-all">' + esc(j.source.path) + '</span></div>';
+            if (j.source.size) html += '<div class="drawer-kv"><span class="drawer-kv-key">Size</span><span class="drawer-kv-val">' + formatBytes(j.source.size) + '</span></div>';
+            html += '</div>';
+        }
+        // Transcode info
+        if (j.transcode_profile || j.transcode_decision) {
+            html += '<div class="drawer-section"><div class="drawer-section-title">Transcoding</div>';
+            if (j.transcode_profile) html += '<div class="drawer-kv"><span class="drawer-kv-key">Profile</span><span class="drawer-kv-val">' + esc(j.transcode_profile) + '</span></div>';
+            if (j.transcode_decision) html += '<div class="drawer-kv"><span class="drawer-kv-key">Decision</span><span class="drawer-kv-val">' + esc(j.transcode_decision) + '</span></div>';
+            html += '</div>';
+        }
+        // Error
+        if (j.error) {
+            html += '<div class="drawer-section"><div class="drawer-section-title">Error</div><div class="drawer-error">' + esc(j.error) + '</div></div>';
+        }
+        // Timeline
+        if (j.events && j.events.length) {
+            html += '<div class="drawer-section"><div class="drawer-section-title">Timeline</div><ul class="drawer-timeline">';
+            j.events.forEach(ev => {
+                html += '<li><span class="drawer-timeline-time">' + new Date(ev.at).toLocaleTimeString() + '</span><span>' + esc(ev.message || ev.event || '') + '</span></li>';
+            });
+            html += '</ul></div>';
+        }
+        body.innerHTML = html || '<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">No details available.</div>';
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-error">Failed to load job details.</div>';
+    }
+};
+
+window.closeJobDrawer = function() {
+    document.getElementById('drawer-backdrop').classList.add('hidden');
+    document.getElementById('job-drawer').classList.add('hidden');
+};
+
+// ── Settings tab ─────────────────────────
+let _settingsLoaded = false;
+let _settingsData = {};
+
+window.switchTab = window.switchTab || function(tab) {
+    document.querySelectorAll('.tab[data-tab]').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    document.body.dataset.tab = tab;
+};
+
+// Wrap switchTab to lazy-load settings when navigating there
+(function() {
+    const origSwitch = window.switchTab;
+    window.switchTab = function(tab) {
+        origSwitch(tab);
+        if (tab === 'settings' && !_settingsLoaded) loadSettingsTab();
+        if (tab === 'settings' && !arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
+    };
+})();
+
+async function loadSettingsTab() {
+    try {
+        const [psRes, msRes] = await Promise.all([
+            tfetch('/api/pelicula/procula-settings'),
+            tfetch('/api/pelicula/settings'),
+        ]);
+        if (psRes.ok) {
+            const ps = await psRes.json();
+            _settingsData.procula = ps;
+            setToggle('st-validation', ps.validation_enabled !== false);
+            setToggle('st-transcoding', ps.transcoding_enabled !== false);
+            setToggle('st-cataloging', ps.catalog_enabled !== false);
+            setToggle('st-dualsub', !!ps.dual_sub_enabled);
+            const pairs = document.getElementById('st-dualsub-pairs');
+            if (pairs) pairs.value = (ps.dual_sub_pairs || []).join('\n');
+            const translator = ps.dual_sub_translator || 'none';
+            document.querySelectorAll('input[name="st-translator"]').forEach(r => { r.checked = r.value === translator; });
+            updateDualSubOpts();
+        }
+        if (msRes.ok) {
+            const ms = await msRes.json();
+            _settingsData.middleware = ms;
+            const langs = document.getElementById('st-sub-langs');
+            if (langs) langs.value = ms.sub_langs || '';
+            const mode = ms.notifications_mode || 'internal';
+            document.querySelectorAll('input[name="st-notif"]').forEach(r => { r.checked = r.value === mode; });
+        }
+        _settingsLoaded = true;
+    } catch (e) { console.warn('[pelicula] settings load error:', e); }
+}
+
+function setToggle(id, on) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+
+window.toggleSetting = function(btn) {
+    const current = btn.getAttribute('aria-checked') === 'true';
+    btn.setAttribute('aria-checked', current ? 'false' : 'true');
+    if (btn.dataset.key === 'dual_sub_enabled') updateDualSubOpts();
+};
+
+function updateDualSubOpts() {
+    const el = document.getElementById('st-dualsub');
+    const opts = document.getElementById('st-dualsub-opts');
+    if (!el || !opts) return;
+    opts.style.display = el.getAttribute('aria-checked') === 'true' ? '' : 'none';
+}
+
+window.updateNotifMode = function() {};
+
+window.saveSettingsTab = async function() {
+    const statusEl = document.getElementById('st-save-status');
+    if (statusEl) statusEl.textContent = 'Saving\u2026';
+    try {
+        const procPayload = {
+            validation_enabled: document.getElementById('st-validation')?.getAttribute('aria-checked') === 'true',
+            transcoding_enabled: document.getElementById('st-transcoding')?.getAttribute('aria-checked') === 'true',
+            catalog_enabled: document.getElementById('st-cataloging')?.getAttribute('aria-checked') === 'true',
+            dual_sub_enabled: document.getElementById('st-dualsub')?.getAttribute('aria-checked') === 'true',
+            dual_sub_pairs: (document.getElementById('st-dualsub-pairs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean),
+            dual_sub_translator: document.querySelector('input[name="st-translator"]:checked')?.value || 'none',
+        };
+        const middlewarePayload = {
+            sub_langs: document.getElementById('st-sub-langs')?.value || '',
+            notifications_mode: document.querySelector('input[name="st-notif"]:checked')?.value || 'internal',
+        };
+        const [r1, r2] = await Promise.all([
+            tfetch('/api/pelicula/procula-settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(procPayload)}),
+            tfetch('/api/pelicula/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(middlewarePayload)}),
+        ]);
+        if (r1.ok && r2.ok) {
+            if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+        } else {
+            if (statusEl) statusEl.textContent = 'Save failed';
+        }
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Save failed';
+    }
+};
+
+// ── Event log ─────────────────────────────
+let _eventLogLoaded = false;
+let _eventPage = 1;
+let _eventFilter = '';
+
+window.onEventLogToggle = function(details) {
+    if (details.open && !_eventLogLoaded) {
+        _eventLogLoaded = true;
+        loadEventLog(1, '');
+    }
+};
+
+window.setEventFilter = function(btn, filter) {
+    document.querySelectorAll('.pl-chip').forEach(c => c.classList.remove('pl-chip-active'));
+    btn.classList.add('pl-chip-active');
+    _eventFilter = filter;
+    _eventPage = 1;
+    loadEventLog(_eventPage, _eventFilter);
+};
+
+async function loadEventLog(page, filter) {
+    const list = document.getElementById('pl-event-list');
+    const pager = document.getElementById('pl-event-pager');
+    if (!list) return;
+    list.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0">Loading\u2026</div>';
+    try {
+        let url = '/api/procula/events?page=' + page + '&page_size=20';
+        if (filter) url += '&filter=' + encodeURIComponent(filter);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const events = Array.isArray(data) ? data : (data.events || []);
+        const total = data.total || events.length;
+        if (!events.length) {
+            list.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0">No events found.</div>';
+            if (pager) pager.innerHTML = '';
+            return;
+        }
+        const iconMap = {validate: '\u2713', transcode: '\u25b6', catalog: '\u2605', action: '\u25cf', error: '\u26a0'};
+        list.innerHTML = events.map(ev => {
+            const icon = iconMap[ev.type] || '\u25cf';
+            const time = new Date(ev.at || ev.timestamp).toLocaleString();
+            return '<div class="pl-event-item"><span class="pl-event-icon">' + icon + '</span><div class="pl-event-body"><div class="pl-event-title">' + esc(ev.message || ev.event || ev.type) + '</div><div class="pl-event-meta">' + esc(ev.title || '') + (ev.title ? ' \u00b7 ' : '') + time + '</div></div></div>';
+        }).join('');
+        // Pager
+        if (pager) {
+            const pages = Math.ceil(total / 20);
+            let pgHtml = '';
+            if (page > 1) pgHtml += '<button onclick="loadEventLog(' + (page-1) + ',\'' + esc(_eventFilter) + '\')">&#8592; Prev</button>';
+            pgHtml += '<span style="font-size:0.68rem;color:var(--muted);padding:0.2rem 0.4rem">' + page + ' / ' + (pages||1) + '</span>';
+            if (page < pages) pgHtml += '<button onclick="loadEventLog(' + (page+1) + ',\'' + esc(_eventFilter) + '\')">Next &#8594;</button>';
+            pager.innerHTML = pgHtml;
+        }
+        _eventPage = page;
+    } catch (e) {
+        list.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0">Failed to load events.</div>';
+    }
+}
+
+function formatBytes(b) {
+    if (!b) return '0 B';
+    const units = ['B','KB','MB','GB','TB'];
+    let i = 0; let n = b;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(1) + ' ' + units[i];
 }
