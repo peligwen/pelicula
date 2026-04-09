@@ -1436,7 +1436,23 @@ function closeStorageExplorer() {
     if (section) section.classList.add('hidden');
 }
 
+async function checkVPNStatus() {
+    try {
+        const res = await tfetch('/api/pelicula/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.vpn_configured === false) {
+            const banner = document.createElement('div');
+            banner.className = 'vpn-banner';
+            banner.innerHTML = '⚡ VPN not configured — downloading is disabled. <a href="/settings">Set up VPN →</a>';
+            const main = document.querySelector('.main-content') || document.body;
+            main.prepend(banner);
+        }
+    } catch(e) { /* non-critical */ }
+}
+
 checkAuth();
+checkVPNStatus();
 if (window.location.hash === '#storage-explorer') {
     setTimeout(openStorageExplorer, 0);
 }

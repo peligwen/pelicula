@@ -1089,3 +1089,18 @@ details[open] .add-user-summary::before { content: '− '; }
 
 /* ── Storage section (um-style) ────────────────────────────────────────── */
 /* reuses .um-hero, .um-metrics, .um-lanes from above */
+
+/* ── VPN banner ─────────────────────────────────────────────────────────── */
+.vpn-banner {
+    padding: 0.6rem 1rem;
+    background: rgba(255, 152, 0, 0.08);
+    border: 1px solid rgba(255, 152, 0, 0.2);
+    border-radius: 0.4rem;
+    font-size: 0.85rem;
+    color: #FF9800;
+    margin-bottom: 1rem;
+}
+.vpn-banner a {
+    color: #FF9800;
+    font-weight: 600;
+}
