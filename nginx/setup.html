@@ -18,54 +18,53 @@
 
         <!-- Step indicators -->
         <div class="steps">
-            <div class="step active" data-step="1"><span class="step-num">1</span> Account</div>
+            <div class="step active" data-step="1"><span class="step-num">1</span> VPN</div>
             <div class="step-line"></div>
             <div class="step" data-step="2"><span class="step-num">2</span> Storage</div>
             <div class="step-line"></div>
-            <div class="step" data-step="3"><span class="step-num">3</span> VPN</div>
+            <div class="step" data-step="3"><span class="step-num">3</span> Account</div>
             <div class="step-line"></div>
             <div class="step" data-step="4"><span class="step-num">4</span> <span id="step4-label">Confirm</span></div>
         </div>
 
         <div class="platform-badge" id="platform-badge"></div>
 
-        <!-- Step 1: Admin Account -->
+        <!-- Step 1: VPN (optional) -->
         <div class="step-panel active" id="panel-1">
-            <h2>Create Admin Account</h2>
-            <p class="step-desc">This is your account. You'll use it to log into the dashboard and manage everything.</p>
+            <h2>ProtonVPN Setup</h2>
+            <p class="step-desc">Required for downloading media. You can skip this and set it up later.</p>
 
-            <iframe name="setup-save" style="display:none" aria-hidden="true"></iframe>
-            <form id="setup-form" method="POST" action="about:blank" target="setup-save">
-                <label for="admin-username">Username</label>
-                <input type="text" id="admin-username" placeholder="Username" spellcheck="false" autocomplete="username">
+            <label for="vpn-key">WireGuard Private Key</label>
+            <p class="field-help">
+                Go to <strong>protonvpn.com/account</strong> &rarr; WireGuard &rarr; Create key for Linux.
+                <br>Do <strong>not</strong> enable "Moderate NAT" — it breaks port forwarding.
+                <br>Requires a paid plan (Plus or higher) with P2P and port forwarding.
+            </p>
+            <input type="password" id="vpn-key" placeholder="WireGuard private key" spellcheck="false" autocomplete="off">
+            <button class="toggle-vis" onclick="toggleVis('vpn-key')" type="button">Show</button>
 
-                <div class="password-label-row">
-                    <label for="admin-password">Password</label>
-                    <a href="#" onclick="generatePassword(); return false;" class="generate-link" id="generate-link">Generate one for me</a>
+            <div class="vpn-country-display">
+                Server: <strong>Netherlands</strong> <span class="field-help-inline">(best for P2P availability)</span>
+            </div>
+
+            <details class="why-protonvpn">
+                <summary>Why ProtonVPN? Do you work for them?</summary>
+                <div class="why-protonvpn-content">
+                    Nope. Pelicula uses <strong>Gluetun</strong> for VPN, which supports 30+ providers.
+                    We default to ProtonVPN because it's the only provider that reliably offers
+                    <strong>WireGuard + port forwarding + P2P</strong> on all paid plans — the three
+                    things a download client needs. You can switch providers later by editing
+                    <code>.env</code> and the Gluetun config.
                 </div>
+            </details>
 
-                <div id="password-manual">
-                    <input type="password" id="admin-password" placeholder="Minimum 8 characters" spellcheck="false" autocomplete="new-password">
-
-                    <label for="admin-password-confirm">Confirm Password</label>
-                    <input type="password" id="admin-password-confirm" placeholder="Confirm password" spellcheck="false" autocomplete="new-password">
-                </div>
-
-                <div id="password-generated" class="hidden">
-                    <div class="generated-password-box">
-                        <span id="generated-password-display"></span>
-                        <button type="button" class="copy-btn" onclick="copyPassword()" title="Copy password">
-                            <span id="copy-icon">📋</span>
-                        </button>
-                    </div>
-                    <div class="password-warning">⚠️ Save this password — it won't be shown again after setup.</div>
-                </div>
-
-                <div class="step-nav">
-                    <span></span>
-                    <button type="submit" class="btn-primary">Next</button>
-                </div>
-            </form>
+            <div class="step-nav">
+                <span></span>
+                <button onclick="goStep(2)" class="btn-primary">Next</button>
+            </div>
+            <div class="skip-vpn">
+                <a href="#" onclick="skipVPN(); return false;">Skip — I'll set up VPN later</a>
+            </div>
         </div>
 
         <!-- Step 2: Storage -->
@@ -98,42 +97,43 @@
             </div>
         </div>
 
-        <!-- Step 3: VPN (optional) -->
+        <!-- Step 3: Admin Account -->
         <div class="step-panel" id="panel-3">
-            <h2>ProtonVPN Setup</h2>
-            <p class="step-desc">Required for downloading media. You can skip this and set it up later.</p>
+            <h2>Create Admin Account</h2>
+            <p class="step-desc">This is your account. You'll use it to log into the dashboard and manage everything.</p>
 
-            <label for="vpn-key">WireGuard Private Key</label>
-            <p class="field-help">
-                Go to <strong>protonvpn.com/account</strong> &rarr; WireGuard &rarr; Create key for Linux.
-                <br>Do <strong>not</strong> enable "Moderate NAT" — it breaks port forwarding.
-                <br>Requires a paid plan (Plus or higher) with P2P and port forwarding.
-            </p>
-            <input type="password" id="vpn-key" placeholder="WireGuard private key" spellcheck="false" autocomplete="off">
-            <button class="toggle-vis" onclick="toggleVis('vpn-key')" type="button">Show</button>
+            <iframe name="setup-save" style="display:none" aria-hidden="true"></iframe>
+            <form id="setup-form" method="POST" action="about:blank" target="setup-save">
+                <label for="admin-username">Username</label>
+                <input type="text" id="admin-username" placeholder="Username" spellcheck="false" autocomplete="username">
 
-            <div class="vpn-country-display">
-                Server: <strong>Netherlands</strong> <span class="field-help-inline">(best for P2P availability)</span>
-            </div>
-
-            <details class="why-protonvpn">
-                <summary>Why ProtonVPN? Do you work for them?</summary>
-                <div class="why-protonvpn-content">
-                    Nope. Pelicula uses <strong>Gluetun</strong> for VPN, which supports 30+ providers.
-                    We default to ProtonVPN because it's the only provider that reliably offers
-                    <strong>WireGuard + port forwarding + P2P</strong> on all paid plans — the three
-                    things a download client needs. You can switch providers later by editing
-                    <code>.env</code> and the Gluetun config.
+                <div class="password-label-row">
+                    <label for="admin-password">Password</label>
+                    <a href="#" onclick="generatePassword(); return false;" class="generate-link" id="generate-link">Generate one for me</a>
                 </div>
-            </details>
 
-            <div class="step-nav">
-                <button onclick="goStep(2)" class="btn-secondary">Back</button>
-                <button onclick="goStep(4)" class="btn-primary">Next</button>
-            </div>
-            <div class="skip-vpn">
-                <a href="#" onclick="skipVPN(); return false;">Skip — I'll set up VPN later</a>
-            </div>
+                <div id="password-manual">
+                    <input type="password" id="admin-password" placeholder="Minimum 8 characters" spellcheck="false" autocomplete="new-password">
+
+                    <label for="admin-password-confirm">Confirm Password</label>
+                    <input type="password" id="admin-password-confirm" placeholder="Confirm password" spellcheck="false" autocomplete="new-password">
+                </div>
+
+                <div id="password-generated" class="hidden">
+                    <div class="generated-password-box">
+                        <span id="generated-password-display"></span>
+                        <button type="button" class="copy-btn" onclick="copyPassword()" title="Copy password">
+                            <svg id="copy-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>
+                        </button>
+                    </div>
+                    <div class="password-warning">⚠️ Save this password — it won't be shown again after setup.</div>
+                </div>
+
+                <div class="step-nav">
+                    <button onclick="event.preventDefault(); goStep(2)" class="btn-secondary">Back</button>
+                    <button type="submit" class="btn-primary">Next</button>
+                </div>
+            </form>
         </div>
 
         <!-- Step 4: Confirm -->
@@ -246,16 +246,16 @@ async function generatePassword() {
 
 function copyPassword() {
     navigator.clipboard.writeText(generatedPassword).then(() => {
-        const icon = document.getElementById('copy-icon');
-        icon.textContent = '✓';
-        icon.style.color = '#4CAF50';
-        setTimeout(() => { icon.textContent = '📋'; icon.style.color = ''; }, 1500);
+        const btn = document.querySelector('.copy-btn');
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5 6.5-7"/></svg>';
+        setTimeout(() => { btn.innerHTML = orig; }, 1500);
     });
 }
 
 function skipVPN() {
     vpnSkipped = true;
-    goStep(4);
+    goStep(2, true);
 }
 
 function toggleVis(id) {
@@ -275,7 +275,7 @@ function getPassword() {
     return document.getElementById('admin-password').value;
 }
 
-function validateStep1() {
+function validateAccount() {
     const username = document.getElementById('admin-username').value.trim();
     if (!username) {
         const el = document.getElementById('admin-username');
@@ -311,21 +311,35 @@ function validateStep1() {
 
 // Let the form submit to a hidden iframe so password managers detect the submission
 document.getElementById('setup-form').addEventListener('submit', function(e) {
-    if (!validateStep1()) {
+    if (!validateAccount()) {
         e.preventDefault();
         return;
     }
     // Don't preventDefault — the form submits to a hidden iframe, triggering password manager save
-    setTimeout(() => goStep(2, true), 0);
+    setTimeout(() => goStep(4, true), 0);
 });
 
 function goStep(n, skipValidation) {
-    // Validate current step before advancing
-    if (!skipValidation && n === 2) {
-        if (!validateStep1()) return;
+    if (n === 2 && !skipValidation) {
+        // Validate step 1: VPN key format (if provided)
+        vpnSkipped = false;
+        const key = document.getElementById('vpn-key').value.trim();
+        if (mode === 'setup' && key) {
+            if (key.length !== 44 || !key.endsWith('=')) {
+                const el = document.getElementById('vpn-key');
+                el.focus();
+                el.classList.add('input-error');
+                el.placeholder = 'Must be 44-character base64 key ending in =';
+                return;
+            }
+        }
+        if (mode === 'setup' && !key) {
+            vpnSkipped = true;
+        }
+        document.getElementById('vpn-key').classList.remove('input-error');
     }
 
-    if (n === 3) {
+    if (n === 3 && !skipValidation) {
         // Validate step 2: storage paths
         for (const id of ['path-config', 'path-media']) {
             const el = document.getElementById(id);
@@ -336,28 +350,14 @@ function goStep(n, skipValidation) {
             }
             el.classList.remove('input-error');
         }
-        vpnSkipped = false; // reset skip when navigating normally
     }
 
-    if (n === 4) {
-        // Validate step 3: VPN (only if not skipping)
-        if (!vpnSkipped) {
-            const key = document.getElementById('vpn-key').value.trim();
-            if (mode === 'setup' && key) {
-                if (key.length !== 44 || !key.endsWith('=')) {
-                    const el = document.getElementById('vpn-key');
-                    el.focus();
-                    el.classList.add('input-error');
-                    el.placeholder = 'Must be 44-character base64 key ending in =';
-                    return;
-                }
-            }
-            if (mode === 'setup' && !key) {
-                // No key and not explicitly skipping — treat as skip
-                vpnSkipped = true;
-            }
-            document.getElementById('vpn-key').classList.remove('input-error');
-        }
+    if (n === 4 && !skipValidation) {
+        // Validate step 3: account
+        if (!validateAccount()) return;
+        buildSummary();
+    }
+    if (n === 4 && skipValidation) {
         buildSummary();
     }
 

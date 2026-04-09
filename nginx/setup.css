@@ -249,6 +249,12 @@ input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink,
     font-size: 1rem;
     padding: 0.2rem;
     margin-left: auto;
+    color: var(--muted, #9080a8);
+    display: inline-flex;
+    align-items: center;
+}
+.generated-password-box .copy-btn:hover {
+    color: var(--pink, #f060a8);
 }
 .password-warning {
     font-size: 0.75rem;
