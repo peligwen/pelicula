@@ -375,10 +375,10 @@ function buildSummary() {
     }
 
     if (vpnSkipped) {
-        html += row('VPN', '<span style="color:#FF9800">Skipped</span>');
+        html += rowHTML('VPN', '<span style="color:#FF9800">Skipped</span>');
         document.getElementById('vpn-skipped-notice').classList.remove('hidden');
     } else {
-        html += row('VPN', '<span style="color:#4CAF50">Netherlands ✓</span>');
+        html += rowHTML('VPN', '<span style="color:#4CAF50">Netherlands ✓</span>');
         document.getElementById('vpn-skipped-notice').classList.add('hidden');
     }
     html += '</table>';
@@ -386,7 +386,11 @@ function buildSummary() {
 }
 
 function row(label, value) {
-    return '<tr><td class="sum-label">' + esc(label) + '</td><td>' + value + '</td></tr>';
+    return '<tr><td class="sum-label">' + esc(label) + '</td><td>' + esc(value) + '</td></tr>';
+}
+
+function rowHTML(label, html) {
+    return '<tr><td class="sum-label">' + esc(label) + '</td><td>' + html + '</td></tr>';
 }
 
 function esc(s) {

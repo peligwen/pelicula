@@ -244,20 +244,21 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 	newProculaKey := generateAPIKey()
 	newJFPass := generateReadablePassword()
 
+	adminUser := envDefault(env, "JELLYFIN_ADMIN_USER", "admin")
 	if err := writeEnvFile(
 		envFile,
 		configDir, libraryDir, workDir,
 		env["PUID"], env["PGID"], env["TZ"],
 		savedWGKey, savedCountries,
 		envDefault(env, "PELICULA_PORT", "7354"),
-		"jellyfin", newProculaKey, newJFPass,
+		"jellyfin", adminUser, newProculaKey, newJFPass,
 	); err != nil {
 		fatal("Failed to write .env: " + err.Error())
 	}
 	pass("Wrote fresh " + envFile)
 
 	fmt.Println()
-	pass("Full reset complete — admin login: " + bold("admin / "+newJFPass))
+	pass("Full reset complete — admin login: " + bold(adminUser+" / "+newJFPass))
 	fmt.Println("Run " + bold("pelicula up") + " to start fresh with auto-wiring.")
 }
 

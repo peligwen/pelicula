@@ -1438,6 +1438,7 @@ function closeStorageExplorer() {
 
 async function checkVPNStatus() {
     try {
+        if (document.querySelector('.vpn-banner')) return;
         const res = await tfetch('/api/pelicula/status');
         if (!res.ok) return;
         const data = await res.json();

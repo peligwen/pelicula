@@ -39,7 +39,7 @@ func setupDirs(configDir, libraryDir, workDir string) error {
 
 // writeEnvFile writes a fresh .env file with the given parameters.
 func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
-	wgKey, countries, port, auth, proculaKey, jfPass string) error {
+	wgKey, countries, port, auth, adminUser, proculaKey, jfPass string) error {
 
 	// Back up if exists
 	if _, err := os.Stat(envPath); err == nil {
@@ -58,6 +58,7 @@ func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
 		"SERVER_COUNTRIES":      countries,
 		"PELICULA_PORT":         port,
 		"PELICULA_AUTH":         auth,
+		"JELLYFIN_ADMIN_USER":   adminUser,
 		"JELLYFIN_PASSWORD":     jfPass,
 		"PROCULA_API_KEY":       proculaKey,
 		"TRANSCODING_ENABLED":   "false",
