@@ -40,6 +40,14 @@ Two modes via `PELICULA_AUTH`:
 
 **Guards:** `Guard` (viewer+), `GuardManager` (manager+), `GuardAdmin` (admin). Wired per-route in `main.go`.
 
+**Remote role capping (defense-in-depth):** The remote nginx vhost injects `X-Pelicula-Remote: true` on all proxy blocks. The middleware's `effectiveRole()` caps any session to `viewer` when this header is present, regardless of the stored role. This prevents a compromised admin credential from escalating via the remote vhost. The LAN vhost strips the header (`proxy_set_header X-Pelicula-Remote ""`) to prevent spoofing. `HandleCheck` returns `"remote": true/false` so the dashboard can adapt.
+
+### Open Registration (`middleware/register.go`)
+
+Optional LAN-only public registration without invite tokens. Controlled by `PELICULA_OPEN_REGISTRATION` in `.env` (default `false`), toggleable via settings UI.
+
+When enabled, `/register` without a `?t=` token shows a registration form. `POST /api/pelicula/register` creates a Jellyfin user and assigns `viewer` role. Requires `PELICULA_AUTH=jellyfin` (no-op when auth is off). Rate-limited by IP (reuses auth limiter). LAN-only via `requireLocalOriginStrict` — not exposed on the remote vhost.
+
 ### CSRF Origin Guard (`middleware/auth.go`)
 
 `isLocalOrigin(origin string) bool` — returns true if the `Origin` header is an RFC1918/localhost address. Parses as URL to prevent substring-match bypasses. Returns false for empty strings.
@@ -129,6 +137,7 @@ Enable via `./pelicula configure → 8) Remote access`.
 - **Self-signed HTTPS** breaks Chrome on the LAN (Chrome blocks JS). Default LAN setup uses HTTP; use Peligrosa remote vhost for TLS.
 - **`WEBHOOK_SECRET`** is optional for backward compatibility. Fresh installs get a random secret from setup; nginx additionally restricts the endpoint to Docker-internal networks.
 - **CSRF guards** use `requireLocalOriginStrict` / `requireLocalOriginSoft` wrappers wired per-route in `main.go`. `admin_ops.go` uses a separate auth-conditional variant; see [Reading the Code](#reading-the-code).
+- **Remote role capping** relies on the `X-Pelicula-Remote` header injected by the remote nginx vhost. The LAN vhost strips it. If nginx is bypassed and the middleware is accessed directly, the header won't be present and the cap won't apply (defense-in-depth only — middleware is not directly exposed).
 
 ---
 
@@ -136,7 +145,8 @@ Enable via `./pelicula configure → 8) Remote access`.
 
 | File | What it owns |
 |------|-------------|
-| `middleware/auth.go` | Sessions, login rate limiter, `isLocalOrigin` CSRF guard, `Guard`/`GuardManager`/`GuardAdmin` |
+| `middleware/auth.go` | Sessions, login rate limiter, `isLocalOrigin` CSRF guard, `Guard`/`GuardManager`/`GuardAdmin`, remote role capping (`effectiveRole`) |
+| `middleware/register.go` | Open LAN registration (optional, `PELICULA_OPEN_REGISTRATION`) |
 | `middleware/invites.go` | Invite token lifecycle, redemption |
 | `middleware/requests.go` | Viewer request queue, approval/denial flow |
 | `middleware/jellyfin.go` | `handleUsers`, `handleUsersWithID`, `CreateJellyfinUser` |

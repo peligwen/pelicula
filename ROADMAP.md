@@ -37,6 +37,9 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 - [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
 - [ ] **[Peligrosa] `middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Blocked on `JellyfinClient` interface, `Fulfiller` injection, and shared HTTP helpers extraction. See plan file for incremental path.
 - [x] **[Peligrosa] Jellyfin auth** — `PELICULA_AUTH=jellyfin` (now the only auth mode): credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed.
+- [x] **[Peligrosa] Remote role capping** — defense-in-depth: the remote nginx vhost injects `X-Pelicula-Remote: true`; middleware caps effective role to `viewer` regardless of stored role. Prevents credential escalation via the remote vhost.
+- [x] **[Peligrosa] Open LAN registration** — optional `PELICULA_OPEN_REGISTRATION` setting: `/register` without a token creates a Jellyfin viewer account. LAN-only, rate-limited, always viewer role.
+- [x] **[Peligrosa] First-admin password** — setup wizard generates `JELLYFIN_PASSWORD` and prints admin credentials after `./pelicula up`.
 - [ ] **[Peligrosa] Plex SSO** — deferred; different API shape (plex.tv OAuth dance).
 
 ---
