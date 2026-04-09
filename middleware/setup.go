@@ -173,22 +173,25 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// generateReadablePassword creates a 15-char password in 3 groups of 5,
-// using only unambiguous characters. Uses rejection sampling to avoid
-// modulo bias.
+// generateReadablePassword returns a 4-word passphrase like "calm-tiger-sobre-leaps",
+// drawn from weightedPassphraseWords (wordlist.go). All lowercase, hyphen-separated.
+// 5-letter words are most likely; 3- and 7-letter words are rare (bell curve).
 func generateReadablePassword() string {
-	const charset = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	max := big.NewInt(int64(len(charset)))
-	b := make([]byte, 15)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, max)
-		if err != nil {
-			b[i] = charset[0]
-			continue
-		}
-		b[i] = charset[n.Int64()]
+	n := len(weightedPassphraseWords)
+	return weightedPassphraseWords[cryptoRandN(n)] + "-" +
+		weightedPassphraseWords[cryptoRandN(n)] + "-" +
+		weightedPassphraseWords[cryptoRandN(n)] + "-" +
+		weightedPassphraseWords[cryptoRandN(n)]
+}
+
+// cryptoRandN returns a cryptographically random integer in [0, n).
+func cryptoRandN(n int) int {
+	max := big.NewInt(int64(n))
+	v, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		return 0
 	}
-	return string(b[:5]) + "-" + string(b[5:10]) + "-" + string(b[10:15])
+	return int(v.Int64())
 }
 
 func generateAPIKey() string {

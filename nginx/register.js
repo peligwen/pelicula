@@ -96,6 +96,24 @@
     el.textContent = '';
   }
 
+  // ── Suggest password ─────────────────────────────────────────────────────
+  document.getElementById('suggest-pw').addEventListener('click', async function (e) {
+    e.preventDefault();
+    try {
+      const resp = await fetch('/api/pelicula/generate-password');
+      if (!resp.ok) return;
+      const { password } = await resp.json();
+      const pwField = document.getElementById('reg-password');
+      const cfField = document.getElementById('reg-confirm');
+      pwField.value = password;
+      cfField.value = password;
+      // Show in plain text briefly so the user can note it
+      pwField.type = 'text';
+      pwField.dispatchEvent(new Event('input'));
+      setTimeout(() => { pwField.type = 'password'; }, 3000);
+    } catch (_) {}
+  });
+
   // ── Password strength meter ───────────────────────────────────────────────
   document.getElementById('reg-password').addEventListener('input', function () {
     const pw = this.value;

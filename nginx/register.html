@@ -55,6 +55,8 @@
         .reg-field input:focus { border-color: var(--pink, #f060a8); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
         .reg-strength { height: 5px; border-radius: 50px; background: var(--border, rgba(180,140,220,0.25)); margin-top: 0.35rem; overflow: hidden; }
         .reg-strength-bar { height: 100%; width: 0; border-radius: 50px; transition: width 0.2s, background 0.2s; }
+        .reg-suggest { float: right; font-size: 0.68rem; font-weight: 600; color: var(--pink, #f060a8); text-decoration: none; text-transform: none; letter-spacing: 0; }
+        .reg-suggest:hover { text-decoration: underline; }
         .reg-submit {
             width: 100%; margin-top: 1.25rem; padding: 0.75rem;
             background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
@@ -123,7 +125,7 @@
                         <input id="reg-username" type="text" autocomplete="username" placeholder="yourname" maxlength="64" required>
                     </div>
                     <div class="reg-field">
-                        <label for="reg-password">Password</label>
+                        <label for="reg-password">Password <a href="#" id="suggest-pw" class="reg-suggest">Suggest one</a></label>
                         <input id="reg-password" type="password" autocomplete="new-password" placeholder="Choose a password" required>
                         <div class="reg-strength"><div class="reg-strength-bar" id="reg-strength-bar"></div></div>
                     </div>

@@ -155,6 +155,7 @@ func main() {
 	// Open registration (LAN-only, optional): public account creation without invite tokens.
 	// Peligrosa: requireLocalOriginStrict ensures only LAN browsers can POST.
 	mux.HandleFunc("/api/pelicula/register/check", handleOpenRegCheck)
+	mux.HandleFunc("/api/pelicula/generate-password", handleGeneratePassword)
 	mux.Handle("/api/pelicula/register", requireLocalOriginStrict(http.HandlerFunc(handleOpenRegister)))
 
 	// read: active Jellyfin sessions for the now-playing card.

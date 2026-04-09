@@ -118,12 +118,19 @@ func TestHandleSetupSubmit_AcceptsVPNSkipped(t *testing.T) {
 func TestGenerateReadablePassword_Format(t *testing.T) {
 	p := generateReadablePassword()
 	parts := strings.Split(p, "-")
-	if len(parts) != 3 {
-		t.Fatalf("expected 3 hyphen-separated groups, got %d in %q", len(parts), p)
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 hyphen-separated words, got %d in %q", len(parts), p)
+	}
+	wordSet := make(map[string]bool, len(passphraseWords))
+	for _, w := range passphraseWords {
+		wordSet[w] = true
 	}
 	for i, part := range parts {
-		if len(part) != 5 {
-			t.Errorf("group %d: length = %d, want 5 in %q", i, len(part), p)
+		if l := len(part); l < 3 || l > 7 {
+			t.Errorf("word %d: length = %d, want 3–7 in %q", i, l, p)
+		}
+		if !wordSet[part] {
+			t.Errorf("word %d: %q not in passphraseWords", i, part)
 		}
 	}
 }

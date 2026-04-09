@@ -19,6 +19,22 @@ var openRegistration bool
 // request can observe IsEmpty()==true and claim the admin role.
 var initialSetupMu sync.Mutex
 
+// handleGeneratePassword returns a fresh passphrase suggestion.
+// Public endpoint — no auth required; used by the registration UI.
+// Rate-limited per IP via the auth limiter.
+func handleGeneratePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ip := clientIP(r)
+	if authMiddleware != nil && authMiddleware.isRateLimited(ip) {
+		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		return
+	}
+	writeJSON(w, map[string]string{"password": generateReadablePassword()})
+}
+
 func handleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
