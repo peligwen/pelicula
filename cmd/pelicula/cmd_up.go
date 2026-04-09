@@ -52,10 +52,6 @@ func cmdUp(_ []string) {
 
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		defer func() {
-			_ = c.runSetupDown(setupCompose)
-		}()
-
 		fmt.Printf("  Open %s in your browser to continue setup\n", bold("http://localhost:7354/"))
 		fmt.Println()
 		openBrowser("http://localhost:7354/")
@@ -68,6 +64,7 @@ func cmdUp(_ []string) {
 			case <-ctx.Done():
 				fmt.Println()
 				warn("Setup cancelled.")
+				_ = c.runSetupDown(setupCompose)
 				return
 			default:
 			}
@@ -79,12 +76,22 @@ func cmdUp(_ []string) {
 			}
 			if i == maxWait-1 {
 				warn("Setup timed out after 5 minutes")
+				_ = c.runSetupDown(setupCompose)
 				return
 			}
 		}
 		if !completed {
+			_ = c.runSetupDown(setupCompose)
 			return
 		}
+
+		// Tear down setup containers before starting main stack —
+		// they share container names (pelicula-api, nginx) and port 7354.
+		info("Cleaning up setup containers...")
+		if err := c.runSetupDown(setupCompose); err != nil {
+			warn("Failed to stop setup containers: " + err.Error())
+		}
+
 		fmt.Println()
 	}
 
@@ -157,7 +164,7 @@ func cmdUp(_ []string) {
 		c.profiles = append(c.profiles, "apprise")
 	}
 
-	if err := c.Run("up", "-d"); err != nil {
+	if err := c.RunQuiet("up", "-d", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
 

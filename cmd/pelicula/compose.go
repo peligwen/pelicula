@@ -71,6 +71,20 @@ func (c *Compose) RunSilent(args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// RunQuiet runs docker compose silently when not in verbose mode.
+// In verbose mode it attaches to the terminal. In quiet mode it captures
+// output and only dumps it to stderr if the command fails.
+func (c *Compose) RunQuiet(args ...string) error {
+	if verboseMode {
+		return c.Run(args...)
+	}
+	out, err := c.RunSilent(args...)
+	if err != nil {
+		os.Stderr.Write(out)
+	}
+	return err
+}
+
 // DockerExec runs a docker exec command, attaching stdin/stdout/stderr.
 func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
 	cmd := c.dockerCmd(append([]string{"exec", container}, cmdArgs...)...)

@@ -30,6 +30,9 @@ func ansiCode(seq string) string {
 }
 
 func pass(msg string) {
+	if !verboseMode {
+		return
+	}
 	fmt.Printf("  %s✓%s %s\n", colorGreen, colorReset, msg)
 }
 
@@ -38,6 +41,9 @@ func fail(msg string) {
 }
 
 func info(msg string) {
+	if !verboseMode {
+		return
+	}
 	fmt.Printf("%s→%s %s\n", colorCyan, colorReset, msg)
 }
 
