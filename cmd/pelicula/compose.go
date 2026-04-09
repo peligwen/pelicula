@@ -11,6 +11,7 @@ type Compose struct {
 	projectDir string
 	envFile    string
 	needsSudo  bool
+	profiles   []string // active profiles (e.g. "vpn", "apprise")
 }
 
 // NewCompose creates a Compose helper rooted at scriptDir.
@@ -31,6 +32,7 @@ func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
 }
 
 // args builds the full docker compose argument list.
+// Profile flags are inserted before the subcommand (required by Docker Compose v5+).
 func (c *Compose) buildArgs(extra ...string) []string {
 	args := []string{"compose", "--env-file", c.envFile, "-f", filepath.Join(c.projectDir, "docker-compose.yml")}
 
@@ -43,6 +45,11 @@ func (c *Compose) buildArgs(extra ...string) []string {
 	remote := filepath.Join(c.projectDir, "docker-compose.remote.yml")
 	if _, err := os.Stat(remote); err == nil {
 		args = append(args, "-f", remote)
+	}
+
+	// Profiles must come before the subcommand
+	for _, p := range c.profiles {
+		args = append(args, "--profile", p)
 	}
 
 	args = append(args, extra...)

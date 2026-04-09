@@ -2,7 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 BIN=./bin/pelicula
-if [[ ! -x "$BIN" ]] || [[ cmd/pelicula/main.go -nt "$BIN" ]]; then
+NEWEST=$(find cmd/pelicula -name '*.go' -newer "$BIN" -print -quit 2>/dev/null)
+if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
     echo "Building pelicula CLI..." >&2
     mkdir -p bin
     ( cd cmd/pelicula && go build -o ../../bin/pelicula . )

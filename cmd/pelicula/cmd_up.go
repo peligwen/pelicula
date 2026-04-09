@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,7 +17,9 @@ func cmdUp(_ []string) {
 	envFile := filepath.Join(scriptDir, ".env")
 
 	// If no .env, run setup wizard, then continue with up
+	firstRun := false
 	if _, err := os.Stat(envFile); err != nil {
+		firstRun = true
 		fmt.Println()
 		fmt.Printf("%sNo configuration found — starting setup wizard.%s\n", colorBold, colorReset)
 		fmt.Println()
@@ -143,22 +146,18 @@ func cmdUp(_ []string) {
 		fatal("Config seeding failed: " + err.Error())
 	}
 
-	// Build compose up args with optional profiles
-	upArgs := []string{"up", "-d"}
-
-	// VPN profile: only when WireGuard key is configured
+	// Enable compose profiles based on config
 	wgKey := env["WIREGUARD_PRIVATE_KEY"]
 	if wgKey != "" {
-		upArgs = append(upArgs, "--profile", "vpn")
+		c.profiles = append(c.profiles, "vpn")
 	}
 
-	// Apprise profile: when notifications use apprise
 	notifMode := envDefault(env, "NOTIFICATIONS_MODE", "internal")
 	if notifMode == "apprise" {
-		upArgs = append(upArgs, "--profile", "apprise")
+		c.profiles = append(c.profiles, "apprise")
 	}
 
-	if err := c.Run(upArgs...); err != nil {
+	if err := c.Run("up", "-d"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
 
@@ -187,33 +186,69 @@ func cmdUp(_ []string) {
 	fmt.Println()
 	fmt.Printf("%s%sStack is running!%s\n", colorGreen, colorBold, colorReset)
 
-	// Print admin credentials if auth is enabled
-	if jfPass := env["JELLYFIN_PASSWORD"]; jfPass != "" {
-		adminUser := envDefault(env, "JELLYFIN_ADMIN_USER", "admin")
-		fmt.Println()
-		fmt.Printf("  %sAdmin login:%s  %s / %s\n", colorBold, colorReset, adminUser, jfPass)
-	}
+	host := lanIP()
+	remoteEnabled := env["REMOTE_ACCESS_ENABLED"] == "true"
 
 	fmt.Println()
-	fmt.Println("  Service         URL")
-	fmt.Println("  ─────────────── ──────────────────────────")
-	fmt.Printf("  Dashboard       http://localhost:%s/\n", port)
-	fmt.Printf("  Sonarr          http://localhost:%s/sonarr/\n", port)
-	fmt.Printf("  Radarr          http://localhost:%s/radarr/\n", port)
-	if wgKey != "" {
-		fmt.Printf("  Prowlarr        http://localhost:%s/prowlarr/\n", port)
-		fmt.Printf("  qBittorrent     http://localhost:%s/qbt/\n", port)
+	if remoteEnabled {
+		fmt.Printf("  %sDashboard (LAN only)%s\n", colorBold, colorReset)
+	} else {
+		fmt.Printf("  %sDashboard%s\n", colorBold, colorReset)
 	}
-	fmt.Printf("  Jellyfin        http://localhost:%s/jellyfin/\n", port)
-	fmt.Printf("  Bazarr          http://localhost:%s/bazarr/\n", port)
-	fmt.Printf("  Procula API     http://localhost:%s/api/procula/status\n", port)
+	fmt.Printf("  http://%s:%s/\n", host, port)
+	fmt.Println()
+	fmt.Printf("  %sJellyfin%s\n", colorBold, colorReset)
+	fmt.Printf("  http://%s:%s/jellyfin/\n", host, port)
 
-	if env["REMOTE_ACCESS_ENABLED"] == "true" {
+	// Remote access section
+	if remoteEnabled {
 		rHost := env["REMOTE_HOSTNAME"]
 		rHTTPS := envDefault(env, "REMOTE_HTTPS_PORT", "8920")
 		if rHost != "" {
 			fmt.Println()
-			fmt.Printf("  Remote Jellyfin  https://%s:%s/\n", rHost, rHTTPS)
+			fmt.Printf("  %sRemote Jellyfin%s\n", colorBold, colorReset)
+			fmt.Println("  ────────────────────────────────────────────")
+			fmt.Printf("  https://%s:%s/\n", rHost, rHTTPS)
+			fmt.Println()
+			fmt.Printf("  Port forwarding: route port %s to this machine.\n", rHTTPS)
+			fmt.Printf("  Do %sNOT%s forward port %s — it exposes admin tools.\n", colorBold, colorReset, port)
 		}
 	}
+
+	fmt.Println()
+
+	if firstRun {
+		dashURL := fmt.Sprintf("http://%s:%s/", host, port)
+		openBrowser(dashURL)
+	}
+}
+
+// lanIP returns the first non-loopback IPv4 address, or "localhost" if none found.
+func lanIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "localhost"
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip != nil && ip.To4() != nil {
+				return ip.String()
+			}
+		}
+	}
+	return "localhost"
 }

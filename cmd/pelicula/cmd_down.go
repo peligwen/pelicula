@@ -11,7 +11,10 @@ func cmdDown(_ []string) {
 
 	requireEnv(filepath.Join(scriptDir, ".env"))
 
-	if err := c.Run("--profile", "apprise", "down", "--remove-orphans"); err != nil {
+	// Enable all profiles so down catches every container
+	c.profiles = append(c.profiles, "vpn", "apprise")
+
+	if err := c.Run("down", "--remove-orphans"); err != nil {
 		fatal("docker compose down failed: " + err.Error())
 	}
 	pass("Stack stopped")

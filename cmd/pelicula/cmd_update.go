@@ -18,11 +18,13 @@ func cmdUpdate(_ []string) {
 	}
 
 	info("Recreating containers...")
-	upArgs := []string{"up", "-d"}
 	if envDefault(env, "NOTIFICATIONS_MODE", "internal") == "apprise" {
-		upArgs = append(upArgs, "--profile", "apprise")
+		c.profiles = append(c.profiles, "apprise")
 	}
-	if err := c.Run(upArgs...); err != nil {
+	if wgKey := env["WIREGUARD_PRIVATE_KEY"]; wgKey != "" {
+		c.profiles = append(c.profiles, "vpn")
+	}
+	if err := c.Run("up", "-d"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
 

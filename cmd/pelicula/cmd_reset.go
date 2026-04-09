@@ -173,7 +173,6 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 	fmt.Println("  Pelicula admin accounts and invite tokens")
 	fmt.Println("  Procula custom transcoding profiles and notification settings")
 	fmt.Println("  TLS certificates (regenerated on next up)")
-	fmt.Println("  .env credentials — password and API keys are regenerated")
 	fmt.Println()
 	fmt.Printf("%sWhat is kept:%s\n", colorBold, colorReset)
 	fmt.Println("  Prowlarr indexer database (indexers survive)")
@@ -240,26 +239,24 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 		info("Prowlarr indexer database restored")
 	}
 
-	// Regenerate .env — fresh credentials, preserved identity/VPN values
+	// Regenerate .env — preserved identity/VPN values, fresh internal API key.
+	// Admin password is left empty — the setup wizard handles that on next up.
 	newProculaKey := generateAPIKey()
-	newJFPass := generateReadablePassword()
 
-	adminUser := envDefault(env, "JELLYFIN_ADMIN_USER", "admin")
 	if err := writeEnvFile(
 		envFile,
 		configDir, libraryDir, workDir,
 		env["PUID"], env["PGID"], env["TZ"],
 		savedWGKey, savedCountries,
 		envDefault(env, "PELICULA_PORT", "7354"),
-		"jellyfin", adminUser, newProculaKey, newJFPass,
+		"jellyfin", "", newProculaKey, "",
 	); err != nil {
 		fatal("Failed to write .env: " + err.Error())
 	}
 	pass("Wrote fresh " + envFile)
 
 	fmt.Println()
-	pass("Full reset complete — admin login: " + bold(adminUser+" / "+newJFPass))
-	fmt.Println("Run " + bold("pelicula up") + " to start fresh with auto-wiring.")
+	pass("Full reset complete — run " + bold("pelicula up") + " to start fresh.")
 }
 
 // ensureStackDown stops the stack if any services are running.

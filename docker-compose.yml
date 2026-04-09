@@ -243,6 +243,7 @@ services:
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
+      - ${CONFIG_DIR}/pelicula:/config/pelicula
       - ${LIBRARY_DIR}/movies:/movies
       - ${LIBRARY_DIR}/tv:/tv
       - ${WORK_DIR}/downloads:/downloads:ro

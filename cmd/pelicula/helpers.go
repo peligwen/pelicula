@@ -82,24 +82,6 @@ func generateAPIKey() string {
 	return string(b)
 }
 
-// generateReadablePassword generates a password in 5-5-5 format using
-// unambiguous characters (no 0, O, l, 1, I, etc.).
-func generateReadablePassword() string {
-	// Same character set as the bash CLI
-	const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	b := make([]byte, 15)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
-		if err != nil {
-			// very unlikely; fall back
-			b[i] = chars[0]
-			continue
-		}
-		b[i] = chars[n.Int64()]
-	}
-	return string(b[0:5]) + "-" + string(b[5:10]) + "-" + string(b[10:15])
-}
-
 // requireEnv prints an error and exits if the .env file does not exist.
 func requireEnv(envFile string) {
 	if _, err := os.Stat(envFile); err != nil {
