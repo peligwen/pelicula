@@ -159,6 +159,7 @@ PGID="1000"
 TZ="UTC"
 PELICULA_PORT="7354"
 PELICULA_AUTH="off"
+JELLYFIN_ADMIN_USER="admin"
 TRANSCODING_ENABLED="false"
 NOTIFICATIONS_ENABLED="false"
 NOTIFICATIONS_MODE="internal"
@@ -234,5 +235,62 @@ func TestSetEnvVar(t *testing.T) {
 	}
 	if m2["CONFIG_DIR"] != "/config" {
 		t.Errorf("CONFIG_DIR: got %q (should be unchanged)", m2["CONFIG_DIR"])
+	}
+}
+
+func TestWriteEnvAdminUser(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+
+	m := EnvMap{
+		"CONFIG_DIR":          "/config",
+		"JELLYFIN_ADMIN_USER": "gwen",
+		"JELLYFIN_PASSWORD":   "test-pass-123",
+	}
+	if err := WriteEnv(path, m); err != nil {
+		t.Fatalf("WriteEnv error: %v", err)
+	}
+	m2, err := ParseEnv(path)
+	if err != nil {
+		t.Fatalf("ParseEnv error: %v", err)
+	}
+	if got := m2["JELLYFIN_ADMIN_USER"]; got != "gwen" {
+		t.Errorf("JELLYFIN_ADMIN_USER: got %q, want %q", got, "gwen")
+	}
+}
+
+func TestMigrateEnvAddsAdminUser(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+
+	content := `CONFIG_DIR="/config"
+LIBRARY_DIR="/media"
+WORK_DIR="/media"
+PUID="1000"
+PGID="1000"
+TZ="UTC"
+PELICULA_PORT="7354"
+PELICULA_AUTH="jellyfin"
+JELLYFIN_PASSWORD="old-pass-123"
+TRANSCODING_ENABLED=false
+NOTIFICATIONS_ENABLED=false
+NOTIFICATIONS_MODE=internal
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := MigrateEnv(path)
+	if err != nil {
+		t.Fatalf("MigrateEnv error: %v", err)
+	}
+	if !changed {
+		t.Error("expected changed=true")
+	}
+	m, err := ParseEnv(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m["JELLYFIN_ADMIN_USER"]; got != "admin" {
+		t.Errorf("JELLYFIN_ADMIN_USER: got %q, want %q", got, "admin")
 	}
 }

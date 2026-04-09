@@ -22,6 +22,7 @@ var envKeyOrder = []string{
 	"SERVER_COUNTRIES",
 	"PELICULA_PORT",
 	"PELICULA_AUTH",
+	"JELLYFIN_ADMIN_USER",
 	"JELLYFIN_PASSWORD",
 	"PROCULA_API_KEY",
 	"TRANSCODING_ENABLED",
@@ -164,6 +165,12 @@ func MigrateEnv(path string) (bool, error) {
 			m[d.key] = d.val
 			changed = true
 		}
+	}
+
+	// Migration 3: default JELLYFIN_ADMIN_USER for pre-existing installs
+	if _, ok := m["JELLYFIN_ADMIN_USER"]; !ok {
+		m["JELLYFIN_ADMIN_USER"] = "admin"
+		changed = true
 	}
 
 	if changed {
