@@ -12,7 +12,7 @@ func cmdUp(_ []string) {
 	scriptDir := getScriptDir()
 	envFile := filepath.Join(scriptDir, ".env")
 
-	// If no .env, run setup wizard
+	// If no .env, run setup wizard first, then continue with up
 	if _, err := os.Stat(envFile); err != nil {
 		fmt.Println()
 		fmt.Printf("%sNo configuration found.%s\n", colorBold, colorReset)
@@ -21,7 +21,10 @@ func cmdUp(_ []string) {
 		fmt.Printf("  Option 2: Run %s for CLI setup (Ctrl+C to abort)\n", bold("pelicula setup"))
 		fmt.Println()
 		cmdSetup(nil)
-		return
+		// If setup still didn't produce a .env (cancelled / timed out), bail.
+		if _, err2 := os.Stat(envFile); err2 != nil {
+			return
+		}
 	}
 
 	// Load and migrate .env

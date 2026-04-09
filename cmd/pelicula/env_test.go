@@ -176,6 +176,33 @@ NOTIFICATIONS_MODE="internal"
 	}
 }
 
+func TestWriteEnvSanitizesQuotes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+
+	m := EnvMap{
+		"CONFIG_DIR": `/some/"path"`,
+		"TZ":         "America/New_York\nINJECTED=evil",
+	}
+	if err := WriteEnv(path, m); err != nil {
+		t.Fatalf("WriteEnv error: %v", err)
+	}
+
+	m2, err := ParseEnv(path)
+	if err != nil {
+		t.Fatalf("ParseEnv error: %v", err)
+	}
+
+	// Quotes should be stripped from CONFIG_DIR value
+	if got := m2["CONFIG_DIR"]; got != "/some/path" {
+		t.Errorf("CONFIG_DIR: got %q, want %q", got, "/some/path")
+	}
+	// Newline should be stripped — INJECTED key must not appear
+	if _, ok := m2["INJECTED"]; ok {
+		t.Error("INJECTED key must not appear — newline injection was not sanitized")
+	}
+}
+
 func TestSetEnvVar(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")

@@ -22,6 +22,14 @@ func NewCompose(scriptDir string, needsSudo bool) *Compose {
 	}
 }
 
+// dockerCmd returns an exec.Cmd for "docker <args...>", prefixed with sudo if needed.
+func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
+	if c.needsSudo {
+		return exec.Command("sudo", append([]string{"docker"}, args...)...)
+	}
+	return exec.Command("docker", args...)
+}
+
 // args builds the full docker compose argument list.
 func (c *Compose) buildArgs(extra ...string) []string {
 	args := []string{"compose", "--env-file", c.envFile, "-f", filepath.Join(c.projectDir, "docker-compose.yml")}
@@ -43,14 +51,7 @@ func (c *Compose) buildArgs(extra ...string) []string {
 
 // Run runs docker compose with the given subcommand args, attaching stdin/stdout/stderr.
 func (c *Compose) Run(args ...string) error {
-	fullArgs := c.buildArgs(args...)
-	var cmd *exec.Cmd
-	if c.needsSudo {
-		fullArgs = append([]string{"docker"}, fullArgs...)
-		cmd = exec.Command("sudo", fullArgs...)
-	} else {
-		cmd = exec.Command("docker", fullArgs...)
-	}
+	cmd := c.dockerCmd(c.buildArgs(args...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -59,26 +60,13 @@ func (c *Compose) Run(args ...string) error {
 
 // RunSilent runs docker compose and captures output, not attaching to terminal.
 func (c *Compose) RunSilent(args ...string) ([]byte, error) {
-	fullArgs := c.buildArgs(args...)
-	var cmd *exec.Cmd
-	if c.needsSudo {
-		fullArgs = append([]string{"docker"}, fullArgs...)
-		cmd = exec.Command("sudo", fullArgs...)
-	} else {
-		cmd = exec.Command("docker", fullArgs...)
-	}
+	cmd := c.dockerCmd(c.buildArgs(args...)...)
 	return cmd.CombinedOutput()
 }
 
 // DockerExec runs a docker exec command, attaching stdin/stdout/stderr.
 func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
-	args := append([]string{"exec", container}, cmdArgs...)
-	var cmd *exec.Cmd
-	if c.needsSudo {
-		cmd = exec.Command("sudo", append([]string{"docker"}, args...)...)
-	} else {
-		cmd = exec.Command("docker", args...)
-	}
+	cmd := c.dockerCmd(append([]string{"exec", container}, cmdArgs...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -88,13 +76,7 @@ func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
 // buildSetupCmd creates an exec.Cmd for `docker compose -f setupCompose up -d --build`
 // with the given environment variables.
 func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
-	args := []string{"compose", "-f", setupCompose, "up", "-d", "--build"}
-	var cmd *exec.Cmd
-	if c.needsSudo {
-		cmd = exec.Command("sudo", append([]string{"docker"}, args...)...)
-	} else {
-		cmd = exec.Command("docker", args...)
-	}
+	cmd := c.dockerCmd("compose", "-f", setupCompose, "up", "-d", "--build")
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -104,25 +86,12 @@ func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
 
 // runSetupDown tears down the setup compose stack.
 func (c *Compose) runSetupDown(setupCompose string) error {
-	args := []string{"compose", "-f", setupCompose, "down"}
-	var cmd *exec.Cmd
-	if c.needsSudo {
-		cmd = exec.Command("sudo", append([]string{"docker"}, args...)...)
-	} else {
-		cmd = exec.Command("docker", args...)
-	}
-	return cmd.Run()
+	return c.dockerCmd("compose", "-f", setupCompose, "down").Run()
 }
 
 // DockerInspect runs docker inspect --format=... on a container.
 func (c *Compose) DockerInspect(format, container string) (string, error) {
-	args := []string{"inspect", "--format=" + format, container}
-	var cmd *exec.Cmd
-	if c.needsSudo {
-		cmd = exec.Command("sudo", append([]string{"docker"}, args...)...)
-	} else {
-		cmd = exec.Command("docker", args...)
-	}
+	cmd := c.dockerCmd("inspect", "--format="+format, container)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

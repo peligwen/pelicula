@@ -9,6 +9,17 @@ import (
 	"strings"
 )
 
+// xmlEscape escapes special XML characters in s so it is safe to interpolate
+// into an XML element value.
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
+}
+
 // seedConfig writes content to file only if the file does not already exist.
 func seedConfig(file, content string) error {
 	if _, err := os.Stat(file); err == nil {
@@ -168,7 +179,7 @@ func ResetArrService(name, dir, urlBase, apiKey string) error {
 	}
 	keyXML := ""
 	if apiKey != "" {
-		keyXML = "<ApiKey>" + apiKey + "</ApiKey>"
+		keyXML = "<ApiKey>" + xmlEscape(apiKey) + "</ApiKey>"
 	}
 	content := fmt.Sprintf(
 		"<Config><UrlBase>%s</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -77,7 +80,7 @@ func cmdSetup(args []string) {
 	if _, err := os.Stat(envFile); err == nil {
 		warn(".env already exists. Run " + bold("pelicula up") + " to start the stack.")
 		warn("To reconfigure, delete .env and run setup again.")
-		os.Exit(1)
+		return
 	}
 
 	plat := Detect(scriptDir)
@@ -112,6 +115,13 @@ func cmdSetup(args []string) {
 		fatal("Failed to start setup containers: " + err.Error())
 	}
 
+	// Tear down setup containers on exit (signal or normal return).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	defer func() {
+		_ = c.runSetupDown(setupCompose)
+	}()
+
 	fmt.Println()
 	fmt.Printf("  Open %s in your browser to continue setup\n", bold("http://localhost:7354/"))
 	fmt.Println()
@@ -122,23 +132,30 @@ func cmdSetup(args []string) {
 	// Poll for .env to appear (written by the wizard)
 	info("Waiting for setup to complete (Ctrl+C to abort)...")
 	const maxWait = 150 // 150 * 2s = 5 minutes
+	completed := false
 	for i := 0; i < maxWait; i++ {
+		select {
+		case <-ctx.Done():
+			fmt.Println()
+			warn("Setup cancelled — tearing down setup containers...")
+			return
+		default:
+		}
 		time.Sleep(2 * time.Second)
 		if _, err := os.Stat(envFile); err == nil {
 			pass("Configuration saved")
+			completed = true
 			break
 		}
 		if i == maxWait-1 {
 			warn("Setup timed out after 5 minutes")
-			// Tear down setup containers
-			_ = c.runSetupDown(setupCompose)
 			fmt.Printf("Run %s for CLI setup instead.\n", bold("pelicula setup --advanced"))
-			os.Exit(1)
+			return
 		}
 	}
-
-	// Tear down setup containers
-	_ = c.runSetupDown(setupCompose)
+	if !completed {
+		return
+	}
 
 	fmt.Println()
 	fmt.Printf("%s%sSetup complete!%s\n", colorGreen, colorBold, colorReset)

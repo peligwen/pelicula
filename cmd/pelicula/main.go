@@ -9,17 +9,15 @@ var version = "dev" // set via -ldflags at build time
 
 func main() {
 	// Strip -v/--verbose flag from args
-	verbose := false
 	var args []string
 	for _, a := range os.Args[1:] {
 		switch a {
 		case "-v", "--verbose":
-			verbose = true
+			verboseMode = true
 		default:
 			args = append(args, a)
 		}
 	}
-	_ = verbose // consumed by output helpers via package-level var
 
 	if len(args) == 0 {
 		usage()

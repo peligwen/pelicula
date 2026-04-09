@@ -28,6 +28,13 @@ func Detect(scriptDir string) Platform {
 	p.OS = runtime.GOOS
 	p.UID = os.Getuid()
 	p.GID = os.Getgid()
+	// os.Getuid/Getgid return -1 on Windows — default to 1000
+	if p.UID < 0 {
+		p.UID = 1000
+	}
+	if p.GID < 0 {
+		p.GID = 1000
+	}
 
 	// Synology detection
 	if _, err := os.Stat("/proc/syno_platform"); err == nil {
@@ -129,8 +136,8 @@ func detectSudo() bool {
 	if err := cmd.Run(); err == nil {
 		return false
 	}
-	// Try with sudo
-	cmd2 := exec.Command("sudo", "docker", "info")
+	// Try with sudo (-n = non-interactive: fail immediately if a password prompt would appear)
+	cmd2 := exec.Command("sudo", "-n", "docker", "info")
 	cmd2.Stdout = nil
 	cmd2.Stderr = nil
 	if err := cmd2.Run(); err == nil {

@@ -32,6 +32,10 @@ var envKeyOrder = []string{
 // ParseEnv reads a .env file and returns a map of key→value.
 // Lines beginning with # or empty lines are skipped.
 // Values may be optionally quoted with single or double quotes.
+//
+// Format contract: values are written as KEY="value" (double-quoted).
+// Values must not contain double-quote characters or newlines — WriteEnv
+// strips those characters before writing.
 func ParseEnv(path string) (EnvMap, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -87,14 +91,14 @@ func WriteEnv(path string, m EnvMap) error {
 	written := make(map[string]bool)
 	for _, k := range envKeyOrder {
 		if v, ok := m[k]; ok {
-			fmt.Fprintf(f, "%s=\"%s\"\n", k, v)
+			fmt.Fprintf(f, "%s=\"%s\"\n", k, sanitizeEnvValue(v))
 			written[k] = true
 		}
 	}
 	// Write any extra keys not in the canonical order
 	for k, v := range m {
 		if !written[k] {
-			fmt.Fprintf(f, "%s=\"%s\"\n", k, v)
+			fmt.Fprintf(f, "%s=\"%s\"\n", k, sanitizeEnvValue(v))
 		}
 	}
 	return nil
@@ -166,6 +170,15 @@ func MigrateEnv(path string) (bool, error) {
 		return true, WriteEnv(path, m)
 	}
 	return false, nil
+}
+
+// sanitizeEnvValue strips characters that would break the KEY="value" .env format:
+// double-quote characters and newlines are removed.
+func sanitizeEnvValue(v string) string {
+	v = strings.ReplaceAll(v, `"`, "")
+	v = strings.ReplaceAll(v, "\n", "")
+	v = strings.ReplaceAll(v, "\r", "")
+	return v
 }
 
 // copyFile is a simple file copy helper.

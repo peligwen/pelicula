@@ -82,7 +82,7 @@ func resetConfigSoft(scriptDir, envFile string, env EnvMap) {
 	info("Resetting Prowlarr config (keeping indexer database)...")
 	keyXML := ""
 	if prowlarrKey != "" {
-		keyXML = "<ApiKey>" + prowlarrKey + "</ApiKey>"
+		keyXML = "<ApiKey>" + xmlEscape(prowlarrKey) + "</ApiKey>"
 	}
 	prowlarrConf := fmt.Sprintf(
 		"<Config><UrlBase>/prowlarr</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
@@ -122,7 +122,7 @@ func resetConfigService(scriptDir, envFile, svc string, env EnvMap) {
 		key := extractAPIKey(filepath.Join(configDir, "prowlarr", "config.xml"))
 		keyXML := ""
 		if key != "" {
-			keyXML = "<ApiKey>" + key + "</ApiKey>"
+			keyXML = "<ApiKey>" + xmlEscape(key) + "</ApiKey>"
 		}
 		content := fmt.Sprintf(
 			"<Config><UrlBase>/prowlarr</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
