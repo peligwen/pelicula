@@ -137,6 +137,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	tz := envOr("HOST_TZ", "America/New_York")
 	proculaKey := generateAPIKey()
 	webhookSecret := generateAPIKey()
+	jellyfinPassword := generateReadablePassword()
 
 	envMu.Lock()
 	defer envMu.Unlock()
@@ -152,6 +153,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"SERVER_COUNTRIES":      req.Country,
 		"PELICULA_PORT":         req.Port,
 		"PELICULA_AUTH":         authMode,
+		"JELLYFIN_PASSWORD":     jellyfinPassword,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
