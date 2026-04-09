@@ -85,7 +85,7 @@ func generateReadablePassword() string {
 // requireEnv prints an error and exits if the .env file does not exist.
 func requireEnv(envFile string) {
 	if _, err := os.Stat(envFile); err != nil {
-		fatal("No .env file found. Run " + bold("pelicula setup") + " first.")
+		fatal("No .env file found. Run " + bold("pelicula up") + " first.")
 	}
 }
 

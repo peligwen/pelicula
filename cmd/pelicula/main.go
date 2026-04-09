@@ -25,8 +25,6 @@ func main() {
 	}
 
 	switch args[0] {
-	case "setup":
-		cmdSetup(args[1:])
 	case "up":
 		cmdUp(args[1:])
 	case "down":
@@ -74,8 +72,7 @@ func usage() {
 Usage: pelicula <command> [options]
 
 Lifecycle:
-  setup               First-time setup (opens browser wizard)
-  up                  Start the stack
+  up                  Start the stack (runs setup wizard on first run)
   down                Stop the stack
   restart [service]   Restart service(s)
   rebuild [service]   Rebuild and restart middleware/procula/nginx
