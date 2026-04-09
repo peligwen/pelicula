@@ -27,7 +27,6 @@ type SettingsResponse struct {
 	WorkDir              string `json:"work_dir"`
 	Port                 string `json:"port"`
 	AuthMode             string `json:"auth_mode"`
-	Password             string `json:"password"`
 	ProculaAPIKey        string `json:"procula_api_key"`
 	TranscodingEnabled   string `json:"transcoding_enabled"`
 	NotificationsEnabled string `json:"notifications_enabled"`
@@ -93,7 +92,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"CONFIG_DIR", "LIBRARY_DIR", "WORK_DIR",
 		"PUID", "PGID", "TZ",
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
-		"PELICULA_PORT", "PELICULA_AUTH", "PELICULA_PASSWORD",
+		"PELICULA_PORT", "PELICULA_AUTH",
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
@@ -179,7 +178,6 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		WorkDir:              vars["WORK_DIR"],
 		Port:                 vars["PELICULA_PORT"],
 		AuthMode:             vars["PELICULA_AUTH"],
-		Password:             maskedValue,
 		ProculaAPIKey:        maskedValue,
 		TranscodingEnabled:   vars["TRANSCODING_ENABLED"],
 		NotificationsEnabled: vars["NOTIFICATIONS_ENABLED"],
@@ -265,18 +263,10 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	// Validate auth mode if being changed
 	if req.AuthMode != "" {
 		switch req.AuthMode {
-		case "off", "true", "password", "users", "jellyfin":
+		case "off", "jellyfin":
 			// valid
 		default:
-			http.Error(w, "auth_mode must be one of: off, password, users, jellyfin", http.StatusBadRequest)
-			return
-		}
-	}
-
-	// Validate password if being changed
-	if req.Password != "" && req.Password != maskedValue {
-		if strings.ContainsAny(req.Password, "\"\n\r") {
-			http.Error(w, "password contains invalid characters", http.StatusBadRequest)
+			http.Error(w, "auth_mode must be one of: off, jellyfin", http.StatusBadRequest)
 			return
 		}
 	}
@@ -312,9 +302,6 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuthMode != "" {
 		vars["PELICULA_AUTH"] = req.AuthMode
-	}
-	if req.Password != "" && req.Password != maskedValue {
-		vars["PELICULA_PASSWORD"] = req.Password
 	}
 	if req.TZ != "" {
 		vars["TZ"] = req.TZ
@@ -412,7 +399,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		{"library_dir", req.LibraryDir},
 		{"work_dir", req.WorkDir},
 		{"port", req.Port},
-		{"password", req.Password},
 	} {
 		if strings.ContainsAny(check.val, "\"\n\r") {
 			http.Error(w, check.name+" contains invalid characters", http.StatusBadRequest)
@@ -447,13 +433,9 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		req.WorkDir = envOr("HOST_WORK_DIR", "~/media")
 	}
 
-	password := req.Password
 	authMode := "off"
 	if req.AuthEnabled {
-		authMode = "true"
-		if password == "" {
-			password = generateReadablePassword()
-		}
+		authMode = "jellyfin"
 	}
 
 	envMu.Lock()
@@ -478,7 +460,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"SERVER_COUNTRIES":      req.Country,
 		"PELICULA_PORT":         req.Port,
 		"PELICULA_AUTH":         authMode,
-		"PELICULA_PASSWORD":     password,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
@@ -506,7 +487,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":           "ok",
 		"restart_required": true,
-		"password":         password,
 	})
 }
 

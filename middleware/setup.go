@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -20,7 +19,6 @@ type SetupRequest struct {
 	WorkDir      string `json:"work_dir"`
 	Port         string `json:"port"`
 	AuthEnabled  bool   `json:"auth_enabled"`
-	Password     string `json:"password"` // empty = auto-generate
 }
 
 // SetupDetect is returned by GET /api/pelicula/setup/detect.
@@ -90,7 +88,6 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		{"library_dir", req.LibraryDir},
 		{"work_dir", req.WorkDir},
 		{"port", req.Port},
-		{"password", req.Password},
 	} {
 		if strings.ContainsAny(check.val, "\"\n\r") {
 			http.Error(w, check.name+" contains invalid characters", http.StatusBadRequest)
@@ -129,14 +126,9 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		req.WorkDir = envOr("HOST_WORK_DIR", "~/media")
 	}
 
-	// Generate password if auth enabled but no password given
-	password := req.Password
 	authMode := "off"
 	if req.AuthEnabled {
-		authMode = "true"
-		if password == "" {
-			password = generateReadablePassword()
-		}
+		authMode = "jellyfin"
 	}
 
 	puid := envOr("HOST_PUID", "1000")
@@ -159,7 +151,6 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"SERVER_COUNTRIES":      req.Country,
 		"PELICULA_PORT":         req.Port,
 		"PELICULA_AUTH":         authMode,
-		"PELICULA_PASSWORD":     password,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
@@ -176,9 +167,8 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("setup wizard completed, wrote .env", "component", "setup")
 
-	resp := map[string]string{"status": "ok", "password": password}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func envOr(key, fallback string) string {
@@ -186,25 +176,6 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// generateReadablePassword creates a 15-char password in 3 groups of 5,
-// using only unambiguous characters. Uses rejection sampling to avoid
-// modulo bias.
-func generateReadablePassword() string {
-	const charset = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	max := big.NewInt(int64(len(charset)))
-	b := make([]byte, 15)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, max)
-		if err != nil {
-			// crypto/rand should never fail; if it does, use what we have
-			b[i] = charset[0]
-			continue
-		}
-		b[i] = charset[n.Int64()]
-	}
-	return string(b[:5]) + "-" + string(b[5:10]) + "-" + string(b[10:15])
 }
 
 func generateAPIKey() string {

@@ -57,31 +57,22 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Determine auth mode:
-	//   PELICULA_AUTH=off (or empty/false) — no auth
-	//   PELICULA_AUTH=true or =password    — single shared password (legacy)
-	//   PELICULA_AUTH=users                — user model from /config/pelicula/users.json
 	//   PELICULA_AUTH=jellyfin             — credentials verified against Jellyfin
+	//   PELICULA_AUTH=off (or empty/false) — no auth
 	authEnv := os.Getenv("PELICULA_AUTH")
 	var authMode string
 	switch authEnv {
-	case "users":
-		authMode = "users"
 	case "jellyfin":
 		authMode = "jellyfin"
-	case "true", "password":
-		authMode = "password"
+	case "true", "password", "users":
+		slog.Warn("PELICULA_AUTH mode removed — migrate to 'jellyfin' via ./pelicula configure; falling back to off",
+			"component", "auth", "was", authEnv)
+		authMode = "off"
 	default:
 		authMode = "off"
 	}
-	peliculaPassword := os.Getenv("PELICULA_PASSWORD")
-	if authMode == "password" && peliculaPassword == "" {
-		slog.Error("PELICULA_AUTH=password requires PELICULA_PASSWORD to be set — run ./pelicula setup to configure authentication")
-		os.Exit(1)
-	}
 	authMiddleware = NewAuth(AuthConfig{
 		Mode:      authMode,
-		Password:  peliculaPassword,
-		UsersFile: "/config/pelicula/users.json",
 		RolesFile: "/config/pelicula/roles.json",
 	})
 	auth := authMiddleware

@@ -19,10 +19,7 @@ async function checkAuth() {
             return;
         }
         if (!data.valid) {
-            // Show username field only in users mode
-            if (data.mode === 'users') {
-                document.getElementById('login-username').classList.remove('hidden');
-            }
+            document.getElementById('login-username').classList.remove('hidden');
             document.getElementById('login-overlay').classList.remove('hidden');
         } else {
             applyRole(data.role || 'admin', data.username || '');

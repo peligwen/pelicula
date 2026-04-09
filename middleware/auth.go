@@ -1,13 +1,11 @@
 // Peligrosa: trust boundary layer.
-// Sessions, password hashing, login rate limiter, CSRF origin guard, and
-// role-based access guards (Guard/GuardManager/GuardAdmin). Changes here
-// affect the core authentication surface — see ../PELIGROSA.md.
+// Sessions, login rate limiter, CSRF origin guard, and role-based access
+// guards (Guard/GuardManager/GuardAdmin). Changes here affect the core
+// authentication surface — see ../PELIGROSA.md.
 package main
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,8 +14,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -35,12 +31,6 @@ func (r UserRole) atLeast(min UserRole) bool {
 	return order[r] >= order[min]
 }
 
-type User struct {
-	Username string   `json:"username"`
-	Password string   `json:"password"` // "sha256v2:HEXSALT:HEXHASH" (new) or legacy hex
-	Role     UserRole `json:"role"`
-}
-
 type session struct {
 	username string
 	role     UserRole
@@ -54,14 +44,9 @@ type loginAttempts struct {
 
 // Auth handles authentication and authorization.
 // mode "off"      — all requests pass through
-// mode "password" — single shared password (legacy, PELICULA_AUTH=true)
-// mode "users"    — user model from usersFile
 // mode "jellyfin" — credentials verified against Jellyfin; roles from rolesFile
 type Auth struct {
 	mode       string
-	password   string
-	usersFile  string
-	users      []User
 	rolesStore *RolesStore  // non-nil in "jellyfin" mode
 	httpClient *http.Client // used for Jellyfin auth calls
 	sessions   map[string]session
@@ -69,11 +54,9 @@ type Auth struct {
 	mu         sync.RWMutex
 }
 
-// AuthConfig holds all parameters for NewAuth. Use zero values for unused fields.
+// AuthConfig holds parameters for NewAuth.
 type AuthConfig struct {
 	Mode       string
-	Password   string       // for "password" mode
-	UsersFile  string       // for "users" mode
 	RolesFile  string       // for "jellyfin" mode
 	HTTPClient *http.Client // for "jellyfin" mode; nil → 10-second default client
 }
@@ -85,18 +68,11 @@ func NewAuth(cfg AuthConfig) *Auth {
 	}
 	a := &Auth{
 		mode:       cfg.Mode,
-		password:   cfg.Password,
-		usersFile:  cfg.UsersFile,
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		httpClient: hc,
 	}
-	switch cfg.Mode {
-	case "users":
-		if err := a.loadUsers(); err != nil {
-			slog.Warn("could not load users", "component", "auth", "path", cfg.UsersFile, "error", err)
-		}
-	case "jellyfin":
+	if cfg.Mode == "jellyfin" {
 		a.rolesStore = NewRolesStore(cfg.RolesFile)
 		slog.Info("auth mode: jellyfin — credentials verified against Jellyfin", "component", "auth")
 	}
@@ -162,59 +138,6 @@ func (a *Auth) recordFailure(ip string) {
 	}
 	a.failures[ip].times = append(a.failures[ip].times, time.Now())
 	a.mu.Unlock()
-}
-
-func (a *Auth) loadUsers() error {
-	data, err := os.ReadFile(a.usersFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			slog.Warn("no users file found — all requests will be rejected until users are created", "component", "auth", "path", a.usersFile)
-			return nil
-		}
-		return err
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return json.Unmarshal(data, &a.users)
-}
-
-// hashPassword generates a salted SHA-256 hash in "sha256v2:SALT:HASH" format.
-// HASH = sha256(SALT + ":" + username + ":" + plaintext)
-func hashPassword(username, plaintext string) (string, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	saltHex := hex.EncodeToString(salt)
-	h := sha256.Sum256([]byte(saltHex + ":" + username + ":" + plaintext))
-	return "sha256v2:" + saltHex + ":" + hex.EncodeToString(h[:]), nil
-}
-
-// verifyPassword checks plaintext against a stored hash.
-// Supports both "sha256v2:SALT:HASH" (salted) and the legacy unsalted format.
-func verifyPassword(username, plaintext, stored string) bool {
-	parts := strings.SplitN(stored, ":", 3)
-	if len(parts) == 3 && parts[0] == "sha256v2" {
-		saltHex, expectedHash := parts[1], parts[2]
-		h := sha256.Sum256([]byte(saltHex + ":" + username + ":" + plaintext))
-		computed := hex.EncodeToString(h[:])
-		return subtle.ConstantTimeCompare([]byte(computed), []byte(expectedHash)) == 1
-	}
-	// Legacy: unsalted sha256(username:password)
-	h := sha256.Sum256([]byte(fmt.Sprintf("%s:%s", username, plaintext)))
-	computed := hex.EncodeToString(h[:])
-	return subtle.ConstantTimeCompare([]byte(computed), []byte(stored)) == 1
-}
-
-func (a *Auth) lookupUser(username, plaintext string) (User, bool) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for _, u := range a.users {
-		if u.Username == username && verifyPassword(username, plaintext, u.Password) {
-			return u, true
-		}
-	}
-	return User{}, false
 }
 
 // IsOffMode reports whether auth is disabled (PELICULA_AUTH=off).
@@ -298,54 +221,33 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var role UserRole
-	switch a.mode {
-	case "password":
-		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.password)) == 0 {
-			a.recordFailure(ip)
-			writeError(w, "invalid password", http.StatusUnauthorized)
-			return
-		}
-		role = RoleAdmin // single-password mode is always admin
-	case "users":
-		u, ok := a.lookupUser(req.Username, req.Password)
-		if !ok {
+	result, err := jellyfinAuthenticateByName(a.httpClient, req.Username, req.Password)
+	if err != nil {
+		var httpErr *jellyfinHTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
 			a.recordFailure(ip)
 			writeError(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
-		role = u.Role
-	case "jellyfin":
-		result, err := jellyfinAuthenticateByName(a.httpClient, req.Username, req.Password)
-		if err != nil {
-			var httpErr *jellyfinHTTPError
-			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
-				a.recordFailure(ip)
-				writeError(w, "invalid credentials", http.StatusUnauthorized)
-				return
-			}
-			slog.Error("Jellyfin auth call failed", "component", "auth", "error", err)
-			writeError(w, "authentication service unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		// Jellyfin admins always get the admin role in Pelicula.
-		// Other users keep their stored role, defaulting to viewer on first login.
-		if result.IsAdministrator {
-			role = RoleAdmin
-		} else if stored, ok := a.rolesStore.Lookup(result.UserID); ok {
-			role = stored
-		} else {
-			role = RoleViewer
-		}
-		if err := a.rolesStore.Upsert(result.UserID, result.Username, role); err != nil {
-			slog.Warn("failed to persist role", "component", "auth", "user", result.Username, "error", err)
-		}
-		// Override username to the one Jellyfin returned (canonical casing).
-		req.Username = result.Username
-	default:
-		writeError(w, "auth misconfigured", http.StatusInternalServerError)
+		slog.Error("Jellyfin auth call failed", "component", "auth", "error", err)
+		writeError(w, "authentication service unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// Jellyfin admins always get the admin role in Pelicula.
+	// Other users keep their stored role, defaulting to viewer on first login.
+	var role UserRole
+	if result.IsAdministrator {
+		role = RoleAdmin
+	} else if stored, ok := a.rolesStore.Lookup(result.UserID); ok {
+		role = stored
+	} else {
+		role = RoleViewer
+	}
+	if err := a.rolesStore.Upsert(result.UserID, result.Username, role); err != nil {
+		slog.Warn("failed to persist role", "component", "auth", "user", result.Username, "error", err)
+	}
+	// Override username to the one Jellyfin returned (canonical casing).
+	req.Username = result.Username
 
 	token, err := generateToken()
 	if err != nil {
