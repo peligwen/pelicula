@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -176,6 +177,24 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// generateReadablePassword creates a 15-char password in 3 groups of 5,
+// using only unambiguous characters. Uses rejection sampling to avoid
+// modulo bias.
+func generateReadablePassword() string {
+	const charset = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	max := big.NewInt(int64(len(charset)))
+	b := make([]byte, 15)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			b[i] = charset[0]
+			continue
+		}
+		b[i] = charset[n.Int64()]
+	}
+	return string(b[:5]) + "-" + string(b[5:10]) + "-" + string(b[10:15])
 }
 
 func generateAPIKey() string {

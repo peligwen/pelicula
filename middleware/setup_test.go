@@ -92,6 +92,29 @@ func TestHandleSetupSubmit_RejectsInjectionInFields(t *testing.T) {
 	}
 }
 
+// ── generateReadablePassword ─────────────────────────────────────────────────
+
+func TestGenerateReadablePassword_Format(t *testing.T) {
+	p := generateReadablePassword()
+	parts := strings.Split(p, "-")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 hyphen-separated groups, got %d in %q", len(parts), p)
+	}
+	for i, part := range parts {
+		if len(part) != 5 {
+			t.Errorf("group %d: length = %d, want 5 in %q", i, len(part), p)
+		}
+	}
+}
+
+func TestGenerateReadablePassword_Unique(t *testing.T) {
+	a := generateReadablePassword()
+	b := generateReadablePassword()
+	if a == b {
+		t.Error("expected two different passwords, got same")
+	}
+}
+
 // ── writeEnvFile uses writeEnvFile (not fmt.Sprintf) ────────────────────────
 
 func TestSetupUsesWriteEnvFile(t *testing.T) {
