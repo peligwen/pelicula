@@ -58,6 +58,10 @@ func cmdImportBackup(args []string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		fail("Authentication required — use the dashboard to import backups when auth is enabled")
+		os.Exit(1)
+	}
 	if resp.StatusCode != 200 {
 		fail(fmt.Sprintf("Import failed (HTTP %d): %s", resp.StatusCode, string(body)))
 		os.Exit(1)

@@ -227,7 +227,7 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 		"prowlarr":    prowlarrURL + "/ping",
 		"qbittorrent": qbtBaseURL + "/",
 		"jellyfin":    jellyfinURL + "/health",
-		"procula":     proculaBaseURL() + "/ping",
+		"procula":     proculaURL + "/ping",
 		"bazarr":      bazarrURL + "/",
 	}
 	var wg sync.WaitGroup

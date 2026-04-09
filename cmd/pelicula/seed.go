@@ -272,10 +272,16 @@ func resetQBittorrent(configDir string) error {
 	)
 }
 
-// resetProculaJobs clears the Procula job queue directory.
+// resetProculaJobs clears the Procula job queue (SQLite database and legacy JSON directory).
 func resetProculaJobs(configDir string) error {
 	info("Clearing Procula job queue...")
-	jobsDir := filepath.Join(configDir, "procula", "jobs")
+	proculaDir := filepath.Join(configDir, "procula")
+	// Remove SQLite database and WAL files (schema is auto-recreated on next startup)
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		os.Remove(filepath.Join(proculaDir, "procula.db"+suffix))
+	}
+	// Remove legacy JSON jobs directory
+	jobsDir := filepath.Join(proculaDir, "jobs")
 	if err := os.RemoveAll(jobsDir); err != nil {
 		return err
 	}

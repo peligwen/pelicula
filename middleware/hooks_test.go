@@ -22,7 +22,9 @@ func newFakeProcula(t *testing.T, path, body string) *httptest.Server {
 func TestHandleStorageProxy(t *testing.T) {
 	fake := newFakeProcula(t, "/api/procula/storage", `{"volumes":[],"timestamp":"2026-04-06T00:00:00Z"}`)
 	defer fake.Close()
-	t.Setenv("PROCULA_URL", fake.URL)
+	old := proculaURL
+	proculaURL = fake.URL
+	t.Cleanup(func() { proculaURL = old })
 	services = NewServiceClients("/config")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
@@ -44,7 +46,9 @@ func TestHandleStorageProxy(t *testing.T) {
 func TestHandleUpdatesProxy(t *testing.T) {
 	fake := newFakeProcula(t, "/api/procula/updates", `{"current_version":"dev","update_available":false}`)
 	defer fake.Close()
-	t.Setenv("PROCULA_URL", fake.URL)
+	old := proculaURL
+	proculaURL = fake.URL
+	t.Cleanup(func() { proculaURL = old })
 	services = NewServiceClients("/config")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)

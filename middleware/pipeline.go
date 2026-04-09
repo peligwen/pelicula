@@ -189,7 +189,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	go func() {
-		resp, err := services.client.Get(proculaBaseURL() + "/api/procula/jobs")
+		resp, err := services.client.Get(proculaURL + "/api/procula/jobs")
 		if err != nil {
 			proculaCh <- proculaFetchResult{err: err}
 			return

@@ -77,7 +77,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path)
 
 	// Forward to Procula
-	proculaURL := proculaBaseURL() + "/api/procula/jobs"
+	proculaURL := proculaURL + "/api/procula/jobs"
 	if err := forwardToProcula(proculaURL, source); err != nil {
 		slog.Error("failed to forward to Procula", "component", "hooks", "error", err)
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
@@ -211,7 +211,7 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := proculaBaseURL()
+	base := proculaURL
 
 	// Fetch status and jobs in parallel
 	type result struct {
@@ -310,7 +310,7 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		resp, err := services.client.Get(proculaBaseURL() + "/api/procula/notifications")
+		resp, err := services.client.Get(proculaURL + "/api/procula/notifications")
 		if err != nil || resp.StatusCode != http.StatusOK {
 			if resp != nil {
 				resp.Body.Close()
@@ -496,7 +496,7 @@ func proxyProcula(path string, forwardQuery ...bool) http.HandlerFunc {
 			writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		target := proculaBaseURL() + path
+		target := proculaURL + path
 		if fwd {
 			if q := r.URL.RawQuery; q != "" {
 				target += "?" + q
@@ -540,7 +540,7 @@ func proxyProculaMutate(path string) http.HandlerFunc {
 		if r.Body != nil {
 			body = r.Body
 		}
-		req, err := http.NewRequestWithContext(r.Context(), r.Method, proculaBaseURL()+path, body)
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, proculaURL+path, body)
 		if err != nil {
 			writeError(w, "proxy error", http.StatusInternalServerError)
 			return
@@ -571,9 +571,4 @@ var handleUpdatesProxy = proxyProcula("/api/procula/updates")
 // handleEventsProxy proxies Procula's event log, forwarding pagination/filter query params.
 var handleEventsProxy = proxyProcula("/api/procula/events", true)
 
-func proculaBaseURL() string {
-	if v := strings.TrimSpace(os.Getenv("PROCULA_URL")); v != "" {
-		return v
-	}
-	return "http://procula:8282"
-}
+var proculaURL = envOr("PROCULA_URL", "http://procula:8282")

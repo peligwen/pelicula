@@ -680,7 +680,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 
 	// Optionally forward successfully added items to Procula for validation.
 	if req.Validate && len(addedItems) > 0 {
-		proculaURL := proculaBaseURL() + "/api/procula/jobs"
+		proculaJobsURL := proculaURL + "/api/procula/jobs"
 		for _, item := range addedItems {
 			if item.SourcePath == "" {
 				continue
@@ -696,7 +696,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 				Path:    item.SourcePath,
 				ArrType: arrType,
 			}
-			if err := forwardToProcula(proculaURL, source); err != nil {
+			if err := forwardToProcula(proculaJobsURL, source); err != nil {
 				slog.Warn("failed to forward import to Procula",
 					"component", "library", "title", item.Title, "error", err)
 			}
@@ -1189,7 +1189,7 @@ func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	req, err := http.NewRequest(http.MethodGet, proculaBaseURL()+"/api/procula/profiles", nil)
+	req, err := http.NewRequest(http.MethodGet, proculaURL+"/api/procula/profiles", nil)
 	if err != nil {
 		writeError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -1238,7 +1238,7 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		body, _ := json.Marshal(map[string]string{"path": clean, "profile": req.Profile})
-		proculaReq, err := http.NewRequest(http.MethodPost, proculaBaseURL()+"/api/procula/transcode", bytes.NewReader(body))
+		proculaReq, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/transcode", bytes.NewReader(body))
 		if err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, path+": "+err.Error())

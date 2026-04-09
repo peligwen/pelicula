@@ -23,6 +23,14 @@ func migrateAllJSON(db *sql.DB, configDir string) {
 	migrateDismissedJSON(db, filepath.Join(configDir, "dismissed.json"))
 }
 
+// truncToken returns the first 8 characters of a token for logging, or the full token if shorter.
+func truncToken(t string) string {
+	if len(t) <= 8 {
+		return t
+	}
+	return t[:8] + "…"
+}
+
 // markMigrated renames path → path.migrated so it will not be re-processed.
 func markMigrated(path string) {
 	if err := os.Rename(path, path+".migrated"); err != nil {
@@ -111,7 +119,7 @@ func migrateInvitesJSON(db *sql.DB, jsonPath string) {
 		)
 		if err != nil {
 			slog.Warn("invites migration: failed to insert invite",
-				"component", "migrate", "token", inv.Token[:8]+"…", "error", err)
+				"component", "migrate", "token", truncToken(inv.Token), "error", err)
 			continue
 		}
 
@@ -122,7 +130,7 @@ func migrateInvitesJSON(db *sql.DB, jsonPath string) {
 			)
 			if err != nil {
 				slog.Warn("invites migration: failed to insert redemption",
-					"component", "migrate", "token", inv.Token[:8]+"…", "user", r.Username, "error", err)
+					"component", "migrate", "token", truncToken(inv.Token), "user", r.Username, "error", err)
 			}
 		}
 	}
