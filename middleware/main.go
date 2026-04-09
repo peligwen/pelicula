@@ -29,7 +29,6 @@ func main() {
 			w.Write([]byte(`{"status":"setup"}`))
 		})
 		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
-		mux.HandleFunc("/api/pelicula/setup/generate-password", handleGeneratePassword)
 		// Peligrosa: requireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
 		mux.Handle("/api/pelicula/setup", requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")

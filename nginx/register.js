@@ -5,6 +5,7 @@
   const params = new URLSearchParams(window.location.search);
   const token = params.get('t') || '';
   let openRegMode = false;
+  let initialSetupMode = false;
 
   // ── Boot: validate the token (or check open registration) ────────────────
   async function boot() {
@@ -13,7 +14,17 @@
       try {
         const resp = await fetch('/api/pelicula/register/check');
         const data = await resp.json().catch(() => ({}));
-        if (data.open_registration) {
+        if (data.initial_setup) {
+          openRegMode = true;
+          initialSetupMode = true;
+          document.getElementById('reg-loading').style.display = 'none';
+          document.getElementById('reg-form-wrap').style.display = '';
+          const heading = document.querySelector('.reg-heading');
+          if (heading) heading.textContent = 'Create Admin Account';
+          const hint = document.querySelector('.reg-hint');
+          if (hint) hint.textContent = 'Create your admin account. You\u2019ll use these credentials to log in and manage everything.';
+          return;
+        } else if (data.open_registration) {
           openRegMode = true;
           document.getElementById('reg-loading').style.display = 'none';
           document.getElementById('reg-form-wrap').style.display = '';
@@ -130,6 +141,22 @@
       const data = await resp.json().catch(() => ({}));
 
       if (resp.ok) {
+        if (initialSetupMode) {
+          // Auto-login after initial setup registration
+          try {
+            const loginResp = await fetch('/api/pelicula/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password }),
+            });
+            if (loginResp.ok) {
+              window.location.href = '/';
+              return;
+            }
+          } catch (e) {
+            console.error('auto-login after registration failed', e);
+          }
+        }
         showSuccess();
         return;
       }

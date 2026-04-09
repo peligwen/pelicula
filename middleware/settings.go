@@ -95,8 +95,9 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
 		"PELICULA_PORT", "PELICULA_AUTH",
 		"PELICULA_OPEN_REGISTRATION",
-		"JELLYFIN_ADMIN_USER",
-		"JELLYFIN_PASSWORD",
+		"JELLYFIN_ADMIN_USER", // legacy: kept for upgrade-path ordering
+		"JELLYFIN_PASSWORD",   // legacy: kept for upgrade-path ordering
+		"JELLYFIN_API_KEY",
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
@@ -122,7 +123,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		}
 		writeLine(&sb, k, v)
 	}
-	// Preserve any extra keys not in the canonical list (e.g. JELLYFIN_PASSWORD)
+	// Preserve any extra keys not in the canonical list
 	for k, v := range vars {
 		if !inOrder[k] {
 			writeLine(&sb, k, v)
@@ -464,9 +465,8 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	proculaKey := generateAPIKey()
 	// Preserve existing WEBHOOK_SECRET if present so autowired webhooks keep working
 	webhookSecret := orDefault(existing["WEBHOOK_SECRET"], generateAPIKey())
-	// Preserve JELLYFIN_ADMIN_USER and JELLYFIN_PASSWORD so the admin login stays valid after reset
-	jellyfinAdminUser := orDefault(existing["JELLYFIN_ADMIN_USER"], "admin")
-	jellyfinPassword := orDefault(existing["JELLYFIN_PASSWORD"], generateReadablePassword())
+	// Note: JELLYFIN_API_KEY is intentionally NOT preserved — Jellyfin DB is wiped on reset,
+	// so the old key is stale. Autowire will create a fresh one on next boot.
 
 	vars := map[string]string{
 		"CONFIG_DIR":                  req.ConfigDir,
@@ -480,8 +480,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"PELICULA_PORT":               "7354",
 		"PELICULA_AUTH":               "jellyfin",
 		"PELICULA_OPEN_REGISTRATION":  "false",
-		"JELLYFIN_ADMIN_USER":         jellyfinAdminUser,
-		"JELLYFIN_PASSWORD":           jellyfinPassword,
 		"PROCULA_API_KEY":             proculaKey,
 		"WEBHOOK_SECRET":              webhookSecret,
 		"TRANSCODING_ENABLED":         "false",

@@ -177,18 +177,6 @@ select { cursor: pointer; border-radius: 12px; }
 }
 
 /* ── Done screen ────────────────── */
-.done-password {
-    background: var(--panel2, #fdf5ff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4));
-    border-radius: 16px; padding: 1rem; margin: 1.5rem 0; text-align: center;
-}
-.done-password label { text-align: center; margin-top: 0; }
-.password-display {
-    font-family: ui-monospace, 'Cascadia Code', monospace;
-    font-size: 1.4rem; letter-spacing: 0.15em;
-    color: var(--pink, #f060a8); padding: 0.75rem 0; user-select: all;
-}
-.done-password .field-help { margin-top: 0.5rem; margin-bottom: 0; }
-
 .spinner {
     width: 2rem; height: 2rem; border: 2px solid var(--border2, rgba(180,140,220,0.4));
     border-top-color: var(--pink, #f060a8); border-radius: 50%;
@@ -215,55 +203,6 @@ input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink,
 }
 
 /* ── New wizard elements ─────────── */
-.password-label-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-}
-.generate-link {
-    font-size: 0.75rem;
-    color: var(--accent, #a78bfa);
-    text-decoration: none;
-}
-.generate-link:hover {
-    text-decoration: underline;
-}
-.generated-password-box {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.6rem 0.8rem;
-    background: rgba(167, 139, 250, 0.06);
-    border: 1px solid rgba(167, 139, 250, 0.2);
-    border-radius: 0.4rem;
-    font-family: monospace;
-    font-size: 1rem;
-    letter-spacing: 0.03em;
-    color: var(--text, #e0e0e0);
-    margin-bottom: 0.5rem;
-}
-.generated-password-box .copy-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1rem;
-    padding: 0.2rem;
-    margin-left: auto;
-    color: var(--muted, #9080a8);
-    display: inline-flex;
-    align-items: center;
-}
-.generated-password-box .copy-btn:hover {
-    color: var(--pink, #f060a8);
-}
-.password-warning {
-    font-size: 0.75rem;
-    color: #FF9800;
-    padding: 0.5rem 0.6rem;
-    background: rgba(255, 152, 0, 0.06);
-    border-radius: 0.3rem;
-    border: 1px solid rgba(255, 152, 0, 0.15);
-}
 .advanced-toggle {
     font-size: 0.8rem;
     color: #888;
@@ -307,18 +246,15 @@ input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink,
     border-radius: 0.4rem;
     line-height: 1.6;
 }
-.skip-vpn {
-    text-align: center;
-    margin-top: 0.75rem;
-}
-.skip-vpn a {
+.skip-vpn-link {
     font-size: 0.8rem;
-    color: #888;
+    color: var(--muted, #9080a8);
     text-decoration: none;
-    border-bottom: 1px dashed #555;
+    border-bottom: 1px dashed var(--faint, #c8b8d8);
 }
-.skip-vpn a:hover {
-    color: #aaa;
+.skip-vpn-link:hover {
+    color: var(--pink, #f060a8);
+    border-bottom-color: var(--pink, #f060a8);
 }
 .vpn-skipped-notice {
     padding: 0.6rem 0.8rem;

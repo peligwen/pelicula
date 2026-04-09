@@ -55,6 +55,9 @@ func resetServices(t *testing.T) {
 	t.Helper()
 	orig := services
 	services = NewServiceClients(t.TempDir())
+	// Set a test API key so jellyfinAuth() returns it directly
+	// without trying to read /project/.env.
+	services.JellyfinAPIKey = "test-token"
 	t.Cleanup(func() { services = orig })
 }
 

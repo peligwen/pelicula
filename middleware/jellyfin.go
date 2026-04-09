@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -20,6 +19,8 @@ import (
 var jellyfinURL = envOr("JELLYFIN_URL", "http://jellyfin:8096/jellyfin")
 
 const embyAuthHeader = `MediaBrowser Client="Pelicula", Device="pelicula-api", DeviceId="pelicula-autowire", Version="1.0"`
+
+const jellyfinServiceUser = "pelicula-internal"
 
 // ErrPasswordRequired is returned by CreateJellyfinUser when password is empty.
 var ErrPasswordRequired = errors.New("password is required")
@@ -158,30 +159,62 @@ func wireJellyfin(s *ServiceClients) {
 
 	wizardDone, _ := info["StartupWizardCompleted"].(bool)
 
+	var token string
 	if !wizardDone {
-		if err := completeJellyfinWizard(s); err != nil {
-			slog.Error("Jellyfin wizard setup failed", "component", "autowire", "error", err)
+		wizardToken, wizardErr := completeJellyfinWizard(s)
+		if wizardErr != nil {
+			slog.Error("Jellyfin wizard setup failed", "component", "autowire", "error", wizardErr)
 			return
 		}
+		token = wizardToken
 		// Give Jellyfin a moment to settle after wizard completion
 		time.Sleep(2 * time.Second)
 	} else {
 		slog.Info("Jellyfin startup wizard already completed", "component", "autowire")
+		// Authenticate using the stored API key (or password fallback for upgrades)
+		authToken, authErr := jellyfinAuth(s)
+		if authErr != nil {
+			slog.Error("Jellyfin auth failed, skipping library setup", "component", "autowire", "error", authErr)
+			return
+		}
+		token = authToken
 	}
 
-	// Authenticate to get an API token
-	token, err := jellyfinAuth(s)
-	if err != nil {
-		slog.Error("Jellyfin auth failed, skipping library setup", "component", "autowire", "error", err)
-		slog.Info("if you set a Jellyfin password, add libraries manually via the Jellyfin UI", "component", "autowire")
-		return
+	// Create a persistent API key if we don't have one yet
+	if s.JellyfinAPIKey == "" {
+		apiKey, err := createJellyfinAPIKey(s, token)
+		if err != nil {
+			slog.Error("failed to create Jellyfin API key", "component", "autowire", "error", err)
+		} else {
+			s.mu.Lock()
+			s.JellyfinAPIKey = apiKey
+			s.mu.Unlock()
+			// Persist to .env and clean up legacy password
+			envMu.Lock()
+			vars, readErr := parseEnvFile(envPath)
+			if readErr != nil {
+				vars = make(map[string]string)
+			}
+			vars["JELLYFIN_API_KEY"] = apiKey
+			delete(vars, "JELLYFIN_PASSWORD")
+			delete(vars, "JELLYFIN_ADMIN_USER")
+			if writeErr := writeEnvFile(envPath, vars); writeErr != nil {
+				slog.Error("failed to persist Jellyfin API key to .env", "component", "autowire", "error", writeErr)
+			} else {
+				slog.Info("Jellyfin API key created and saved", "component", "autowire")
+			}
+			envMu.Unlock()
+		}
 	}
 
 	wireJellyfinLibrary(s, token, "Movies", "movies", "/data/movies")
 	wireJellyfinLibrary(s, token, "TV Shows", "tvshows", "/data/tv")
 }
 
-func completeJellyfinWizard(s *ServiceClients) error {
+// completeJellyfinWizard runs the Jellyfin startup wizard and returns a session
+// token obtained by authenticating as the service account. The throwaway password
+// is generated in memory and never written to disk.
+func completeJellyfinWizard(s *ServiceClients) (string, error) {
 	slog.Info("completing Jellyfin startup wizard", "component", "autowire")
 
 	// Step 1: initial config
@@ -190,20 +223,16 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		"MetadataCountryCode": "US",
 	})
 	if err != nil {
-		return fmt.Errorf("set startup config: %w", err)
+		return "", fmt.Errorf("set startup config: %w", err)
 	}
 
 	// Step 2: set admin user name and password.
 	// Jellyfin 10.11+ changed /Startup/User to update an auto-created initial user
 	// rather than creating one from scratch. The user is initialized lazily — a GET
 	// to /Startup/User triggers the creation; only then does POST succeed.
-	pass := os.Getenv("JELLYFIN_PASSWORD")
-	adminUser := envOr("JELLYFIN_ADMIN_USER", "admin")
-	if pass == "" {
-		slog.Info("creating Jellyfin admin user with no password", "component", "autowire", "username", adminUser)
-	} else {
-		slog.Info("creating Jellyfin admin user with configured password", "component", "autowire", "username", adminUser)
-	}
+	pass := generateAPIKey() // random throwaway, never stored
+	adminUser := jellyfinServiceUser
+	slog.Info("creating Jellyfin service account", "component", "autowire", "username", adminUser)
 	// GET first to trigger lazy user initialization (Jellyfin 10.11+).
 	if _, err = jellyfinGet(s, "/Startup/User", ""); err != nil {
 		slog.Warn("could not fetch initial Jellyfin startup user", "component", "autowire", "error", err)
@@ -213,40 +242,78 @@ func completeJellyfinWizard(s *ServiceClients) error {
 		"Password": pass,
 	})
 	if err != nil {
-		return fmt.Errorf("create admin user: %w", err)
+		return "", fmt.Errorf("create admin user: %w", err)
 	}
 
 	// Step 3: mark wizard done
 	_, err = jellyfinPost(s, "/Startup/Complete", "", nil)
 	if err != nil {
-		return fmt.Errorf("complete wizard: %w", err)
+		return "", fmt.Errorf("complete wizard: %w", err)
 	}
 
 	slog.Info("Jellyfin wizard completed", "component", "autowire")
-	return nil
+
+	// Step 4: authenticate with the throwaway password to get a session token.
+	// This token is returned to the caller so it can create an API key before
+	// the password is discarded.
+	data, err := jellyfinPost(s, "/Users/AuthenticateByName", "", map[string]any{
+		"Username": adminUser,
+		"Pw":       pass,
+	})
+	if err != nil {
+		return "", fmt.Errorf("post-wizard auth: %w", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("parse post-wizard auth: %w", err)
+	}
+	token, _ := result["AccessToken"].(string)
+	if token == "" {
+		return "", fmt.Errorf("empty access token from post-wizard auth")
+	}
+	return token, nil
 }
 
 func jellyfinAuth(s *ServiceClients) (string, error) {
-	adminUser := envOr("JELLYFIN_ADMIN_USER", "admin")
+	// Use persistent API key if available (normal path after first boot)
+	s.mu.RLock()
+	apiKey := s.JellyfinAPIKey
+	s.mu.RUnlock()
+	if apiKey != "" {
+		return apiKey, nil
+	}
+
+	// Fallback: password-based auth (first boot or upgrade from older version).
+	// Read credentials from the mounted .env file, not from env vars.
+	vars, err := parseEnvFile(envPath)
+	if err != nil {
+		return "", fmt.Errorf("no API key and cannot read .env: %w", err)
+	}
+	adminUser := vars["JELLYFIN_ADMIN_USER"]
+	if adminUser == "" {
+		adminUser = jellyfinServiceUser
+	}
+	pass := vars["JELLYFIN_PASSWORD"]
+	if pass == "" {
+		return "", fmt.Errorf("no API key and no password in .env — run setup again")
+	}
+
 	data, err := jellyfinPost(s, "/Users/AuthenticateByName", "", map[string]any{
 		"Username": adminUser,
-		"Pw":       os.Getenv("JELLYFIN_PASSWORD"),
+		"Pw":       pass,
 	})
 	if err != nil {
 		return "", err
 	}
 
 	var result map[string]any
-	if json.Unmarshal(data, &result) != nil {
-		return "", fmt.Errorf("invalid auth response")
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", err
 	}
-
 	token, _ := result["AccessToken"].(string)
 	if token == "" {
-		return "", fmt.Errorf("no access token in response")
+		return "", fmt.Errorf("empty access token from Jellyfin")
 	}
-
-	slog.Info("Jellyfin authenticated as admin", "component", "autowire", "username", adminUser)
 	return token, nil
 }
 
@@ -519,6 +586,53 @@ func TriggerLibraryRefresh(s *ServiceClients) error {
 	}
 	slog.Info("library refresh triggered", "component", "jellyfin")
 	return nil
+}
+
+// createJellyfinAPIKey creates a persistent Jellyfin API key via POST /Auth/Keys.
+// The key uses the same Token= header format as session tokens.
+// If a "Pelicula" key already exists (e.g. from a prior boot), it is reused.
+func createJellyfinAPIKey(s *ServiceClients, token string) (string, error) {
+	// Check for an existing key first to avoid duplicates on restart.
+	data, err := jellyfinGet(s, "/Auth/Keys", token)
+	if err == nil {
+		var existing struct {
+			Items []struct {
+				AccessToken string `json:"AccessToken"`
+				AppName     string `json:"AppName"`
+			} `json:"Items"`
+		}
+		if json.Unmarshal(data, &existing) == nil {
+			for _, item := range existing.Items {
+				if item.AppName == "Pelicula" {
+					return item.AccessToken, nil
+				}
+			}
+		}
+	}
+
+	// No existing key — create one.
+	if _, err := jellyfinPost(s, "/Auth/Keys?app=Pelicula", token, nil); err != nil {
+		return "", fmt.Errorf("create API key: %w", err)
+	}
+	data, err = jellyfinGet(s, "/Auth/Keys", token)
+	if err != nil {
+		return "", fmt.Errorf("list API keys: %w", err)
+	}
+	var result struct {
+		Items []struct {
+			AccessToken string `json:"AccessToken"`
+			AppName     string `json:"AppName"`
+		} `json:"Items"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("parse API keys: %w", err)
+	}
+	for _, item := range result.Items {
+		if item.AppName == "Pelicula" {
+			return item.AccessToken, nil
+		}
+	}
+	return "", fmt.Errorf("API key not found after creation")
 }
 
 // jellyfinDo is the shared implementation for all Jellyfin HTTP calls.

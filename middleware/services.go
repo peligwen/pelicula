@@ -17,10 +17,11 @@ type ServiceClients struct {
 	configDir string
 	client    *http.Client
 
-	SonarrKey   string
-	RadarrKey   string
-	ProwlarrKey string
-	BazarrKey   string
+	SonarrKey      string
+	RadarrKey      string
+	ProwlarrKey    string
+	BazarrKey      string
+	JellyfinAPIKey string
 
 	wired bool
 	mu    sync.RWMutex
@@ -39,6 +40,7 @@ func NewServiceClients(configDir string) *ServiceClients {
 		configDir: configDir,
 		client:    &http.Client{Timeout: 10 * time.Second},
 	}
+	s.JellyfinAPIKey = os.Getenv("JELLYFIN_API_KEY")
 	s.loadKeys()
 	return s
 }

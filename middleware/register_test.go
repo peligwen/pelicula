@@ -171,6 +171,9 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 	// Set authMiddleware AFTER newFakeJellyfin (which also sets it) so the
 	// rolesStore we inspect is the one the handler actually writes to.
 	store := NewRolesStore(testDB(t))
+	// Seed an existing admin so IsEmpty() returns false — this test verifies
+	// that subsequent registrants get viewer, not admin.
+	_ = store.Upsert("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
 	auth := newTestJellyfinAuth(t, store, nil)
 	origAuth := authMiddleware
 	authMiddleware = auth
@@ -191,6 +194,47 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 	}
 	if role != RoleViewer {
 		t.Errorf("role = %q, want viewer", role)
+	}
+}
+
+func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
+	// Open registration is OFF, but initial_setup (empty roles store) should
+	// still allow registration and assign admin role.
+	setOpenRegistration(t, false)
+
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6","Name":"gwen"}`))
+		})
+		mux.HandleFunc("/Users/", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	resetServices(t)
+
+	// Fresh roles store — IsEmpty() returns true.
+	store := NewRolesStore(testDB(t))
+	auth := newTestJellyfinAuth(t, store, nil)
+	origAuth := authMiddleware
+	authMiddleware = auth
+	t.Cleanup(func() { authMiddleware = origAuth })
+
+	body := strings.NewReader(`{"username":"gwen","password":"secret123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
+	w := httptest.NewRecorder()
+	handleOpenRegister(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	role, ok := store.Lookup("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6")
+	if !ok {
+		t.Fatal("expected user to be in roles store")
+	}
+	if role != RoleAdmin {
+		t.Errorf("role = %q, want admin", role)
 	}
 }
 

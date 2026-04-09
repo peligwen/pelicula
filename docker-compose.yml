@@ -233,7 +233,7 @@ services:
       - TZ=${TZ}
       - PELICULA_AUTH=${PELICULA_AUTH:-jellyfin}
       - DOCKER_HOST=http://docker-proxy:2375
-      - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:-}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
       - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
     volumes:

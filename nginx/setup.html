@@ -22,9 +22,7 @@
             <div class="step-line"></div>
             <div class="step" data-step="2"><span class="step-num">2</span> Storage</div>
             <div class="step-line"></div>
-            <div class="step" data-step="3"><span class="step-num">3</span> Account</div>
-            <div class="step-line"></div>
-            <div class="step" data-step="4"><span class="step-num">4</span> <span id="step4-label">Confirm</span></div>
+            <div class="step" data-step="3"><span class="step-num">3</span> <span id="step3-label">Confirm</span></div>
         </div>
 
         <div class="platform-badge" id="platform-badge"></div>
@@ -59,11 +57,8 @@
             </details>
 
             <div class="step-nav">
-                <span></span>
+                <a href="#" onclick="skipVPN(); return false;" class="skip-vpn-link">Skip — I'll set up VPN later</a>
                 <button onclick="goStep(2)" class="btn-primary">Next</button>
-            </div>
-            <div class="skip-vpn">
-                <a href="#" onclick="skipVPN(); return false;">Skip — I'll set up VPN later</a>
             </div>
         </div>
 
@@ -97,47 +92,8 @@
             </div>
         </div>
 
-        <!-- Step 3: Admin Account -->
+        <!-- Step 3: Confirm -->
         <div class="step-panel" id="panel-3">
-            <h2>Create Admin Account</h2>
-            <p class="step-desc">This is your account. You'll use it to log into the dashboard and manage everything.</p>
-
-            <iframe name="setup-save" style="display:none" aria-hidden="true"></iframe>
-            <form id="setup-form" method="POST" action="about:blank" target="setup-save">
-                <label for="admin-username">Username</label>
-                <input type="text" id="admin-username" placeholder="Username" spellcheck="false" autocomplete="username">
-
-                <div class="password-label-row">
-                    <label for="admin-password">Password</label>
-                    <a href="#" onclick="generatePassword(); return false;" class="generate-link" id="generate-link">Generate one for me</a>
-                </div>
-
-                <div id="password-manual">
-                    <input type="password" id="admin-password" placeholder="Minimum 8 characters" spellcheck="false" autocomplete="new-password">
-
-                    <label for="admin-password-confirm">Confirm Password</label>
-                    <input type="password" id="admin-password-confirm" placeholder="Confirm password" spellcheck="false" autocomplete="new-password">
-                </div>
-
-                <div id="password-generated" class="hidden">
-                    <div class="generated-password-box">
-                        <span id="generated-password-display"></span>
-                        <button type="button" class="copy-btn" onclick="copyPassword()" title="Copy password">
-                            <svg id="copy-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>
-                        </button>
-                    </div>
-                    <div class="password-warning">⚠️ Save this password — it won't be shown again after setup.</div>
-                </div>
-
-                <div class="step-nav">
-                    <button onclick="event.preventDefault(); goStep(2)" class="btn-secondary">Back</button>
-                    <button type="submit" class="btn-primary">Next</button>
-                </div>
-            </form>
-        </div>
-
-        <!-- Step 4: Confirm -->
-        <div class="step-panel" id="panel-4">
             <h2 id="confirm-heading">Ready to Go</h2>
             <p class="step-desc" id="confirm-desc">Review your settings.</p>
 
@@ -150,7 +106,7 @@
             <div class="error-msg hidden" id="setup-error"></div>
 
             <div class="step-nav">
-                <button onclick="goStep(3)" class="btn-secondary">Back</button>
+                <button onclick="goStep(2)" class="btn-secondary">Back</button>
                 <button onclick="submitSetup()" class="btn-primary" id="btn-submit">Launch Pelicula</button>
             </div>
         </div>
@@ -175,7 +131,6 @@ let mode = 'setup';
 let detected = {};
 let currentSettings = {};
 let vpnSkipped = false;
-let generatedPassword = '';
 
 (async function init() {
     try {
@@ -208,7 +163,7 @@ let generatedPassword = '';
 
 function applySettingsMode() {
     document.getElementById('page-subtitle').textContent = 'Settings';
-    document.getElementById('step4-label').textContent = 'Review';
+    document.getElementById('step3-label').textContent = 'Review';
     document.getElementById('confirm-heading').textContent = 'Review Changes';
     document.getElementById('confirm-desc').textContent = 'Review your configuration changes. A restart is required for changes to take effect.';
     document.getElementById('btn-submit').textContent = 'Save Settings';
@@ -228,31 +183,6 @@ function prefillSettings(s) {
     }
 }
 
-async function generatePassword() {
-    try {
-        const r = await fetch('/api/pelicula/setup/generate-password');
-        const data = await r.json();
-        generatedPassword = data.password;
-
-        document.getElementById('password-manual').classList.add('hidden');
-        document.getElementById('password-generated').classList.remove('hidden');
-        document.getElementById('generated-password-display').textContent = generatedPassword;
-        document.getElementById('admin-password').value = generatedPassword;
-        document.getElementById('generate-link').textContent = 'Generate another';
-    } catch(e) {
-        console.error('generate password failed', e);
-    }
-}
-
-function copyPassword() {
-    navigator.clipboard.writeText(generatedPassword).then(() => {
-        const btn = document.querySelector('.copy-btn');
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5 6.5-7"/></svg>';
-        setTimeout(() => { btn.innerHTML = orig; }, 1500);
-    });
-}
-
 function skipVPN() {
     vpnSkipped = true;
     goStep(2, true);
@@ -269,55 +199,6 @@ function toggleVis(id) {
         btn.textContent = 'Show';
     }
 }
-
-function getPassword() {
-    if (generatedPassword) return generatedPassword;
-    return document.getElementById('admin-password').value;
-}
-
-function validateAccount() {
-    const username = document.getElementById('admin-username').value.trim();
-    if (!username) {
-        const el = document.getElementById('admin-username');
-        el.focus();
-        el.classList.add('input-error');
-        return false;
-    }
-    document.getElementById('admin-username').classList.remove('input-error');
-
-    const pw = getPassword();
-    if (!pw || pw.length < 8) {
-        const el = document.getElementById('admin-password');
-        el.focus();
-        el.classList.add('input-error');
-        el.placeholder = 'Minimum 8 characters';
-        return false;
-    }
-    document.getElementById('admin-password').classList.remove('input-error');
-
-    if (!generatedPassword) {
-        const confirm = document.getElementById('admin-password-confirm').value;
-        if (pw !== confirm) {
-            const el = document.getElementById('admin-password-confirm');
-            el.focus();
-            el.classList.add('input-error');
-            el.placeholder = 'Passwords do not match';
-            return false;
-        }
-        document.getElementById('admin-password-confirm').classList.remove('input-error');
-    }
-    return true;
-}
-
-// Let the form submit to a hidden iframe so password managers detect the submission
-document.getElementById('setup-form').addEventListener('submit', function(e) {
-    if (!validateAccount()) {
-        e.preventDefault();
-        return;
-    }
-    // Don't preventDefault — the form submits to a hidden iframe, triggering password manager save
-    setTimeout(() => goStep(4, true), 0);
-});
 
 function goStep(n, skipValidation) {
     if (n === 2 && !skipValidation) {
@@ -350,14 +231,9 @@ function goStep(n, skipValidation) {
             }
             el.classList.remove('input-error');
         }
-    }
-
-    if (n === 4 && !skipValidation) {
-        // Validate step 3: account
-        if (!validateAccount()) return;
         buildSummary();
     }
-    if (n === 4 && skipValidation) {
+    if (n === 3 && skipValidation) {
         buildSummary();
     }
 
@@ -372,13 +248,11 @@ function goStep(n, skipValidation) {
 }
 
 function buildSummary() {
-    const username = document.getElementById('admin-username').value.trim();
     const config = document.getElementById('path-config').value;
     const media = document.getElementById('path-media').value;
     const key = document.getElementById('vpn-key').value.trim();
 
     let html = '<table>';
-    html += row('Admin', username);
     html += row('Config', config);
     html += row('Media', media);
 
@@ -426,8 +300,6 @@ async function submitSetup() {
     errEl.classList.add('hidden');
 
     const body = {
-        admin_username: document.getElementById('admin-username').value.trim(),
-        admin_password: getPassword(),
         config_dir: document.getElementById('path-config').value.trim(),
         media_dir: document.getElementById('path-media').value.trim(),
         library_dir: document.getElementById('path-library').value.trim() || '',
@@ -456,9 +328,6 @@ async function submitSetup() {
         if (mode === 'settings') {
             showSettingsDone();
         } else {
-            // Store credentials for auto-login after stack starts
-            sessionStorage.setItem('pelicula_setup_user', body.admin_username);
-            sessionStorage.setItem('pelicula_setup_pass', body.admin_password);
             pollForDashboard();
         }
     } catch(e) {
@@ -485,8 +354,8 @@ async function pollForDashboard() {
             const r = await fetch('/api/pelicula/health', { cache: 'no-store' });
             const data = await r.json();
             if (data.status !== 'setup') {
-                status.textContent = 'Services are up! Logging you in...';
-                await autoLogin();
+                status.textContent = 'Services are up! Redirecting...';
+                window.location.href = '/register';
                 return;
             }
         } catch(e) {
@@ -499,33 +368,6 @@ async function pollForDashboard() {
     status.textContent = 'Taking longer than expected. Check the terminal for details, or reload this page.';
 }
 
-async function autoLogin() {
-    const username = sessionStorage.getItem('pelicula_setup_user');
-    const password = sessionStorage.getItem('pelicula_setup_pass');
-    sessionStorage.removeItem('pelicula_setup_user');
-    sessionStorage.removeItem('pelicula_setup_pass');
-
-    if (!username || !password) {
-        window.location.href = '/';
-        return;
-    }
-
-    try {
-        const r = await fetch('/api/pelicula/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
-        });
-        if (r.ok) {
-            window.location.href = '/';
-            return;
-        }
-    } catch(e) {
-        console.error('auto-login failed', e);
-    }
-    // Fallback: redirect anyway, user will see login screen
-    window.location.href = '/';
-}
 </script>
 </body>
 </html>

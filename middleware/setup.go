@@ -13,14 +13,12 @@ import (
 
 // SetupRequest is the JSON body submitted by the browser wizard.
 type SetupRequest struct {
-	AdminUsername string `json:"admin_username"`
-	AdminPassword string `json:"admin_password"`
-	ConfigDir     string `json:"config_dir"`
-	MediaDir      string `json:"media_dir"`
-	LibraryDir    string `json:"library_dir"`
-	WorkDir       string `json:"work_dir"`
-	WireguardKey  string `json:"wireguard_key"`
-	VPNSkipped    bool   `json:"vpn_skipped"`
+	ConfigDir    string `json:"config_dir"`
+	MediaDir     string `json:"media_dir"`
+	LibraryDir   string `json:"library_dir"`
+	WorkDir      string `json:"work_dir"`
+	WireguardKey string `json:"wireguard_key"`
+	VPNSkipped   bool   `json:"vpn_skipped"`
 }
 
 // SetupDetect is returned by GET /api/pelicula/setup/detect.
@@ -61,17 +59,6 @@ func handleSetupDetect(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func handleGeneratePassword(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"password": generateReadablePassword(),
-	})
-}
-
 func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -89,24 +76,8 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate admin credentials
-	if req.AdminUsername == "" {
-		http.Error(w, "admin_username is required", http.StatusBadRequest)
-		return
-	}
-	if !validUsername(req.AdminUsername) {
-		http.Error(w, "admin_username is invalid (1-64 chars, no control chars or slashes)", http.StatusBadRequest)
-		return
-	}
-	if len(req.AdminPassword) < 8 {
-		http.Error(w, "admin_password must be at least 8 characters", http.StatusBadRequest)
-		return
-	}
-
 	// Sanitize all string fields
 	for _, check := range []struct{ name, val string }{
-		{"admin_username", req.AdminUsername},
-		{"admin_password", req.AdminPassword},
 		{"wireguard_key", req.WireguardKey},
 		{"config_dir", req.ConfigDir},
 		{"media_dir", req.MediaDir},
@@ -175,8 +146,6 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"SERVER_COUNTRIES":      "Netherlands",
 		"PELICULA_PORT":         "7354",
 		"PELICULA_AUTH":         "jellyfin",
-		"JELLYFIN_ADMIN_USER":   req.AdminUsername,
-		"JELLYFIN_PASSWORD":     req.AdminPassword,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
@@ -191,7 +160,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("setup wizard completed", "component", "setup", "admin", req.AdminUsername, "vpn", !req.VPNSkipped)
+	slog.Info("setup wizard completed", "component", "setup", "vpn", !req.VPNSkipped)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
