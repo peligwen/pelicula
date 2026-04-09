@@ -2,7 +2,43 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 )
+
+func cmdRedeploy(args []string) {
+	scriptDir := getScriptDir()
+	requireEnv(filepath.Join(scriptDir, ".env"))
+
+	plat := Detect(scriptDir)
+	c := NewCompose(scriptDir, plat.NeedsSudo)
+
+	targets := args
+	if len(targets) == 0 {
+		targets = []string{"pelicula-api", "procula"}
+	}
+
+	for _, svc := range targets {
+		switch svc {
+		case "pelicula-api", "middleware", "procula":
+			// normalise middleware alias
+			if svc == "middleware" {
+				svc = "pelicula-api"
+			}
+		default:
+			warn("Unknown service '" + svc + "'. Known targets: pelicula-api, procula")
+			return
+		}
+	}
+
+	info("Building images: " + strings.Join(targets, ", "))
+	buildArgs := append([]string{"build"}, targets...)
+	if err := c.Run(buildArgs...); err != nil {
+		fatal("build failed: " + err.Error())
+	}
+
+	cmdDown(nil)
+	cmdUp(nil)
+}
 
 func cmdRebuild(args []string) {
 	scriptDir := getScriptDir()

@@ -37,6 +37,8 @@ func main() {
 		cmdRestartAcquire(args[1:])
 	case "rebuild":
 		cmdRebuild(args[1:])
+	case "redeploy":
+		cmdRedeploy(args[1:])
 	case "reset-config":
 		cmdResetConfig(args[1:])
 	case "status":
@@ -86,6 +88,7 @@ Lifecycle:
   down                Stop the stack
   restart [service]   Restart service(s)
   rebuild [service]   Rebuild and restart middleware/procula/nginx
+  redeploy [service]  Rebuild images then do a full stack down/up
   update              Pull latest images and restart
   status              Show service health
   logs [service]      Tail service logs

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -162,7 +164,7 @@ func cmdUp(_ []string) {
 		c.profiles = append(c.profiles, "apprise")
 	}
 
-	if err := c.RunQuiet("up", "-d", "--remove-orphans"); err != nil {
+	if err := c.Run("up", "-d", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
 
@@ -220,8 +222,43 @@ func cmdUp(_ []string) {
 		}
 	}
 
+	// Check if any admin has registered yet. The middleware may still be
+	// starting, so poll for up to 15 seconds before giving up quietly.
+	regURL := fmt.Sprintf("http://localhost:%s/api/pelicula/register/check", port)
+	if needsAdmin := checkNeedsAdmin(regURL); needsAdmin {
+		fmt.Printf("  %s%s No admin account yet — register now:%s\n", colorYellow, colorBold, colorReset)
+		dashURL := fmt.Sprintf("http://%s:%s/register", host, port)
+		fmt.Printf("  %s\n", dashURL)
+		fmt.Println()
+		openBrowser(dashURL)
+	}
+
 	fmt.Println()
 
+}
+
+// checkNeedsAdmin polls the register/check endpoint (up to 15s) and returns
+// true if initial_setup is true (no admin has registered yet).
+func checkNeedsAdmin(url string) bool {
+	client := &http.Client{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		var data struct {
+			InitialSetup bool `json:"initial_setup"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		resp.Body.Close()
+		if err != nil {
+			return false
+		}
+		return data.InitialSetup
+	}
+	return false
 }
 
 // lanIP returns the first non-loopback IPv4 address, or "localhost" if none found.
