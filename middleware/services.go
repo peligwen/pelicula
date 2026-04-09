@@ -31,6 +31,9 @@ type xmlConfig struct {
 	ApiKey  string   `xml:"ApiKey"`
 }
 
+// qbtBaseURL is the base URL for qBittorrent (runs on gluetun's network namespace).
+var qbtBaseURL = envOr("QBITTORRENT_URL", "http://gluetun:8080")
+
 func NewServiceClients(configDir string) *ServiceClients {
 	s := &ServiceClients{
 		configDir: configDir,
@@ -145,7 +148,7 @@ func (s *ServiceClients) ArrPost(baseURL, apiKey, path string, payload any) ([]b
 
 // QbtGet makes a GET request to qBittorrent (via Docker network, auth bypass).
 func (s *ServiceClients) QbtGet(path string) ([]byte, error) {
-	resp, err := s.client.Get("http://gluetun:8080" + path)
+	resp, err := s.client.Get(qbtBaseURL + path)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +165,7 @@ func (s *ServiceClients) QbtGet(path string) ([]byte, error) {
 
 // QbtPost makes a form-encoded POST request to qBittorrent.
 func (s *ServiceClients) QbtPost(path string, form string) error {
-	req, err := http.NewRequest("POST", "http://gluetun:8080"+path, bytes.NewBufferString(form))
+	req, err := http.NewRequest("POST", qbtBaseURL+path, bytes.NewBufferString(form))
 	if err != nil {
 		return err
 	}
@@ -219,13 +222,13 @@ func (s *ServiceClients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraPar
 func (s *ServiceClients) CheckHealth() map[string]string {
 	results := make(map[string]string)
 	checks := map[string]string{
-		"sonarr":      "http://sonarr:8989/sonarr/ping",
-		"radarr":      "http://radarr:7878/radarr/ping",
-		"prowlarr":    "http://prowlarr:9696/prowlarr/ping",
-		"qbittorrent": "http://gluetun:8080/",
-		"jellyfin":    "http://jellyfin:8096/jellyfin/health",
-		"procula":     "http://procula:8282/ping",
-		"bazarr":      "http://bazarr:6767/bazarr/",
+		"sonarr":      sonarrURL + "/ping",
+		"radarr":      radarrURL + "/ping",
+		"prowlarr":    prowlarrURL + "/ping",
+		"qbittorrent": qbtBaseURL + "/",
+		"jellyfin":    jellyfinURL + "/health",
+		"procula":     proculaBaseURL() + "/ping",
+		"bazarr":      bazarrURL + "/",
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex

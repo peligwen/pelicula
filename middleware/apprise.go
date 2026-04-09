@@ -32,6 +32,9 @@ func loadAppriseConfig() *appriseNotifConfig {
 	return &cfg
 }
 
+// appriseURL is the base URL for the Apprise notification container.
+var appriseURL = envOr("APPRISE_URL", "http://apprise:8000/notify")
+
 // notifyApprise sends a notification via the Apprise container if configured.
 // Non-fatal: logs on error and returns.
 func notifyApprise(title, body string) {
@@ -47,7 +50,7 @@ func notifyApprise(title, body string) {
 	}
 	data, _ := json.Marshal(payload)
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post("http://apprise:8000/notify", "application/json", bytes.NewReader(data))
+	resp, err := client.Post(appriseURL, "application/json", bytes.NewReader(data))
 	if err != nil {
 		slog.Warn("apprise notification failed", "component", "requests", "error", err)
 		return

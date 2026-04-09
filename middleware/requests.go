@@ -259,6 +259,31 @@ func generateRequestID() string {
 	return fmt.Sprintf("req_%d_%s", time.Now().UnixMilli(), generateAPIKey()[:6])
 }
 
+// InsertFull inserts a media request from a backup export, preserving all
+// fields including the ID, timestamps, and event history. Silently succeeds
+// if the ID already exists (idempotent restore).
+func (s *RequestStore) InsertFull(req RequestExport) error {
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
+		                                 requested_by, state, reason, arr_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
+		req.RequestedBy, string(req.State), req.Reason, req.ArrID,
+		req.CreatedAt.UTC().Format(time.RFC3339Nano), req.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return err
+	}
+	// Insert history events, ignoring duplicates.
+	for _, ev := range req.History {
+		s.db.Exec( //nolint:errcheck — best-effort
+			`INSERT OR IGNORE INTO request_events (request_id, at, state, actor, note) VALUES (?, ?, ?, ?, ?)`,
+			req.ID, ev.At.UTC().Format(time.RFC3339Nano), string(ev.State), ev.Actor, ev.Note,
+		)
+	}
+	return nil
+}
+
 // --- HTTP handlers ---
 
 // handleRequests dispatches GET (list) and POST (create) on /api/pelicula/requests.

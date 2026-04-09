@@ -15,8 +15,9 @@ import (
 	"unicode"
 )
 
-// jellyfinURL is a var (not const) so tests can point it at an httptest.Server.
-var jellyfinURL = "http://jellyfin:8096/jellyfin"
+// jellyfinURL is a var (not const) so tests can point it at an httptest.Server
+// and so power users can override it via JELLYFIN_URL.
+var jellyfinURL = envOr("JELLYFIN_URL", "http://jellyfin:8096/jellyfin")
 
 const embyAuthHeader = `MediaBrowser Client="Pelicula", Device="pelicula-api", DeviceId="pelicula-autowire", Version="1.0"`
 

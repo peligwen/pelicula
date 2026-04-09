@@ -103,10 +103,13 @@ func queryVPNStatus() VPNStatus {
 	return vpn
 }
 
+// gluetunControlURL is the base URL for the Gluetun control API (port 8000).
+var gluetunControlURL = envOr("GLUETUN_CONTROL_URL", "http://gluetun:8000")
+
 // gluetunGet makes a GET request to the Gluetun control API and returns the
 // response body. Returns (nil, false) on any error or non-200 status.
 func gluetunGet(client *http.Client, path string) ([]byte, bool) {
-	resp, err := client.Get("http://gluetun:8000" + path)
+	resp, err := client.Get(gluetunControlURL + path)
 	if err != nil {
 		return nil, false
 	}

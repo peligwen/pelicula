@@ -11,11 +11,47 @@ import (
 
 // ── Export types ─────────────────────────────────────────────────────────────
 
+const currentBackupVersion = 2
+
 type BackupExport struct {
-	Version  int            `json:"version"`
-	Exported string         `json:"exported"`
-	Movies   []MovieExport  `json:"movies"`
-	Series   []SeriesExport `json:"series"`
+	Version         int             `json:"version"`
+	PeliculaVersion string          `json:"pelicula_version,omitempty"`
+	Exported        string          `json:"exported"`
+	Movies          []MovieExport   `json:"movies"`
+	Series          []SeriesExport  `json:"series"`
+	Roles           []RolesEntry    `json:"roles,omitempty"`
+	Invites         []InviteExport  `json:"invites,omitempty"`
+	Requests        []RequestExport `json:"requests,omitempty"`
+}
+
+// InviteExport captures the full state of an invite for backup/restore.
+type InviteExport struct {
+	Token     string       `json:"token"`
+	Label     string       `json:"label,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	CreatedBy string       `json:"created_by"`
+	ExpiresAt *time.Time   `json:"expires_at,omitempty"`
+	MaxUses   *int         `json:"max_uses,omitempty"`
+	Uses      int          `json:"uses"`
+	Revoked   bool         `json:"revoked"`
+}
+
+// RequestExport captures the full state of a media request for backup/restore.
+type RequestExport struct {
+	ID          string         `json:"id"`
+	Type        string         `json:"type"`
+	TmdbID      int            `json:"tmdb_id"`
+	TvdbID      int            `json:"tvdb_id"`
+	Title       string         `json:"title"`
+	Year        int            `json:"year"`
+	Poster      string         `json:"poster,omitempty"`
+	RequestedBy string         `json:"requested_by"`
+	State       RequestState   `json:"state"`
+	Reason      string         `json:"reason,omitempty"`
+	ArrID       int            `json:"arr_id,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	History     []RequestEvent `json:"history"`
 }
 
 type MovieExport struct {
@@ -125,15 +161,65 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Export roles (from auth middleware's rolesStore, may be nil if auth is off)
+	var roles []RolesEntry
+	if authMiddleware != nil && authMiddleware.rolesStore != nil {
+		roles = authMiddleware.rolesStore.All()
+	}
+
+	// Export invites
+	var invites []InviteExport
+	if inviteStore != nil {
+		for _, iws := range inviteStore.ListInvites() {
+			invites = append(invites, InviteExport{
+				Token:     iws.Token,
+				Label:     iws.Label,
+				CreatedAt: iws.CreatedAt,
+				CreatedBy: iws.CreatedBy,
+				ExpiresAt: iws.ExpiresAt,
+				MaxUses:   iws.MaxUses,
+				Uses:      iws.Uses,
+				Revoked:   iws.Revoked,
+			})
+		}
+	}
+
+	// Export requests
+	var requests []RequestExport
+	if requestStore != nil {
+		for _, req := range requestStore.all() {
+			requests = append(requests, RequestExport{
+				ID:          req.ID,
+				Type:        req.Type,
+				TmdbID:      req.TmdbID,
+				TvdbID:      req.TvdbID,
+				Title:       req.Title,
+				Year:        req.Year,
+				Poster:      req.Poster,
+				RequestedBy: req.RequestedBy,
+				State:       req.State,
+				Reason:      req.Reason,
+				ArrID:       req.ArrID,
+				CreatedAt:   req.CreatedAt,
+				UpdatedAt:   req.UpdatedAt,
+				History:     req.History,
+			})
+		}
+	}
+
 	export := BackupExport{
-		Version:  1,
+		Version:  currentBackupVersion,
 		Exported: time.Now().UTC().Format(time.RFC3339),
 		Movies:   movies,
 		Series:   series,
+		Roles:    roles,
+		Invites:  invites,
+		Requests: requests,
 	}
 
 	slog.Info("export complete", "component", "export",
-		"movies", len(movies), "series", len(series))
+		"movies", len(movies), "series", len(series),
+		"roles", len(roles), "invites", len(invites), "requests", len(requests))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition",
@@ -148,13 +234,13 @@ func handleImportBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB
+	r.Body = http.MaxBytesReader(w, r.Body, 100<<20) // 100 MB
 	var backup BackupExport
 	if err := json.NewDecoder(r.Body).Decode(&backup); err != nil {
 		writeError(w, "invalid backup JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if backup.Version != 1 {
+	if backup.Version < 1 || backup.Version > currentBackupVersion {
 		writeError(w, fmt.Sprintf("unsupported backup version %d", backup.Version), http.StatusBadRequest)
 		return
 	}
@@ -183,12 +269,65 @@ func handleImportBackup(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 
+	// v2+ backups may include roles, invites, and requests.
+	if backup.Version >= 2 {
+		importRoles(backup.Roles, result)
+		importInvites(backup.Invites, result)
+		importRequests(backup.Requests, result)
+	}
+
 	slog.Info("import complete", "component", "export",
 		"movies_added", result.MoviesAdded, "movies_skipped", result.MoviesSkipped,
 		"series_added", result.SeriesAdded, "series_skipped", result.SeriesSkipped,
 		"errors", len(result.Errors))
 
 	writeJSON(w, result)
+}
+
+// importRoles upserts roles from a v2 backup into the roles store.
+func importRoles(roles []RolesEntry, result *ImportResult) {
+	if len(roles) == 0 {
+		return
+	}
+	if authMiddleware == nil || authMiddleware.rolesStore == nil {
+		slog.Warn("roles import skipped: rolesStore not available (auth mode is not jellyfin)", "component", "export")
+		return
+	}
+	for _, entry := range roles {
+		if err := authMiddleware.rolesStore.Upsert(entry.JellyfinID, entry.Username, entry.Role); err != nil {
+			slog.Warn("failed to upsert role from backup", "component", "export",
+				"jellyfin_id", entry.JellyfinID, "error", err)
+			result.Errors = append(result.Errors, fmt.Sprintf("role %q (id:%s): %v", entry.Username, entry.JellyfinID, err))
+		}
+	}
+}
+
+// importInvites inserts invites from a v2 backup, skipping tokens that already exist.
+func importInvites(invites []InviteExport, result *ImportResult) {
+	if len(invites) == 0 || inviteStore == nil {
+		return
+	}
+	for _, inv := range invites {
+		if err := inviteStore.InsertFull(inv); err != nil {
+			slog.Warn("failed to insert invite from backup", "component", "export",
+				"token", inv.Token[:8]+"...", "error", err)
+			// Don't add to errors — duplicate tokens are expected and silently skipped
+		}
+	}
+}
+
+// importRequests inserts requests from a v2 backup, skipping IDs that already exist.
+func importRequests(requests []RequestExport, result *ImportResult) {
+	if len(requests) == 0 || requestStore == nil {
+		return
+	}
+	for _, req := range requests {
+		if err := requestStore.InsertFull(req); err != nil {
+			slog.Warn("failed to insert request from backup", "component", "export",
+				"id", req.ID, "error", err)
+			// Don't add to errors — duplicate IDs are expected and silently skipped
+		}
+	}
 }
 
 // ── Export helpers ────────────────────────────────────────────────────────────
@@ -535,15 +674,21 @@ func loadExistingSeriesIDs(apiKey string) map[int]bool {
 	return m
 }
 
-// resolveProfileID looks up profile ID by name; returns 1 if not found.
+// resolveProfileID looks up profile ID by name.
+// If not found, logs a warning and falls back to the first available profile
+// (or 1 if the map is empty). The warning makes profile mismatches visible.
 func resolveProfileID(name string, nameMap map[string]int) int {
 	if id, ok := nameMap[name]; ok {
 		return id
 	}
 	// Fall back to first available profile
 	for _, id := range nameMap {
+		slog.Warn("quality profile not found, using fallback",
+			"component", "export", "requested", name, "fallback_id", id)
 		return id
 	}
+	slog.Warn("quality profile not found and no profiles available, using id=1",
+		"component", "export", "requested", name)
 	return 1
 }
 

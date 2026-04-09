@@ -191,6 +191,31 @@ func (s *InviteStore) CreateInvite(createdBy, label string, expiresAt *time.Time
 	return inv, nil
 }
 
+// InsertFull inserts an invite record from a backup export, preserving all
+// fields including the token and timestamps. Silently succeeds if the token
+// already exists (idempotent restore).
+func (s *InviteStore) InsertFull(inv InviteExport) error {
+	var expiresAtStr interface{}
+	if inv.ExpiresAt != nil {
+		expiresAtStr = inv.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	var maxUsesVal interface{}
+	if inv.MaxUses != nil {
+		maxUsesVal = *inv.MaxUses
+	}
+	revokedInt := 0
+	if inv.Revoked {
+		revokedInt = 1
+	}
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO invites (token, label, created_at, created_by, expires_at, max_uses, uses, revoked)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		inv.Token, inv.Label, inv.CreatedAt.UTC().Format(time.RFC3339),
+		inv.CreatedBy, expiresAtStr, maxUsesVal, inv.Uses, revokedInt,
+	)
+	return err
+}
+
 // ListInvites returns all invites with their derived states.
 func (s *InviteStore) ListInvites() []InviteWithState {
 	rows, err := s.db.Query(

@@ -10,12 +10,13 @@ import (
 	"time"
 )
 
-const (
-	sonarrURL   = "http://sonarr:8989/sonarr"
-	radarrURL   = "http://radarr:7878/radarr"
-	prowlarrURL = "http://prowlarr:9696/prowlarr"
-	bazarrURL   = "http://bazarr:6767/bazarr"
+var (
+	sonarrURL   = envOr("SONARR_URL", "http://sonarr:8989/sonarr")
+	radarrURL   = envOr("RADARR_URL", "http://radarr:7878/radarr")
+	prowlarrURL = envOr("PROWLARR_URL", "http://prowlarr:9696/prowlarr")
+	bazarrURL   = envOr("BAZARR_URL", "http://bazarr:6767/bazarr")
 )
+
 
 func AutoWire(s *ServiceClients) error {
 	slog.Info("waiting for services to be ready", "component", "autowire")
@@ -68,7 +69,7 @@ func waitForServices(s *ServiceClients) error {
 		"sonarr":      sonarrURL + "/ping",
 		"radarr":      radarrURL + "/ping",
 		"prowlarr":    prowlarrURL + "/ping",
-		"qbittorrent": "http://gluetun:8080/",
+		"qbittorrent": qbtBaseURL + "/",
 		"jellyfin":    jellyfinURL + "/System/Info/Public",
 	}
 	endpoints["bazarr"] = bazarrURL + "/api/system/status"
@@ -202,7 +203,7 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 		}
 	}
 
-	hookURL := "http://pelicula-api:8181/api/pelicula/hooks/import"
+	hookURL := envOr("PELICULA_API_URL", "http://pelicula-api:8181") + "/api/pelicula/hooks/import"
 	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
 		hookURL += "?secret=" + url.QueryEscape(secret)
 	}

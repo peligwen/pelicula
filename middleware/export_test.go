@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestResolveProfileID(t *testing.T) {
@@ -149,6 +154,264 @@ func TestExtractSeasons(t *testing.T) {
 		seasons := extractSeasons(map[string]any{})
 		if len(seasons) != 0 {
 			t.Errorf("expected empty, got %v", seasons)
+		}
+	})
+}
+
+// ── Backup version tests ───────────────────────────────────────────────────
+
+func TestBackupVersionBoundaries(t *testing.T) {
+	// Helper that POSTs a backup JSON to handleImportBackup and returns the response code.
+	post := func(t *testing.T, payload BackupExport) int {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/import-backup", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		// handleImportBackup calls services.Keys() — stub them.
+		origServices := services
+		services = &ServiceClients{}
+		t.Cleanup(func() { services = origServices })
+
+		handleImportBackup(w, req)
+		return w.Code
+	}
+
+	t.Run("version 0 rejected", func(t *testing.T) {
+		code := post(t, BackupExport{Version: 0})
+		if code != http.StatusBadRequest {
+			t.Errorf("got %d, want 400", code)
+		}
+	})
+
+	t.Run("version 99 rejected", func(t *testing.T) {
+		code := post(t, BackupExport{Version: 99})
+		if code != http.StatusBadRequest {
+			t.Errorf("got %d, want 400", code)
+		}
+	})
+
+	t.Run("version 1 accepted (keys missing → 503)", func(t *testing.T) {
+		// Version is valid; missing API keys yield 503, not 400.
+		code := post(t, BackupExport{Version: 1})
+		if code != http.StatusServiceUnavailable {
+			t.Errorf("got %d, want 503", code)
+		}
+	})
+
+	t.Run("version 2 accepted (keys missing → 503)", func(t *testing.T) {
+		code := post(t, BackupExport{Version: 2})
+		if code != http.StatusServiceUnavailable {
+			t.Errorf("got %d, want 503", code)
+		}
+	})
+}
+
+// ── InviteStore.InsertFull tests ───────────────────────────────────────────
+
+func TestInviteStoreInsertFull(t *testing.T) {
+	db := testDB(t)
+	store := NewInviteStore(db)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	maxUses := 5
+
+	inv := InviteExport{
+		Token:     "aaaabbbbccccddddeeeeffffgggghhhh123", // 43 chars
+		Label:     "test-invite",
+		CreatedAt: now,
+		CreatedBy: "admin",
+		MaxUses:   &maxUses,
+		Uses:      2,
+		Revoked:   false,
+	}
+
+	if err := store.InsertFull(inv); err != nil {
+		t.Fatalf("InsertFull: %v", err)
+	}
+
+	// Verify it's in the store.
+	list := store.ListInvites()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 invite, got %d", len(list))
+	}
+	got := list[0]
+	if got.Token != inv.Token {
+		t.Errorf("token = %q, want %q", got.Token, inv.Token)
+	}
+	if got.Label != inv.Label {
+		t.Errorf("label = %q, want %q", got.Label, inv.Label)
+	}
+	if got.Uses != inv.Uses {
+		t.Errorf("uses = %d, want %d", got.Uses, inv.Uses)
+	}
+
+	t.Run("idempotent on duplicate token", func(t *testing.T) {
+		// Second insert of same token must not error.
+		if err := store.InsertFull(inv); err != nil {
+			t.Errorf("second InsertFull: %v", err)
+		}
+		if len(store.ListInvites()) != 1 {
+			t.Error("expected still 1 invite after duplicate insert")
+		}
+	})
+}
+
+// ── RequestStore.InsertFull tests ─────────────────────────────────────────
+
+func TestRequestStoreInsertFull(t *testing.T) {
+	db := testDB(t)
+	store := NewRequestStore(db)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	req := RequestExport{
+		ID:          "req_backup_001",
+		Type:        "movie",
+		TmdbID:      12345,
+		Title:       "Test Movie",
+		Year:        2024,
+		RequestedBy: "viewer1",
+		State:       RequestPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		History: []RequestEvent{
+			{At: now, State: RequestPending, Actor: "viewer1"},
+		},
+	}
+
+	if err := store.InsertFull(req); err != nil {
+		t.Fatalf("InsertFull: %v", err)
+	}
+
+	// Verify it's in the store.
+	all := store.all()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(all))
+	}
+	got := all[0]
+	if got.ID != req.ID {
+		t.Errorf("id = %q, want %q", got.ID, req.ID)
+	}
+	if got.Title != req.Title {
+		t.Errorf("title = %q, want %q", got.Title, req.Title)
+	}
+	if len(got.History) != 1 {
+		t.Errorf("history len = %d, want 1", len(got.History))
+	}
+
+	t.Run("idempotent on duplicate id", func(t *testing.T) {
+		if err := store.InsertFull(req); err != nil {
+			t.Errorf("second InsertFull: %v", err)
+		}
+		if len(store.all()) != 1 {
+			t.Error("expected still 1 request after duplicate insert")
+		}
+	})
+}
+
+// ── v1 backup import compatibility test ───────────────────────────────────
+
+func TestImportV1BackupHasNoRolesInvitesRequests(t *testing.T) {
+	// A v1 backup JSON: only movies/series, no roles/invites/requests.
+	v1 := `{"version":1,"exported":"2025-01-01T00:00:00Z","movies":[],"series":[]}`
+	var backup BackupExport
+	if err := json.Unmarshal([]byte(v1), &backup); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if backup.Version != 1 {
+		t.Errorf("version = %d, want 1", backup.Version)
+	}
+	if len(backup.Roles) != 0 || len(backup.Invites) != 0 || len(backup.Requests) != 0 {
+		t.Error("v1 backup should have no roles/invites/requests")
+	}
+}
+
+// ── v2 backup struct roundtrip test ───────────────────────────────────────
+
+func TestBackupExportV2Roundtrip(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	maxUses := 1
+	export := BackupExport{
+		Version:  2,
+		Exported: now.Format(time.RFC3339),
+		Movies:   []MovieExport{},
+		Series:   []SeriesExport{},
+		Roles: []RolesEntry{
+			{JellyfinID: "jf-001", Username: "alice", Role: RoleAdmin},
+		},
+		Invites: []InviteExport{
+			{
+				Token: "aaaabbbbccccddddeeeeffffgggghhhh123",
+				Label: "family",
+				CreatedAt: now,
+				CreatedBy: "admin",
+				MaxUses:   &maxUses,
+				Uses:      0,
+			},
+		},
+		Requests: []RequestExport{
+			{
+				ID:          "req_test_001",
+				Type:        "movie",
+				TmdbID:      999,
+				Title:       "Some Film",
+				Year:        2025,
+				RequestedBy: "alice",
+				State:       RequestPending,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+				History:     []RequestEvent{{At: now, State: RequestPending, Actor: "alice"}},
+			},
+		},
+	}
+
+	// Marshal + unmarshal roundtrip.
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got BackupExport
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.Version != 2 {
+		t.Errorf("version = %d, want 2", got.Version)
+	}
+	if len(got.Roles) != 1 || got.Roles[0].JellyfinID != "jf-001" {
+		t.Errorf("roles = %v", got.Roles)
+	}
+	if len(got.Invites) != 1 || got.Invites[0].Token != "aaaabbbbccccddddeeeeffffgggghhhh123" {
+		t.Errorf("invites = %v", got.Invites)
+	}
+	if len(got.Requests) != 1 || got.Requests[0].ID != "req_test_001" {
+		t.Errorf("requests = %v", got.Requests)
+	}
+}
+
+// ── resolveProfileID warning tests ────────────────────────────────────────
+
+func TestResolveProfileIDWithWarning(t *testing.T) {
+	t.Run("known profile returns exact match silently", func(t *testing.T) {
+		m := map[string]int{"HD-1080p": 3, "Any": 1}
+		got := resolveProfileID("HD-1080p", m)
+		if got != 3 {
+			t.Errorf("got %d, want 3", got)
+		}
+	})
+
+	t.Run("unknown profile falls back to first available", func(t *testing.T) {
+		m := map[string]int{"Any": 5}
+		got := resolveProfileID("MissingProfile", m)
+		if got != 5 {
+			t.Errorf("got %d, want 5 (first available)", got)
+		}
+	})
+
+	t.Run("empty map returns 1", func(t *testing.T) {
+		got := resolveProfileID("anything", map[string]int{})
+		if got != 1 {
+			t.Errorf("got %d, want 1", got)
 		}
 	})
 }
