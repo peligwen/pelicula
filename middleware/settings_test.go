@@ -135,7 +135,6 @@ func newSettingsEnv(t *testing.T) string {
 		"SERVER_COUNTRIES":      "Netherlands",
 		"PELICULA_PORT":         "7354",
 		"PELICULA_AUTH":         "off",
-		"PELICULA_PASSWORD":     "",
 		"PROCULA_API_KEY":       "testkey",
 		"WEBHOOK_SECRET":        "testsecret",
 		"TRANSCODING_ENABLED":   "false",
@@ -202,7 +201,7 @@ func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
 }
 
 func TestHandleSettingsUpdate_AcceptsValidAuthMode(t *testing.T) {
-	for _, mode := range []string{"off", "password", "users", "true", "jellyfin"} {
+	for _, mode := range []string{"off", "jellyfin"} {
 		t.Run(mode, func(t *testing.T) {
 			body, _ := json.Marshal(SettingsResponse{AuthMode: mode})
 			req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))

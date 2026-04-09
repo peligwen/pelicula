@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -43,27 +42,14 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-// testHash is a test helper that hashes a password, panicking on error.
-// crypto/rand.Read never returns an error in practice (Go 1.20+ guarantee).
-func testHash(username, plaintext string) string {
-	h, err := hashPassword(username, plaintext)
-	if err != nil {
-		panic("hashPassword: " + err.Error())
-	}
-	return h
-}
-
 // newTestAuth creates an Auth for testing without touching the filesystem.
 // The cleanup goroutine is harmless in tests (sleeps 10 min, then GC'd).
-func newTestAuth(mode, password string, users []User) *Auth {
-	a := &Auth{
+func newTestAuth(mode string) *Auth {
+	return &Auth{
 		mode:     mode,
-		password: password,
 		sessions: make(map[string]session),
 		failures: make(map[string]*loginAttempts),
-		users:    users,
 	}
-	return a
 }
 
 // newTestJellyfinAuth creates an Auth in "jellyfin" mode for testing.
@@ -134,155 +120,10 @@ func TestUserRoleAtLeast(t *testing.T) {
 	}
 }
 
-func TestHashPassword(t *testing.T) {
-	t.Run("format is sha256v2:SALT:HASH", func(t *testing.T) {
-		h := testHash("alice", "secret")
-		parts := strings.Split(h, ":")
-		if len(parts) != 3 {
-			t.Fatalf("expected 3 colon-separated parts, got %d in %q", len(parts), h)
-		}
-		if parts[0] != "sha256v2" {
-			t.Errorf("prefix = %q, want %q", parts[0], "sha256v2")
-		}
-		if len(parts[1]) == 0 {
-			t.Error("salt is empty")
-		}
-		if len(parts[2]) == 0 {
-			t.Error("hash is empty")
-		}
-	})
-
-	t.Run("same password hashed twice has different salts", func(t *testing.T) {
-		h1 := testHash("alice", "secret")
-		h2 := testHash("alice", "secret")
-		if h1 == h2 {
-			t.Error("expected different hashes due to random salt")
-		}
-	})
-}
-
-func TestVerifyPassword(t *testing.T) {
-	t.Run("correct password verifies", func(t *testing.T) {
-		h := testHash("alice", "correct-horse")
-		if !verifyPassword("alice", "correct-horse", h) {
-			t.Error("expected correct password to verify")
-		}
-	})
-
-	t.Run("wrong password fails", func(t *testing.T) {
-		h := testHash("alice", "correct-horse")
-		if verifyPassword("alice", "wrong-horse", h) {
-			t.Error("expected wrong password to fail")
-		}
-	})
-
-	t.Run("legacy format: plain sha256 of user:pass", func(t *testing.T) {
-		// Legacy format: sha256(username + ":" + password) as plain hex, no prefix.
-		raw := sha256.Sum256([]byte("alice:legacy"))
-		legacyHash := hex.EncodeToString(raw[:])
-		if !verifyPassword("alice", "legacy", legacyHash) {
-			t.Error("expected legacy hash to verify correctly")
-		}
-	})
-
-	t.Run("empty stored hash fails gracefully", func(t *testing.T) {
-		if verifyPassword("alice", "anything", "") {
-			t.Error("expected empty stored hash to return false")
-		}
-	})
-
-	t.Run("wrong username fails even with correct password", func(t *testing.T) {
-		h := testHash("alice", "secret")
-		if verifyPassword("bob", "secret", h) {
-			t.Error("expected wrong username to fail verification")
-		}
-	})
-}
-
 // ── HandleLogin ─────────────────────────────────────────────────────────
 
-func TestLogin_PasswordMode_Success(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
-	body := strings.NewReader(`{"username":"admin","password":"secret"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
-	w := httptest.NewRecorder()
-	a.HandleLogin(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	m := parseJSONBody(t, w)
-	if m["role"] != "admin" {
-		t.Errorf("role = %v, want admin", m["role"])
-	}
-	cookies := w.Result().Cookies()
-	var found bool
-	for _, c := range cookies {
-		if c.Name == "pelicula_session" {
-			found = true
-			if !c.HttpOnly {
-				t.Error("cookie should be HttpOnly")
-			}
-		}
-	}
-	if !found {
-		t.Error("expected pelicula_session cookie to be set")
-	}
-}
-
-func TestLogin_PasswordMode_WrongPassword(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
-	body := strings.NewReader(`{"username":"admin","password":"wrong"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
-	w := httptest.NewRecorder()
-	a.HandleLogin(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", w.Code)
-	}
-}
-
-func TestLogin_UsersMode(t *testing.T) {
-	hash := testHash("alice", "pass123")
-	users := []User{{Username: "alice", Password: hash, Role: RoleViewer}}
-	a := newTestAuth("users", "", users)
-
-	t.Run("correct credentials", func(t *testing.T) {
-		body := strings.NewReader(`{"username":"alice","password":"pass123"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
-		w := httptest.NewRecorder()
-		a.HandleLogin(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", w.Code)
-		}
-		m := parseJSONBody(t, w)
-		if m["role"] != "viewer" {
-			t.Errorf("role = %v, want viewer", m["role"])
-		}
-	})
-
-	t.Run("wrong password", func(t *testing.T) {
-		body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
-		w := httptest.NewRecorder()
-		a.HandleLogin(w, req)
-		if w.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401", w.Code)
-		}
-	})
-
-	t.Run("unknown user", func(t *testing.T) {
-		body := strings.NewReader(`{"username":"bob","password":"pass123"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
-		w := httptest.NewRecorder()
-		a.HandleLogin(w, req)
-		if w.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401", w.Code)
-		}
-	})
-}
-
 func TestLogin_AuthOff(t *testing.T) {
-	a := newTestAuth("off", "", nil)
+	a := newTestAuth("off")
 	body := strings.NewReader(`{"username":"any","password":"any"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
@@ -297,7 +138,7 @@ func TestLogin_AuthOff(t *testing.T) {
 }
 
 func TestLogin_MethodNotAllowed(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/login", nil)
 	w := httptest.NewRecorder()
 	a.HandleLogin(w, req)
@@ -307,7 +148,7 @@ func TestLogin_MethodNotAllowed(t *testing.T) {
 }
 
 func TestLogin_BadJSON(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	body := strings.NewReader(`not json`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
@@ -318,7 +159,8 @@ func TestLogin_BadJSON(t *testing.T) {
 }
 
 func TestLogin_RateLimited(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	srv := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
 	ip := "1.2.3.4"
 	for i := 0; i < 5; i++ {
 		a.recordFailure(ip)
@@ -350,7 +192,7 @@ func TestLogin_RateLimited(t *testing.T) {
 // ── HandleLogout ────────────────────────────────────────────────────────
 
 func TestLogout_ClearsSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	token := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/logout", nil)
@@ -377,7 +219,7 @@ func TestLogout_ClearsSession(t *testing.T) {
 }
 
 func TestLogout_NoCookie(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/logout", nil)
 	w := httptest.NewRecorder()
 	a.HandleLogout(w, req)
@@ -387,7 +229,7 @@ func TestLogout_NoCookie(t *testing.T) {
 }
 
 func TestLogout_MethodNotAllowed(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/logout", nil)
 	w := httptest.NewRecorder()
 	a.HandleLogout(w, req)
@@ -399,7 +241,7 @@ func TestLogout_MethodNotAllowed(t *testing.T) {
 // ── HandleCheck ─────────────────────────────────────────────────────────
 
 func TestCheck_AuthOff(t *testing.T) {
-	a := newTestAuth("off", "", nil)
+	a := newTestAuth("off")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
 	w := httptest.NewRecorder()
 	a.HandleCheck(w, req)
@@ -416,7 +258,7 @@ func TestCheck_AuthOff(t *testing.T) {
 }
 
 func TestCheck_ValidSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	token := insertSession(a, "alice", RoleManager, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
@@ -440,7 +282,7 @@ func TestCheck_ValidSession(t *testing.T) {
 }
 
 func TestCheck_NoSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
 	w := httptest.NewRecorder()
 	a.HandleCheck(w, req)
@@ -455,7 +297,7 @@ func TestCheck_NoSession(t *testing.T) {
 }
 
 func TestCheck_NginxSubrequest_NoSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
 	w := httptest.NewRecorder()
 	a.HandleCheck(w, req)
@@ -466,7 +308,7 @@ func TestCheck_NginxSubrequest_NoSession(t *testing.T) {
 }
 
 func TestCheck_NginxSubrequest_ValidSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
@@ -484,7 +326,7 @@ func TestCheck_NginxSubrequest_ValidSession(t *testing.T) {
 }
 
 func TestCheck_ExpiredSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(-time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
@@ -499,7 +341,7 @@ func TestCheck_ExpiredSession(t *testing.T) {
 // ── Guard middleware ────────────────────────────────────────────────────
 
 func TestGuard_AuthOff(t *testing.T) {
-	a := newTestAuth("off", "", nil)
+	a := newTestAuth("off")
 	called := false
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -515,7 +357,7 @@ func TestGuard_AuthOff(t *testing.T) {
 }
 
 func TestGuard_NoSession(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -529,7 +371,7 @@ func TestGuard_NoSession(t *testing.T) {
 }
 
 func TestGuard_RoleMatrix(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
+	a := newTestAuth("jellyfin")
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -573,7 +415,7 @@ func TestGuard_RoleMatrix(t *testing.T) {
 // bypass in guardRole does NOT protect handleUsers — instead handleUsers has its
 // own explicit off-mode check so POST is blocked even when GuardAdmin is a no-op.
 func TestGuardAdmin_OffMode_HandleUsers_StillBlocked(t *testing.T) {
-	a := newTestAuth("off", "", nil)
+	a := newTestAuth("off")
 	// In off mode, GuardAdmin passes through unconditionally.
 	called := false
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -596,8 +438,9 @@ func TestGuardAdmin_OffMode_HandleUsers_StillBlocked(t *testing.T) {
 // ── Session details ─────────────────────────────────────────────────────
 
 func TestSession_TokenFormat(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
-	body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+	srv := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
 	a.HandleLogin(w, req)
@@ -617,8 +460,9 @@ func TestSession_TokenFormat(t *testing.T) {
 }
 
 func TestSession_CookieAttributes(t *testing.T) {
-	a := newTestAuth("password", "secret", nil)
-	body := strings.NewReader(`{"username":"admin","password":"secret"}`)
+	srv := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, srv.Client())
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
 	a.HandleLogin(w, req)

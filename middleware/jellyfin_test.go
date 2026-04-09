@@ -44,7 +44,7 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) *httptest.Ser
 	// authMiddleware in off mode by default — tests that need a specific mode
 	// assign authMiddleware themselves.
 	origAuth := authMiddleware
-	authMiddleware = newTestAuth("users", "", nil) // non-off mode so POST isn't blocked
+	authMiddleware = newTestAuth("jellyfin") // non-off mode so POST isn't blocked
 	t.Cleanup(func() { authMiddleware = origAuth })
 	return srv
 }
@@ -235,7 +235,7 @@ func TestHandleUsers_PostForeignOrigin(t *testing.T) {
 func TestHandleUsers_OffMode(t *testing.T) {
 	// Restore global after test.
 	orig := authMiddleware
-	authMiddleware = newTestAuth("off", "", nil)
+	authMiddleware = newTestAuth("off")
 	t.Cleanup(func() { authMiddleware = orig })
 
 	body := strings.NewReader(`{"username":"bob","password":"hunter2"}`)
@@ -503,7 +503,7 @@ func TestHandleUsers_OffMode_GetIsAllowed(t *testing.T) {
 	resetServices(t)
 
 	// Switch authMiddleware to off mode.
-	authMiddleware = newTestAuth("off", "", nil)
+	authMiddleware = newTestAuth("off")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/users", nil)
 	w := httptest.NewRecorder()
@@ -792,7 +792,7 @@ func TestHandleUserPassword_EmptyPassword(t *testing.T) {
 
 func TestHandleUsersWithID_OffMode(t *testing.T) {
 	orig := authMiddleware
-	authMiddleware = newTestAuth("off", "", nil)
+	authMiddleware = newTestAuth("off")
 	t.Cleanup(func() { authMiddleware = orig })
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", nil)

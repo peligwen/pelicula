@@ -238,10 +238,10 @@ func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 // ── HTTP handler tests ───────────────────────────────────────────────────────
 
 func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
-	// Set up a store and users-mode auth (no active sessions → 401).
+	// Set up a store and jellyfin-mode auth (no active sessions → 401).
 	s := newRequestStore(t)
 	requestStore = s
-	authMiddleware = NewAuth(AuthConfig{Mode: "users", UsersFile: os.DevNull})
+	authMiddleware = NewAuth(AuthConfig{Mode: "jellyfin", RolesFile: t.TempDir() + "/roles.json"})
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",

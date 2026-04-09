@@ -255,8 +255,7 @@ func inviteAdminRequest(t *testing.T, method, path string, body any) *http.Reque
 	r := httptest.NewRequest(method, path, rb)
 	r.Header.Set("Content-Type", "application/json")
 	// Inject admin session
-	h, _ := hashPassword("admin", "secret")
-	a := newTestAuth("users", "", []User{{Username: "admin", Password: h, Role: RoleAdmin}})
+	a := newTestAuth("jellyfin")
 	tok := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
 	orig := authMiddleware
 	authMiddleware = a
@@ -418,7 +417,7 @@ func TestHandleInviteOffMode(t *testing.T) {
 	s := newTestInviteStore(t)
 	setInviteStore(t, s)
 	orig := authMiddleware
-	authMiddleware = newTestAuth("off", "", nil)
+	authMiddleware = newTestAuth("off")
 	t.Cleanup(func() { authMiddleware = orig })
 
 	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", strings.NewReader(`{}`))
