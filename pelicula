@@ -54,12 +54,6 @@ docker_cmd() {
     $NEEDS_SUDO docker "$@"
 }
 
-generate_password() {
-    local raw
-    raw="$(LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 15 2>/dev/null || openssl rand -hex 8 | head -c 15)"
-    echo "${raw:0:5}-${raw:5:5}-${raw:10:5}"
-}
-
 load_env() {
     if [[ ! -f "$ENV_FILE" ]]; then
         echo -e "${RED}No .env file found.${NC} Run ${BOLD}./pelicula setup${NC} first."
@@ -145,11 +139,11 @@ prompt() {
 # Write (or overwrite) .env from the given values.
 # Usage: _write_env_file <config_dir> <library_dir> <work_dir> <puid> <pgid> <tz> \
 #                        <wireguard_key> <server_countries> <port> \
-#                        <auth> <password> <procula_api_key>
+#                        <auth> <procula_api_key>
 _write_env_file() {
     local cfg="$1" lib="$2" work="$3" puid="$4" pgid="$5" tz="$6"
     local wg_key="$7" countries="$8" port="$9"
-    local auth="${10}" password="${11}" procula_key="${12}"
+    local auth="${10}" procula_key="${11}"
 
     if [[ -f "$ENV_FILE" ]]; then
         cp "$ENV_FILE" "${ENV_FILE}.bak.$(date +%s)"
@@ -167,7 +161,6 @@ WIREGUARD_PRIVATE_KEY="${wg_key}"
 SERVER_COUNTRIES="${countries}"
 PELICULA_PORT="${port}"
 PELICULA_AUTH="${auth}"
-PELICULA_PASSWORD="${password}"
 PROCULA_API_KEY="${procula_key}"
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
@@ -252,23 +245,14 @@ cmd_setup() {
 
         # Auth setup
         echo -e "${BOLD}Auth${NC}"
-        echo "  1) Password — single shared password (recommended)"
+        echo "  1) Jellyfin — credentials verified against Jellyfin (recommended)"
         echo "  2) Off — no auth required (single-user LAN)"
         echo ""
         echo -en "Auth mode [1-2, default 1]: "
         read -r auth_choice
-        local PELICULA_AUTH="true"
-        local PELICULA_PASSWORD=""
+        local PELICULA_AUTH="jellyfin"
         if [[ "$auth_choice" == "2" ]]; then
             PELICULA_AUTH="off"
-        else
-            echo -en "${BOLD}Password${NC} (leave blank to auto-generate): "
-            read -rs PELICULA_PASSWORD
-            echo ""
-            if [[ -z "$PELICULA_PASSWORD" ]]; then
-                PELICULA_PASSWORD="$(generate_password)"
-                info "Generated password: ${BOLD}${PELICULA_PASSWORD}${NC}"
-            fi
         fi
         echo ""
     else
@@ -279,10 +263,8 @@ cmd_setup() {
         LIBRARY_DIR="$default_media"
         WORK_DIR="$default_media"
         PELICULA_PORT="7354"
-        PELICULA_PASSWORD="$(generate_password)"
-        PELICULA_AUTH="true"
+        PELICULA_AUTH="jellyfin"
         info "Using defaults: TZ=${TZ}, PUID=${PUID}, config=${CONFIG_DIR}"
-        info "Generated password: ${BOLD}${PELICULA_PASSWORD}${NC}"
         echo ""
     fi
 
@@ -296,7 +278,7 @@ cmd_setup() {
 
     _write_env_file "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR" "$PUID" "$PGID" "$TZ" \
         "$WIREGUARD_PRIVATE_KEY" "$SERVER_COUNTRIES" "$PELICULA_PORT" \
-        "$PELICULA_AUTH" "$PELICULA_PASSWORD" "$PROCULA_API_KEY"
+        "$PELICULA_AUTH" "$PROCULA_API_KEY"
     pass "Wrote ${ENV_FILE}"
 
     setup_dirs "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR"
@@ -402,7 +384,6 @@ cmd_configure() {
 
         local auth_mode notifications transcoding port vpn_country remote_enabled remote_hostname seeding_remove
         auth_mode="$(get_env_var PELICULA_AUTH off)"
-        [[ "$auth_mode" == "true" ]] && auth_mode="password"
         notifications="$(get_env_var NOTIFICATIONS_MODE internal)"
         transcoding="$(get_env_var TRANSCODING_ENABLED false)"
         port="$(get_env_var PELICULA_PORT 7354)"
@@ -459,229 +440,28 @@ configure_auth() {
     echo ""
     local current
     current="$(get_env_var PELICULA_AUTH off)"
-    [[ "$current" == "true" ]] && current="password"
     echo "  Current mode: ${current}"
     echo ""
     echo "  1) off      — no auth required (single-user LAN)"
-    echo "  2) password — single shared password (admin only)"
-    echo "  3) users    — multi-user with roles (viewer / manager / admin)"
+    echo "  2) jellyfin — credentials verified against Jellyfin"
     echo ""
-    echo -en "Select [1-3]: "
+    echo -en "Select [1-2]: "
     read -r choice
     case "$choice" in
         1)
             set_env_var PELICULA_AUTH off
-            set_env_var PELICULA_PASSWORD ""
             pass "Auth disabled"
             warn "Restart services: ./pelicula restart"
             ;;
         2)
-            echo -en "${BOLD}Password${NC}: "
-            read -rs pw
-            echo ""
-            if [[ -z "$pw" ]]; then
-                warn "Password cannot be empty — no changes made"
-                return
-            fi
-            set_env_var PELICULA_AUTH true
-            set_env_var PELICULA_PASSWORD "$pw"
-            pass "Password auth configured"
+            set_env_var PELICULA_AUTH jellyfin
+            pass "Auth mode set to jellyfin"
             warn "Restart services: ./pelicula restart"
-            ;;
-        3)
-            set_env_var PELICULA_AUTH users
-            set_env_var PELICULA_PASSWORD ""
-            pass "Auth mode set to users"
-            configure_users
             ;;
         *)
             warn "Unknown option"
             ;;
     esac
-}
-
-# Hash a password using salted SHA-256: "sha256v2:SALT:hex(sha256(salt:username:password))"
-# Falls back to legacy unsalted format if openssl rand is unavailable.
-hash_password() {
-    local username="$1" password="$2"
-    local salt
-    salt="$(openssl rand -hex 16 2>/dev/null)"
-    if [[ -n "$salt" ]]; then
-        local hash
-        hash="$(printf '%s:%s:%s' "$salt" "$username" "$password" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')"
-        printf 'sha256v2:%s:%s' "$salt" "$hash"
-    else
-        # Legacy fallback (no salt) — older openssl without rand subcommand
-        printf '%s:%s' "$username" "$password" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}'
-    fi
-}
-
-configure_users() {
-    load_env
-    local users_file="${CONFIG_DIR}/pelicula/users.json"
-    mkdir -p "$(dirname "$users_file")"
-
-    # Initialize empty array if file doesn't exist
-    [[ ! -f "$users_file" ]] && echo '[]' > "$users_file"
-
-    while true; do
-        echo ""
-        echo -e "${BOLD}User Management${NC}"
-        echo ""
-
-        # List current users
-        if command -v python3 &>/dev/null; then
-            USERS_FILE="$users_file" python3 -c "
-import json, os, sys
-try:
-    users = json.load(open(os.environ['USERS_FILE']))
-    if not users:
-        print('  (no users)')
-    for u in users:
-        print(f\"  {u['username']:20s} {u.get('role','?')}\")
-except: print('  (could not read users file)')
-"
-        else
-            info "Users file: ${users_file}"
-        fi
-
-        echo ""
-        echo "  1) Add user"
-        echo "  2) Remove user"
-        echo "  3) Change password"
-        echo "  4) Change role"
-        echo "  b) Back"
-        echo ""
-        echo -en "Select [1-4, b]: "
-        read -r choice
-        case "$choice" in
-            1) add_user "$users_file" ;;
-            2) remove_user "$users_file" ;;
-            3) change_user_password "$users_file" ;;
-            4) change_user_role "$users_file" ;;
-            b|B) break ;;
-            *) warn "Unknown option" ;;
-        esac
-    done
-    warn "Restart pelicula-api for user changes to take effect: ./pelicula restart-acquire"
-}
-
-add_user() {
-    local users_file="$1"
-    echo ""
-    prompt username "Username"
-    echo -en "${BOLD}Password${NC}: "
-    read -rs pw
-    echo ""
-    if [[ -z "$pw" ]]; then warn "Password cannot be empty"; return; fi
-    echo ""
-    echo "  Roles:"
-    echo "    viewer  — read-only dashboard, can submit content requests"
-    echo "    manager — search + add content, pause/resume downloads"
-    echo "    admin   — full access including cancel and blocklist"
-    echo ""
-    echo -en "Role [viewer/manager/admin, default admin]: "
-    read -r role
-    case "$role" in
-        viewer|manager|admin) ;;
-        "") role="admin" ;;
-        *) warn "Invalid role — must be viewer, manager, or admin"; return ;;
-    esac
-    local hash
-    hash="$(hash_password "$username" "$pw")"
-    if [[ -z "$hash" ]]; then
-        warn "Could not hash password (openssl required)"
-        return
-    fi
-    # Append user to JSON array using python3 if available, otherwise manual
-    if command -v python3 &>/dev/null; then
-        USERS_FILE="$users_file" USERNAME="$username" HASH="$hash" ROLE="$role" python3 -c "
-import json, os
-e = os.environ
-users = json.load(open(e['USERS_FILE']))
-users = [u for u in users if u['username'] != e['USERNAME']]
-users.append({'username': e['USERNAME'], 'password': e['HASH'], 'role': e['ROLE']})
-json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
-print('ok')
-" | grep -q ok && pass "User '${username}' added (${role})" || warn "Failed to write users file"
-    else
-        warn "python3 not found — cannot update users.json automatically"
-        info "Manually add to ${users_file}:"
-        echo "  {\"username\": \"${username}\", \"password\": \"${hash}\", \"role\": \"${role}\"}"
-    fi
-}
-
-remove_user() {
-    local users_file="$1"
-    echo ""
-    prompt username "Username to remove"
-    if command -v python3 &>/dev/null; then
-        USERS_FILE="$users_file" USERNAME="$username" python3 -c "
-import json, os
-e = os.environ
-users = json.load(open(e['USERS_FILE']))
-before = len(users)
-users = [u for u in users if u['username'] != e['USERNAME']]
-json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
-print('removed' if len(users) < before else 'notfound')
-" | grep -q removed && pass "User '${username}' removed" || warn "User '${username}' not found"
-    else
-        warn "python3 not found — edit ${users_file} manually"
-    fi
-}
-
-change_user_password() {
-    local users_file="$1"
-    echo ""
-    prompt username "Username"
-    echo -en "${BOLD}New password${NC}: "
-    read -rs pw
-    echo ""
-    if [[ -z "$pw" ]]; then warn "Password cannot be empty"; return; fi
-    local hash
-    hash="$(hash_password "$username" "$pw")"
-    if command -v python3 &>/dev/null; then
-        USERS_FILE="$users_file" USERNAME="$username" HASH="$hash" python3 -c "
-import json, os
-e = os.environ
-users = json.load(open(e['USERS_FILE']))
-found = False
-for u in users:
-    if u['username'] == e['USERNAME']:
-        u['password'] = e['HASH']; found = True
-json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
-print('ok' if found else 'notfound')
-" | grep -q ok && pass "Password updated for '${username}'" || warn "User '${username}' not found"
-    else
-        warn "python3 not found — edit ${users_file} manually"
-    fi
-}
-
-change_user_role() {
-    local users_file="$1"
-    echo ""
-    prompt username "Username"
-    echo -en "New role [viewer/manager/admin]: "
-    read -r role
-    case "$role" in
-        viewer|manager|admin) ;;
-        *) warn "Invalid role"; return ;;
-    esac
-    if command -v python3 &>/dev/null; then
-        USERS_FILE="$users_file" USERNAME="$username" ROLE="$role" python3 -c "
-import json, os
-e = os.environ
-users = json.load(open(e['USERS_FILE']))
-found = False
-for u in users:
-    if u['username'] == e['USERNAME']:
-        u['role'] = e['ROLE']; found = True
-json.dump(users, open(e['USERS_FILE'], 'w'), indent=2)
-print('ok' if found else 'notfound')
-" | grep -q ok && pass "Role for '${username}' set to ${role}" || warn "User '${username}' not found"
-    else
-        warn "python3 not found — edit ${users_file} manually"
-    fi
 }
 
 configure_notifications() {
@@ -1929,12 +1709,11 @@ _reset_config_all() {
     fi
 
     # Regenerate .env — fresh credentials, preserved identity/VPN values
-    local new_password new_procula_key
-    new_password="$(generate_password)"
+    local new_procula_key
     new_procula_key="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 2>/dev/null || openssl rand -base64 24 | tr -d '/+=')"
     _write_env_file "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR" "$PUID" "$PGID" "$TZ" \
         "$saved_wg_key" "$saved_countries" "$PELICULA_PORT" \
-        "true" "$new_password" "$new_procula_key"
+        "jellyfin" "$new_procula_key"
     pass "Wrote fresh ${ENV_FILE}"
 
     echo ""
@@ -2637,7 +2416,6 @@ WIREGUARD_PRIVATE_KEY="dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE="
 SERVER_COUNTRIES="Netherlands"
 PELICULA_PORT="${test_port}"
 PELICULA_AUTH="off"
-PELICULA_PASSWORD="test-only"
 JELLYFIN_PASSWORD="test-jellyfin-pw"
 PROCULA_API_KEY="${test_api_key}"
 TRANSCODING_ENABLED=false
@@ -2996,12 +2774,11 @@ except Exception:
 
     # ── Stage 8: Auth & Nginx Routing ────────────────
 
-    info "Enabling authentication and testing routing..."
+    info "Enabling jellyfin auth and testing routing..."
 
-    # Update .env to enable password auth and recreate pelicula-api to pick up new env vars.
+    # Update .env to enable jellyfin auth and recreate pelicula-api to pick up new env vars.
     # "restart" does not re-read env changes; "up -d" recreates the container when config changes.
-    sed -i.bak 's/PELICULA_AUTH="off"/PELICULA_AUTH="password"/' "$test_env"
-    sed -i.bak 's/PELICULA_PASSWORD="test-only"/PELICULA_PASSWORD="e2e-test-secret"/' "$test_env"
+    sed -i.bak 's/PELICULA_AUTH="off"/PELICULA_AUTH="jellyfin"/' "$test_env"
     test_compose up -d pelicula-api >/dev/null 2>&1
 
     # Wait for pelicula-api to come back up
@@ -3046,7 +2823,7 @@ except Exception:
     assert_http 302 "http://localhost:${test_port}/sonarr"
     assert_http 302 "http://localhost:${test_port}/radarr"
 
-    # Login with wrong password should fail
+    # Login with wrong password should fail (verified against Jellyfin)
     local login_fail
     login_fail="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
         -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
@@ -3058,17 +2835,17 @@ except Exception:
         t_fail "Wrong password returned $login_fail (expected 401)"
     fi
 
-    # Login with correct password should succeed and set cookie
+    # Login with Jellyfin credentials should succeed and set cookie
     local cookie_file="$test_dir/cookies.txt"
     local login_resp
     login_resp="$(curl -s -w '\n%{http_code}' --max-time 5 \
         -c "$cookie_file" \
         -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
         -H "Content-Type: application/json" \
-        -d '{"username":"admin","password":"e2e-test-secret"}' 2>/dev/null)"
+        -d '{"username":"admin","password":"test-jellyfin-pw"}' 2>/dev/null)"
     local login_code="${login_resp##*$'\n'}"
     if [[ "$login_code" == "200" ]]; then
-        t_pass "Login succeeded with correct password"
+        t_pass "Login succeeded with Jellyfin credentials"
     else
         t_fail "Login returned $login_code (expected 200)"
     fi
