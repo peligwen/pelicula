@@ -198,17 +198,18 @@ func completeJellyfinWizard(s *ServiceClients) error {
 	// rather than creating one from scratch. The user is initialized lazily — a GET
 	// to /Startup/User triggers the creation; only then does POST succeed.
 	pass := os.Getenv("JELLYFIN_PASSWORD")
+	adminUser := envOr("JELLYFIN_ADMIN_USER", "admin")
 	if pass == "" {
-		slog.Info("creating Jellyfin admin user with no password — set JELLYFIN_PASSWORD in .env for Jellyfin 10.11+", "component", "autowire")
+		slog.Info("creating Jellyfin admin user with no password", "component", "autowire", "username", adminUser)
 	} else {
-		slog.Info("creating Jellyfin admin user with configured password", "component", "autowire")
+		slog.Info("creating Jellyfin admin user with configured password", "component", "autowire", "username", adminUser)
 	}
 	// GET first to trigger lazy user initialization (Jellyfin 10.11+).
 	if _, err = jellyfinGet(s, "/Startup/User", ""); err != nil {
 		slog.Warn("could not fetch initial Jellyfin startup user", "component", "autowire", "error", err)
 	}
 	_, err = jellyfinPost(s, "/Startup/User", "", map[string]any{
-		"Name":     "admin",
+		"Name":     adminUser,
 		"Password": pass,
 	})
 	if err != nil {
@@ -226,8 +227,9 @@ func completeJellyfinWizard(s *ServiceClients) error {
 }
 
 func jellyfinAuth(s *ServiceClients) (string, error) {
+	adminUser := envOr("JELLYFIN_ADMIN_USER", "admin")
 	data, err := jellyfinPost(s, "/Users/AuthenticateByName", "", map[string]any{
-		"Username": "admin",
+		"Username": adminUser,
 		"Pw":       os.Getenv("JELLYFIN_PASSWORD"),
 	})
 	if err != nil {
@@ -244,7 +246,7 @@ func jellyfinAuth(s *ServiceClients) (string, error) {
 		return "", fmt.Errorf("no access token in response")
 	}
 
-	slog.Info("Jellyfin authenticated as admin", "component", "autowire")
+	slog.Info("Jellyfin authenticated as admin", "component", "autowire", "username", adminUser)
 	return token, nil
 }
 

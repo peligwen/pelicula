@@ -28,23 +28,37 @@ func AutoWire(s *ServiceClients) error {
 	// Reload keys in case they were generated after initial container start
 	s.ReloadKeys()
 
-	if s.SonarrKey == "" || s.RadarrKey == "" || s.ProwlarrKey == "" {
-		return fmt.Errorf("missing API keys (sonarr=%v radarr=%v prowlarr=%v)",
-			s.SonarrKey != "", s.RadarrKey != "", s.ProwlarrKey != "")
+	if s.SonarrKey == "" || s.RadarrKey == "" {
+		return fmt.Errorf("missing API keys (sonarr=%v radarr=%v)",
+			s.SonarrKey != "", s.RadarrKey != "")
 	}
 
 	slog.Info("services ready, checking configuration", "component", "autowire")
 
-	sonarrWired := wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "tv-sonarr") &&
-		wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "/tv")
+	vpnConfigured := os.Getenv("WIREGUARD_PRIVATE_KEY") != ""
 
-	radarrWired := wireDownloadClient(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "radarr") &&
-		wireRootFolder(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "/movies")
+	sonarrWired := true
+	radarrWired := true
+	prowlarrWired := true
 
-	prowlarrWired := wireProwlarrApp(s, "Sonarr", sonarrURL, s.SonarrKey) &&
-		wireProwlarrApp(s, "Radarr", radarrURL, s.RadarrKey)
+	if vpnConfigured {
+		if s.ProwlarrKey == "" {
+			slog.Warn("Prowlarr API key not found — skipping download client and indexer wiring", "component", "autowire")
+		} else {
+			sonarrWired = wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "tv-sonarr")
+			radarrWired = wireDownloadClient(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "radarr")
+			prowlarrWired = wireProwlarrApp(s, "Sonarr", sonarrURL, s.SonarrKey) &&
+				wireProwlarrApp(s, "Radarr", radarrURL, s.RadarrKey)
+		}
+	} else {
+		slog.Info("VPN not configured — skipping download client and indexer wiring", "component", "autowire")
+	}
 
-	// Wire Procula import webhooks into Radarr and Sonarr
+	// Root folders are needed regardless of VPN (for library management + import)
+	wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "/tv")
+	wireRootFolder(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "/movies")
+
+	// Wire Procula import webhooks (useful even without VPN, for manual imports)
 	wireImportWebhook(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
 	wireImportWebhook(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
 
@@ -66,13 +80,17 @@ func AutoWire(s *ServiceClients) error {
 
 func waitForServices(s *ServiceClients) error {
 	endpoints := map[string]string{
-		"sonarr":      sonarrURL + "/ping",
-		"radarr":      radarrURL + "/ping",
-		"prowlarr":    prowlarrURL + "/ping",
-		"qbittorrent": qbtBaseURL + "/",
-		"jellyfin":    jellyfinURL + "/System/Info/Public",
+		"sonarr":   sonarrURL + "/ping",
+		"radarr":   radarrURL + "/ping",
+		"jellyfin": jellyfinURL + "/System/Info/Public",
 	}
 	endpoints["bazarr"] = bazarrURL + "/api/system/status"
+
+	vpnConfigured := os.Getenv("WIREGUARD_PRIVATE_KEY") != ""
+	if vpnConfigured {
+		endpoints["prowlarr"] = prowlarrURL + "/ping"
+		endpoints["qbittorrent"] = qbtBaseURL + "/"
+	}
 
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
