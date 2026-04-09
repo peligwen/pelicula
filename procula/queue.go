@@ -163,11 +163,12 @@ func (q *Queue) loadExisting() error {
 }
 
 func (q *Queue) Create(source JobSource) (*Job, error) {
-	// Deduplicate: return existing job if the same path is already active
+	// Deduplicate: return existing job if the same path is already active.
+	// json_extract avoids LIKE wildcards that break on paths containing % or _.
 	var existingID string
 	err := q.db.QueryRow(
-		`SELECT id FROM jobs WHERE source LIKE ? AND state IN ('queued','processing') LIMIT 1`,
-		`%"`+source.Path+`"%`,
+		`SELECT id FROM jobs WHERE json_extract(source, '$.path') = ? AND state IN ('queued','processing') LIMIT 1`,
+		source.Path,
 	).Scan(&existingID)
 	if err == nil {
 		// Found existing job — load and return it

@@ -185,9 +185,3 @@ func migrate1(tx *sql.Tx) error {
 	return nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

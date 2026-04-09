@@ -34,6 +34,7 @@ func migrateJobsJSON(db *sql.DB, configDir string) {
 	}
 
 	count := 0
+	corruptCount := 0
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -47,7 +48,12 @@ func migrateJobsJSON(db *sql.DB, configDir string) {
 
 		var job Job
 		if err := json.Unmarshal(data, &job); err != nil {
-			slog.Warn("jobs migration: corrupt JSON, skipping", "component", "migrate", "file", entry.Name(), "error", err)
+			slog.Warn("jobs migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "file", entry.Name(), "error", err)
+			corruptDest := path + ".corrupt"
+			if renameErr := os.Rename(path, corruptDest); renameErr != nil {
+				slog.Warn("jobs migration: could not rename corrupt file", "component", "migrate", "file", entry.Name(), "error", renameErr)
+			}
+			corruptCount++
 			continue
 		}
 
@@ -115,10 +121,15 @@ func migrateJobsJSON(db *sql.DB, configDir string) {
 		count++
 	}
 
-	slog.Info("jobs migration complete", "component", "migrate", "count", count)
+	slog.Info("jobs migration complete", "component", "migrate", "count", count, "corrupt", corruptCount)
 
-	// Rename the directory so it won't be re-processed
+	// Rename the directory so it won't be re-processed.
+	// If every JSON file was corrupt (nothing migrated), use .corrupt suffix.
+	jsonCount := count + corruptCount
 	dest := jobsDir + ".migrated"
+	if jsonCount > 0 && count == 0 {
+		dest = jobsDir + ".corrupt"
+	}
 	if err := os.Rename(jobsDir, dest); err != nil {
 		slog.Warn("jobs migration: could not rename jobs dir", "component", "migrate", "error", err)
 	}
@@ -133,16 +144,19 @@ func migrateSettingsJSON(db *sql.DB, configDir string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		slog.Warn("settings migration: cannot read file", "component", "migrate", "path", settingsPath, "error", err)
-		markProculaMigrated(settingsPath)
+		// Non-NotExist error: log and retry next startup.
+		slog.Warn("settings migration: cannot read file, will retry next startup", "component", "migrate", "path", settingsPath, "error", err)
 		return
 	}
 
 	// Validate it parses as PipelineSettings
 	var s PipelineSettings
 	if err := json.Unmarshal(data, &s); err != nil {
-		slog.Warn("settings migration: corrupt JSON, skipping", "component", "migrate", "path", settingsPath, "error", err)
-		markProculaMigrated(settingsPath)
+		slog.Warn("settings migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", settingsPath, "error", err)
+		corruptDest := settingsPath + ".corrupt"
+		if renameErr := os.Rename(settingsPath, corruptDest); renameErr != nil {
+			slog.Warn("settings migration: could not rename corrupt file", "component", "migrate", "path", settingsPath, "error", renameErr)
+		}
 		return
 	}
 

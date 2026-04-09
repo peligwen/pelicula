@@ -209,6 +209,9 @@ func (s *InviteStore) ListInvites() []InviteWithState {
 			tokens = append(tokens, token)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("invites: ListInvites rows iteration error", "component", "invites", "error", err)
+	}
 	rows.Close() // must close before scanInvite queries
 
 	result := make([]InviteWithState, 0, len(tokens))

@@ -27,6 +27,11 @@ func OpenDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
+	// Enforce foreign key constraints (SQLite disables them by default).
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 
 	if err := runMigrations(db); err != nil {
 		db.Close()
@@ -130,9 +135,3 @@ func migrate1(tx *sql.Tx) error {
 	return nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

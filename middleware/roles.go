@@ -5,6 +5,7 @@ package main
 
 import (
 	"database/sql"
+	"log/slog"
 )
 
 // RolesEntry maps a Jellyfin user ID to a Pelicula role.
@@ -81,6 +82,9 @@ func (rs *RolesStore) All() []RolesEntry {
 			continue
 		}
 		result = append(result, e)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("roles: All rows iteration error", "component", "roles", "error", err)
 	}
 	if result == nil {
 		return []RolesEntry{}

@@ -67,10 +67,14 @@ func TestMigrateRolesJSON_CorruptFile(t *testing.T) {
 	path := filepath.Join(dir, "roles.json")
 	os.WriteFile(path, []byte(`not valid json`), 0600)
 
-	// Should not panic; file should be marked as migrated.
+	// Should not panic; corrupt file should be renamed to .corrupt (not .migrated).
 	migrateRolesJSON(db, path)
-	if _, err := os.Stat(path + ".migrated"); err != nil {
-		t.Errorf("expected .migrated file after corrupt JSON: %v", err)
+	if _, err := os.Stat(path + ".corrupt"); err != nil {
+		t.Errorf("expected .corrupt file after corrupt JSON: %v", err)
+	}
+	// Original file must be gone.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("expected original file to be renamed away")
 	}
 }
 

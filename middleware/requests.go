@@ -190,6 +190,9 @@ func (s *RequestStore) all() []*MediaRequest {
 		}
 		result = append(result, &req)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("requests: all rows iteration error", "component", "requests", "error", err)
+	}
 	rows.Close() // must close before loadHistory queries
 
 	// Now load history for each request (connection is free).

@@ -37,15 +37,17 @@ func migrateRolesJSON(db *sql.DB, jsonPath string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		slog.Warn("roles migration: cannot read file", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		// Non-NotExist error (permissions, I/O): log and retry next startup.
+		slog.Warn("roles migration: cannot read file, will retry next startup", "component", "migrate", "path", jsonPath, "error", err)
 		return
 	}
 
 	var f rolesFile
 	if err := json.Unmarshal(data, &f); err != nil {
-		slog.Warn("roles migration: corrupt JSON, skipping", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		slog.Warn("roles migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
+		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
+			slog.Warn("roles migration: could not rename corrupt file", "component", "migrate", "path", jsonPath, "error", renameErr)
+		}
 		return
 	}
 
@@ -72,15 +74,17 @@ func migrateInvitesJSON(db *sql.DB, jsonPath string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		slog.Warn("invites migration: cannot read file", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		// Non-NotExist error: log and retry next startup.
+		slog.Warn("invites migration: cannot read file, will retry next startup", "component", "migrate", "path", jsonPath, "error", err)
 		return
 	}
 
 	var invites []Invite
 	if err := json.Unmarshal(data, &invites); err != nil {
-		slog.Warn("invites migration: corrupt JSON, skipping", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		slog.Warn("invites migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
+		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
+			slog.Warn("invites migration: could not rename corrupt file", "component", "migrate", "path", jsonPath, "error", renameErr)
+		}
 		return
 	}
 
@@ -134,15 +138,17 @@ func migrateRequestsJSON(db *sql.DB, jsonPath string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		slog.Warn("requests migration: cannot read file", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		// Non-NotExist error: log and retry next startup.
+		slog.Warn("requests migration: cannot read file, will retry next startup", "component", "migrate", "path", jsonPath, "error", err)
 		return
 	}
 
 	var requests []*MediaRequest
 	if err := json.Unmarshal(data, &requests); err != nil {
-		slog.Warn("requests migration: corrupt JSON, skipping", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		slog.Warn("requests migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
+		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
+			slog.Warn("requests migration: could not rename corrupt file", "component", "migrate", "path", jsonPath, "error", renameErr)
+		}
 		return
 	}
 
@@ -186,15 +192,17 @@ func migrateDismissedJSON(db *sql.DB, jsonPath string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		slog.Warn("dismissed migration: cannot read file", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		// Non-NotExist error: log and retry next startup.
+		slog.Warn("dismissed migration: cannot read file, will retry next startup", "component", "migrate", "path", jsonPath, "error", err)
 		return
 	}
 
 	var ids []string
 	if err := json.Unmarshal(data, &ids); err != nil {
-		slog.Warn("dismissed migration: corrupt JSON, skipping", "component", "migrate", "path", jsonPath, "error", err)
-		markMigrated(jsonPath)
+		slog.Warn("dismissed migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
+		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
+			slog.Warn("dismissed migration: could not rename corrupt file", "component", "migrate", "path", jsonPath, "error", renameErr)
+		}
 		return
 	}
 

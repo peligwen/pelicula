@@ -866,6 +866,67 @@ func TestLogin_JellyfinMode_JellyfinDown_Returns503(t *testing.T) {
 	}
 }
 
+// ── Session persistence round-trip ───────────────────────────────────────────
+
+// TestSessionPersistence_RoundTrip verifies that a session created by one Auth
+// instance is visible to a second Auth instance opened on the same DB, simulating
+// a process restart where sessions must survive.
+func TestSessionPersistence_RoundTrip(t *testing.T) {
+	srv := fakeJellyfinAuthServer(t, true, true)
+	db := testDB(t)
+
+	// Auth1: perform a login — this writes the session to SQLite.
+	a1 := NewAuth(AuthConfig{
+		Mode:       "jellyfin",
+		DB:         db,
+		HTTPClient: srv.Client(),
+	})
+
+	loginBody := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", loginBody)
+	loginW := httptest.NewRecorder()
+	a1.HandleLogin(loginW, loginReq)
+	if loginW.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200; body: %s", loginW.Code, loginW.Body.String())
+	}
+
+	// Extract the session cookie from the login response.
+	var sessionToken string
+	for _, c := range loginW.Result().Cookies() {
+		if c.Name == "pelicula_session" {
+			sessionToken = c.Value
+			break
+		}
+	}
+	if sessionToken == "" {
+		t.Fatal("no pelicula_session cookie in login response")
+	}
+
+	// Auth2: new instance on the same DB — must restore sessions from SQLite.
+	a2 := NewAuth(AuthConfig{
+		Mode:       "jellyfin",
+		DB:         db,
+		HTTPClient: srv.Client(),
+	})
+
+	// Verify the session is available via HandleCheck.
+	checkReq := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
+	checkReq.AddCookie(&http.Cookie{Name: "pelicula_session", Value: sessionToken})
+	checkW := httptest.NewRecorder()
+	a2.HandleCheck(checkW, checkReq)
+
+	if checkW.Code != http.StatusOK {
+		t.Fatalf("check status = %d, want 200 (session should be restored from DB)", checkW.Code)
+	}
+	m := parseJSONBody(t, checkW)
+	if m["valid"] != true {
+		t.Errorf("valid = %v, want true — session not restored from DB", m["valid"])
+	}
+	if m["username"] != "alice" {
+		t.Errorf("username = %v, want alice", m["username"])
+	}
+}
+
 // ── RolesStore ─────────────────────────────────────────────────────────────────
 
 func TestRolesStore_RoundTrip(t *testing.T) {

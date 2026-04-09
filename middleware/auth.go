@@ -148,15 +148,11 @@ func (a *Auth) cleanupSessions() {
 		}
 		a.mu.Unlock()
 
-		// Purge expired rows from SQLite as well.
+		// Purge expired session rows from SQLite as well.
 		if a.db != nil {
 			nowStr := now.UTC().Format(time.RFC3339)
 			if _, err := a.db.Exec(`DELETE FROM sessions WHERE expires_at <= ?`, nowStr); err != nil {
 				slog.Warn("cleanup: failed to delete expired sessions", "component", "auth", "error", err)
-			}
-			windowStr := window.UTC().Format(time.RFC3339)
-			if _, err := a.db.Exec(`DELETE FROM rate_limits WHERE window_start <= ?`, windowStr); err != nil {
-				slog.Warn("cleanup: failed to delete stale rate limits", "component", "auth", "error", err)
 			}
 		}
 	}
@@ -182,6 +178,8 @@ func (a *Auth) isRateLimited(ip string) bool {
 }
 
 // recordFailure records a failed login attempt for rate limiting.
+// Rate limits are kept purely in-memory: the 5-minute window is shorter than
+// any realistic restart time, so persistence provides no meaningful value.
 func (a *Auth) recordFailure(ip string) {
 	now := time.Now()
 	a.mu.Lock()
@@ -190,18 +188,6 @@ func (a *Auth) recordFailure(ip string) {
 	}
 	a.failures[ip].times = append(a.failures[ip].times, now)
 	a.mu.Unlock()
-
-	if a.db != nil {
-		// Upsert: increment fail_count for the IP, resetting window_start on first hit.
-		_, err := a.db.Exec(
-			`INSERT INTO rate_limits (ip, fail_count, window_start) VALUES (?, 1, ?)
-			 ON CONFLICT(ip) DO UPDATE SET fail_count = fail_count + 1`,
-			ip, now.UTC().Format(time.RFC3339),
-		)
-		if err != nil {
-			slog.Warn("failed to persist rate limit", "component", "auth", "ip", ip, "error", err)
-		}
-	}
 }
 
 // IsOffMode reports whether auth is disabled (PELICULA_AUTH=off).
