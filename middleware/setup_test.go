@@ -12,14 +12,7 @@ import (
 )
 
 func TestHandleSetupSubmit_AlreadyConfigured(t *testing.T) {
-	// Create a fake .env at the path the handler checks.
-	// envPath is a package-level const ("/project/.env") and the file
-	// won't exist in the test environment, so this test exercises the
-	// "already configured" guard by pre-creating the file.
-	//
-	// We can't redirect envPath, but we CAN test the guard behaviour
-	// by stubbing the stat: instead, verify the handler returns 405 for
-	// GET (method guard fires before file check).
+	// Verify the handler returns 405 for GET (method guard fires before file check).
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup", nil)
 	w := httptest.NewRecorder()
 	handleSetupSubmit(w, req)
@@ -30,7 +23,11 @@ func TestHandleSetupSubmit_AlreadyConfigured(t *testing.T) {
 }
 
 func TestHandleSetupSubmit_RejectsForeignOrigin(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{WireguardKey: strings.Repeat("A", 43) + "="})
+	body, _ := json.Marshal(SetupRequest{
+		AdminUsername: "gwen",
+		AdminPassword: "test-pass-123",
+		VPNSkipped:    true,
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
@@ -42,7 +39,11 @@ func TestHandleSetupSubmit_RejectsForeignOrigin(t *testing.T) {
 }
 
 func TestHandleSetupSubmit_RejectsEmptyOrigin(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{WireguardKey: strings.Repeat("A", 43) + "="})
+	body, _ := json.Marshal(SetupRequest{
+		AdminUsername: "gwen",
+		AdminPassword: "test-pass-123",
+		VPNSkipped:    true,
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	// No Origin header — should be rejected by the strict CSRF guard.
 	w := httptest.NewRecorder()
@@ -53,20 +54,67 @@ func TestHandleSetupSubmit_RejectsEmptyOrigin(t *testing.T) {
 	}
 }
 
-func TestHandleSetupSubmit_RejectsMissingKey(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{})
+func TestHandleSetupSubmit_RejectsMissingAdminUsername(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"admin_password": "test-pass-123",
+		"config_dir":     "./config",
+		"media_dir":      "~/media",
+		"vpn_skipped":    true,
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
 	handleSetupSubmit(w, req)
 
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for missing wireguard_key", w.Code)
+		t.Errorf("status = %d, want 400 for missing admin_username", w.Code)
+	}
+}
+
+func TestHandleSetupSubmit_RejectsShortPassword(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"admin_username": "gwen",
+		"admin_password": "short",
+		"config_dir":     "./config",
+		"media_dir":      "~/media",
+		"vpn_skipped":    true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	handleSetupSubmit(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for short password", w.Code)
+	}
+}
+
+func TestHandleSetupSubmit_RejectsMissingVPNKey(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"admin_username": "gwen",
+		"admin_password": "test-pass-123",
+		"config_dir":     "./config",
+		"media_dir":      "~/media",
+		// vpn_skipped omitted — defaults to false, so key is required
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	handleSetupSubmit(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for missing wireguard_key when not skipped", w.Code)
 	}
 }
 
 func TestHandleSetupSubmit_RejectsShortKey(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{WireguardKey: "tooshort"})
+	body, _ := json.Marshal(map[string]any{
+		"admin_username": "gwen",
+		"admin_password": "test-pass-123",
+		"wireguard_key":  "tooshort",
+		"config_dir":     "./config",
+		"media_dir":      "~/media",
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
@@ -78,9 +126,11 @@ func TestHandleSetupSubmit_RejectsShortKey(t *testing.T) {
 }
 
 func TestHandleSetupSubmit_RejectsInjectionInFields(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{
-		WireguardKey: strings.Repeat("A", 43) + "=",
-		Country:      "Nether\nlands",
+	body, _ := json.Marshal(map[string]any{
+		"admin_username": "gwen",
+		"admin_password": "test-pass-123",
+		"config_dir":     "/config\nnewline",
+		"vpn_skipped":    true,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
@@ -88,7 +138,49 @@ func TestHandleSetupSubmit_RejectsInjectionInFields(t *testing.T) {
 	handleSetupSubmit(w, req)
 
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for newline in country", w.Code)
+		t.Errorf("status = %d, want 400 for newline in config_dir", w.Code)
+	}
+}
+
+func TestHandleSetupSubmit_AcceptsVPNSkipped(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"admin_username": "gwen",
+		"admin_password": "test-pass-123",
+		"config_dir":     "./config",
+		"media_dir":      "~/media",
+		"vpn_skipped":    true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	handleSetupSubmit(w, req)
+
+	// Will fail with 409 (already configured) or 500 (can't write /project/.env)
+	// in test environment — but NOT 400, which would mean validation rejected it.
+	if w.Code == http.StatusBadRequest {
+		t.Errorf("status = 400, but VPN skip with valid fields should pass validation")
+	}
+}
+
+func TestHandleGeneratePassword(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup/generate-password", nil)
+	w := httptest.NewRecorder()
+	handleGeneratePassword(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	pw := resp["password"]
+	if pw == "" {
+		t.Error("expected non-empty password")
+	}
+	parts := strings.Split(pw, "-")
+	if len(parts) != 3 {
+		t.Errorf("expected 3 hyphen-separated groups, got %d in %q", len(parts), pw)
 	}
 }
 
@@ -124,7 +216,7 @@ func TestSetupUsesWriteEnvFile(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	vars := map[string]string{
-		"PELICULA_AUTH":         "off",
+		"PELICULA_AUTH":         "jellyfin",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"CONFIG_DIR":            "/config",

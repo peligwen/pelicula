@@ -95,6 +95,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
 		"PELICULA_PORT", "PELICULA_AUTH",
 		"PELICULA_OPEN_REGISTRATION",
+		"JELLYFIN_ADMIN_USER",
 		"JELLYFIN_PASSWORD",
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"TRANSCODING_ENABLED",
@@ -407,11 +408,10 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	// Sanitize all string fields
 	for _, check := range []struct{ name, val string }{
 		{"wireguard_key", req.WireguardKey},
-		{"country", req.Country},
 		{"config_dir", req.ConfigDir},
+		{"media_dir", req.MediaDir},
 		{"library_dir", req.LibraryDir},
 		{"work_dir", req.WorkDir},
-		{"port", req.Port},
 	} {
 		if strings.ContainsAny(check.val, "\"\n\r") {
 			http.Error(w, check.name+" contains invalid characters", http.StatusBadRequest)
@@ -419,36 +419,39 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	key := strings.TrimSpace(req.WireguardKey)
-	if key == "" {
-		http.Error(w, "wireguard_key is required", http.StatusBadRequest)
-		return
+	// VPN: validate key if provided, or require vpn_skipped
+	wgKey := strings.TrimSpace(req.WireguardKey)
+	if !req.VPNSkipped {
+		if wgKey == "" {
+			http.Error(w, "wireguard_key is required (or set vpn_skipped)", http.StatusBadRequest)
+			return
+		}
+		if len(wgKey) != 44 || wgKey[43] != '=' {
+			http.Error(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
+			return
+		}
+	} else {
+		wgKey = "" // ensure empty when skipped
 	}
-	if len(key) != 44 || key[43] != '=' {
-		http.Error(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
-		return
-	}
-	req.WireguardKey = key
 
-	if req.Country == "" {
-		req.Country = "Netherlands"
-	}
-	if req.Port == "" {
-		req.Port = "7354"
-	}
 	if req.ConfigDir == "" {
 		req.ConfigDir = envOr("HOST_CONFIG_DIR", "./config")
 	}
-	if req.LibraryDir == "" {
-		req.LibraryDir = envOr("HOST_LIBRARY_DIR", "~/media")
+	libraryDir := req.LibraryDir
+	workDir := req.WorkDir
+	if req.MediaDir != "" {
+		if libraryDir == "" {
+			libraryDir = req.MediaDir
+		}
+		if workDir == "" {
+			workDir = req.MediaDir
+		}
 	}
-	if req.WorkDir == "" {
-		req.WorkDir = envOr("HOST_WORK_DIR", "~/media")
+	if libraryDir == "" {
+		libraryDir = envOr("HOST_LIBRARY_DIR", "~/media")
 	}
-
-	authMode := "off"
-	if req.AuthEnabled {
-		authMode = "jellyfin"
+	if workDir == "" {
+		workDir = envOr("HOST_WORK_DIR", "~/media")
 	}
 
 	envMu.Lock()
@@ -461,36 +464,38 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	proculaKey := generateAPIKey()
 	// Preserve existing WEBHOOK_SECRET if present so autowired webhooks keep working
 	webhookSecret := orDefault(existing["WEBHOOK_SECRET"], generateAPIKey())
-	// Preserve JELLYFIN_PASSWORD so the admin login stays valid after reset
+	// Preserve JELLYFIN_ADMIN_USER and JELLYFIN_PASSWORD so the admin login stays valid after reset
+	jellyfinAdminUser := orDefault(existing["JELLYFIN_ADMIN_USER"], "admin")
 	jellyfinPassword := orDefault(existing["JELLYFIN_PASSWORD"], generateReadablePassword())
 
 	vars := map[string]string{
 		"CONFIG_DIR":                  req.ConfigDir,
-		"LIBRARY_DIR":                req.LibraryDir,
-		"WORK_DIR":                   req.WorkDir,
-		"PUID":                       puid,
-		"PGID":                       pgid,
-		"TZ":                         tz,
-		"WIREGUARD_PRIVATE_KEY":      req.WireguardKey,
-		"SERVER_COUNTRIES":           req.Country,
-		"PELICULA_PORT":              req.Port,
-		"PELICULA_AUTH":              authMode,
-		"PELICULA_OPEN_REGISTRATION": "false",
-		"JELLYFIN_PASSWORD":          jellyfinPassword,
-		"PROCULA_API_KEY":            proculaKey,
-		"WEBHOOK_SECRET":             webhookSecret,
-		"TRANSCODING_ENABLED":   "false",
-		"NOTIFICATIONS_ENABLED": "false",
-		"NOTIFICATIONS_MODE":    "internal",
-		"PELICULA_SUB_LANGS":    "en",
-		"REMOTE_ACCESS_ENABLED":    "false",
-		"REMOTE_HOSTNAME":          "",
-		"REMOTE_HTTP_PORT":         "80",
-		"REMOTE_HTTPS_PORT":        "8920",
-		"REMOTE_CERT_MODE":         "self-signed",
-		"REMOTE_LE_EMAIL":          "",
-		"REMOTE_LE_STAGING":        "false",
-		"SEEDING_REMOVE_ON_COMPLETE": "false",
+		"LIBRARY_DIR":                 libraryDir,
+		"WORK_DIR":                    workDir,
+		"PUID":                        puid,
+		"PGID":                        pgid,
+		"TZ":                          tz,
+		"WIREGUARD_PRIVATE_KEY":       wgKey,
+		"SERVER_COUNTRIES":            "Netherlands",
+		"PELICULA_PORT":               "7354",
+		"PELICULA_AUTH":               "jellyfin",
+		"PELICULA_OPEN_REGISTRATION":  "false",
+		"JELLYFIN_ADMIN_USER":         jellyfinAdminUser,
+		"JELLYFIN_PASSWORD":           jellyfinPassword,
+		"PROCULA_API_KEY":             proculaKey,
+		"WEBHOOK_SECRET":              webhookSecret,
+		"TRANSCODING_ENABLED":         "false",
+		"NOTIFICATIONS_ENABLED":       "false",
+		"NOTIFICATIONS_MODE":          "internal",
+		"PELICULA_SUB_LANGS":          "en",
+		"REMOTE_ACCESS_ENABLED":       "false",
+		"REMOTE_HOSTNAME":             "",
+		"REMOTE_HTTP_PORT":            "80",
+		"REMOTE_HTTPS_PORT":           "8920",
+		"REMOTE_CERT_MODE":            "self-signed",
+		"REMOTE_LE_EMAIL":             "",
+		"REMOTE_LE_STAGING":           "false",
+		"SEEDING_REMOVE_ON_COMPLETE":  "false",
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {

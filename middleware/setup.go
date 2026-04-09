@@ -13,13 +13,14 @@ import (
 
 // SetupRequest is the JSON body submitted by the browser wizard.
 type SetupRequest struct {
-	WireguardKey string `json:"wireguard_key"`
-	Country      string `json:"country"`
-	ConfigDir    string `json:"config_dir"`
-	LibraryDir   string `json:"library_dir"`
-	WorkDir      string `json:"work_dir"`
-	Port         string `json:"port"`
-	AuthEnabled  bool   `json:"auth_enabled"`
+	AdminUsername string `json:"admin_username"`
+	AdminPassword string `json:"admin_password"`
+	ConfigDir     string `json:"config_dir"`
+	MediaDir      string `json:"media_dir"`
+	LibraryDir    string `json:"library_dir"`
+	WorkDir       string `json:"work_dir"`
+	WireguardKey  string `json:"wireguard_key"`
+	VPNSkipped    bool   `json:"vpn_skipped"`
 }
 
 // SetupDetect is returned by GET /api/pelicula/setup/detect.
@@ -60,13 +61,23 @@ func handleSetupDetect(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func handleGeneratePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"password": generateReadablePassword(),
+	})
+}
+
 func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Refuse if .env already exists
 	if _, err := os.Stat(envPath); err == nil {
 		http.Error(w, "already configured", http.StatusConflict)
 		return
@@ -78,17 +89,29 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize all string fields: reject values containing characters
-	// that could corrupt the .env file format.
-	for _, check := range []struct {
-		name, val string
-	}{
+	// Validate admin credentials
+	if req.AdminUsername == "" {
+		http.Error(w, "admin_username is required", http.StatusBadRequest)
+		return
+	}
+	if !validUsername(req.AdminUsername) {
+		http.Error(w, "admin_username is invalid (1-64 chars, no control chars or slashes)", http.StatusBadRequest)
+		return
+	}
+	if len(req.AdminPassword) < 8 {
+		http.Error(w, "admin_password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Sanitize all string fields
+	for _, check := range []struct{ name, val string }{
+		{"admin_username", req.AdminUsername},
+		{"admin_password", req.AdminPassword},
 		{"wireguard_key", req.WireguardKey},
-		{"country", req.Country},
 		{"config_dir", req.ConfigDir},
+		{"media_dir", req.MediaDir},
 		{"library_dir", req.LibraryDir},
 		{"work_dir", req.WorkDir},
-		{"port", req.Port},
 	} {
 		if strings.ContainsAny(check.val, "\"\n\r") {
 			http.Error(w, check.name+" contains invalid characters", http.StatusBadRequest)
@@ -96,40 +119,40 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate WireGuard key: must be 44-char base64 ending in =
-	key := strings.TrimSpace(req.WireguardKey)
-	if key == "" {
-		http.Error(w, "wireguard_key is required", http.StatusBadRequest)
-		return
-	}
-	if len(key) != 44 || key[43] != '=' {
-		http.Error(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
-		return
-	}
-	req.WireguardKey = key
-
-	// Defaults
-	if req.Country == "" {
-		req.Country = "Netherlands"
-	}
-	if req.Port == "" {
-		req.Port = "7354"
+	// VPN: validate key if provided, or require vpn_skipped
+	wgKey := strings.TrimSpace(req.WireguardKey)
+	if !req.VPNSkipped {
+		if wgKey == "" {
+			http.Error(w, "wireguard_key is required (or set vpn_skipped)", http.StatusBadRequest)
+			return
+		}
+		if len(wgKey) != 44 || wgKey[43] != '=' {
+			http.Error(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
+			return
+		}
+	} else {
+		wgKey = "" // ensure empty when skipped
 	}
 
-	// Use host-detected defaults for paths if not provided
+	// Paths: media_dir is the single field; library_dir/work_dir override it
 	if req.ConfigDir == "" {
 		req.ConfigDir = envOr("HOST_CONFIG_DIR", "./config")
 	}
-	if req.LibraryDir == "" {
-		req.LibraryDir = envOr("HOST_LIBRARY_DIR", "~/media")
+	libraryDir := req.LibraryDir
+	workDir := req.WorkDir
+	if req.MediaDir != "" {
+		if libraryDir == "" {
+			libraryDir = req.MediaDir
+		}
+		if workDir == "" {
+			workDir = req.MediaDir
+		}
 	}
-	if req.WorkDir == "" {
-		req.WorkDir = envOr("HOST_WORK_DIR", "~/media")
+	if libraryDir == "" {
+		libraryDir = envOr("HOST_LIBRARY_DIR", "~/media")
 	}
-
-	authMode := "off"
-	if req.AuthEnabled {
-		authMode = "jellyfin"
+	if workDir == "" {
+		workDir = envOr("HOST_WORK_DIR", "~/media")
 	}
 
 	puid := envOr("HOST_PUID", "1000")
@@ -137,23 +160,23 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	tz := envOr("HOST_TZ", "America/New_York")
 	proculaKey := generateAPIKey()
 	webhookSecret := generateAPIKey()
-	jellyfinPassword := generateReadablePassword()
 
 	envMu.Lock()
 	defer envMu.Unlock()
 
 	vars := map[string]string{
 		"CONFIG_DIR":            req.ConfigDir,
-		"LIBRARY_DIR":           req.LibraryDir,
-		"WORK_DIR":              req.WorkDir,
+		"LIBRARY_DIR":           libraryDir,
+		"WORK_DIR":              workDir,
 		"PUID":                  puid,
 		"PGID":                  pgid,
 		"TZ":                    tz,
-		"WIREGUARD_PRIVATE_KEY": req.WireguardKey,
-		"SERVER_COUNTRIES":      req.Country,
-		"PELICULA_PORT":         req.Port,
-		"PELICULA_AUTH":         authMode,
-		"JELLYFIN_PASSWORD":     jellyfinPassword,
+		"WIREGUARD_PRIVATE_KEY": wgKey,
+		"SERVER_COUNTRIES":      "Netherlands",
+		"PELICULA_PORT":         "7354",
+		"PELICULA_AUTH":         "jellyfin",
+		"JELLYFIN_ADMIN_USER":   req.AdminUsername,
+		"JELLYFIN_PASSWORD":     req.AdminPassword,
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
@@ -168,7 +191,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("setup wizard completed, wrote .env", "component", "setup")
+	slog.Info("setup wizard completed", "component", "setup", "admin", req.AdminUsername, "vpn", !req.VPNSkipped)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
