@@ -1,0 +1,111 @@
+package main
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"math/big"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+// getScriptDir returns the directory containing the running binary, which is
+// the pelicula project root (same contract as SCRIPT_DIR in the bash CLI).
+func getScriptDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		// Fall back to cwd
+		cwd, _ := os.Getwd()
+		return cwd
+	}
+	// Resolve symlinks so that `./pelicula` invocation works correctly
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		return filepath.Dir(exe)
+	}
+	return filepath.Dir(resolved)
+}
+
+// sudoRun creates an exec.Cmd prefixed with "sudo".
+func sudoRun(args ...string) *exec.Cmd {
+	return exec.Command("sudo", args...)
+}
+
+// openBrowser opens url in the default browser.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start() // best-effort, ignore errors
+}
+
+// generateAPIKey generates a 32-character alphanumeric random key.
+func generateAPIKey() string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 32)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			// Fall back to base64 if crypto/rand fails
+			fb := make([]byte, 24)
+			_, _ = rand.Read(fb)
+			return base64.RawURLEncoding.EncodeToString(fb)[:32]
+		}
+		b[i] = chars[n.Int64()]
+	}
+	return string(b)
+}
+
+// generateReadablePassword generates a password in 5-5-5 format using
+// unambiguous characters (no 0, O, l, 1, I, etc.).
+func generateReadablePassword() string {
+	// Same character set as the bash CLI
+	const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	b := make([]byte, 15)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			// very unlikely; fall back
+			b[i] = chars[0]
+			continue
+		}
+		b[i] = chars[n.Int64()]
+	}
+	return string(b[0:5]) + "-" + string(b[5:10]) + "-" + string(b[10:15])
+}
+
+// requireEnv prints an error and exits if the .env file does not exist.
+func requireEnv(envFile string) {
+	if _, err := os.Stat(envFile); err != nil {
+		fatal("No .env file found. Run " + bold("pelicula setup") + " first.")
+	}
+}
+
+// loadEnvOrFatal loads the .env file or exits on failure.
+func loadEnvOrFatal(envFile string) EnvMap {
+	requireEnv(envFile)
+	env, err := ParseEnv(envFile)
+	if err != nil {
+		fatal("Failed to read .env: " + err.Error())
+	}
+	return env
+}
+
+// expandHome replaces a leading ~ with the user's home directory.
+func expandHome(path, home string) string {
+	if strings.HasPrefix(path, "~/") {
+		return home + path[1:]
+	}
+	if path == "~" {
+		return home
+	}
+	return path
+}
