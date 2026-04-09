@@ -15,4 +15,4 @@ procula/testcache/
 docs/design-exploration/_archive/
 docs/superpowers/
 .superpowers/
-.env.bak.*
+.env.bak*
