@@ -213,3 +213,115 @@ input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink,
     border-radius: 12px; padding: 0.75rem 1rem; font-size: 0.78rem; color: var(--muted, #9080a8);
     margin-top: 0.75rem; line-height: 1.6;
 }
+
+/* ── New wizard elements ─────────── */
+.password-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+.generate-link {
+    font-size: 0.75rem;
+    color: var(--accent, #a78bfa);
+    text-decoration: none;
+}
+.generate-link:hover {
+    text-decoration: underline;
+}
+.generated-password-box {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    background: rgba(167, 139, 250, 0.06);
+    border: 1px solid rgba(167, 139, 250, 0.2);
+    border-radius: 0.4rem;
+    font-family: monospace;
+    font-size: 1rem;
+    letter-spacing: 0.03em;
+    color: var(--text, #e0e0e0);
+    margin-bottom: 0.5rem;
+}
+.generated-password-box .copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0.2rem;
+    margin-left: auto;
+}
+.password-warning {
+    font-size: 0.75rem;
+    color: #FF9800;
+    padding: 0.5rem 0.6rem;
+    background: rgba(255, 152, 0, 0.06);
+    border-radius: 0.3rem;
+    border: 1px solid rgba(255, 152, 0, 0.15);
+}
+.advanced-toggle {
+    font-size: 0.8rem;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+    margin-top: 0.5rem;
+}
+.advanced-content {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: rgba(255,255,255,0.02);
+    border-radius: 0.4rem;
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.vpn-country-display {
+    margin: 0.75rem 0;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255,255,255,0.02);
+    border-radius: 0.3rem;
+    font-size: 0.85rem;
+    color: #ccc;
+}
+.field-help-inline {
+    font-size: 0.75rem;
+    color: #666;
+}
+.why-protonvpn {
+    margin: 0.5rem 0;
+}
+.why-protonvpn summary {
+    font-size: 0.8rem;
+    color: #888;
+    cursor: pointer;
+}
+.why-protonvpn-content {
+    font-size: 0.8rem;
+    color: #aaa;
+    margin-top: 0.5rem;
+    padding: 0.6rem;
+    background: rgba(255,255,255,0.03);
+    border-radius: 0.4rem;
+    line-height: 1.6;
+}
+.skip-vpn {
+    text-align: center;
+    margin-top: 0.75rem;
+}
+.skip-vpn a {
+    font-size: 0.8rem;
+    color: #888;
+    text-decoration: none;
+    border-bottom: 1px dashed #555;
+}
+.skip-vpn a:hover {
+    color: #aaa;
+}
+.vpn-skipped-notice {
+    padding: 0.6rem 0.8rem;
+    background: rgba(255, 152, 0, 0.06);
+    border: 1px solid rgba(255, 152, 0, 0.15);
+    border-radius: 0.4rem;
+    font-size: 0.8rem;
+    color: #FF9800;
+    line-height: 1.5;
+    margin-top: 0.75rem;
+}
+.hidden { display: none !important; }
