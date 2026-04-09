@@ -6,26 +6,12 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 ## Active
 
-### Pelicula for Windows
+### Peligrosa Hardening
 
-Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `pelicula.exe`) for true cross-platform support including native Windows without WSL.
+Remaining security items from the Peligrosa initiative:
 
-**Why:** The bash script is the only Windows-incompatible piece. All containers run fine on Docker Desktop for Windows. A Go CLI removes the bash + python3 dependencies entirely.
-
-**Scope:**
-- [ ] New `cmd/pelicula/` package — compiles to a single binary per platform
-- [ ] All setup/configure prompts in Go (`bufio.Scanner`) — no bash required
-- [ ] `.env` generation and config file writes in pure Go
-- [ ] User management (`configure_users`) in Go — removes python3 dependency
-- [ ] `docker compose` orchestration via `os/exec` (same as bash today)
-- [ ] Platform detection in Go: Windows, macOS, Linux, Synology NAS
-- [ ] TUN device handling on Linux/Synology; skip on macOS/Windows (Docker Desktop handles it)
-- [ ] `docker-compose.override.yml` generation on non-macOS
-- [ ] Distribute as a single binary — no shell, no interpreter, no dependencies
-
-**What does NOT change:** middleware, procula, nginx, docker-compose.yml, all containers. The Go CLI is purely the operator tool that wraps `docker compose` and manages configuration.
-
-**Note:** The current bash script remains authoritative until this is complete. Build after active phases above.
+- [ ] **HMAC invite tokens** — sign tokens with a server secret so validity is verifiable without a DB lookup
+- [ ] **`middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD into a Go subpackage with explicit API surface
 
 ---
 
@@ -53,11 +39,12 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
 - **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; `./pelicula up` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
-- **Procula queue: JSON files vs SQLite** — Current implementation (`procula/queue.go`) uses one JSON file per job under `/config/procula/jobs/`. Pros: zero external dependencies, stdlib only, trivial to inspect, files are the unit of recovery. Cons: O(n) scans on load, no atomic multi-job operations. At current scale (single worker goroutine, hundreds of jobs/month) the cost is negligible. SQLite would win if we add cross-job analytics to the dashboard, a second worker, or job volume exceeds ~10k/month. Migration path is straightforward: JSON files are keyed by job ID, a one-shot importer can seed SQLite on first startup.
 
 ---
 
 ## Shipped
+
+**Pre-v1.0 Hardening:** SQLite data layer for all mutable state (`modernc.org/sqlite` via pure-Go driver). Migration framework with `PRAGMA user_version` for both middleware and procula. Auto-migration from JSON files on first startup (idempotent, handles corrupt files). Configurable service URLs via environment variables (`SONARR_URL`, `RADARR_URL`, etc.). Versioned backup format (v1→v2) with forward-compatible import chain; v2 includes roles, invites, and requests. Go CLI rewrite (`cmd/pelicula/`) — single binary, cross-platform (macOS/Linux/Windows/Synology), stdlib-only, replaces the bash script. API contract freeze with stability policy (additive-only changes).
 
 **Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `./pelicula configure` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
 

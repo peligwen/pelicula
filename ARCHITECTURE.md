@@ -15,25 +15,39 @@ The stack is assembled from several Compose files depending on context:
 
 `docker-compose.override.yml` and `docker-compose.remote.yml` are gitignored (generated at runtime). `docker-compose.test.yml` is checked in.
 
+## Data Layer
+
+Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no CGO) for all mutable state. Config files (XML, INI) remain file-based.
+
+| Service | Database | Tables |
+|---------|----------|--------|
+| middleware | `/config/pelicula/pelicula.db` | roles, invites, redemptions, requests, request_events, sessions, dismissed_jobs, rate_limits |
+| procula | `/config/procula/procula.db` | jobs, settings |
+
+**Schema versioning:** `PRAGMA user_version` tracks the current migration level. Migrations run in transactions on startup. WAL mode + `MaxOpenConns(1)` for safe concurrent access.
+
+**JSON auto-migration:** On first startup after upgrade, existing JSON files are read, inserted into SQLite, and renamed to `.json.migrated`. Corrupt files are renamed to `.json.corrupt` and logged; read errors leave the file in place for retry on next startup.
+
 ## Middleware Startup Sequence
 
 `pelicula-api` (port 8181) runs this sequence on every start:
 
-1. Read API keys from mounted `*arr` `config.xml` files
-2. Wait for all services to be healthy (health-check polling)
-3. Auto-wire:
+1. Open SQLite database, run migrations, auto-migrate JSON files
+2. Read API keys from mounted `*arr` `config.xml` files
+3. Wait for all services to be healthy (health-check polling)
+4. Auto-wire:
    - Add qBittorrent as download client in Sonarr + Radarr
    - Set root folders for Sonarr + Radarr
    - Connect Prowlarr to Sonarr + Radarr
    - Complete Jellyfin setup wizard
    - Add Movies + TV libraries to Jellyfin
    - Wire import webhooks into Radarr + Sonarr (`wireImportWebhook()`)
-4. Start the missing content watcher (2-minute interval) — auto-searches monitored items with no files
-5. Serve the HTTP API
+5. Start the missing content watcher (2-minute interval) — auto-searches monitored items with no files
+6. Serve the HTTP API
 
 ## Config Seeding and Auth Enforcement
 
-On every `./pelicula up`, `cmd_up` in the bash CLI:
+On every `pelicula up`, the Go CLI (`cmd/pelicula/`):
 
 - **Seeds** config files that are missing (UrlBase, auth settings, qBittorrent subnet bypass, Jellyfin BaseUrl). Seeding is idempotent — existing files are left alone.
 - **`enforce_arr_auth()`** patches any existing `*arr` `config.xml` where `AuthenticationRequired=Enabled` back to `DisabledForLocalAddresses`. This prevents the *arr apps from locking the user out: on first boot, *arr writes its own config on top of the seeded file, re-enabling auth. The enforcement pass corrects this every time the stack starts.
@@ -46,18 +60,20 @@ From nginx and the *arr apps, qBittorrent is reachable at `gluetun:8080` (not `q
 
 qBittorrent v5 renamed the pause/resume API to stop/start — the middleware uses the v5 endpoints.
 
-## Platform Detection
+## Go CLI
 
-`detect_platform()` in the bash CLI:
+The `cmd/pelicula/` package compiles to a single binary per platform (macOS/Linux/Windows/Synology). Zero external dependencies — stdlib only. Replaces the bash script for all lifecycle commands: setup, up, down, restart, rebuild, reset-config, status, logs, update, export, import-backup, import, check-vpn.
 
+**Platform detection** (`detectPlatform()` in `platform.go`):
 1. Checks `/proc/syno_platform` or `/volume1` to identify Synology NAS
-2. Auto-detects whether `docker` needs `sudo` by running `docker info` without it first
+2. Auto-detects whether `docker` needs `sudo` by running `sudo -n docker info`
 
 Platform affects:
 - **Default paths** at setup time (`./config` + `~/media` generically; `/volume1/docker/pelicula` + `/volume1/media` on Synology)
 - **Setup display label** (macOS, Linux, WSL, Synology NAS)
-- **TUN device handling** — created on Linux/Synology/WSL, skipped on macOS (Docker Desktop uses utun internally)
+- **TUN device handling** — created on Linux/Synology/WSL, skipped on macOS/Windows (Docker Desktop handles it)
 - **`docker-compose.override.yml`** — generated on all non-macOS platforms with the TUN device mapping
+- **TTY detection** — platform-specific build tags (`tty_darwin.go`, `tty_linux.go`, `tty_windows.go`) for ANSI color output
 
 ## nginx Static Files
 
