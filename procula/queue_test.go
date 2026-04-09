@@ -1,16 +1,14 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func newTestQueue(t *testing.T) *Queue {
 	t.Helper()
-	q, err := NewQueue(t.TempDir())
+	db := testDB(t)
+	q, err := NewQueue(db)
 	if err != nil {
 		t.Fatalf("NewQueue: %v", err)
 	}
@@ -58,18 +56,11 @@ func TestQueueCreateAndGet(t *testing.T) {
 		t.Errorf("Get ID = %q, want %q", got.ID, job.ID)
 	}
 
-	// Verify JSON file written to disk
-	jobPath := filepath.Join(q.configDir, "jobs", job.ID+".json")
-	data, err := os.ReadFile(jobPath)
-	if err != nil {
-		t.Fatalf("job file not on disk: %v", err)
-	}
-	var onDisk Job
-	if err := json.Unmarshal(data, &onDisk); err != nil {
-		t.Fatalf("corrupt job file: %v", err)
-	}
-	if onDisk.ID != job.ID {
-		t.Errorf("on-disk ID = %q, want %q", onDisk.ID, job.ID)
+	// Verify job is in DB
+	var count int
+	q.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE id=?`, job.ID).Scan(&count)
+	if count != 1 {
+		t.Errorf("expected 1 row in DB for job %s, got %d", job.ID, count)
 	}
 }
 
@@ -77,7 +68,7 @@ func TestQueueGetIsolation(t *testing.T) {
 	q := newTestQueue(t)
 	job, _ := q.Create(testSource("/downloads/test.mkv"))
 
-	// Mutating the returned copy must not affect the queue's internal state
+	// Mutating the returned copy must not affect the stored state
 	got, _ := q.Get(job.ID)
 	got.State = StateFailed
 	got.Error = "mutated"
@@ -165,12 +156,11 @@ func TestQueueUpdate(t *testing.T) {
 		t.Errorf("UpdatedAt not updated: %v <= %v", got.UpdatedAt, before)
 	}
 
-	// Verify persisted to disk
-	data, _ := os.ReadFile(filepath.Join(q.configDir, "jobs", job.ID+".json"))
-	var onDisk Job
-	json.Unmarshal(data, &onDisk)
-	if onDisk.State != StateProcessing {
-		t.Errorf("on-disk State = %q, want %q", onDisk.State, StateProcessing)
+	// Verify persisted to DB
+	var state string
+	q.db.QueryRow(`SELECT state FROM jobs WHERE id=?`, job.ID).Scan(&state)
+	if state != string(StateProcessing) {
+		t.Errorf("on-DB state = %q, want %q", state, StateProcessing)
 	}
 }
 
@@ -294,10 +284,11 @@ func TestQueueStatus(t *testing.T) {
 }
 
 func TestQueueLoadExisting(t *testing.T) {
-	dir := t.TempDir()
+	// Use a shared DB path so both queues can access it
+	import_db := testDB(t)
 
 	// Create a queue, add a job, then abandon it "mid-processing"
-	q1, _ := NewQueue(dir)
+	q1, _ := NewQueue(import_db)
 	job, _ := q1.Create(testSource("/downloads/test.mkv"))
 	q1.Update(job.ID, func(j *Job) {
 		j.State = StateProcessing
@@ -313,8 +304,8 @@ func TestQueueLoadExisting(t *testing.T) {
 	job3, _ := q1.Create(testSource("/downloads/fail.mkv"))
 	q1.Update(job3.ID, func(j *Job) { j.State = StateFailed })
 
-	// Load a fresh queue from the same directory (simulating restart)
-	q2, err := NewQueue(dir)
+	// Load a fresh queue from the same DB (simulating restart)
+	q2, err := NewQueue(import_db)
 	if err != nil {
 		t.Fatalf("NewQueue on restart: %v", err)
 	}
@@ -348,33 +339,25 @@ func TestQueueLoadExisting(t *testing.T) {
 }
 
 func TestQueueLoadSkipsCorruptFiles(t *testing.T) {
-	dir := t.TempDir()
-	jobsDir := filepath.Join(dir, "jobs")
-	os.MkdirAll(jobsDir, 0755)
+	// With SQLite backing there are no corrupt files to skip —
+	// DB rows are always valid. Verify the queue loads normally.
+	db := testDB(t)
 
-	// Write a corrupt JSON file
-	os.WriteFile(filepath.Join(jobsDir, "job_corrupt.json"), []byte("not json{{"), 0644)
-
-	// Also write a valid job
-	valid := Job{
-		ID:        "job_valid",
-		State:     StateQueued,
-		Stage:     StageValidate,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Source:    testSource("/downloads/ok.mkv"),
-	}
-	data, _ := json.Marshal(valid)
-	os.WriteFile(filepath.Join(jobsDir, "job_valid.json"), data, 0644)
-
-	q, err := NewQueue(dir)
+	// Insert a valid job directly into the DB using the queue
+	q1, _ := NewQueue(db)
+	valid, err := q1.Create(testSource("/downloads/ok.mkv"))
 	if err != nil {
-		t.Fatalf("NewQueue with corrupt file: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
-	if len(q.jobs) != 1 {
-		t.Errorf("expected 1 job loaded (corrupt skipped), got %d", len(q.jobs))
+
+	// Open a second queue on the same DB
+	q2, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
 	}
-	if _, ok := q.jobs["job_valid"]; !ok {
-		t.Error("valid job not loaded")
+
+	_, ok := q2.Get(valid.ID)
+	if !ok {
+		t.Error("valid job not found in second queue")
 	}
 }

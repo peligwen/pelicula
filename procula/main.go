@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,9 +10,12 @@ import (
 	"strings"
 )
 
-// configDir is the global config directory used by settings.go.
+// configDir is the global config directory.
 // Set once at startup from CONFIG_DIR env var.
 var configDir string
+
+// appDB is the global SQLite database handle set at startup.
+var appDB *sql.DB
 
 // Version is the current Procula version, injected at build time via -ldflags.
 var Version = "dev"
@@ -36,6 +40,7 @@ func requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 // Server holds the dependencies for HTTP handlers.
 type Server struct {
 	queue     *Queue
+	db        *sql.DB
 	configDir string
 }
 
@@ -48,12 +53,23 @@ func main() {
 	peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
 	proculaAPIKey = env("PROCULA_API_KEY", "")
 
-	q, err := NewQueue(configDir)
+	db, err := OpenDB(filepath.Join(configDir, "procula.db"))
+	if err != nil {
+		slog.Error("database initialization failed", "component", "main", "error", err)
+		os.Exit(1)
+	}
+	appDB = db
+
+	migrateAllJSON(db, configDir)
+
+	q, err := NewQueue(db)
 	if err != nil {
 		slog.Error("queue initialization failed", "component", "main", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("queue loaded", "component", "queue", "job_count", len(q.jobs))
+
+	jobs := q.List()
+	slog.Info("queue loaded", "component", "queue", "job_count", len(jobs))
 
 	el, err := NewEventLog(configDir)
 	if err != nil {
@@ -67,7 +83,7 @@ func main() {
 	go RunStorageMonitor(configDir)
 	go RunUpdateChecker(configDir)
 
-	srv := &Server{queue: q, configDir: configDir}
+	srv := &Server{queue: q, db: db, configDir: configDir}
 
 	mux := http.NewServeMux()
 
@@ -82,8 +98,8 @@ func main() {
 	mux.HandleFunc("POST /api/procula/storage/scan", requireAPIKey(handleStorageScan))
 	mux.HandleFunc("GET /api/procula/updates", handleUpdates)
 	mux.HandleFunc("GET /api/procula/notifications", srv.handleNotifications)
-	mux.HandleFunc("GET /api/procula/settings", handleGetSettings)
-	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(handleSaveSettings))
+	mux.HandleFunc("GET /api/procula/settings", srv.handleGetSettings)
+	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(srv.handleSaveSettings))
 	mux.HandleFunc("GET /api/procula/profiles", srv.handleListProfiles)
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
@@ -223,50 +239,55 @@ func handleUpdates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, getCachedUpdate())
 }
 
-func handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, GetSettings())
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, GetSettings(s.db))
 }
 
-func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var s PipelineSettings
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+	var settings PipelineSettings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	// Validate notification mode
-	switch s.NotifMode {
+	switch settings.NotifMode {
 	case "internal", "apprise", "direct":
 	default:
-		s.NotifMode = "internal"
+		settings.NotifMode = "internal"
 	}
-	switch s.DualSubTranslator {
+	switch settings.DualSubTranslator {
 	case "argos", "none":
 	default:
-		s.DualSubTranslator = "none"
+		settings.DualSubTranslator = "none"
 	}
-	if len(s.DualSubPairs) == 0 {
-		s.DualSubPairs = []string{"en-es"}
+	if len(settings.DualSubPairs) == 0 {
+		settings.DualSubPairs = []string{"en-es"}
 	}
 	// Clamp storage thresholds to [0, 100] and ensure warning < critical.
-	if s.StorageWarningPct < 0 {
-		s.StorageWarningPct = 0
+	if settings.StorageWarningPct < 0 {
+		settings.StorageWarningPct = 0
 	}
-	if s.StorageCriticalPct > 100 {
-		s.StorageCriticalPct = 100
+	if settings.StorageCriticalPct > 100 {
+		settings.StorageCriticalPct = 100
 	}
-	if s.StorageWarningPct >= s.StorageCriticalPct {
-		s.StorageWarningPct = s.StorageCriticalPct - 1
-		if s.StorageWarningPct < 0 {
-			s.StorageWarningPct = 0
+	if settings.StorageWarningPct >= settings.StorageCriticalPct {
+		settings.StorageWarningPct = settings.StorageCriticalPct - 1
+		if settings.StorageWarningPct < 0 {
+			settings.StorageWarningPct = 0
 		}
 	}
-	if err := SaveSettings(s); err != nil {
+	if err := SaveSettings(s.db, settings); err != nil {
 		writeError(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	slog.Info("settings saved", "component", "settings", "validation", s.ValidationEnabled, "transcoding", s.TranscodingEnabled, "catalog", s.CatalogEnabled, "notif_mode", s.NotifMode)
-	writeJSON(w, s)
+	slog.Info("settings saved", "component", "settings",
+		"validation", settings.ValidationEnabled,
+		"transcoding", settings.TranscodingEnabled,
+		"catalog", settings.CatalogEnabled,
+		"notif_mode", settings.NotifMode,
+	)
+	writeJSON(w, settings)
 }
 
 func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,18 +11,31 @@ import (
 	"testing"
 )
 
-// overrideSettings sets cachedSettings for the duration of a test.
+// overrideSettings saves settings into a fresh test DB and points appDB at it
+// for the duration of the test, restoring the original appDB on cleanup.
 func overrideSettings(t *testing.T, s PipelineSettings) {
 	t.Helper()
-	settingsMu.Lock()
-	old := cachedSettings
-	cachedSettings = &s
-	settingsMu.Unlock()
-	t.Cleanup(func() {
-		settingsMu.Lock()
-		cachedSettings = old
-		settingsMu.Unlock()
-	})
+	db := testDB(t)
+	if err := SaveSettings(db, s); err != nil {
+		t.Fatalf("overrideSettings: SaveSettings: %v", err)
+	}
+	old := appDB
+	appDB = db
+	t.Cleanup(func() { appDB = old })
+}
+
+// overrideSettingsDB is like overrideSettings but also returns the DB so the
+// caller can create a Queue that shares it.
+func overrideSettingsDB(t *testing.T, s PipelineSettings) *sql.DB {
+	t.Helper()
+	db := testDB(t)
+	if err := SaveSettings(db, s); err != nil {
+		t.Fatalf("overrideSettingsDB: SaveSettings: %v", err)
+	}
+	old := appDB
+	appDB = db
+	t.Cleanup(func() { appDB = old })
+	return db
 }
 
 // fakePeliculaAPI returns a test server that accepts any request (for blocklist/catalog calls).

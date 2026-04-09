@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"os"
-	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 )
@@ -96,25 +94,17 @@ type Job struct {
 }
 
 type Queue struct {
-	configDir string
-	mu        sync.RWMutex
-	jobs      map[string]*Job
+	db        *sql.DB
 	pending   chan string
 	cancelsMu sync.Mutex
 	cancels   map[string]context.CancelFunc
 }
 
-func NewQueue(configDir string) (*Queue, error) {
-	jobsDir := filepath.Join(configDir, "jobs")
-	if err := os.MkdirAll(jobsDir, 0755); err != nil {
-		return nil, fmt.Errorf("create jobs dir: %w", err)
-	}
-
+func NewQueue(db *sql.DB) (*Queue, error) {
 	q := &Queue{
-		configDir: configDir,
-		jobs:      make(map[string]*Job),
-		pending:   make(chan string, 256),
-		cancels:   make(map[string]context.CancelFunc),
+		db:      db,
+		pending: make(chan string, 256),
+		cancels: make(map[string]context.CancelFunc),
 	}
 
 	if err := q.loadExisting(); err != nil {
@@ -124,43 +114,49 @@ func NewQueue(configDir string) (*Queue, error) {
 	return q, nil
 }
 
-// loadExisting reads job files from disk on startup. Jobs that were
-// mid-processing when the process died are re-queued.
+// loadExisting reads jobs from DB on startup. Jobs that were mid-processing
+// when the process died are reset to queued and re-enqueued.
 func (q *Queue) loadExisting() error {
-	jobsDir := filepath.Join(q.configDir, "jobs")
-	entries, err := os.ReadDir(jobsDir)
+	rows, err := q.db.Query(`SELECT id, state FROM jobs WHERE state IN ('queued','processing')`)
 	if err != nil {
-		return nil
+		return fmt.Errorf("loadExisting query: %w", err)
+	}
+	defer rows.Close()
+
+	type row struct {
+		id    string
+		state JobState
+	}
+	var toProcess []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.state); err != nil {
+			slog.Warn("loadExisting scan error", "component", "queue", "error", err)
+			continue
+		}
+		toProcess = append(toProcess, r)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("loadExisting rows: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(jobsDir, entry.Name()))
-		if err != nil {
-			slog.Warn("could not read job file", "component", "queue", "file", entry.Name(), "error", err)
-			continue
-		}
-		var job Job
-		if err := json.Unmarshal(data, &job); err != nil {
-			slog.Warn("corrupt job file, skipping", "component", "queue", "file", entry.Name(), "error", err)
-			continue
-		}
-		// Re-queue jobs that were processing when we died
-		if job.State == StateProcessing {
-			job.State = StateQueued
-			job.Stage = StageValidate
-			job.Progress = 0
-			job.Error = "interrupted: restarted"
-		}
-		q.jobs[job.ID] = &job
-		if job.State == StateQueued {
-			select {
-			case q.pending <- job.ID:
-			default:
-				slog.Warn("pending channel full, job will not run until retried or restarted", "component", "queue", "job_id", job.ID)
+	for _, r := range toProcess {
+		if r.state == StateProcessing {
+			// Reset interrupted jobs back to queued
+			_, err := q.db.Exec(
+				`UPDATE jobs SET state=?, stage=?, progress=0, error=?, updated_at=? WHERE id=?`,
+				string(StateQueued), string(StageValidate), "interrupted: restarted",
+				time.Now().UTC().Format(time.RFC3339Nano), r.id,
+			)
+			if err != nil {
+				slog.Warn("could not reset interrupted job", "component", "queue", "job_id", r.id, "error", err)
+				continue
 			}
+		}
+		select {
+		case q.pending <- r.id:
+		default:
+			slog.Warn("pending channel full, job will not run until retried or restarted", "component", "queue", "job_id", r.id)
 		}
 	}
 	return nil
@@ -168,19 +164,43 @@ func (q *Queue) loadExisting() error {
 
 func (q *Queue) Create(source JobSource) (*Job, error) {
 	// Deduplicate: return existing job if the same path is already active
-	q.mu.RLock()
-	for _, j := range q.jobs {
-		if j.Source.Path == source.Path && (j.State == StateQueued || j.State == StateProcessing) {
-			cp := *j
-			q.mu.RUnlock()
-			slog.Info("duplicate job, returning existing", "component", "queue", "path", source.Path, "existing_id", cp.ID)
-			return &cp, nil
+	var existingID string
+	err := q.db.QueryRow(
+		`SELECT id FROM jobs WHERE source LIKE ? AND state IN ('queued','processing') LIMIT 1`,
+		`%"`+source.Path+`"%`,
+	).Scan(&existingID)
+	if err == nil {
+		// Found existing job — load and return it
+		job, ok := q.Get(existingID)
+		if ok {
+			slog.Info("duplicate job, returning existing", "component", "queue", "path", source.Path, "existing_id", existingID)
+			return job, nil
 		}
 	}
-	q.mu.RUnlock()
 
 	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
 	now := time.Now().UTC()
+
+	sourceJSON, err := json.Marshal(source)
+	if err != nil {
+		return nil, fmt.Errorf("marshal source: %w", err)
+	}
+
+	_, err = q.db.Exec(
+		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0)`,
+		id,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		string(StateQueued),
+		string(StageValidate),
+		string(sourceJSON),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert job: %w", err)
+	}
+
 	job := &Job{
 		ID:        id,
 		CreatedAt: now,
@@ -188,14 +208,6 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 		State:     StateQueued,
 		Stage:     StageValidate,
 		Source:    source,
-	}
-
-	q.mu.Lock()
-	q.jobs[id] = job
-	q.mu.Unlock()
-
-	if err := q.persist(job); err != nil {
-		return nil, err
 	}
 
 	select {
@@ -208,41 +220,97 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 }
 
 func (q *Queue) Get(id string) (*Job, bool) {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	j, ok := q.jobs[id]
-	if !ok {
+	row := q.db.QueryRow(
+		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
+		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
+		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
+		 FROM jobs WHERE id=?`, id,
+	)
+	job, err := scanJob(row)
+	if err != nil {
 		return nil, false
 	}
-	cp := *j
-	return &cp, true
+	return job, true
 }
 
 func (q *Queue) List() []Job {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	out := make([]Job, 0, len(q.jobs))
-	for _, j := range q.jobs {
-		out = append(out, *j)
+	rows, err := q.db.Query(
+		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
+		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
+		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
+		 FROM jobs ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		slog.Warn("List query failed", "component", "queue", "error", err)
+		return nil
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
-	})
+	defer rows.Close()
+
+	var out []Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			slog.Warn("List scan failed", "component", "queue", "error", err)
+			continue
+		}
+		out = append(out, *job)
+	}
 	return out
 }
 
 func (q *Queue) Update(id string, fn func(*Job)) error {
-	q.mu.Lock()
-	job, ok := q.jobs[id]
+	job, ok := q.Get(id)
 	if !ok {
-		q.mu.Unlock()
 		return fmt.Errorf("job %s not found", id)
 	}
+
 	fn(job)
 	job.UpdatedAt = time.Now().UTC()
-	cp := *job
-	q.mu.Unlock()
-	if err := q.persist(&cp); err != nil {
+
+	sourceJSON, _ := json.Marshal(job.Source)
+
+	var validationJSON *string
+	if job.Validation != nil {
+		b, _ := json.Marshal(job.Validation)
+		s := string(b)
+		validationJSON = &s
+	}
+
+	var missingSubsJSON *string
+	if job.MissingSubs != nil {
+		b, _ := json.Marshal(job.MissingSubs)
+		s := string(b)
+		missingSubsJSON = &s
+	}
+
+	var dualSubOutputsJSON *string
+	if job.DualSubOutputs != nil {
+		b, _ := json.Marshal(job.DualSubOutputs)
+		s := string(b)
+		dualSubOutputsJSON = &s
+	}
+
+	var transcodeOutputsJSON *string
+	if job.TranscodeOutputs != nil {
+		b, _ := json.Marshal(job.TranscodeOutputs)
+		s := string(b)
+		transcodeOutputsJSON = &s
+	}
+
+	_, err := q.db.Exec(
+		`UPDATE jobs SET
+			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
+			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
+			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?
+		 WHERE id=?`,
+		job.UpdatedAt.Format(time.RFC3339Nano),
+		string(job.State), string(job.Stage), job.Progress,
+		string(sourceJSON), validationJSON, missingSubsJSON,
+		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
+		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
+		id,
+	)
+	if err != nil {
 		slog.Warn("failed to persist job", "component", "queue", "job_id", id, "error", err)
 		return err
 	}
@@ -309,8 +377,6 @@ func (q *Queue) unregisterCancel(id string) {
 }
 
 func (q *Queue) Status() map[string]int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
 	counts := map[string]int{
 		"queued":     0,
 		"processing": 0,
@@ -318,23 +384,84 @@ func (q *Queue) Status() map[string]int {
 		"failed":     0,
 		"cancelled":  0,
 	}
-	for _, j := range q.jobs {
-		counts[string(j.State)]++
+
+	rows, err := q.db.Query(`SELECT state, COUNT(*) FROM jobs GROUP BY state`)
+	if err != nil {
+		slog.Warn("Status query failed", "component", "queue", "error", err)
+		return counts
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var state string
+		var count int
+		if err := rows.Scan(&state, &count); err == nil {
+			counts[state] = count
+		}
 	}
 	return counts
 }
 
-func (q *Queue) persist(job *Job) error {
-	data, err := json.MarshalIndent(job, "", "  ")
+// scanner is satisfied by both *sql.Row and *sql.Rows.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+// scanJob reads one job row from a scanner (either *sql.Row or *sql.Rows).
+func scanJob(s scanner) (*Job, error) {
+	var (
+		job               Job
+		createdAtStr      string
+		updatedAtStr      string
+		sourceJSON        string
+		validationJSON    *string
+		missingSubsJSON   *string
+		dualSubOutputsJSON *string
+		transcodeOutputsJSON *string
+	)
+
+	err := s.Scan(
+		&job.ID, &createdAtStr, &updatedAtStr,
+		&job.State, &job.Stage, &job.Progress,
+		&sourceJSON, &validationJSON, &missingSubsJSON,
+		&job.Error, &job.RetryCount, &job.ManualProfile,
+		&dualSubOutputsJSON, &job.DualSubError,
+		&job.TranscodeProfile, &job.TranscodeDecision,
+		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	final := filepath.Join(q.configDir, "jobs", job.ID+".json")
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
+
+	if t, err := time.Parse(time.RFC3339Nano, createdAtStr); err == nil {
+		job.CreatedAt = t
 	}
-	return os.Rename(tmp, final)
+	if t, err := time.Parse(time.RFC3339Nano, updatedAtStr); err == nil {
+		job.UpdatedAt = t
+	}
+
+	json.Unmarshal([]byte(sourceJSON), &job.Source) //nolint:errcheck
+
+	if validationJSON != nil {
+		var v ValidationResult
+		if err := json.Unmarshal([]byte(*validationJSON), &v); err == nil {
+			job.Validation = &v
+		}
+	}
+
+	if missingSubsJSON != nil {
+		json.Unmarshal([]byte(*missingSubsJSON), &job.MissingSubs) //nolint:errcheck
+	}
+
+	if dualSubOutputsJSON != nil {
+		json.Unmarshal([]byte(*dualSubOutputsJSON), &job.DualSubOutputs) //nolint:errcheck
+	}
+
+	if transcodeOutputsJSON != nil {
+		json.Unmarshal([]byte(*transcodeOutputsJSON), &job.TranscodeOutputs) //nolint:errcheck
+	}
+
+	return &job, nil
 }
 
 const randChars = "abcdefghijklmnopqrstuvwxyz0123456789"

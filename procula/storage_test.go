@@ -139,18 +139,15 @@ func TestComputeFolderSizes(t *testing.T) {
 }
 
 func TestVolumeStatus(t *testing.T) {
-	// Override settings to test threshold logic without a config file.
-	settingsMu.Lock()
-	cachedSettings = &PipelineSettings{
+	// Override settings to test threshold logic.
+	db := testDB(t)
+	SaveSettings(db, PipelineSettings{
 		StorageWarningPct:  50,
 		StorageCriticalPct: 90,
-	}
-	settingsMu.Unlock()
-	defer func() {
-		settingsMu.Lock()
-		cachedSettings = nil
-		settingsMu.Unlock()
-	}()
+	})
+	old := appDB
+	appDB = db
+	defer func() { appDB = old }()
 
 	cases := []struct {
 		usedPct float64
@@ -164,7 +161,7 @@ func TestVolumeStatus(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		s := GetSettings()
+		s := GetSettings(appDB)
 		status := "ok"
 		switch {
 		case c.usedPct >= s.StorageCriticalPct:

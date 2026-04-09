@@ -137,7 +137,7 @@ func buildStorageReport() StorageReport {
 				usedPct = float64(used) / float64(total) * 100
 			}
 
-			s := GetSettings()
+			s := GetSettings(appDB)
 			status := "ok"
 			switch {
 			case usedPct >= s.StorageCriticalPct:

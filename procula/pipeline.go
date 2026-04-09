@@ -66,7 +66,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Stage = StageValidate
 	})
 
-	settings := GetSettings()
+	settings := GetSettings(appDB)
 
 	// ── Stage 1: Validate ─────────────────────────────────────────────────
 	job, _ = q.Get(id)
@@ -273,7 +273,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 // Returns a non-nil error only when transcoding was attempted and failed; the
 // caller continues with the original file either way.
 func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) error {
-	if !GetSettings().TranscodingEnabled {
+	if !GetSettings(appDB).TranscodingEnabled {
 		return nil
 	}
 
@@ -468,7 +468,7 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 	})
 
 	// Refresh Jellyfin so the sidecar appears as an alternate version
-	settings := GetSettings()
+	settings := GetSettings(appDB)
 	if settings.CatalogEnabled {
 		job, _ = q.Get(id)
 		CatalogLate(job, peliculaAPI)

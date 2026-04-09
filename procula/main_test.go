@@ -10,8 +10,12 @@ import (
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	q := newTestQueue(t)
-	return &Server{queue: q, configDir: t.TempDir()}
+	db := testDB(t)
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+	return &Server{queue: q, db: db, configDir: t.TempDir()}
 }
 
 func TestHandlePing(t *testing.T) {
