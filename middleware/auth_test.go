@@ -435,6 +435,139 @@ func TestGuardAdmin_OffMode_HandleUsers_StillBlocked(t *testing.T) {
 	}
 }
 
+// ── Remote role capping (Peligrosa defense-in-depth) ────────────────────
+
+func TestIsRemoteRequest(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		want   bool
+	}{
+		{"present", "true", true},
+		{"absent", "", false},
+		{"wrong value", "false", false},
+		{"garbage", "yes", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if c.header != "" {
+				req.Header.Set("X-Pelicula-Remote", c.header)
+			}
+			if got := isRemoteRequest(req); got != c.want {
+				t.Errorf("isRemoteRequest = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveRole_LocalAdminUnchanged(t *testing.T) {
+	sess := session{username: "alice", role: RoleAdmin}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if got := effectiveRole(sess, req); got != RoleAdmin {
+		t.Errorf("effectiveRole = %q, want admin (local request)", got)
+	}
+}
+
+func TestEffectiveRole_RemoteAdminCapped(t *testing.T) {
+	sess := session{username: "alice", role: RoleAdmin}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	if got := effectiveRole(sess, req); got != RoleViewer {
+		t.Errorf("effectiveRole = %q, want viewer (remote admin capped)", got)
+	}
+}
+
+func TestEffectiveRole_RemoteManagerCapped(t *testing.T) {
+	sess := session{username: "bob", role: RoleManager}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	if got := effectiveRole(sess, req); got != RoleViewer {
+		t.Errorf("effectiveRole = %q, want viewer (remote manager capped)", got)
+	}
+}
+
+func TestEffectiveRole_RemoteViewerUnchanged(t *testing.T) {
+	sess := session{username: "carol", role: RoleViewer}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	if got := effectiveRole(sess, req); got != RoleViewer {
+		t.Errorf("effectiveRole = %q, want viewer (already viewer)", got)
+	}
+}
+
+func TestGuardRole_RemoteAdminBlockedByGuardManager(t *testing.T) {
+	a := newTestAuth("jellyfin")
+	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
+	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := a.GuardManager(dummy)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	addSessionCookie(req, token)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (remote admin capped below manager)", w.Code)
+	}
+}
+
+func TestGuardRole_RemoteAdminPassesGuard(t *testing.T) {
+	a := newTestAuth("jellyfin")
+	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
+	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := a.Guard(dummy)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	addSessionCookie(req, token)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (remote admin can still access viewer endpoints)", w.Code)
+	}
+}
+
+func TestHandleCheck_RemoteReturnsViewerRole(t *testing.T) {
+	a := newTestAuth("jellyfin")
+	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
+	addSessionCookie(req, token)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["role"] != "viewer" {
+		t.Errorf("role = %v, want viewer (remote admin capped)", m["role"])
+	}
+	if m["remote"] != true {
+		t.Errorf("remote = %v, want true", m["remote"])
+	}
+}
+
+func TestSessionFor_RemoteAdminReturnsViewer(t *testing.T) {
+	a := newTestAuth("jellyfin")
+	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	addSessionCookie(req, token)
+	req.Header.Set("X-Pelicula-Remote", "true")
+	username, role, ok := a.SessionFor(req)
+	if !ok {
+		t.Fatal("SessionFor returned false, want true")
+	}
+	if username != "alice" {
+		t.Errorf("username = %q, want alice", username)
+	}
+	if role != RoleViewer {
+		t.Errorf("role = %q, want viewer (remote admin capped)", role)
+	}
+}
+
 // ── Session details ─────────────────────────────────────────────────────
 
 func TestSession_TokenFormat(t *testing.T) {

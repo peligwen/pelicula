@@ -162,6 +162,23 @@ func (a *Auth) GuardAdmin(next http.Handler) http.Handler {
 	return a.guardRole(next, RoleAdmin)
 }
 
+// isRemoteRequest reports whether the request arrived via the remote (Peligrosa)
+// nginx vhost. The remote vhost injects X-Pelicula-Remote: true; the LAN vhost
+// strips the header to prevent spoofing. See nginx/remote.conf.template.
+func isRemoteRequest(r *http.Request) bool {
+	return r.Header.Get("X-Pelicula-Remote") == "true"
+}
+
+// effectiveRole returns the role to enforce for this request. Remote requests
+// are capped to viewer regardless of the stored role — defense-in-depth so that
+// a compromised admin credential cannot escalate via the remote vhost.
+func effectiveRole(sess session, r *http.Request) UserRole {
+	if isRemoteRequest(r) && sess.role.atLeast(RoleManager) {
+		return RoleViewer
+	}
+	return sess.role
+}
+
 func (a *Auth) guardRole(next http.Handler, minRole UserRole) http.Handler {
 	if a.mode == "off" {
 		return next
@@ -172,7 +189,7 @@ func (a *Auth) guardRole(next http.Handler, minRole UserRole) http.Handler {
 			writeError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if !sess.role.atLeast(minRole) {
+		if !effectiveRole(sess, r).atLeast(minRole) {
 			writeError(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -323,7 +340,8 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 		"valid":    true,
 		"mode":     a.mode,
 		"username": sess.username,
-		"role":     string(sess.role),
+		"role":     string(effectiveRole(sess, r)),
+		"remote":   isRemoteRequest(r),
 	})
 }
 
@@ -337,7 +355,7 @@ func (a *Auth) SessionFor(r *http.Request) (username string, role UserRole, ok b
 	if !sOk {
 		return "", "", false
 	}
-	return sess.username, sess.role, true
+	return sess.username, effectiveRole(sess, r), true
 }
 
 func generateToken() (string, error) {
