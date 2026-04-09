@@ -19,7 +19,6 @@ async function checkAuth() {
             return;
         }
         if (!data.valid) {
-            document.getElementById('login-username').classList.remove('hidden');
             document.getElementById('login-overlay').classList.remove('hidden');
         } else {
             applyRole(data.role || 'admin', data.username || '');
@@ -96,8 +95,7 @@ function applyRole(role, username) {
 
 let usersLoaded = false;
 
-document.getElementById('login-username').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-password').focus(); });
-document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('login-form').addEventListener('submit', e => { e.preventDefault(); doLogin(); });
 
 // ── Status + Indexer check ────────────────
 async function checkStatus() {
@@ -1497,11 +1495,11 @@ async function loadUsers() {
                 `<button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>` +
                 `<button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>` +
                 `</div>` +
-                `<div class="user-reset-form hidden">` +
-                `<input type="password" class="user-reset-input" placeholder="New password">` +
-                `<button class="user-action-btn" onclick="submitResetPassword(this)">Set</button>` +
-                `<button class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>` +
-                `</div>` +
+                `<form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">` +
+                `<input type="password" class="user-reset-input" placeholder="New password" autocomplete="new-password">` +
+                `<button type="submit" class="user-action-btn">Set</button>` +
+                `<button type="button" class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>` +
+                `</form>` +
                 `</li>`;
         }).join('');
     } catch (e) {
@@ -1523,12 +1521,13 @@ function cancelResetPassword(btn) {
     li.querySelector('.user-reset-input').value = '';
 }
 
-async function submitResetPassword(btn) {
-    const li = btn.closest('li');
+async function submitResetPassword(form) {
+    const li = form.closest('li');
     const id = li.dataset.userId;
     const input = li.querySelector('.user-reset-input');
     const password = input.value;
     if (!password) { input.focus(); return; }
+    const btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
     try {
         const resp = await fetch(`/api/pelicula/users/${encodeURIComponent(id)}/password`, {

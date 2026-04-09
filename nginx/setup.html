@@ -34,35 +34,38 @@
             <h2>Create Admin Account</h2>
             <p class="step-desc">This is your account. You'll use it to log into the dashboard and manage everything.</p>
 
-            <label for="admin-username">Username</label>
-            <input type="text" id="admin-username" placeholder="Username" spellcheck="false" autocomplete="off">
+            <iframe name="setup-save" style="display:none" aria-hidden="true"></iframe>
+            <form id="setup-form" method="POST" action="about:blank" target="setup-save">
+                <label for="admin-username">Username</label>
+                <input type="text" id="admin-username" placeholder="Username" spellcheck="false" autocomplete="username">
 
-            <div class="password-label-row">
-                <label for="admin-password">Password</label>
-                <a href="#" onclick="generatePassword(); return false;" class="generate-link" id="generate-link">Generate one for me</a>
-            </div>
-
-            <div id="password-manual">
-                <input type="password" id="admin-password" placeholder="Minimum 8 characters" spellcheck="false" autocomplete="new-password">
-
-                <label for="admin-password-confirm">Confirm Password</label>
-                <input type="password" id="admin-password-confirm" placeholder="Confirm password" spellcheck="false" autocomplete="new-password">
-            </div>
-
-            <div id="password-generated" class="hidden">
-                <div class="generated-password-box">
-                    <span id="generated-password-display"></span>
-                    <button type="button" class="copy-btn" onclick="copyPassword()" title="Copy password">
-                        <span id="copy-icon">📋</span>
-                    </button>
+                <div class="password-label-row">
+                    <label for="admin-password">Password</label>
+                    <a href="#" onclick="generatePassword(); return false;" class="generate-link" id="generate-link">Generate one for me</a>
                 </div>
-                <div class="password-warning">⚠️ Save this password — it won't be shown again after setup.</div>
-            </div>
 
-            <div class="step-nav">
-                <span></span>
-                <button onclick="goStep(2)" class="btn-primary">Next</button>
-            </div>
+                <div id="password-manual">
+                    <input type="password" id="admin-password" placeholder="Minimum 8 characters" spellcheck="false" autocomplete="new-password">
+
+                    <label for="admin-password-confirm">Confirm Password</label>
+                    <input type="password" id="admin-password-confirm" placeholder="Confirm password" spellcheck="false" autocomplete="new-password">
+                </div>
+
+                <div id="password-generated" class="hidden">
+                    <div class="generated-password-box">
+                        <span id="generated-password-display"></span>
+                        <button type="button" class="copy-btn" onclick="copyPassword()" title="Copy password">
+                            <span id="copy-icon">📋</span>
+                        </button>
+                    </div>
+                    <div class="password-warning">⚠️ Save this password — it won't be shown again after setup.</div>
+                </div>
+
+                <div class="step-nav">
+                    <span></span>
+                    <button type="submit" class="btn-primary">Next</button>
+                </div>
+            </form>
         </div>
 
         <!-- Step 2: Storage -->
@@ -234,6 +237,7 @@ async function generatePassword() {
         document.getElementById('password-manual').classList.add('hidden');
         document.getElementById('password-generated').classList.remove('hidden');
         document.getElementById('generated-password-display').textContent = generatedPassword;
+        document.getElementById('admin-password').value = generatedPassword;
         document.getElementById('generate-link').textContent = 'Generate another';
     } catch(e) {
         console.error('generate password failed', e);
@@ -271,40 +275,54 @@ function getPassword() {
     return document.getElementById('admin-password').value;
 }
 
-function goStep(n) {
+function validateStep1() {
+    const username = document.getElementById('admin-username').value.trim();
+    if (!username) {
+        const el = document.getElementById('admin-username');
+        el.focus();
+        el.classList.add('input-error');
+        return false;
+    }
+    document.getElementById('admin-username').classList.remove('input-error');
+
+    const pw = getPassword();
+    if (!pw || pw.length < 8) {
+        const el = document.getElementById('admin-password');
+        el.focus();
+        el.classList.add('input-error');
+        el.placeholder = 'Minimum 8 characters';
+        return false;
+    }
+    document.getElementById('admin-password').classList.remove('input-error');
+
+    if (!generatedPassword) {
+        const confirm = document.getElementById('admin-password-confirm').value;
+        if (pw !== confirm) {
+            const el = document.getElementById('admin-password-confirm');
+            el.focus();
+            el.classList.add('input-error');
+            el.placeholder = 'Passwords do not match';
+            return false;
+        }
+        document.getElementById('admin-password-confirm').classList.remove('input-error');
+    }
+    return true;
+}
+
+// Let the form submit to a hidden iframe so password managers detect the submission
+document.getElementById('setup-form').addEventListener('submit', function(e) {
+    if (!validateStep1()) {
+        e.preventDefault();
+        return;
+    }
+    // Don't preventDefault — the form submits to a hidden iframe, triggering password manager save
+    setTimeout(() => goStep(2, true), 0);
+});
+
+function goStep(n, skipValidation) {
     // Validate current step before advancing
-    if (n === 2) {
-        // Validate step 1: admin account
-        const username = document.getElementById('admin-username').value.trim();
-        if (!username) {
-            const el = document.getElementById('admin-username');
-            el.focus();
-            el.classList.add('input-error');
-            return;
-        }
-        document.getElementById('admin-username').classList.remove('input-error');
-
-        const pw = getPassword();
-        if (!pw || pw.length < 8) {
-            const el = document.getElementById('admin-password');
-            el.focus();
-            el.classList.add('input-error');
-            el.placeholder = 'Minimum 8 characters';
-            return;
-        }
-        document.getElementById('admin-password').classList.remove('input-error');
-
-        if (!generatedPassword) {
-            const confirm = document.getElementById('admin-password-confirm').value;
-            if (pw !== confirm) {
-                const el = document.getElementById('admin-password-confirm');
-                el.focus();
-                el.classList.add('input-error');
-                el.placeholder = 'Passwords do not match';
-                return;
-            }
-            document.getElementById('admin-password-confirm').classList.remove('input-error');
-        }
+    if (!skipValidation && n === 2) {
+        if (!validateStep1()) return;
     }
 
     if (n === 3) {
@@ -466,7 +484,7 @@ async function pollForDashboard() {
         try {
             const r = await fetch('/api/pelicula/health', { cache: 'no-store' });
             const data = await r.json();
-            if (data.status && data.status !== 'setup') {
+            if (data.status !== 'setup') {
                 status.textContent = 'Services are up! Logging you in...';
                 await autoLogin();
                 return;

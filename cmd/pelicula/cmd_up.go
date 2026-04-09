@@ -17,9 +17,7 @@ func cmdUp(_ []string) {
 	envFile := filepath.Join(scriptDir, ".env")
 
 	// If no .env, run setup wizard, then continue with up
-	firstRun := false
 	if _, err := os.Stat(envFile); err != nil {
-		firstRun = true
 		fmt.Println()
 		fmt.Printf("%sNo configuration found — starting setup wizard.%s\n", colorBold, colorReset)
 		fmt.Println()
@@ -224,10 +222,6 @@ func cmdUp(_ []string) {
 
 	fmt.Println()
 
-	if firstRun {
-		dashURL := fmt.Sprintf("http://%s:%s/", host, port)
-		openBrowser(dashURL)
-	}
 }
 
 // lanIP returns the first non-loopback IPv4 address, or "localhost" if none found.
