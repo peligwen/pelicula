@@ -175,6 +175,10 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// JELLYFIN_API_KEY is intentionally excluded from SettingsResponse — it is
+	// a bearer credential equivalent to a password and must never be sent to
+	// the browser.  Keep it absent rather than masked so that future changes
+	// adding a JellyfinAPIKey field to SettingsResponse catch this comment.
 	resp := SettingsResponse{
 		WireguardKey:         maskedValue,
 		Country:              vars["SERVER_COUNTRIES"],

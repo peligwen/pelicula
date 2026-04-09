@@ -26,6 +26,9 @@ func handleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	initialSetup := false
 	if authMiddleware != nil && authMiddleware.rolesStore != nil {
+		// IsEmpty() has its own internal locking; no initialSetupMu needed here
+		// because this endpoint is advisory (frontend uses it to show/hide the
+		// "Create Admin Account" heading) — the actual gate is in handleOpenRegister.
 		initialSetup = authMiddleware.rolesStore.IsEmpty()
 	}
 	writeJSON(w, map[string]any{

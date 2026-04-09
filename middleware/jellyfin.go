@@ -180,15 +180,31 @@ func wireJellyfin(s *ServiceClients) {
 		token = authToken
 	}
 
-	// Create a persistent API key if we don't have one yet
+	// Create a persistent API key if we don't have one yet.
+	// On a fresh install (wizard just ran) the token is a short-lived session
+	// token; we must obtain a persistent API key before wiring libraries so
+	// that subsequent middleware→Jellyfin calls work after the session expires.
 	if s.JellyfinAPIKey == "" {
 		apiKey, err := createJellyfinAPIKey(s, token)
 		if err != nil {
 			slog.Error("failed to create Jellyfin API key", "component", "autowire", "error", err)
+			if !wizardDone {
+				// Fresh install: token is a session token that will expire.
+				// Without a persistent key the middleware cannot authenticate
+				// to Jellyfin after this boot.  Bail out so the operator
+				// can investigate and re-run setup.
+				slog.Error("aborting library wiring — restart to retry API key creation", "component", "autowire")
+				return
+			}
+			// Upgrade path: token came from jellyfinAuth (password fallback).
+			// Libraries will be wired now but auth will fall back to the
+			// stored password on subsequent boots until the key is created.
 		} else {
 			s.mu.Lock()
 			s.JellyfinAPIKey = apiKey
 			s.mu.Unlock()
+			// Use the persistent key for all subsequent calls in this run.
+			token = apiKey
 			// Persist to .env and clean up legacy password
 			envMu.Lock()
 			vars, readErr := parseEnvFile(envPath)
@@ -610,7 +626,8 @@ func createJellyfinAPIKey(s *ServiceClients, token string) (string, error) {
 		}
 	}
 
-	// No existing key — create one.
+	// No existing key — create one.  Jellyfin's POST /Auth/Keys returns 204
+	// with no body, so we must fetch the key list again to get the token value.
 	if _, err := jellyfinPost(s, "/Auth/Keys?app=Pelicula", token, nil); err != nil {
 		return "", fmt.Errorf("create API key: %w", err)
 	}

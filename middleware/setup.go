@@ -193,6 +193,10 @@ func generateReadablePassword() string {
 
 func generateAPIKey() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read should never fail; log and proceed with whatever
+		// partial bytes were written (consistent with generateReadablePassword).
+		slog.Error("crypto/rand.Read failed generating API key", "error", err)
+	}
 	return hex.EncodeToString(b)
 }
