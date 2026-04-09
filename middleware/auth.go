@@ -6,6 +6,7 @@ package main
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -44,9 +45,14 @@ type loginAttempts struct {
 
 // Auth handles authentication and authorization.
 // mode "off"      — all requests pass through
-// mode "jellyfin" — credentials verified against Jellyfin; roles from rolesFile
+// mode "jellyfin" — credentials verified against Jellyfin; roles from rolesStore
+//
+// When db is non-nil, sessions and rate-limit data are persisted to SQLite so
+// they survive process restarts. When db is nil (e.g. in tests created with
+// newTestAuth), the in-memory maps are used exclusively.
 type Auth struct {
 	mode       string
+	db         *sql.DB      // non-nil in production; nil in tests that don't need persistence
 	rolesStore *RolesStore  // non-nil in "jellyfin" mode
 	httpClient *http.Client // used for Jellyfin auth calls
 	sessions   map[string]session
@@ -57,7 +63,7 @@ type Auth struct {
 // AuthConfig holds parameters for NewAuth.
 type AuthConfig struct {
 	Mode       string
-	RolesFile  string       // for "jellyfin" mode
+	DB         *sql.DB      // for session + rate-limit persistence (nil = in-memory only)
 	HTTPClient *http.Client // for "jellyfin" mode; nil → 10-second default client
 }
 
@@ -68,16 +74,49 @@ func NewAuth(cfg AuthConfig) *Auth {
 	}
 	a := &Auth{
 		mode:       cfg.Mode,
+		db:         cfg.DB,
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		httpClient: hc,
 	}
 	if cfg.Mode == "jellyfin" {
-		a.rolesStore = NewRolesStore(cfg.RolesFile)
+		if cfg.DB != nil {
+			a.rolesStore = NewRolesStore(cfg.DB)
+		}
 		slog.Info("auth mode: jellyfin — credentials verified against Jellyfin", "component", "auth")
+	}
+	// Restore persisted sessions from DB into the in-memory map on startup.
+	if cfg.DB != nil {
+		a.loadSessionsFromDB()
 	}
 	go a.cleanupSessions()
 	return a
+}
+
+// loadSessionsFromDB reads non-expired sessions from SQLite into the in-memory map.
+func (a *Auth) loadSessionsFromDB() {
+	rows, err := a.db.Query(
+		`SELECT token, username, role, expires_at FROM sessions WHERE expires_at > ?`,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		slog.Warn("failed to load sessions from DB", "component", "auth", "error", err)
+		return
+	}
+	defer rows.Close()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for rows.Next() {
+		var token, username, role, expiresAt string
+		if err := rows.Scan(&token, &username, &role, &expiresAt); err != nil {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, expiresAt)
+		if err != nil {
+			continue
+		}
+		a.sessions[token] = session{username: username, role: UserRole(role), expiry: t}
+	}
 }
 
 // cleanupSessions periodically removes expired sessions and stale rate-limit
@@ -108,6 +147,18 @@ func (a *Auth) cleanupSessions() {
 			}
 		}
 		a.mu.Unlock()
+
+		// Purge expired rows from SQLite as well.
+		if a.db != nil {
+			nowStr := now.UTC().Format(time.RFC3339)
+			if _, err := a.db.Exec(`DELETE FROM sessions WHERE expires_at <= ?`, nowStr); err != nil {
+				slog.Warn("cleanup: failed to delete expired sessions", "component", "auth", "error", err)
+			}
+			windowStr := window.UTC().Format(time.RFC3339)
+			if _, err := a.db.Exec(`DELETE FROM rate_limits WHERE window_start <= ?`, windowStr); err != nil {
+				slog.Warn("cleanup: failed to delete stale rate limits", "component", "auth", "error", err)
+			}
+		}
 	}
 }
 
@@ -132,12 +183,25 @@ func (a *Auth) isRateLimited(ip string) bool {
 
 // recordFailure records a failed login attempt for rate limiting.
 func (a *Auth) recordFailure(ip string) {
+	now := time.Now()
 	a.mu.Lock()
 	if a.failures[ip] == nil {
 		a.failures[ip] = &loginAttempts{}
 	}
-	a.failures[ip].times = append(a.failures[ip].times, time.Now())
+	a.failures[ip].times = append(a.failures[ip].times, now)
 	a.mu.Unlock()
+
+	if a.db != nil {
+		// Upsert: increment fail_count for the IP, resetting window_start on first hit.
+		_, err := a.db.Exec(
+			`INSERT INTO rate_limits (ip, fail_count, window_start) VALUES (?, 1, ?)
+			 ON CONFLICT(ip) DO UPDATE SET fail_count = fail_count + 1`,
+			ip, now.UTC().Format(time.RFC3339),
+		)
+		if err != nil {
+			slog.Warn("failed to persist rate limit", "component", "auth", "ip", ip, "error", err)
+		}
+	}
 }
 
 // IsOffMode reports whether auth is disabled (PELICULA_AUTH=off).
@@ -277,6 +341,18 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	a.sessions[token] = session{username: req.Username, role: role, expiry: expiry}
 	a.mu.Unlock()
 
+	if a.db != nil {
+		_, err := a.db.Exec(
+			`INSERT OR REPLACE INTO sessions (token, username, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+			token, req.Username, string(role),
+			time.Now().UTC().Format(time.RFC3339),
+			expiry.UTC().Format(time.RFC3339),
+		)
+		if err != nil {
+			slog.Warn("failed to persist session", "component", "auth", "user", req.Username, "error", err)
+		}
+	}
+
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "pelicula_session",
@@ -302,6 +378,11 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		delete(a.sessions, cookie.Value)
 		a.mu.Unlock()
+		if a.db != nil {
+			if _, dbErr := a.db.Exec(`DELETE FROM sessions WHERE token = ?`, cookie.Value); dbErr != nil {
+				slog.Warn("failed to delete session from DB", "component", "auth", "error", dbErr)
+			}
+		}
 	}
 
 	http.SetCookie(w, &http.Cookie{

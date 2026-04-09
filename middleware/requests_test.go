@@ -5,17 +5,42 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
-// newRequestStore returns a RequestStore backed by a temp file.
+// newRequestStore returns a RequestStore backed by a test database.
 func newRequestStore(t *testing.T) *RequestStore {
 	t.Helper()
-	dir := t.TempDir()
-	return NewRequestStore(filepath.Join(dir, "requests.json"))
+	db := testDB(t)
+	return NewRequestStore(db)
+}
+
+// insertRequest is a test helper that inserts a MediaRequest directly into the DB.
+func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
+	t.Helper()
+	now := req.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	updatedAt := req.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = now
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
+		                       requested_by, state, reason, arr_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
+		req.RequestedBy, string(req.State), req.Reason, req.ArrID,
+		now.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatalf("insertRequest: %v", err)
+	}
+	for _, ev := range req.History {
+		s.insertEvent(req.ID, ev)
+	}
 }
 
 // ── Store unit tests ─────────────────────────────────────────────────────────
@@ -27,11 +52,11 @@ func TestNewRequestStore_Empty(t *testing.T) {
 	}
 }
 
-func TestNewRequestStore_LoadsExistingFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "requests.json")
+func TestNewRequestStore_LoadsExistingData(t *testing.T) {
+	// Use a shared DB so data is visible across two store instances.
+	db := testDB(t)
+	s1 := NewRequestStore(db)
 
-	// Write a pre-existing store.
 	req := &MediaRequest{
 		ID:        "req_123_abc",
 		Type:      "movie",
@@ -41,13 +66,10 @@ func TestNewRequestStore_LoadsExistingFile(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	data, _ := json.MarshalIndent([]*MediaRequest{req}, "", "  ")
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
+	insertRequest(t, s1, req)
 
-	s := NewRequestStore(path)
-	all := s.all()
+	s2 := NewRequestStore(db)
+	all := s2.all()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request after load, got %d", len(all))
 	}
@@ -59,7 +81,6 @@ func TestNewRequestStore_LoadsExistingFile(t *testing.T) {
 func TestRequestStore_CreateAssignsID(t *testing.T) {
 	s := newRequestStore(t)
 
-	s.mu.Lock()
 	req := &MediaRequest{
 		ID:        generateRequestID(),
 		Type:      "movie",
@@ -70,12 +91,7 @@ func TestRequestStore_CreateAssignsID(t *testing.T) {
 		UpdatedAt: time.Now(),
 		History:   []RequestEvent{{At: time.Now(), State: RequestPending}},
 	}
-	s.requests = append(s.requests, req)
-	if err := s.save(); err != nil {
-		s.mu.Unlock()
-		t.Fatal(err)
-	}
-	s.mu.Unlock()
+	insertRequest(t, s, req)
 
 	all := s.all()
 	if len(all) != 1 {
@@ -89,7 +105,6 @@ func TestRequestStore_CreateAssignsID(t *testing.T) {
 func TestRequestStore_DeduplicatesActiveRequests(t *testing.T) {
 	s := newRequestStore(t)
 
-	s.mu.Lock()
 	existing := &MediaRequest{
 		ID:     "req_1_aabbcc",
 		Type:   "movie",
@@ -97,14 +112,10 @@ func TestRequestStore_DeduplicatesActiveRequests(t *testing.T) {
 		Title:  "Dup Film",
 		State:  RequestPending,
 	}
-	s.requests = append(s.requests, existing)
-	s.mu.Unlock()
+	insertRequest(t, s, existing)
 
 	// findActive should find the existing request.
-	s.mu.Lock()
 	found := s.findActive("movie", 55, 0)
-	s.mu.Unlock()
-
 	if found == nil {
 		t.Fatal("findActive returned nil for existing active request")
 	}
@@ -116,20 +127,15 @@ func TestRequestStore_DeduplicatesActiveRequests(t *testing.T) {
 func TestRequestStore_DeduplicateSkipsTerminal(t *testing.T) {
 	s := newRequestStore(t)
 
-	s.mu.Lock()
-	s.requests = append(s.requests, &MediaRequest{
+	insertRequest(t, s, &MediaRequest{
 		ID:     "req_old",
 		Type:   "movie",
 		TmdbID: 77,
 		Title:  "Old Film",
 		State:  RequestDenied, // terminal
 	})
-	s.mu.Unlock()
 
-	s.mu.Lock()
 	found := s.findActive("movie", 77, 0)
-	s.mu.Unlock()
-
 	if found != nil {
 		t.Error("findActive should return nil for terminal requests")
 	}
@@ -138,7 +144,6 @@ func TestRequestStore_DeduplicateSkipsTerminal(t *testing.T) {
 func TestRequestStore_DenyTransition(t *testing.T) {
 	s := newRequestStore(t)
 
-	s.mu.Lock()
 	req := &MediaRequest{
 		ID:     "req_deny_test",
 		Type:   "series",
@@ -146,26 +151,28 @@ func TestRequestStore_DenyTransition(t *testing.T) {
 		Title:  "A Show",
 		State:  RequestPending,
 	}
-	s.requests = append(s.requests, req)
-	s.mu.Unlock()
+	insertRequest(t, s, req)
 
 	// Simulate deny logic.
-	s.mu.Lock()
 	r := s.get("req_deny_test")
+	if r == nil {
+		t.Fatal("request not found")
+	}
 	r.State = RequestDenied
 	r.Reason = "wrong quality"
 	r.UpdatedAt = time.Now()
-	r.History = append(r.History, RequestEvent{
-		At:    time.Now(),
+	if err := s.updateRequest(r); err != nil {
+		t.Fatal(err)
+	}
+	ev := RequestEvent{
+		At:    r.UpdatedAt,
 		State: RequestDenied,
 		Actor: "admin",
 		Note:  "wrong quality",
-	})
-	if err := s.save(); err != nil {
-		s.mu.Unlock()
+	}
+	if err := s.insertEvent(r.ID, ev); err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Unlock()
 
 	all := s.all()
 	if all[0].State != RequestDenied {
@@ -183,15 +190,13 @@ func TestMarkRequestAvailable_FlipsGrabbedByTmdb(t *testing.T) {
 	s := newRequestStore(t)
 	requestStore = s
 
-	s.mu.Lock()
-	s.requests = append(s.requests, &MediaRequest{
+	insertRequest(t, s, &MediaRequest{
 		ID:     "req_avail_movie",
 		Type:   "movie",
 		TmdbID: 999,
 		Title:  "Ready Film",
 		State:  RequestGrabbed,
 	})
-	s.mu.Unlock()
 
 	MarkRequestAvailable("movie", 999, 0, "Ready Film")
 
@@ -217,15 +222,13 @@ func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 	s := newRequestStore(t)
 	requestStore = s
 
-	s.mu.Lock()
-	s.requests = append(s.requests, &MediaRequest{
+	insertRequest(t, s, &MediaRequest{
 		ID:     "req_avail_series",
 		Type:   "series",
 		TvdbID: 888,
 		Title:  "Ready Show",
 		State:  RequestGrabbed,
 	})
-	s.mu.Unlock()
 
 	MarkRequestAvailable("series", 0, 888, "Ready Show")
 
@@ -241,7 +244,8 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 	// Set up a store and jellyfin-mode auth (no active sessions → 401).
 	s := newRequestStore(t)
 	requestStore = s
-	authMiddleware = NewAuth(AuthConfig{Mode: "jellyfin", RolesFile: t.TempDir() + "/roles.json"})
+	db := testDB(t)
+	authMiddleware = NewAuth(AuthConfig{Mode: "jellyfin", DB: db})
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",
@@ -258,8 +262,7 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 }
 
 func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
-	dir := t.TempDir()
-	s := NewRequestStore(filepath.Join(dir, "requests.json"))
+	s := newRequestStore(t)
 	requestStore = s
 	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
@@ -286,13 +289,11 @@ func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
 }
 
 func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
-	dir := t.TempDir()
-	s := NewRequestStore(filepath.Join(dir, "requests.json"))
+	s := newRequestStore(t)
 	requestStore = s
 	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
 	// Seed an existing request.
-	s.mu.Lock()
 	existing := &MediaRequest{
 		ID:     "req_already",
 		Type:   "movie",
@@ -300,9 +301,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 		Title:  "Open Film",
 		State:  RequestPending,
 	}
-	s.requests = append(s.requests, existing)
-	_ = s.save()
-	s.mu.Unlock()
+	insertRequest(t, s, existing)
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",
@@ -324,8 +323,8 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 }
 
 func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
-	dir := t.TempDir()
-	requestStore = NewRequestStore(filepath.Join(dir, "requests.json"))
+	s := newRequestStore(t)
+	requestStore = s
 	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
 	body, _ := json.Marshal(map[string]any{
@@ -344,18 +343,12 @@ func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
 
 func TestHandleRequestList_ViewerSeesOnlyOwn(t *testing.T) {
 	// Off mode: all requests treated as owned by ""
-	dir := t.TempDir()
-	s := NewRequestStore(filepath.Join(dir, "requests.json"))
+	s := newRequestStore(t)
 	requestStore = s
 	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
 
-	s.mu.Lock()
-	s.requests = []*MediaRequest{
-		{ID: "r1", Type: "movie", TmdbID: 1, Title: "Film1", State: RequestPending, RequestedBy: "alice"},
-		{ID: "r2", Type: "movie", TmdbID: 2, Title: "Film2", State: RequestPending, RequestedBy: "bob"},
-	}
-	_ = s.save()
-	s.mu.Unlock()
+	insertRequest(t, s, &MediaRequest{ID: "r1", Type: "movie", TmdbID: 1, Title: "Film1", State: RequestPending, RequestedBy: "alice"})
+	insertRequest(t, s, &MediaRequest{ID: "r2", Type: "movie", TmdbID: 2, Title: "Film2", State: RequestPending, RequestedBy: "bob"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests", nil)
 	w := httptest.NewRecorder()

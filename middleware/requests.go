@@ -5,14 +5,13 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -61,54 +60,154 @@ func (r *MediaRequest) isTerminal() bool {
 	return r.State == RequestDenied || r.State == RequestAvailable
 }
 
-// RequestStore persists media requests to a JSON file under a single mutex.
+// RequestStore persists media requests in SQLite.
+// SQLite handles concurrency; no additional mutex is needed.
 type RequestStore struct {
-	path     string
-	mu       sync.Mutex
-	requests []*MediaRequest
+	db *sql.DB
 }
 
-func NewRequestStore(path string) *RequestStore {
-	s := &RequestStore{path: path}
-	if err := s.load(); err != nil {
-		slog.Warn("could not load requests", "component", "requests", "path", path, "error", err)
-	}
-	return s
+func NewRequestStore(db *sql.DB) *RequestStore {
+	return &RequestStore{db: db}
 }
 
-func (s *RequestStore) load() error {
-	data, err := os.ReadFile(s.path)
+// loadHistory fetches the event history for a request from request_events.
+func (s *RequestStore) loadHistory(id string) ([]RequestEvent, error) {
+	rows, err := s.db.Query(
+		`SELECT at, state, actor, note FROM request_events WHERE request_id = ? ORDER BY at`,
+		id,
+	)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		return nil, err
+	}
+	defer rows.Close()
+
+	var history []RequestEvent
+	for rows.Next() {
+		var ev RequestEvent
+		var atStr string
+		if err := rows.Scan(&atStr, &ev.State, &ev.Actor, &ev.Note); err != nil {
+			continue
 		}
-		return err
+		if t, parseErr := time.Parse(time.RFC3339Nano, atStr); parseErr == nil {
+			ev.At = t
+		} else if t, parseErr := time.Parse(time.RFC3339, atStr); parseErr == nil {
+			ev.At = t
+		}
+		history = append(history, ev)
 	}
-	return json.Unmarshal(data, &s.requests)
+	return history, nil
 }
 
-func (s *RequestStore) save() error {
-	data, err := json.MarshalIndent(s.requests, "", "  ")
+// scanRequest reads one row from requests and populates its History.
+func (s *RequestStore) scanRequest(row *sql.Row) (*MediaRequest, error) {
+	var req MediaRequest
+	var createdAt, updatedAt string
+	var poster, reason sql.NullString
+	var arrID sql.NullInt64
+
+	err := row.Scan(
+		&req.ID, &req.Type, &req.TmdbID, &req.TvdbID,
+		&req.Title, &req.Year, &poster,
+		&req.RequestedBy, &req.State, &reason, &arrID,
+		&createdAt, &updatedAt,
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
-		return err
+	if poster.Valid {
+		req.Poster = poster.String
 	}
-	return os.WriteFile(s.path, data, 0600)
+	if reason.Valid {
+		req.Reason = reason.String
+	}
+	if arrID.Valid {
+		req.ArrID = int(arrID.Int64)
+	}
+	if t, parseErr := time.Parse(time.RFC3339Nano, createdAt); parseErr == nil {
+		req.CreatedAt = t
+	} else if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+		req.CreatedAt = t
+	}
+	if t, parseErr := time.Parse(time.RFC3339Nano, updatedAt); parseErr == nil {
+		req.UpdatedAt = t
+	} else if t, parseErr := time.Parse(time.RFC3339, updatedAt); parseErr == nil {
+		req.UpdatedAt = t
+	}
+
+	history, _ := s.loadHistory(req.ID)
+	if history == nil {
+		history = []RequestEvent{}
+	}
+	req.History = history
+	return &req, nil
 }
 
 func (s *RequestStore) all() []*MediaRequest {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]*MediaRequest, len(s.requests))
-	copy(out, s.requests)
-	return out
+	rows, err := s.db.Query(
+		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
+		        requested_by, state, reason, arr_id, created_at, updated_at
+		 FROM requests ORDER BY created_at`,
+	)
+	if err != nil {
+		return []*MediaRequest{}
+	}
+
+	// Collect rows first, then close before making additional queries.
+	// (SQLite MaxOpenConns=1: keeping rows open while issuing another query deadlocks.)
+	var result []*MediaRequest
+	for rows.Next() {
+		var req MediaRequest
+		var createdAt, updatedAt string
+		var poster, reason sql.NullString
+		var arrID sql.NullInt64
+
+		if err := rows.Scan(
+			&req.ID, &req.Type, &req.TmdbID, &req.TvdbID,
+			&req.Title, &req.Year, &poster,
+			&req.RequestedBy, &req.State, &reason, &arrID,
+			&createdAt, &updatedAt,
+		); err != nil {
+			continue
+		}
+		if poster.Valid {
+			req.Poster = poster.String
+		}
+		if reason.Valid {
+			req.Reason = reason.String
+		}
+		if arrID.Valid {
+			req.ArrID = int(arrID.Int64)
+		}
+		if t, parseErr := time.Parse(time.RFC3339Nano, createdAt); parseErr == nil {
+			req.CreatedAt = t
+		} else if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+			req.CreatedAt = t
+		}
+		if t, parseErr := time.Parse(time.RFC3339Nano, updatedAt); parseErr == nil {
+			req.UpdatedAt = t
+		} else if t, parseErr := time.Parse(time.RFC3339, updatedAt); parseErr == nil {
+			req.UpdatedAt = t
+		}
+		result = append(result, &req)
+	}
+	rows.Close() // must close before loadHistory queries
+
+	// Now load history for each request (connection is free).
+	for _, req := range result {
+		history, _ := s.loadHistory(req.ID)
+		if history == nil {
+			history = []RequestEvent{}
+		}
+		req.History = history
+	}
+	return result
 }
 
 // findActive returns the first non-terminal request matching type + tmdbID or tvdbID.
+// Must be called without holding any lock.
 func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequest {
-	for _, r := range s.requests {
+	all := s.all()
+	for _, r := range all {
 		if r.Type != reqType || r.isTerminal() {
 			continue
 		}
@@ -123,12 +222,34 @@ func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequ
 }
 
 func (s *RequestStore) get(id string) *MediaRequest {
-	for _, r := range s.requests {
-		if r.ID == id {
-			return r
-		}
+	req, err := s.scanRequest(s.db.QueryRow(
+		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
+		        requested_by, state, reason, arr_id, created_at, updated_at
+		 FROM requests WHERE id = ?`, id,
+	))
+	if err != nil {
+		return nil
 	}
-	return nil
+	return req
+}
+
+// insertEvent appends a state-transition event to request_events.
+func (s *RequestStore) insertEvent(id string, ev RequestEvent) error {
+	_, err := s.db.Exec(
+		`INSERT INTO request_events (request_id, at, state, actor, note) VALUES (?, ?, ?, ?, ?)`,
+		id, ev.At.UTC().Format(time.RFC3339Nano), string(ev.State), ev.Actor, ev.Note,
+	)
+	return err
+}
+
+// updateRequest updates mutable fields on an existing request row.
+func (s *RequestStore) updateRequest(req *MediaRequest) error {
+	_, err := s.db.Exec(
+		`UPDATE requests SET state=?, reason=?, arr_id=?, updated_at=? WHERE id=?`,
+		string(req.State), req.Reason, req.ArrID,
+		req.UpdatedAt.UTC().Format(time.RFC3339Nano), req.ID,
+	)
+	return err
 }
 
 func generateRequestID() string {
@@ -205,9 +326,6 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestStore.mu.Lock()
-	defer requestStore.mu.Unlock()
-
 	// Deduplicate: return existing non-terminal request for the same content.
 	existing := requestStore.findActive(body.Type, body.TmdbID, body.TvdbID)
 	if existing != nil {
@@ -215,6 +333,7 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC()
 	req := &MediaRequest{
 		ID:          generateRequestID(),
 		Type:        body.Type,
@@ -225,18 +344,29 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		Poster:      body.Poster,
 		RequestedBy: username,
 		State:       RequestPending,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		History: []RequestEvent{
-			{At: time.Now(), State: RequestPending, Actor: username},
-		},
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
-	requestStore.requests = append(requestStore.requests, req)
-	if err := requestStore.save(); err != nil {
+
+	_, err := requestStore.db.Exec(
+		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
+		                       requested_by, state, reason, arr_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?)`,
+		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
+		req.RequestedBy, string(req.State),
+		req.CreatedAt.Format(time.RFC3339Nano), req.UpdatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
 		slog.Error("failed to save request", "component", "requests", "error", err)
 		writeError(w, "failed to save request", http.StatusInternalServerError)
 		return
 	}
+
+	ev := RequestEvent{At: now, State: RequestPending, Actor: username}
+	if err := requestStore.insertEvent(req.ID, ev); err != nil {
+		slog.Warn("failed to insert initial request event", "component", "requests", "error", err)
+	}
+	req.History = []RequestEvent{ev}
 
 	slog.Info("request created", "component", "requests", "id", req.ID, "title", req.Title, "user", username)
 	w.WriteHeader(http.StatusCreated)
@@ -294,26 +424,22 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	sonarrProfileID := envIntOr("REQUESTS_SONARR_PROFILE_ID", 0)
 	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
 
-	requestStore.mu.Lock()
 	req := requestStore.get(id)
 	if req == nil {
-		requestStore.mu.Unlock()
 		writeError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	if req.State != RequestPending {
-		requestStore.mu.Unlock()
 		writeError(w, fmt.Sprintf("request is %s, not pending", req.State), http.StatusConflict)
 		return
 	}
 
-	// Snapshot what we need before releasing the lock for the *arr call
+	// Snapshot what we need for the *arr call
 	reqType := req.Type
 	tmdbID := req.TmdbID
 	tvdbID := req.TvdbID
 	title := req.Title
 	requester := req.RequestedBy
-	requestStore.mu.Unlock()
 
 	// Add to *arr (outside lock — network call)
 	var arrID int
@@ -333,36 +459,35 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	// Update state back under lock
-	requestStore.mu.Lock()
+	// Re-fetch to ensure it still exists, then update state.
 	req = requestStore.get(id)
 	if req == nil {
-		requestStore.mu.Unlock()
 		writeError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	req.State = RequestGrabbed
 	req.ArrID = arrID
-	req.UpdatedAt = time.Now()
-	req.History = append(req.History, RequestEvent{
-		At:    time.Now(),
-		State: RequestGrabbed,
-		Actor: actorUsername,
-		Note:  "approved and added to *arr",
-	})
-	if err := requestStore.save(); err != nil {
-		requestStore.mu.Unlock()
+	req.UpdatedAt = time.Now().UTC()
+	if err := requestStore.updateRequest(req); err != nil {
 		slog.Error("failed to save request after approve", "component", "requests", "error", err)
 		writeError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	out := *req
-	requestStore.mu.Unlock()
+	ev := RequestEvent{
+		At:    req.UpdatedAt,
+		State: RequestGrabbed,
+		Actor: actorUsername,
+		Note:  "approved and added to *arr",
+	}
+	if err := requestStore.insertEvent(req.ID, ev); err != nil {
+		slog.Warn("failed to insert approve event", "component", "requests", "error", err)
+	}
+	req.History = append(req.History, ev)
 
 	slog.Info("request approved", "component", "requests", "id", id, "title", title, "arr_id", arrID)
 	go notifyApprise("Request approved: "+title, fmt.Sprintf("%s requested %q — it's been added to the download queue.", requester, title))
 
-	writeJSON(w, &out)
+	writeJSON(w, req)
 }
 
 func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
@@ -374,15 +499,12 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	json.NewDecoder(r.Body).Decode(&body) // best-effort; reason is optional
 
-	requestStore.mu.Lock()
 	req := requestStore.get(id)
 	if req == nil {
-		requestStore.mu.Unlock()
 		writeError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	if req.isTerminal() {
-		requestStore.mu.Unlock()
 		writeError(w, fmt.Sprintf("request is already %s", req.State), http.StatusConflict)
 		return
 	}
@@ -392,21 +514,22 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 
 	req.State = RequestDenied
 	req.Reason = body.Reason
-	req.UpdatedAt = time.Now()
-	req.History = append(req.History, RequestEvent{
-		At:    time.Now(),
-		State: RequestDenied,
-		Actor: actorUsername,
-		Note:  body.Reason,
-	})
-	if err := requestStore.save(); err != nil {
-		requestStore.mu.Unlock()
+	req.UpdatedAt = time.Now().UTC()
+	if err := requestStore.updateRequest(req); err != nil {
 		slog.Error("failed to save request after deny", "component", "requests", "error", err)
 		writeError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	out := *req
-	requestStore.mu.Unlock()
+	ev := RequestEvent{
+		At:    req.UpdatedAt,
+		State: RequestDenied,
+		Actor: actorUsername,
+		Note:  body.Reason,
+	}
+	if err := requestStore.insertEvent(req.ID, ev); err != nil {
+		slog.Warn("failed to insert deny event", "component", "requests", "error", err)
+	}
+	req.History = append(req.History, ev)
 
 	slog.Info("request denied", "component", "requests", "id", id, "title", title)
 	msg := fmt.Sprintf("Your request for %q was not approved.", title)
@@ -415,28 +538,19 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	go notifyApprise("Request denied: "+title, requester+" — "+msg)
 
-	writeJSON(w, &out)
+	writeJSON(w, req)
 }
 
 func handleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
-	requestStore.mu.Lock()
-	defer requestStore.mu.Unlock()
-
-	idx := -1
-	for i, req := range requestStore.requests {
-		if req.ID == id {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		writeError(w, "request not found", http.StatusNotFound)
+	res, err := requestStore.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
+	if err != nil {
+		slog.Error("failed to delete request", "component", "requests", "error", err)
+		writeError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	requestStore.requests = append(requestStore.requests[:idx], requestStore.requests[idx+1:]...)
-	if err := requestStore.save(); err != nil {
-		slog.Error("failed to save requests after delete", "component", "requests", "error", err)
-		writeError(w, "internal error", http.StatusInternalServerError)
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	writeJSON(w, map[string]string{"status": "deleted"})
@@ -445,11 +559,9 @@ func handleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
 // MarkRequestAvailable transitions a request to "available" when its content has been imported.
 // Matched by tmdbID (movies) or tvdbID (series). Non-fatal if no matching request exists.
 func MarkRequestAvailable(reqType string, tmdbID, tvdbID int, title string) {
-	requestStore.mu.Lock()
-	defer requestStore.mu.Unlock()
-
+	all := requestStore.all()
 	var matched *MediaRequest
-	for _, req := range requestStore.requests {
+	for _, req := range all {
 		if req.isTerminal() || req.State == RequestAvailable {
 			continue
 		}
@@ -468,16 +580,20 @@ func MarkRequestAvailable(reqType string, tmdbID, tvdbID int, title string) {
 
 	requester := matched.RequestedBy
 	matched.State = RequestAvailable
-	matched.UpdatedAt = time.Now()
-	matched.History = append(matched.History, RequestEvent{
-		At:    time.Now(),
-		State: RequestAvailable,
-		Note:  "content imported",
-	})
-	if err := requestStore.save(); err != nil {
+	matched.UpdatedAt = time.Now().UTC()
+	if err := requestStore.updateRequest(matched); err != nil {
 		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
 		return
 	}
+	ev := RequestEvent{
+		At:    matched.UpdatedAt,
+		State: RequestAvailable,
+		Note:  "content imported",
+	}
+	if err := requestStore.insertEvent(matched.ID, ev); err != nil {
+		slog.Warn("failed to insert available event", "component", "requests", "error", err)
+	}
+
 	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
 	go notifyApprise(title+" is now available", fmt.Sprintf("Hey %s — %q has been imported and is ready to watch.", requester, title))
 }

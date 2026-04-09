@@ -4,9 +4,7 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
-	"sync"
+	"database/sql"
 )
 
 // RolesEntry maps a Jellyfin user ID to a Pelicula role.
@@ -16,98 +14,76 @@ type RolesEntry struct {
 	Role       UserRole `json:"role"`
 }
 
+// rolesFile is kept for JSON migration compatibility.
 type rolesFile struct {
 	Version int          `json:"version"`
 	Users   []RolesEntry `json:"users"`
 }
 
-// RolesStore persists the Jellyfin user ID → Pelicula role mapping at path.
-// Thread-safe; safe to call from multiple goroutines.
+// RolesStore persists the Jellyfin user ID → Pelicula role mapping in SQLite.
+// SQLite handles concurrency; no additional mutex is needed.
 type RolesStore struct {
-	path string
-	mu   sync.RWMutex
-	data rolesFile
+	db *sql.DB
 }
 
-// NewRolesStore creates a RolesStore backed by path.
-// If the file does not exist it starts with an empty store (not an error).
-func NewRolesStore(path string) *RolesStore {
-	rs := &RolesStore{path: path}
-	rs.load()
-	return rs
-}
-
-func (rs *RolesStore) load() {
-	data, err := os.ReadFile(rs.path)
-	if err != nil {
-		rs.data = rolesFile{Version: 1}
-		return
-	}
-	var f rolesFile
-	if json.Unmarshal(data, &f) != nil {
-		rs.data = rolesFile{Version: 1}
-		return
-	}
-	if f.Users == nil {
-		f.Users = []RolesEntry{}
-	}
-	rs.data = f
+// NewRolesStore creates a RolesStore backed by db.
+func NewRolesStore(db *sql.DB) *RolesStore {
+	return &RolesStore{db: db}
 }
 
 // IsEmpty reports whether the store has no user entries.
 func (rs *RolesStore) IsEmpty() bool {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-	return len(rs.data.Users) == 0
+	var count int
+	if err := rs.db.QueryRow(`SELECT COUNT(*) FROM roles`).Scan(&count); err != nil {
+		return true
+	}
+	return count == 0
 }
 
 // Lookup returns the stored role for the given Jellyfin user ID.
 func (rs *RolesStore) Lookup(jellyfinID string) (UserRole, bool) {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-	for _, u := range rs.data.Users {
-		if u.JellyfinID == jellyfinID {
-			return u.Role, true
-		}
+	var role UserRole
+	err := rs.db.QueryRow(
+		`SELECT role FROM roles WHERE jellyfin_id = ?`, jellyfinID,
+	).Scan(&role)
+	if err == sql.ErrNoRows {
+		return "", false
 	}
-	return "", false
+	if err != nil {
+		return "", false
+	}
+	return role, true
 }
 
 // Upsert sets the role for a Jellyfin user ID, creating the entry if absent.
 // Also refreshes the stored display name.
 func (rs *RolesStore) Upsert(jellyfinID, username string, role UserRole) error {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	for i, u := range rs.data.Users {
-		if u.JellyfinID == jellyfinID {
-			rs.data.Users[i].Role = role
-			rs.data.Users[i].Username = username
-			return rs.save()
-		}
-	}
-	rs.data.Users = append(rs.data.Users, RolesEntry{
-		JellyfinID: jellyfinID,
-		Username:   username,
-		Role:       role,
-	})
-	return rs.save()
+	_, err := rs.db.Exec(
+		`INSERT INTO roles (jellyfin_id, username, role) VALUES (?, ?, ?)
+		 ON CONFLICT(jellyfin_id) DO UPDATE SET username=excluded.username, role=excluded.role`,
+		jellyfinID, username, string(role),
+	)
+	return err
 }
 
 // All returns a snapshot of all role entries.
 func (rs *RolesStore) All() []RolesEntry {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-	result := make([]RolesEntry, len(rs.data.Users))
-	copy(result, rs.data.Users)
-	return result
-}
-
-// save writes the store to disk. Caller must hold rs.mu (write lock).
-func (rs *RolesStore) save() error {
-	rs.data.Version = 1
-	data, err := json.MarshalIndent(rs.data, "", "  ")
+	rows, err := rs.db.Query(`SELECT jellyfin_id, username, role FROM roles ORDER BY username`)
 	if err != nil {
-		return err
+		return []RolesEntry{}
 	}
-	return os.WriteFile(rs.path, data, 0600)
+	defer rows.Close()
+
+	var result []RolesEntry
+	for rows.Next() {
+		var e RolesEntry
+		if err := rows.Scan(&e.JellyfinID, &e.Username, &e.Role); err != nil {
+			continue
+		}
+		result = append(result, e)
+	}
+	if result == nil {
+		return []RolesEntry{}
+	}
+	return result
 }

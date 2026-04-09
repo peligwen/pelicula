@@ -40,9 +40,17 @@ func main() {
 	}
 
 	services = NewServiceClients("/config")
-	inviteStore = NewInviteStore("/config/pelicula/invites.json")
-	dismissedStore = NewDismissedStore("/config/pelicula/dismissed.json")
-	requestStore = NewRequestStore("/config/pelicula/requests.json")
+
+	db, err := OpenDB("/config/pelicula/pelicula.db")
+	if err != nil {
+		slog.Error("failed to open database", "component", "main", "error", err)
+		os.Exit(1)
+	}
+	migrateAllJSON(db, "/config/pelicula")
+
+	inviteStore = NewInviteStore(db)
+	dismissedStore = NewDismissedStore(db)
+	requestStore = NewRequestStore(db)
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -74,8 +82,8 @@ func main() {
 	openRegistration = os.Getenv("PELICULA_OPEN_REGISTRATION") == "true"
 
 	authMiddleware = NewAuth(AuthConfig{
-		Mode:      authMode,
-		RolesFile: "/config/pelicula/roles.json",
+		Mode: authMode,
+		DB:   db,
 	})
 	auth := authMiddleware
 

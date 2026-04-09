@@ -7,18 +7,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-// newTestInviteStore creates an InviteStore backed by a temp file.
+// newTestInviteStore creates an InviteStore backed by a test database.
 func newTestInviteStore(t *testing.T) *InviteStore {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "invites.json")
-	return NewInviteStore(path)
+	db := testDB(t)
+	return NewInviteStore(db)
 }
 
 // setInviteStore replaces the package-level inviteStore for the duration of a test.
@@ -83,16 +82,17 @@ func TestCreateAndList(t *testing.T) {
 }
 
 func TestPersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "invites.json")
-	s1 := NewInviteStore(path)
+	// Both stores share the same DB — verify data written by s1 is visible via s2.
+	db := testDB(t)
+	s1 := NewInviteStore(db)
 	maxUses := 3
 	exp := time.Now().Add(24 * time.Hour).Truncate(time.Second)
 	inv, err := s1.CreateInvite("admin", "saved label", &exp, &maxUses)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// New store reading same file
-	s2 := NewInviteStore(path)
+	// Second store reading same DB
+	s2 := NewInviteStore(db)
 	list := s2.ListInvites()
 	if len(list) != 1 {
 		t.Fatalf("invite not persisted: got %d", len(list))
@@ -132,14 +132,10 @@ func TestMaxUsesExhausted(t *testing.T) {
 	two := 2
 	inv, _ := s.CreateInvite("admin", "", nil, &two)
 
-	// Manually increment uses to simulate exhaustion
-	s.mu.Lock()
-	for i := range s.invites {
-		if s.invites[i].Token == inv.Token {
-			s.invites[i].Uses = 2
-		}
+	// Directly set uses=2 in the DB to simulate exhaustion.
+	if _, err := s.db.Exec(`UPDATE invites SET uses = 2 WHERE token = ?`, inv.Token); err != nil {
+		t.Fatalf("failed to set uses: %v", err)
 	}
-	s.mu.Unlock()
 
 	state, _ := s.CheckInvite(inv.Token)
 	if state != "exhausted" {

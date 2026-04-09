@@ -53,12 +53,12 @@ func newTestAuth(mode string) *Auth {
 }
 
 // newTestJellyfinAuth creates an Auth in "jellyfin" mode for testing.
-// store may be nil — a fresh in-memory RolesStore backed by a temp file is used.
+// store may be nil — a fresh RolesStore backed by a test DB is used.
 // httpClient should point at an httptest.Server serving the Jellyfin API.
 func newTestJellyfinAuth(t *testing.T, store *RolesStore, httpClient *http.Client) *Auth {
 	t.Helper()
 	if store == nil {
-		store = NewRolesStore(t.TempDir() + "/roles.json")
+		store = NewRolesStore(testDB(t))
 	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -789,7 +789,7 @@ func TestLogin_JellyfinMode_JellyfinAdmin_GetsAdminRole(t *testing.T) {
 
 func TestLogin_JellyfinMode_StoredRolePreserved(t *testing.T) {
 	srv := fakeJellyfinAuthServer(t, true, false)
-	store := NewRolesStore(t.TempDir() + "/roles.json")
+	store := NewRolesStore(testDB(t))
 	// Pre-seed a manager role for this user.
 	_ = store.Upsert("jf-user-001", "alice", RoleManager)
 	a := newTestJellyfinAuth(t, store, srv.Client())
@@ -869,8 +869,8 @@ func TestLogin_JellyfinMode_JellyfinDown_Returns503(t *testing.T) {
 // ── RolesStore ─────────────────────────────────────────────────────────────────
 
 func TestRolesStore_RoundTrip(t *testing.T) {
-	path := t.TempDir() + "/roles.json"
-	rs := NewRolesStore(path)
+	db := testDB(t)
+	rs := NewRolesStore(db)
 
 	if !rs.IsEmpty() {
 		t.Error("fresh store should be empty")
@@ -883,8 +883,8 @@ func TestRolesStore_RoundTrip(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	// Reload from disk
-	rs2 := NewRolesStore(path)
+	// Second store on same DB — same data should be visible.
+	rs2 := NewRolesStore(db)
 	role, ok := rs2.Lookup("id1")
 	if !ok || role != RoleViewer {
 		t.Errorf("id1: got (%q, %v), want (viewer, true)", role, ok)

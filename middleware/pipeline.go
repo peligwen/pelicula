@@ -1,16 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 )
@@ -103,67 +101,30 @@ type PipelineResponse struct {
 
 // ── Dismissed store ───────────────────────────────────────────────────────────
 
-// DismissedStore is a file-backed set of dismissed Procula job IDs.
+// DismissedStore is a SQLite-backed set of dismissed Procula job IDs.
 // Failed jobs in the dismissed set are hidden from the needs_attention lane.
 type DismissedStore struct {
-	mu   sync.RWMutex
-	path string
-	ids  map[string]struct{}
+	db *sql.DB
 }
 
 var dismissedStore *DismissedStore
 
-// NewDismissedStore loads (or creates) the dismissed-jobs file at path.
-func NewDismissedStore(path string) *DismissedStore {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		slog.Warn("could not create dismissed store dir", "component", "pipeline", "error", err)
-	}
-	ds := &DismissedStore{path: path, ids: make(map[string]struct{})}
-	ds.load()
-	return ds
-}
-
-func (ds *DismissedStore) load() {
-	data, err := os.ReadFile(ds.path)
-	if err != nil {
-		return // file may not exist yet — that's fine
-	}
-	var ids []string
-	if json.Unmarshal(data, &ids) == nil {
-		ds.mu.Lock()
-		for _, id := range ids {
-			ds.ids[id] = struct{}{}
-		}
-		ds.mu.Unlock()
-	}
+// NewDismissedStore creates a DismissedStore backed by db.
+func NewDismissedStore(db *sql.DB) *DismissedStore {
+	return &DismissedStore{db: db}
 }
 
 // IsDismissed reports whether the given job ID has been dismissed.
 func (ds *DismissedStore) IsDismissed(id string) bool {
-	ds.mu.RLock()
-	defer ds.mu.RUnlock()
-	_, ok := ds.ids[id]
-	return ok
+	var found int
+	err := ds.db.QueryRow(`SELECT 1 FROM dismissed_jobs WHERE job_id = ?`, id).Scan(&found)
+	return err == nil && found == 1
 }
 
-// Dismiss adds a job ID to the dismissed set and persists to disk.
+// Dismiss adds a job ID to the dismissed set.
 func (ds *DismissedStore) Dismiss(id string) error {
-	ds.mu.Lock()
-	defer ds.mu.Unlock()
-	ds.ids[id] = struct{}{}
-	return ds.persist()
-}
-
-func (ds *DismissedStore) persist() error {
-	ids := make([]string, 0, len(ds.ids))
-	for id := range ds.ids {
-		ids = append(ids, id)
-	}
-	data, err := json.Marshal(ids)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(ds.path, data, 0644)
+	_, err := ds.db.Exec(`INSERT OR IGNORE INTO dismissed_jobs (job_id) VALUES (?)`, id)
+	return err
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────

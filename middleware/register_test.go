@@ -170,7 +170,7 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 
 	// Set authMiddleware AFTER newFakeJellyfin (which also sets it) so the
 	// rolesStore we inspect is the one the handler actually writes to.
-	store := NewRolesStore(t.TempDir() + "/roles.json")
+	store := NewRolesStore(testDB(t))
 	auth := newTestJellyfinAuth(t, store, nil)
 	origAuth := authMiddleware
 	authMiddleware = auth
