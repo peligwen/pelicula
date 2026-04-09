@@ -27,6 +27,7 @@ type SettingsResponse struct {
 	WorkDir              string `json:"work_dir"`
 	Port                 string `json:"port"`
 	AuthMode             string `json:"auth_mode"`
+	OpenRegistration     string `json:"open_registration"`
 	ProculaAPIKey        string `json:"procula_api_key"`
 	TranscodingEnabled   string `json:"transcoding_enabled"`
 	NotificationsEnabled string `json:"notifications_enabled"`
@@ -93,6 +94,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"PUID", "PGID", "TZ",
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
 		"PELICULA_PORT", "PELICULA_AUTH",
+		"PELICULA_OPEN_REGISTRATION",
 		"JELLYFIN_PASSWORD",
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"TRANSCODING_ENABLED",
@@ -179,6 +181,7 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		WorkDir:              vars["WORK_DIR"],
 		Port:                 vars["PELICULA_PORT"],
 		AuthMode:             vars["PELICULA_AUTH"],
+		OpenRegistration:     vars["PELICULA_OPEN_REGISTRATION"],
 		ProculaAPIKey:        maskedValue,
 		TranscodingEnabled:   vars["TRANSCODING_ENABLED"],
 		NotificationsEnabled: vars["NOTIFICATIONS_ENABLED"],
@@ -303,6 +306,15 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuthMode != "" {
 		vars["PELICULA_AUTH"] = req.AuthMode
+	}
+	if req.OpenRegistration != "" {
+		switch req.OpenRegistration {
+		case "true", "false":
+			vars["PELICULA_OPEN_REGISTRATION"] = req.OpenRegistration
+		default:
+			http.Error(w, "open_registration must be true or false", http.StatusBadRequest)
+			return
+		}
 	}
 	if req.TZ != "" {
 		vars["TZ"] = req.TZ
@@ -460,8 +472,9 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"WIREGUARD_PRIVATE_KEY": req.WireguardKey,
 		"SERVER_COUNTRIES":      req.Country,
 		"PELICULA_PORT":         req.Port,
-		"PELICULA_AUTH":         authMode,
-		"PROCULA_API_KEY":       proculaKey,
+		"PELICULA_AUTH":              authMode,
+		"PELICULA_OPEN_REGISTRATION": "false",
+		"PROCULA_API_KEY":            proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",

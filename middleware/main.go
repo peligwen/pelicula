@@ -71,6 +71,8 @@ func main() {
 	default:
 		authMode = "off"
 	}
+	openRegistration = os.Getenv("PELICULA_OPEN_REGISTRATION") == "true"
+
 	authMiddleware = NewAuth(AuthConfig{
 		Mode:      authMode,
 		RolesFile: "/config/pelicula/roles.json",
@@ -141,6 +143,12 @@ func main() {
 	// Peligrosa: requireLocalOriginSoft on both routes — redeem is public but invite-gated.
 	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleInvites))))
 	mux.HandleFunc("/api/pelicula/invites/", requireLocalOriginSoft(http.HandlerFunc(handleInviteOp)).ServeHTTP)
+
+	// Open registration (LAN-only, optional): public account creation without invite tokens.
+	// Peligrosa: requireLocalOriginStrict ensures only LAN browsers can POST.
+	mux.HandleFunc("/api/pelicula/register/check", handleOpenRegCheck)
+	mux.Handle("/api/pelicula/register", requireLocalOriginStrict(http.HandlerFunc(handleOpenRegister)))
+
 	// read: active Jellyfin sessions for the now-playing card.
 	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.
 	// Relax to GuardAuthenticated when viewer/manager roles land on the dashboard.

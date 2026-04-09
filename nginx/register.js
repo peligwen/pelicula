@@ -4,11 +4,27 @@
 
   const params = new URLSearchParams(window.location.search);
   const token = params.get('t') || '';
+  let openRegMode = false;
 
-  // ── Boot: validate the token before showing the form ─────────────────────
+  // ── Boot: validate the token (or check open registration) ────────────────
   async function boot() {
     if (!token) {
-      showDead('Invalid link', 'This link is missing a token. Make sure you copied the full URL.');
+      // No invite token — check if open registration is enabled
+      try {
+        const resp = await fetch('/api/pelicula/register/check');
+        const data = await resp.json().catch(() => ({}));
+        if (data.open_registration) {
+          openRegMode = true;
+          document.getElementById('reg-loading').style.display = 'none';
+          document.getElementById('reg-form-wrap').style.display = '';
+          const hint = document.querySelector('.reg-hint');
+          if (hint) hint.textContent = 'Create a viewer account. You\u2019ll use these credentials to log in.';
+          return;
+        }
+      } catch (e) {
+        // fall through
+      }
+      showDead('Registration closed', 'Open registration is not enabled. Ask an admin for an invite link.');
       return;
     }
 
@@ -103,7 +119,10 @@
     btn.textContent = 'Creating account…';
 
     try {
-      const resp = await fetch(`/api/pelicula/invites/${encodeURIComponent(token)}/redeem`, {
+      const url = openRegMode
+        ? '/api/pelicula/register'
+        : `/api/pelicula/invites/${encodeURIComponent(token)}/redeem`;
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
