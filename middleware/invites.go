@@ -324,7 +324,7 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 			maxUses = &one
 		}
 
-		// Determine creator username from session (or "admin" in password mode).
+		// Determine creator username from session (fallback: "admin").
 		createdBy := "admin"
 		if authMiddleware != nil {
 			if sess, ok := authMiddleware.getSession(r); ok {
