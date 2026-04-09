@@ -461,21 +461,24 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	proculaKey := generateAPIKey()
 	// Preserve existing WEBHOOK_SECRET if present so autowired webhooks keep working
 	webhookSecret := orDefault(existing["WEBHOOK_SECRET"], generateAPIKey())
+	// Preserve JELLYFIN_PASSWORD so the admin login stays valid after reset
+	jellyfinPassword := orDefault(existing["JELLYFIN_PASSWORD"], generateReadablePassword())
 
 	vars := map[string]string{
-		"CONFIG_DIR":            req.ConfigDir,
-		"LIBRARY_DIR":           req.LibraryDir,
-		"WORK_DIR":              req.WorkDir,
-		"PUID":                  puid,
-		"PGID":                  pgid,
-		"TZ":                    tz,
-		"WIREGUARD_PRIVATE_KEY": req.WireguardKey,
-		"SERVER_COUNTRIES":      req.Country,
-		"PELICULA_PORT":         req.Port,
+		"CONFIG_DIR":                  req.ConfigDir,
+		"LIBRARY_DIR":                req.LibraryDir,
+		"WORK_DIR":                   req.WorkDir,
+		"PUID":                       puid,
+		"PGID":                       pgid,
+		"TZ":                         tz,
+		"WIREGUARD_PRIVATE_KEY":      req.WireguardKey,
+		"SERVER_COUNTRIES":           req.Country,
+		"PELICULA_PORT":              req.Port,
 		"PELICULA_AUTH":              authMode,
 		"PELICULA_OPEN_REGISTRATION": "false",
+		"JELLYFIN_PASSWORD":          jellyfinPassword,
 		"PROCULA_API_KEY":            proculaKey,
-		"WEBHOOK_SECRET":        webhookSecret,
+		"WEBHOOK_SECRET":             webhookSecret,
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",

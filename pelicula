@@ -136,6 +136,13 @@ prompt() {
 
 # ── Commands ────────────────────────────────────────
 
+# Generate a readable password in 5-5-5 format using unambiguous characters.
+_generate_readable_password() {
+    local raw
+    raw="$(LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 15 2>/dev/null)"
+    printf '%s-%s-%s' "${raw:0:5}" "${raw:5:5}" "${raw:10:5}"
+}
+
 # Write (or overwrite) .env from the given values.
 # Usage: _write_env_file <config_dir> <library_dir> <work_dir> <puid> <pgid> <tz> \
 #                        <wireguard_key> <server_countries> <port> \
@@ -279,8 +286,7 @@ cmd_setup() {
 
     # Generate a readable Jellyfin admin password (5-5-5 format, unambiguous chars)
     local JELLYFIN_PASSWORD
-    JELLYFIN_PASSWORD="$(LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 15 2>/dev/null)"
-    JELLYFIN_PASSWORD="${JELLYFIN_PASSWORD:0:5}-${JELLYFIN_PASSWORD:5:5}-${JELLYFIN_PASSWORD:10:5}"
+    JELLYFIN_PASSWORD="$(_generate_readable_password)"
 
     _write_env_file "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR" "$PUID" "$PGID" "$TZ" \
         "$WIREGUARD_PRIVATE_KEY" "$SERVER_COUNTRIES" "$PELICULA_PORT" \
@@ -1727,8 +1733,7 @@ _reset_config_all() {
     local new_procula_key
     new_procula_key="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 2>/dev/null || openssl rand -base64 24 | tr -d '/+=')"
     local new_jf_pass
-    new_jf_pass="$(LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 15 2>/dev/null)"
-    new_jf_pass="${new_jf_pass:0:5}-${new_jf_pass:5:5}-${new_jf_pass:10:5}"
+    new_jf_pass="$(_generate_readable_password)"
     _write_env_file "$CONFIG_DIR" "$LIBRARY_DIR" "$WORK_DIR" "$PUID" "$PGID" "$TZ" \
         "$saved_wg_key" "$saved_countries" "$PELICULA_PORT" \
         "jellyfin" "$new_procula_key" "$new_jf_pass"
