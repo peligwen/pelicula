@@ -5,7 +5,7 @@ Pelicula is a LAN-first, clone-and-run media stack for personal use. It is a hob
 ## Scope
 
 The project accepts contributions that:
-- Fix bugs in the bash CLI, Go middleware, Go processing pipeline, or container configuration
+- Fix bugs in the Go CLI, Go middleware, Go processing pipeline, or container configuration
 - Add features described in [ROADMAP.md](ROADMAP.md) (Active section)
 - Improve documentation accuracy
 - Add or improve test coverage
@@ -27,7 +27,7 @@ make test-race
 make test-cover
 
 # Full end-to-end test — spins an isolated stack on port 7399, no VPN needed
-./pelicula test
+make e2e
 ```
 
 Go modules are stdlib-only. Neither `middleware/go.mod` nor `procula/go.mod` has external `require` entries — keep it that way.
@@ -35,7 +35,7 @@ Go modules are stdlib-only. Neither `middleware/go.mod` nor `procula/go.mod` has
 ## Code Conventions
 
 - **Go**: standard library only. No external dependencies. `go vet ./...` must pass clean.
-- **Bash**: `pelicula` is a single-file script. Add subcommands as bash functions; don't split into separate files. Shellcheck (`-S warning`) must pass.
+- **Bash**: `tests/e2e.sh` is the end-to-end test runner. Shellcheck (`-S warning`) must pass.
 - **Tests**: every new Go function that makes a decision should have a unit test. Table-driven tests are preferred. Do not mock the database (there isn't one — use temp dirs).
 - **Commit messages**: `type(scope): short description` in imperative form. Types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`. Examples from history: `feat(procula): dual-subtitle stacking pipeline stage`, `refactor(cli): reset-config all regenerates .env`.
 

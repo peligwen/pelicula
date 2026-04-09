@@ -25,7 +25,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 - [x] **[Peligrosa] Jellyfin auth** — `PELICULA_AUTH=jellyfin` (now the only auth mode): credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed.
 - [x] **[Peligrosa] Remote role capping** — defense-in-depth: the remote nginx vhost injects `X-Pelicula-Remote: true`; middleware caps effective role to `viewer` regardless of stored role. Prevents credential escalation via the remote vhost.
 - [x] **[Peligrosa] Open LAN registration** — optional `PELICULA_OPEN_REGISTRATION` setting: `/register` without a token creates a Jellyfin viewer account. LAN-only, rate-limited, always viewer role.
-- [x] **[Peligrosa] First-admin password** — setup wizard generates `JELLYFIN_PASSWORD` and prints admin credentials after `./pelicula up`.
+- [x] **[Peligrosa] First-admin password** — setup wizard generates `JELLYFIN_PASSWORD` and prints admin credentials after ``pelicula up``.
 - [ ] **[Peligrosa] Plex SSO** — deferred; different API shape (plex.tv OAuth dance).
 
 ---
@@ -33,12 +33,12 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 ## Deferred
 
 - **Invite Apprise notification**: notify admin via Apprise/internal feed when an invite is claimed. Deferred; low priority since the dashboard shows active invites and redemption history.
-- **`./pelicula configure` invite management**: list active invites and revoke them from the CLI menu. Deferred; the dashboard Users section covers this via the UI.
+- **`the Settings UI` invite management**: list active invites and revoke them from the CLI menu. Deferred; the dashboard Users section covers this via the UI.
 
 - **Plex SSO**: moved to Peligrosa initiative above (Jellyfin SSO shipped).
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
-- **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; `./pelicula up` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
+- **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `docker-compose.nfs.yml` + `docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; ``pelicula up`` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
 
 ---
 
@@ -46,7 +46,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 **Pre-v1.0 Hardening:** SQLite data layer for all mutable state (`modernc.org/sqlite` via pure-Go driver). Migration framework with `PRAGMA user_version` for both middleware and procula. Auto-migration from JSON files on first startup (idempotent, handles corrupt files). Configurable service URLs via environment variables (`SONARR_URL`, `RADARR_URL`, etc.). Versioned backup format (v1→v2) with forward-compatible import chain; v2 includes roles, invites, and requests. Go CLI rewrite (`cmd/pelicula/`) — single binary, cross-platform (macOS/Linux/Windows/Synology), stdlib-only, replaces the bash script. API contract freeze with stability policy (additive-only changes).
 
-**Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `./pelicula configure` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
+**Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `the Settings UI` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
 
 **Phase B — Auth & Roles:** Jellyfin-backed auth with viewer / manager / admin roles, `Guard` / `GuardManager` / `GuardAdmin` middleware, dashboard login form, role-based UI hiding. Post-ship hardening: `IsOffMode()` guard on `handleUsers`, CSRF origin check, `MaxBytesReader`, username and UUID validation.
 
@@ -60,6 +60,6 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 **Invite Flow (Phase D follow-up):** One-time shareable invite links for admin-free user onboarding. `POST /api/pelicula/invites` generates a 32-byte random base64url token (stored in `/config/pelicula/invites.json`) with configurable TTL (default 7 days) and optional max-uses cap. Admins create links via the dashboard Users section ("Create invite link" button). `/register` (static HTML, no Pelicula session required) renders a username+password form that submits to `POST /api/pelicula/invites/{token}/redeem`, creating the Jellyfin account on success. Expired, exhausted, and revoked tokens return clear error states. Admin can revoke or delete tokens from the dashboard.
 
-**Bazarr — Subtitle Acquisition:** Bazarr container wired into the stack alongside Sonarr/Radarr. Auto-wire creates a language profile from `PELICULA_SUB_LANGS` (set via `./pelicula configure` → Subtitles) and connects Bazarr to both *arr apps on startup. nginx proxies `/bazarr`. Procula flags imports that are missing subtitles for the configured languages; Bazarr handles acquisition via its own Sonarr/Radarr polling — Procula does not talk to Bazarr directly.
+**Bazarr — Subtitle Acquisition:** Bazarr container wired into the stack alongside Sonarr/Radarr. Auto-wire creates a language profile from `PELICULA_SUB_LANGS` (set via `the Settings UI` → Subtitles) and connects Bazarr to both *arr apps on startup. nginx proxies `/bazarr`. Procula flags imports that are missing subtitles for the configured languages; Bazarr handles acquisition via its own Sonarr/Radarr polling — Procula does not talk to Bazarr directly.
 
 **Dual Subtitles:** Procula pipeline stage that generates stacked ASS sidecar files (`Movie.en-es.ass`) alongside source media. Base language (familiar) appears bottom-center in white; secondary (learning) appears top-center in yellow. Source cues are extracted from embedded subtitle streams or `.{lang}.srt` / `.{lang}.ass` sidecars; Argos Translate (offline, not bundled in image) synthesizes missing tracks. Cue alignment is base-anchored (secondary cue midpoint must fall within base cue range). Configurable via env vars (`DUALSUB_ENABLED`, `DUALSUB_PAIRS`, `DUALSUB_TRANSLATOR`) and Procula settings UI. Known limitations: no bitmap (PGS/DVD) sub support; font fallback required for Arial; per-title opt-out not yet implemented.

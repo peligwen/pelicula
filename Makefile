@@ -1,4 +1,7 @@
-.PHONY: test test-procula test-middleware test-cli test-race test-cover
+.PHONY: build test test-procula test-middleware test-cli test-race test-cover e2e
+
+build:
+	cd cmd/pelicula && go build -ldflags "-X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o ../../bin/pelicula .
 
 test: test-procula test-middleware test-cli
 
@@ -19,3 +22,6 @@ test-race:
 test-cover:
 	cd procula && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
 	cd middleware && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+
+e2e:
+	bash tests/e2e.sh

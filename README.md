@@ -7,23 +7,21 @@ Search for movies and TV shows by name, download via torrent through a VPN, stre
 ```bash
 git clone https://github.com/peligwen/pelicula.git
 cd pelicula
-./pelicula setup    # answer a few prompts
-./pelicula up       # pulls images, builds middleware, starts everything
+./pelicula up       # builds CLI, runs setup wizard on first run, starts everything
 ```
 
-Open `http://localhost:7354` — that's it.
-
-Prefer a browser? Run `./pelicula up` and open `http://localhost:7354/setup` — a setup wizard walks you through configuration without touching the terminal.
+Open `http://localhost:7354` — that's it. On first run, a browser-based setup wizard walks you through configuration.
 
 ## Prerequisites
 
 - **Docker** with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine on Linux)
+- **Go 1.23+** (the wrapper script auto-builds the CLI on first run)
 - **ProtonVPN** paid plan (Plus or higher) with a Wireguard private key
 - **bash** (macOS, Linux, WSL, Synology NAS — the CLI auto-detects your platform and uses the right default paths; no manual folder creation needed on Synology)
 
 ## What Happens Automatically
 
-On `./pelicula up`, the stack:
+On `pelicula up`, the stack:
 
 1. Seeds service configs (URL bases, auth bypass, download paths)
 2. Starts 9 containers behind an nginx reverse proxy on port 7354
@@ -77,22 +75,20 @@ All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, q
 ## CLI
 
 ```
-./pelicula setup               # Interactive first-time configuration
-./pelicula up                  # Start all services
-./pelicula down                # Stop all services
-./pelicula status              # Show container status
-./pelicula logs [svc]          # Tail logs (optionally for one service)
-./pelicula check-vpn           # Verify VPN tunnel and service health
-./pelicula update              # Pull latest images and recreate
-./pelicula restart [svc]       # Restart service(s) without stopping the whole stack
-./pelicula restart-acquire     # Restart and re-run VPN port-forward acquisition
-./pelicula rebuild             # Rebuild and restart middleware/procula containers
-./pelicula reset-config [svc]  # Delete seeded configs so they regenerate on next up
-./pelicula configure           # Interactive menu: auth, notifications, transcoding, remote access
-./pelicula import              # Open the browser-based local media import wizard
-./pelicula export              # Export watchlist/library backup
-./pelicula import-backup       # Restore from a backup exported by pelicula export
-./pelicula test                # End-to-end integration test (isolated stack, no VPN needed)
+pelicula up                  # Start all services (runs setup wizard on first run)
+pelicula down                # Stop all services
+pelicula status              # Show container status
+pelicula logs [svc]          # Tail logs (optionally for one service)
+pelicula check-vpn           # Verify VPN tunnel and service health
+pelicula update              # Pull latest images and recreate
+pelicula restart [svc]       # Restart service(s) without stopping the whole stack
+pelicula restart-acquire     # Restart and re-run VPN port-forward acquisition
+pelicula rebuild             # Rebuild and restart middleware/procula containers
+pelicula reset-config [svc]  # Delete seeded configs so they regenerate on next up
+pelicula import              # Open the browser-based local media import wizard
+pelicula export              # Export watchlist/library backup
+pelicula import-backup       # Restore from a backup exported by pelicula export
+pelicula test                # End-to-end integration test (isolated stack, no VPN needed)
 ```
 
 ## Architecture
@@ -149,9 +145,9 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 ## Optional Services
 
-**Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs via `./pelicula configure`.
+**Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs in the Settings page.
 
-**Bazarr** — automatic subtitle acquisition from OpenSubtitles, Addic7ed, Podnapisi, and others. Wired to Sonarr and Radarr automatically on startup. Set which languages to acquire via `./pelicula configure` → Subtitles (`PELICULA_SUB_LANGS`).
+**Bazarr** — automatic subtitle acquisition from OpenSubtitles, Addic7ed, Podnapisi, and others. Wired to Sonarr and Radarr automatically on startup. Set which languages to acquire in the Settings page (`PELICULA_SUB_LANGS`).
 
 **Dual subtitles** — optional post-Bazarr pipeline stage that stacks two subtitle tracks into a single ASS sidecar file (e.g. `Movie.en-es.ass`) for language learners. Base language appears bottom-center; learning language appears top-center. Configure via `DUALSUB_ENABLED` / `DUALSUB_PAIRS` or the Procula settings UI. See [PROCULA.md](PROCULA.md) for details.
 

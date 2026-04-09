@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [middleware, procula]
+        module: [middleware, procula, cmd/pelicula]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -31,7 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: shellcheck pelicula
+      - name: shellcheck e2e test runner
+        run: shellcheck -S warning tests/e2e.sh
+      - name: shellcheck wrapper
         run: shellcheck -S warning pelicula
 
   e2e:
@@ -47,5 +49,5 @@ jobs:
             -o $DOCKER_CONFIG/cli-plugins/docker-compose
           chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
       - name: e2e test stack
-        run: ./pelicula test
+        run: bash tests/e2e.sh
         timeout-minutes: 10

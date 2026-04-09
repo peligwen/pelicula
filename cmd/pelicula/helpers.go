@@ -11,21 +11,39 @@ import (
 	"strings"
 )
 
-// getScriptDir returns the directory containing the running binary, which is
-// the pelicula project root (same contract as SCRIPT_DIR in the bash CLI).
+// getScriptDir returns the pelicula project root directory.
+// It walks up from the binary's location looking for docker-compose.yml.
+// Falls back to the binary's directory if not found.
 func getScriptDir() string {
+	// Start from the binary's resolved location
+	start := ""
 	exe, err := os.Executable()
-	if err != nil {
-		// Fall back to cwd
-		cwd, _ := os.Getwd()
-		return cwd
+	if err == nil {
+		resolved, err := filepath.EvalSymlinks(exe)
+		if err == nil {
+			start = filepath.Dir(resolved)
+		} else {
+			start = filepath.Dir(exe)
+		}
 	}
-	// Resolve symlinks so that `./pelicula` invocation works correctly
-	resolved, err := filepath.EvalSymlinks(exe)
-	if err != nil {
-		return filepath.Dir(exe)
+	if start == "" {
+		start, _ = os.Getwd()
 	}
-	return filepath.Dir(resolved)
+
+	// Walk up looking for docker-compose.yml (the project root marker)
+	dir := start
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "docker-compose.yml")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return start
 }
 
 // sudoRun creates an exec.Cmd prefixed with "sudo".

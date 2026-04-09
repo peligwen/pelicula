@@ -11,7 +11,7 @@ The name is intentional: **peligrosa** (Spanish, *dangerous*). Every piece of co
 Pelicula is **LAN-first**. The design baseline assumes:
 
 - The admin dashboard (`:7354`) is reachable only from a trusted local network. It is not hardened for public internet exposure.
-- Service-to-service communication between containers relies on Docker's private networks and an IP-based auth bypass inside each *arr app (`AuthenticationRequired=DisabledForLocalAddresses`). This is intentional — `./pelicula up` enforces it on every start.
+- Service-to-service communication between containers relies on Docker's private networks and an IP-based auth bypass inside each *arr app (`AuthenticationRequired=DisabledForLocalAddresses`). This is intentional — ``pelicula up`` enforces it on every start.
 - `PELICULA_AUTH` is an optional convenience layer for shared households, not a defense against a determined network attacker.
 
 **Peligrosa remote vhost (opt-in):** When `REMOTE_ACCESS_ENABLED=true`, a second nginx vhost exposes **only Jellyfin** on a separate hardened port. No admin routes (`/sonarr`, `/radarr`, `/api/pelicula`, etc.) are reachable from the remote vhost. The admin port 7354 is never exposed.
@@ -92,7 +92,7 @@ Path allowlist (`isUnderPrefixes` / `isAllowedWebhookPath`): validates that repo
 
 ### Remote Jellyfin Vhost
 
-`nginx/remote.conf.template` is rendered to `${CONFIG_DIR}/nginx/remote.conf` on every `./pelicula up` when `REMOTE_ACCESS_ENABLED=true`.
+`nginx/remote.conf.template` is rendered to `${CONFIG_DIR}/nginx/remote.conf` on every ``pelicula up`` when `REMOTE_ACCESS_ENABLED=true`.
 
 **Hardening:**
 - `return 444` catch-all on both ports drops requests with unknown Host headers (prevents IP scanning)
@@ -125,13 +125,13 @@ Path allowlist (`isUnderPrefixes` / `isAllowedWebhookPath`): validates that repo
 | `REMOTE_LE_EMAIL` | — | Required for `letsencrypt` mode |
 | `REMOTE_LE_STAGING` | `false` | Use LE staging CA for testing |
 
-Enable via `./pelicula configure → 8) Remote access`.
+Enable via `the Settings UI → 8) Remote access`.
 
 ---
 
 ## Known Limitations
 
-- **WireGuard private key** and API keys are stored in `.env` in plaintext on the host. `./pelicula setup` sets `chmod 600`, but anyone with host access can read it.
+- **WireGuard private key** and API keys are stored in `.env` in plaintext on the host. ``pelicula up` (first-run setup)` sets `chmod 600`, but anyone with host access can read it.
 - **Auth rate limiter** is in-memory, per-IP, and resets on middleware restart. Protects against online brute force.
 - **Invite tokens** are random but not HMAC-signed — token validity requires a database lookup. HMAC signing is a [roadmap item](#roadmap).
 - **Self-signed HTTPS** breaks Chrome on the LAN (Chrome blocks JS). Default LAN setup uses HTTP; use Peligrosa remote vhost for TLS.

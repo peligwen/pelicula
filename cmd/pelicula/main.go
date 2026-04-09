@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 )
 
 var version = "dev" // set via -ldflags at build time
@@ -52,9 +54,17 @@ func main() {
 	case "import":
 		cmdImport(args[1:])
 	case "test":
-		// Delegate to bash test runner for now
-		fmt.Println("Test mode delegates to the bash test runner.")
-		fmt.Println("Run: bash ./pelicula test")
+		testScript := filepath.Join(getScriptDir(), "tests", "e2e.sh")
+		cmd := exec.Command("bash", append([]string{testScript}, args[1:]...)...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				os.Exit(exitErr.ExitCode())
+			}
+			os.Exit(1)
+		}
 	case "--version", "-V":
 		fmt.Println("pelicula", version)
 	case "-h", "--help", "help":

@@ -264,7 +264,7 @@ The dashboard polls `GET /api/pelicula/processing` on the same 15-second refresh
 
 ## Bazarr Integration
 
-Bazarr runs as a standard stack container (port 6767, proxied at `/bazarr`). On startup, `middleware/autowire.go` reads the API key from `$CONFIG_DIR/bazarr/config/config.ini`, connects Bazarr to both Sonarr and Radarr, and creates a language profile from `PELICULA_SUB_LANGS` (set via `./pelicula configure` → Subtitles). Bazarr polls Sonarr/Radarr on its own schedule — Procula does not call Bazarr directly.
+Bazarr runs as a standard stack container (port 6767, proxied at `/bazarr`). On startup, `middleware/autowire.go` reads the API key from `$CONFIG_DIR/bazarr/config/config.ini`, connects Bazarr to both Sonarr and Radarr, and creates a language profile from `PELICULA_SUB_LANGS` (set via `the Settings UI` → Subtitles). Bazarr polls Sonarr/Radarr on its own schedule — Procula does not call Bazarr directly.
 
 After the `catalog` stage, Procula scans each imported file for embedded subtitle streams and checks them against `PELICULA_SUB_LANGS`. Any languages that are missing are recorded in the job's `missing_subs` field and surfaced in the dashboard job card. This is a read-only flag; Bazarr handles the actual download.
 
