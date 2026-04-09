@@ -105,6 +105,7 @@ func main() {
 	mux.Handle("/api/pelicula/pipeline/dismiss", auth.GuardAdmin(http.HandlerFunc(handlePipelineDismiss)))
 
 	// viewer+: read-only dashboard data
+	mux.Handle("/api/pelicula/host", auth.Guard(http.HandlerFunc(handleHost)))
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(handleStatus)))
 	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(handleDownloads)))
 	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(handleDownloadStats)))

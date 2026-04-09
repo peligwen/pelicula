@@ -109,10 +109,13 @@ async function checkStatus() {
         if (!res.ok) return;
         const data = await res.json();
         const toast = document.getElementById('toast');
+        const hint = document.getElementById('footer-hint');
         if (data.indexers === 0) {
             toast.classList.add('visible');
+            if (hint) hint.textContent = 'Prowlarr needs an indexer';
         } else {
             toast.classList.remove('visible');
+            if (hint) hint.textContent = '';
         }
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
@@ -123,13 +126,8 @@ let searchType = '';
 let lastResults = [];
 const searchInput = document.getElementById('search-input');
 
-// Persist "Added" state across re-renders using localStorage
-const addedIds = new Set(JSON.parse(localStorage.getItem('peliculaAdded') || '[]'));
-function markAdded(idKey, id) {
-    addedIds.add(idKey + ':' + id);
-    localStorage.setItem('peliculaAdded', JSON.stringify([...addedIds]));
-}
-function isAddedLocally(idKey, id) { return addedIds.has(idKey + ':' + id); }
+// Clear any stale localStorage added-cache from older versions
+localStorage.removeItem('peliculaAdded');
 const searchResults = document.getElementById('search-results');
 const searchFilters = document.getElementById('search-filters');
 
@@ -175,7 +173,7 @@ function renderResultCard(r) {
     const tvdbId = r.tvdbId || 0;
     const id = r.type === 'movie' ? tmdbId : tvdbId;
     const idKey = r.type === 'movie' ? 'tmdb' : 'tvdb';
-    const added = r.added || isAddedLocally(idKey, id);
+    const added = r.added;
     const isManager = currentRole === 'manager' || currentRole === 'admin';
     // Managers and admins get the direct Add button; viewers get a Request button.
     const actionBtn = isManager
@@ -209,8 +207,11 @@ async function addMedia(type, id, btn) {
         const body = type === 'movie' ? {type, tmdbId: id} : {type, tvdbId: id};
         const res = await fetch('/api/pelicula/search/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         if (res.ok) {
+            // Mark the matching result in lastResults so re-renders reflect the add immediately
+            const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
+            const hit = lastResults.find(r => r[idKey] === id);
+            if (hit) { hit.added = true; }
             btn.textContent = 'Added'; btn.classList.add('added');
-            markAdded(type === 'movie' ? 'tmdb' : 'tvdb', id);
         } else { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
     } catch { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
 }
@@ -272,6 +273,8 @@ async function checkDownloads() {
         document.getElementById('t-dl').classList.remove('loading');
         document.getElementById('t-ul').textContent = formatSpeed(s.upspeed || 0);
         document.getElementById('t-ul').classList.remove('loading');
+        setText('s-dl', formatSpeed(s.dlspeed || 0));
+        setText('s-ul', formatSpeed(s.upspeed || 0));
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 function renderDownloads(data) {
@@ -382,6 +385,15 @@ async function checkServices() {
             el.classList.remove('svc-up', 'svc-down', 'svc-unknown');
             el.classList.add(up ? 'svc-up' : 'svc-down');
         });
+        // Update sidebar pips
+        Object.keys(svcMap).forEach(name => {
+            const pip = document.getElementById('svc-pip-' + name);
+            if (!pip) return;
+            const up = svcMap[name] === 'up';
+            pip.className = 'svc-pip ' + (up ? 'up' : 'down');
+            const row = pip.closest('.svc-row');
+            if (row) { row.classList.remove('svc-up', 'svc-down', 'svc-unknown'); row.classList.add(up ? 'svc-up' : 'svc-down'); }
+        });
         updateSvcTotals();
         // Search depends on Radarr + Sonarr
         const radarrUp = svcMap['radarr'] === 'up';
@@ -393,13 +405,13 @@ async function checkServices() {
             warn.className = 'search-warning err';
         } else if (!radarrUp || !sonarrUp) {
             searchInput.disabled = false;
-            searchInput.placeholder = 'Search movies & TV shows...';
+            searchInput.placeholder = 'Search for a title...';
             const down = !radarrUp ? 'Radarr (movies)' : 'Sonarr (TV shows)';
             warn.textContent = down + ' is down — some results may be missing';
             warn.className = 'search-warning warn';
         } else {
             searchInput.disabled = false;
-            searchInput.placeholder = 'Search movies & TV shows...';
+            searchInput.placeholder = 'Search for a title...';
             warn.className = 'search-warning';
         }
     } catch (e) {
@@ -409,6 +421,11 @@ async function checkServices() {
             if (d) { d.className = 'service-status unknown'; d.textContent = '\u26a0'; }
             el.classList.remove('svc-up', 'svc-down');
             el.classList.add('svc-unknown');
+        });
+        document.querySelectorAll('.svc-pip').forEach(pip => {
+            pip.className = 'svc-pip unknown';
+            const row = pip.closest('.svc-row');
+            if (row) { row.classList.remove('svc-up', 'svc-down'); row.classList.add('svc-unknown'); }
         });
         updateSvcTotals();
         searchInput.disabled = true;
@@ -625,6 +642,7 @@ async function checkVPN() {
             desc.textContent = 'Connected';
             card.classList.remove('vpn-down', 'svc-down', 'svc-unknown');
             card.classList.add('svc-up');
+            setText('s-region', data.country || '\u2014');
         } else if (!ipRes) {
             throw new Error('VPN timeout');
         }
@@ -632,6 +650,7 @@ async function checkVPN() {
             const pd = await portRes.json();
             portEl.textContent = pd.port || '?';
             portEl.classList.remove('loading');
+            setText('s-port', pd.port || '\u2014');
         }
     } catch (e) {
         console.warn('[pelicula] VPN telemetry error:', e);
@@ -644,7 +663,45 @@ async function checkVPN() {
         desc.textContent = 'Down — downloads paused';
         card.classList.remove('svc-up', 'svc-unknown');
         card.classList.add('vpn-down', 'svc-down');
+        setText('s-region', '\u2014');
+        setText('s-port', '\u2014');
     }
+}
+
+function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+
+function fmtUptime(secs) {
+    const s = Math.floor(secs);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`;
+}
+
+function fmtBytes(b) {
+    if (b >= 1e12) return (b / 1e12).toFixed(1) + '\u202fTB';
+    if (b >= 1e9)  return (b / 1e9).toFixed(0)  + '\u202fGB';
+    return (b / 1e6).toFixed(0) + '\u202fMB';
+}
+
+async function checkHost() {
+    try {
+        const res = await tfetch('/api/pelicula/host');
+        if (!res.ok) throw new Error();
+        const d = await res.json();
+        setText('s-uptime', fmtUptime(d.uptime_seconds || 0));
+        if (d.disk && d.disk.total > 0) {
+            setText('s-space', `${fmtBytes(d.disk.free)} free / ${fmtBytes(d.disk.total)}`);
+            const bar = document.getElementById('s-space-bar');
+            if (bar) bar.style.width = Math.round(d.disk.used_pct) + '%';
+        }
+        if (d.library) {
+            const parts = [];
+            if (d.library.movies) parts.push(`${d.library.movies} movies`);
+            if (d.library.series) parts.push(`${d.library.series} series`);
+            setText('s-library', parts.join(' \u00b7 ') || '\u2014');
+        }
+    } catch (e) { console.warn('[pelicula] host error:', e); }
 }
 
 function updateTimestamp() { document.getElementById('footer-time').textContent = new Date().toLocaleTimeString(); }
@@ -749,11 +806,11 @@ function notifClass(type) {
 function renderActivity(events) {
     const section = document.getElementById('activity-section');
     const list = document.getElementById('activity-list');
+    if (!section || !list) return;
     if (!Array.isArray(events) || !events.length) {
-        section.style.display = 'none';
+        list.innerHTML = '<div class="activity-empty">No recent activity yet.</div>';
         return;
     }
-    section.style.display = '';
     list.innerHTML = events.slice(0, 15).map(e => {
         const icon = notifIcon(e.type);
         const cls = notifClass(e.type);
@@ -829,7 +886,7 @@ async function scanStorageNow() {
 }
 
 function folderColor(label) {
-    const map = { downloads: '#7dda93', movies: '#c8a2ff', tv: '#6db3f2', processing: '#f0c060' };
+    const map = { downloads: '#7dda93', movies: '#7080e8', tv: '#40c8a8', processing: '#f0c060' };
     return map[(label || '').toLowerCase()] || '#888';
 }
 
@@ -1145,6 +1202,14 @@ function renderPipeline(data) {
     if (stats.failed > 0) parts.push(stats.failed + ' failed');
     if (statsEl) statsEl.textContent = parts.join(' / ');
 
+    // Footer pipeline count
+    const footerCount = document.getElementById('footer-pipeline-count');
+    if (footerCount) {
+        if (stats.active > 0) footerCount.textContent = stats.active + ' on the way';
+        else if (stats.failed > 0) footerCount.textContent = stats.failed + ' needs attention';
+        else footerCount.textContent = '';
+    }
+
     // Needs attention
     const failedItems = lanes['needs_attention'] || [];
     if (failedItems.length && attentionEl && attentionList) {
@@ -1330,7 +1395,7 @@ async function refresh() {
     console.log('[pelicula] refresh start');
     const results = await Promise.allSettled([
         checkServices(), checkVPN(), checkPipeline(), checkStatus(),
-        checkNotifications(), checkStorage(), loadSessions()
+        checkNotifications(), checkStorage(), loadSessions(), checkHost()
     ]);
     const failed = results.filter(r => r.status === 'rejected').length;
     console.log('[pelicula] refresh done' + (failed ? ' (' + failed + ' failed)' : ''));
@@ -1355,6 +1420,7 @@ function updateStaleBanner() {
 // ── Storage Explorer ──────────────────────────────────────────────────────────
 
 function openStorageExplorer() {
+    if (window.switchTab) switchTab('storage');
     const section = document.getElementById('storage-explorer-section');
     if (section) {
         section.classList.remove('hidden');
@@ -1399,7 +1465,7 @@ async function loadUsers() {
         const countEl = document.getElementById('users-count');
         const metricEl = document.getElementById('um-metric-accounts');
         if (!users || users.length === 0) {
-            list.innerHTML = '<li style="color:#444;font-size:0.8rem;padding:0.5rem 1rem;background:#131313;border:1px solid #1e1e1e;border-radius:8px;">No users yet.</li>';
+            list.innerHTML = '<li style="color:var(--muted,#9080a8);font-size:0.8rem;padding:0.5rem 1rem;background:var(--panel2,#fdf5ff);border:1.5px solid var(--border2,rgba(180,140,220,0.4));border-radius:16px;">No users yet.</li>';
             if (countEl) countEl.textContent = '';
             if (metricEl) metricEl.textContent = '0';
             return;
@@ -1515,7 +1581,7 @@ async function deleteUser(btn) {
 // ── Sessions / Now Playing ─────────────────
 async function loadSessions() {
     const list = document.getElementById('sessions-list');
-    const section = document.getElementById('activity-section');
+    const section = document.getElementById('now-playing-section');
     if (!list || !section) return;
     try {
         const resp = await tfetch('/api/pelicula/sessions');
