@@ -9,7 +9,7 @@ Radarr/Sonarr                   pelicula-api                    Procula (:8282)
   |                                 |                               |
   |-- import webhook -------------->|-- POST /api/procula/jobs ---->|
   |                                 |                               |
-  |                                 |   queue + persist (JSON files)|
+  |                                 |   queue + persist (SQLite)    |
   |                                 |                               |
   |                                 |<-- GET /api/procula/status ---|
   |                                 |    (dashboard polls this)     |
@@ -84,7 +84,7 @@ EXPOSE 8282
 CMD ["procula"]
 ```
 
-**Queue implementation:** One JSON file per job in `/config/procula/jobs/`. No SQLite dependency, stays stdlib-only, matches the middleware pattern. SQLite was considered (CGO_ENABLED=1, `modernc.org/sqlite` or `mattn/go-sqlite3`) but rejected for the initial implementation — JSON files are simpler, inspectable with `ls`/`cat`, and the single-goroutine worker means there's no lock contention. See ROADMAP.md "Procula queue" for revisit criteria (cross-job analytics, second worker, or high job volume).
+**Queue implementation:** Jobs are persisted in SQLite (`procula.db`, tables: `jobs`, `settings`) via `modernc.org/sqlite` (pure-Go driver, no CGO). On first startup, any existing JSON job files in `/config/procula/jobs/` are migrated automatically (idempotent). The single-goroutine worker means there is no lock contention beyond standard SQLite serialized writes.
 
 ## API Endpoints
 
@@ -297,14 +297,20 @@ location /bazarr {
 procula/
   Dockerfile
   go.mod
-  main.go          # HTTP server, route registration
-  queue.go         # Job queue: create, list, update, persist to JSON files
-  pipeline.go      # Stage orchestration: validate -> process -> catalog
-  validate.go      # FFprobe checks, sample detection, duration sanity
-  process.go       # FFmpeg transcoding, extraction, audio normalization
-  catalog.go       # Jellyfin refresh, verification, notifications
-  storage.go       # Disk monitoring, tiered storage, retention, dedup detection
-  profiles.go      # Transcode profile CRUD
+  main.go               # HTTP server, route registration
+  db.go                 # SQLite schema, migration, job/settings CRUD
+  db_test.go
+  migrate_json.go       # One-time migration from legacy JSON job files
+  migrate_json_test.go
+  queue.go              # Job queue: create, list, update (backed by db.go)
+  pipeline.go           # Stage orchestration: validate -> process -> catalog
+  validate.go           # FFprobe checks, sample detection, duration sanity
+  process.go            # FFmpeg transcoding, extraction, audio normalization
+  catalog.go            # Jellyfin refresh, verification, notifications
+  storage.go            # Disk monitoring, tiered storage, retention, dedup detection
+  profiles.go           # Transcode profile CRUD
+  dualsub.go            # Dual-subtitle ASS sidecar generation
+  dualsub_test.go
 ```
 
 ## Job Schema

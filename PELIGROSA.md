@@ -150,6 +150,7 @@ Enable via `the Settings UI → 8) Remote access`.
 | `middleware/invites.go` | Invite token lifecycle, redemption |
 | `middleware/requests.go` | Viewer request queue, approval/denial flow |
 | `middleware/jellyfin.go` | `handleUsers`, `handleUsersWithID`, `CreateJellyfinUser` |
+| `middleware/pipeline.go` | Unified pipeline aggregation (downloads + procula jobs + monitoring requests) |
 | `middleware/hooks.go` | Webhook secret validation, path allowlist |
 | `middleware/library.go` | `handleBrowse` folder browser + symlink escape prevention |
 | `middleware/settings.go` | Settings read/write (uses `isLocalOrigin` for strict CSRF guard) |

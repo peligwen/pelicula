@@ -52,17 +52,21 @@ On every `pelicula up`, the Go CLI (`cmd/pelicula/`):
 - **Seeds** config files that are missing (UrlBase, auth settings, qBittorrent subnet bypass, Jellyfin BaseUrl). Seeding is idempotent — existing files are left alone.
 - **`enforce_arr_auth()`** patches any existing `*arr` `config.xml` where `AuthenticationRequired=Enabled` back to `DisabledForLocalAddresses`. This prevents the *arr apps from locking the user out: on first boot, *arr writes its own config on top of the seeded file, re-enabling auth. The enforcement pass corrects this every time the stack starts.
 
-## qBittorrent Networking
+## VPN-Routed Services
 
-qBittorrent runs with `network_mode: "service:gluetun"` — it shares gluetun's network namespace entirely. All its traffic exits through the WireGuard tunnel; if the tunnel drops, qBittorrent loses internet (VPN kill-switch).
+**qBittorrent** and **Prowlarr** both run with `network_mode: "service:gluetun"` — they share gluetun's network namespace entirely. All their traffic exits through the WireGuard tunnel; if the tunnel drops, they lose internet (VPN kill-switch). This keeps torrent traffic and indexer lookups VPN-bound.
 
-From nginx and the *arr apps, qBittorrent is reachable at `gluetun:8080` (not `qbittorrent:8080`). The Docker subnet auth bypass means no password is needed for service-to-service calls.
+From nginx and the *arr apps:
+- qBittorrent is reachable at `gluetun:8080` (not `qbittorrent:8080`)
+- Prowlarr is reachable at `gluetun:9696` (not `prowlarr:9696`)
+
+The Docker subnet auth bypass means no password is needed for service-to-service calls.
 
 qBittorrent v5 renamed the pause/resume API to stop/start — the middleware uses the v5 endpoints.
 
 ## Go CLI
 
-The `cmd/pelicula/` package compiles to a single binary per platform (macOS/Linux/Windows/Synology). Zero external dependencies — stdlib only. Handles all lifecycle commands: up, down, restart, rebuild, reset-config, status, logs, update, export, import-backup, import, check-vpn. The `test` command delegates to `tests/e2e.sh`. A thin wrapper script at the repo root (`./pelicula`) auto-builds the Go binary on first run.
+The `cmd/pelicula/` package compiles to a single binary per platform (macOS/Linux/Windows/Synology). Zero external dependencies — stdlib only. Handles all lifecycle commands: up, down, restart, rebuild, redeploy, reset-config, status, logs, update, export, import-backup, import, check-vpn. The `test` command delegates to `tests/e2e.sh`. A thin wrapper script at the repo root (`./pelicula`) auto-builds the Go binary on first run.
 
 **Platform detection** (`detectPlatform()` in `platform.go`):
 1. Checks `/proc/syno_platform` or `/volume1` to identify Synology NAS
@@ -79,9 +83,12 @@ Platform affects:
 
 ```
 nginx/
-  nginx.conf          reverse proxy config, path-based routing, no-cache on dashboard
-  index.html          dashboard: VPN telemetry, search, downloads, notifications, service grid
-  setup.html/css      browser-based setup wizard (served when SETUP_MODE=true)
-  import.html/js/css  local media import wizard with server-side folder browser
+  nginx.conf            reverse proxy config, path-based routing, no-cache on dashboard
+  index.html            dashboard: search, pipeline/monitoring, settings tab, job drawer, event log
+  dashboard.js          dashboard logic: search, pipeline, settings, registration, user management
+  styles.css            dashboard styles
+  register.html/js      registration page (invite flow, open registration, initial setup)
+  setup.html/css        browser-based setup wizard (served when SETUP_MODE=true)
+  import.html/js/css    local media import wizard with server-side folder browser
   remote.conf.template  envsubst template for the Peligrosa remote vhost (see PELIGROSA.md)
 ```

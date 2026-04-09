@@ -96,7 +96,7 @@ Service URLs default to Docker-internal addresses. Override these when running s
 |----------|---------|---------|
 | `SONARR_URL` | `http://sonarr:8989/sonarr` | autowire, health checks |
 | `RADARR_URL` | `http://radarr:7878/radarr` | autowire, health checks |
-| `PROWLARR_URL` | `http://prowlarr:9696/prowlarr` | autowire, health checks |
+| `PROWLARR_URL` | `http://gluetun:9696/prowlarr` | autowire, health checks |
 | `BAZARR_URL` | `http://bazarr:6767/bazarr` | autowire, health checks |
 | `JELLYFIN_URL` | `http://jellyfin:8096/jellyfin` | auth, user management, sessions |
 | `QBITTORRENT_URL` | `http://gluetun:8080` | download management |

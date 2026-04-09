@@ -24,6 +24,7 @@ pelicula up                  # start stack (runs setup wizard on first run), see
 pelicula down|status|logs [svc]|update|check-vpn
 pelicula restart [svc]       # restart service(s) without taking the whole stack down
 pelicula rebuild             # rebuild and restart middleware/procula containers
+pelicula redeploy [svc]      # rebuild images then full stack down/up (pelicula-api|middleware|procula)
 pelicula reset-config        # soft reset: wipe service configs, preserve API keys/VPN/certs/auth
 pelicula reset-config [svc]  # per-service reset: sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs
 pelicula reset-config all    # hard reset: wipe config dir + regenerate .env (keeps Prowlarr indexers, VPN key, paths)
@@ -44,12 +45,12 @@ nginx (:7354) ─── /                → dashboard (static HTML)
                ── /api/vpn/        → gluetun control API
                ── /sonarr/         → Sonarr
                ── /radarr/         → Radarr
-               ── /prowlarr/       → Prowlarr
+               ── /prowlarr/       → Prowlarr (via gluetun network)
                ── /qbt/            → qBittorrent (via gluetun network)
                ── /jellyfin/       → Jellyfin (NOT behind VPN)
 ```
 
-**pelicula-api** auto-wires the *arr stack on startup and serves the dashboard API. **procula** handles post-import processing (validate → transcode → catalog). **qBittorrent runs on gluetun's network namespace** — reachable at `gluetun:8080`, not `qbittorrent:8080`.
+**pelicula-api** auto-wires the *arr stack on startup and serves the dashboard API. **procula** handles post-import processing (validate → transcode → catalog). **qBittorrent and Prowlarr run on gluetun's network namespace** — reachable at `gluetun:8080` and `gluetun:9696` respectively, not their own container names.
 
 Remote Jellyfin access (Peligrosa) is opt-in — see PELIGROSA.md.
 

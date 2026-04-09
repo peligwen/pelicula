@@ -44,6 +44,12 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 ## Shipped
 
+**Dashboard Consolidation:** Retired the standalone Procula UI (`/procula/`) — all pipeline visibility is now in the main dashboard. Services grid removed in favour of sidebar-only services list. New Settings tab centralises pipeline toggles, subtitle settings, notification mode, and download defaults. Search cards are click-to-expand with detail chips (rating, certification, runtime, network, genres). New "monitoring" pipeline lane shows grabbed requests that haven't started downloading yet. In-page job drawer replaces the Procula link (shows validation checks, file info, transcode details, timeline). Event log with filter chips and pagination. Password auto-generated on the register page with visibility toggle.
+
+**Infrastructure:** Prowlarr now runs on gluetun's network namespace (alongside qBittorrent) so all indexer traffic is VPN-routed. Prowlarr is reachable at `gluetun:9696`; nginx updated accordingly.
+
+**CLI additions:** `pelicula redeploy [svc]` rebuilds Docker images then does a full stack down/up (distinct from `rebuild` which only restarts). After `pelicula up`, the CLI polls for first-run state and auto-opens the registration page in the browser if no admin is registered yet.
+
 **Pre-v1.0 Hardening:** SQLite data layer for all mutable state (`modernc.org/sqlite` via pure-Go driver). Migration framework with `PRAGMA user_version` for both middleware and procula. Auto-migration from JSON files on first startup (idempotent, handles corrupt files). Configurable service URLs via environment variables (`SONARR_URL`, `RADARR_URL`, etc.). Versioned backup format (v1→v2) with forward-compatible import chain; v2 includes roles, invites, and requests. Go CLI rewrite (`cmd/pelicula/`) — single binary, cross-platform (macOS/Linux/Windows/Synology), stdlib-only, replaces the bash script. API contract freeze with stability policy (additive-only changes).
 
 **Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `the Settings UI` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
