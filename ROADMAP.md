@@ -33,11 +33,10 @@ Replace the bash CLI (`./pelicula`) with a standalone Go binary (`pelicula` / `p
 
 Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md) for the full threat model and current surface.
 
-- [ ] **[Peligrosa] bcrypt/argon2id** — replace salted SHA-256 KDF with a proper slow hash for user passwords (`users` mode only). SHA-256 is fast on GPUs; argon2id is the preferred migration target. Not applicable to `jellyfin` mode (Jellyfin owns hashing).
 - [ ] **[Peligrosa] HMAC invite tokens** — sign tokens with a server secret so validity is verifiable without a DB lookup. Prevents brute-force token enumeration.
 - [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
 - [ ] **[Peligrosa] `middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Blocked on `JellyfinClient` interface, `Fulfiller` injection, and shared HTTP helpers extraction. See plan file for incremental path.
-- [x] **[Peligrosa] Jellyfin SSO** — `PELICULA_AUTH=jellyfin`: credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles (no passwords) stored in `roles.json`; Jellyfin admins auto-promoted. Plex SSO deferred.
+- [x] **[Peligrosa] Jellyfin auth** — `PELICULA_AUTH=jellyfin` (now the only auth mode): credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed.
 - [ ] **[Peligrosa] Plex SSO** — deferred; different API shape (plex.tv OAuth dance).
 
 ---
@@ -59,7 +58,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 **Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `./pelicula configure` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
 
-**Phase B — Auth & Roles:** `users.json` model with viewer / manager / admin roles, `Guard` / `GuardManager` / `GuardAdmin` middleware, dashboard login form, role-based UI hiding. Post-ship hardening: `IsOffMode()` guard on `handleUsers`, CSRF origin check, `MaxBytesReader`, username and UUID validation.
+**Phase B — Auth & Roles:** Jellyfin-backed auth with viewer / manager / admin roles, `Guard` / `GuardManager` / `GuardAdmin` middleware, dashboard login form, role-based UI hiding. Post-ship hardening: `IsOffMode()` guard on `handleUsers`, CSRF origin check, `MaxBytesReader`, username and UUID validation.
 
 **Phase C — In-Dashboard Notifications:** Procula catalog stage writes to `/config/procula/notifications_feed.json` (ring buffer, 50 events), bell icon with unread badge, Processing section on dashboard with job cards and progress bars.
 

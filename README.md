@@ -157,11 +157,10 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 ## Auth
 
-Pelicula supports three modes via `PELICULA_AUTH` in `.env`:
+Pelicula supports two modes via `PELICULA_AUTH` in `.env`:
 
-- `off` (default) — no login required. Fine on a trusted LAN.
-- `password` (or legacy `true`) — shared password via `PELICULA_PASSWORD`. Everyone who logs in gets admin role.
-- `users` — multi-user with roles. Users live in `/config/pelicula/users.json`. Manage them via `./pelicula configure`.
+- `off` — no login required. Fine on a trusted LAN.
+- `jellyfin` (default) — credentials verified against Jellyfin. Roles stored locally in `roles.json`; Jellyfin admins automatically get admin in Pelicula.
 
 Role capabilities: **viewer** sees the dashboard and can submit content requests; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
 
@@ -170,9 +169,9 @@ Role capabilities: **viewer** sees the dashboard and can submit content requests
 ## Security
 
 Pelicula is designed for a trusted LAN. See [SECURITY.md](SECURITY.md) for
-the threat model, known limitations (e.g. salted-SHA-256 password hashing),
-and how to report a vulnerability privately. The opt-in Peligrosa remote
-access feature exposes **only Jellyfin** over TLS — never the admin stack.
+the threat model, known limitations, and how to report a vulnerability
+privately. The opt-in Peligrosa remote access feature exposes **only
+Jellyfin** over TLS — never the admin stack.
 
 ## License
 
