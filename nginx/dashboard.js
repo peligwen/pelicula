@@ -133,6 +133,7 @@ async function checkStatus() {
 let searchTimeout;
 let searchType = '';
 let lastResults = [];
+let lockedResult = null; // result selected by clicking — shown first when collapsed
 const searchInput = document.getElementById('search-input');
 
 // Clear any stale localStorage added-cache from older versions
@@ -155,12 +156,14 @@ searchInput.addEventListener('input', () => {
         searchResults.className = 'search-results'; searchResults.innerHTML = '';
         searchFilters.classList.remove('visible');
         lastResults = [];
+        lockedResult = null;
         return;
     }
     searchFilters.classList.add('visible');
     searchTimeout = setTimeout(() => doSearch(q), 400);
 });
 async function doSearch(q) {
+    lockedResult = null;
     searchResults.innerHTML = '<div class="search-searching-msg">Searching</div>';
     searchResults.className = 'search-results searching';
     try {
@@ -228,8 +231,9 @@ function renderResultCard(r) {
                 onclick="event.stopPropagation();submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true"
               >Request</button>`;
     const detailChips = buildDetailChips(r);
+    const overview = r.overview ? html`<div class="search-overview">${r.overview}</div>` : raw('');
     return html`
-        <div class="search-card" data-testid="search-result-card" data-tmdb="${tmdbId}" data-type="${r.type}"
+        <div class="search-card" data-testid="search-result-card" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-type="${r.type}"
              onclick="showMediaDetail(${tmdbId},${tvdbId},'${r.type}')">
             <div class="search-poster">${poster}</div>
             <div class="search-info">
@@ -237,8 +241,9 @@ function renderResultCard(r) {
                 <div class="search-meta">
                     <span class="search-year">${r.year || ''}</span>
                     <span class="search-badge">${badge}</span>
-                    ${raw(detailChips)}
                 </div>
+                ${overview}
+                <div class="search-detail">${raw(detailChips)}</div>
             </div>
             <div class="search-actions">${actionBtn}</div>
         </div>`.str;
@@ -249,13 +254,50 @@ function renderResults(results, collapsed) {
         searchResults.className = 'search-results visible';
         return;
     }
-    const items = results.slice(0, 10);
+    let items = results.slice(0, 10);
+    // When collapsing, move the locked result to the front so it's the visible card.
+    if (collapsed && lockedResult) {
+        const lockedIdx = items.findIndex(r => r.tmdbId === lockedResult.tmdbId && r.tvdbId === lockedResult.tvdbId && r.type === lockedResult.type);
+        if (lockedIdx > 0) {
+            const [locked] = items.splice(lockedIdx, 1);
+            items.unshift(locked);
+        }
+    }
     let markup = items.map(r => renderResultCard(r)).join('');
     if (collapsed && items.length > 1) {
         markup += `<div class="search-show-more" onclick="expandResults(); event.stopPropagation();">Show <span class="count">${items.length - 1}</span> more result${items.length > 2 ? 's' : ''}</div>`;
     }
     searchResults.innerHTML = markup;
     searchResults.className = collapsed ? 'search-results collapsed' : 'search-results visible';
+    // Re-apply expanded class to the locked result after re-render.
+    if (!collapsed && lockedResult) {
+        for (const card of searchResults.querySelectorAll('.search-card')) {
+            if (parseInt(card.dataset.tmdb, 10) === lockedResult.tmdbId && parseInt(card.dataset.tvdb, 10) === lockedResult.tvdbId) {
+                card.classList.add('expanded');
+                break;
+            }
+        }
+    }
+}
+function showMediaDetail(tmdbId, tvdbId, type) {
+    const hit = lastResults.find(r => type === 'movie' ? r.tmdbId === tmdbId : r.tvdbId === tvdbId);
+    if (!hit) return;
+    let targetCard = null;
+    for (const card of searchResults.querySelectorAll('.search-card')) {
+        if (parseInt(card.dataset.tmdb, 10) === tmdbId && parseInt(card.dataset.tvdb, 10) === tvdbId) {
+            targetCard = card;
+            break;
+        }
+    }
+    if (!targetCard) return;
+    const isExpanded = targetCard.classList.contains('expanded');
+    searchResults.querySelectorAll('.search-card.expanded').forEach(c => c.classList.remove('expanded'));
+    if (isExpanded) {
+        lockedResult = null; // clicking an expanded card collapses it and clears the lock
+    } else {
+        targetCard.classList.add('expanded');
+        lockedResult = hit;
+    }
 }
 function expandResults() {
     searchResults.className = 'search-results visible';
