@@ -1042,7 +1042,14 @@ function renderProcessing(data) {
 
 function renderJobCard(j) {
     const pct = Math.round((j.progress || 0) * 100);
-    const stageName = {validate:'Validating', process:'Processing', catalog:'Cataloging', done:'Done'}[j.stage] || j.stage;
+    const stageName = {
+        validate: 'Validating',
+        catalog: 'Cataloging',
+        await_subs: 'Acquiring subs',
+        dualsub: 'Subtitles',
+        process: 'Processing',
+        done: 'Done'
+    }[j.stage] || j.stage;
     const stateClass = j.state === 'failed' ? 'proc-failed' : 'proc-active';
     const barClass = j.state === 'failed' ? 'proc-bar-failed' : 'proc-bar-active';
     const title = j.source ? j.source.title : j.id;
@@ -1055,9 +1062,17 @@ function renderJobCard(j) {
         : '';
     const viewLogLink = `<button class="dl-btn" onclick="openJobDrawer('${esc(j.id)}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`;
 
-    const missingSubsBadge = (j.missing_subs && j.missing_subs.length)
-        ? `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`
-        : '';
+    let subsBadge = '';
+    if (j.stage === 'await_subs') {
+        const waiting = (j.missing_subs || []).filter(l => !(j.subs_acquired || []).includes(l));
+        if (waiting.length) {
+            subsBadge = `<span class="proc-badge proc-info" title="Waiting for Bazarr to deliver subtitles">Acquiring: ${waiting.map(esc).join(', ')}</span>`;
+        }
+    } else if (j.subs_acquired && j.subs_acquired.length) {
+        subsBadge = `<span class="proc-badge proc-ok" title="Subtitles acquired by Bazarr">Subs: ${j.subs_acquired.map(esc).join(', ')}</span>`;
+    } else if (j.missing_subs && j.missing_subs.length) {
+        subsBadge = `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`;
+    }
 
     let checksHTML = '';
     if (j.state === 'failed' && j.validation) {
@@ -1082,7 +1097,7 @@ function renderJobCard(j) {
             <div class="download-name">${esc(title)}</div>
             <div class="download-actions">
                 <span class="proc-badge ${stateClass}">${stageName}</span>
-                ${missingSubsBadge}
+                ${subsBadge}
                 ${retryBtn}${cancelBtn}${viewLogLink}
             </div>
         </div>
@@ -1270,9 +1285,17 @@ function renderPipelineCard(item) {
     const metaLeft = pct + '%' + (item.error ? ' \u2014 ' + esc(item.error.substring(0, 80)) : '');
 
     const badge = LANE_BADGE[item.lane] || '';
-    const missingSubsBadge = (item.missing_subs && item.missing_subs.length)
-        ? '<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ' + item.missing_subs.map(esc).join(', ') + '</span>'
-        : '';
+    let subsBadge = '';
+    if (item.stage === 'await_subs') {
+        const waiting = (item.missing_subs || []).filter(l => !(item.subs_acquired || []).includes(l));
+        if (waiting.length) {
+            subsBadge = '<span class="proc-badge proc-info" title="Waiting for Bazarr to deliver subtitles">Acquiring: ' + waiting.map(esc).join(', ') + '</span>';
+        }
+    } else if (item.subs_acquired && item.subs_acquired.length) {
+        subsBadge = '<span class="proc-badge proc-ok" title="Subtitles acquired by Bazarr">Subs: ' + item.subs_acquired.map(esc).join(', ') + '</span>';
+    } else if (item.missing_subs && item.missing_subs.length) {
+        subsBadge = '<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ' + item.missing_subs.map(esc).join(', ') + '</span>';
+    }
 
     const role = document.body.dataset.role || currentRole;
     const canAdmin = role === 'admin';
@@ -1327,7 +1350,7 @@ function renderPipelineCard(item) {
     return '<div class="' + cardClass + '" data-key="' + esc(item.key) + '" data-lane="' + esc(item.lane) + '">' +
         '<div class="download-header">' +
         '<div class="download-name" onclick="this.classList.toggle(\'expanded\')" title="' + safeTitle + '">' + esc(title) + yearSpan + '</div>' +
-        '<div class="download-actions">' + badge + missingSubsBadge + actionBtns + '</div>' +
+        '<div class="download-actions">' + badge + subsBadge + actionBtns + '</div>' +
         '</div>' +
         '<div class="download-bar-bg"><div class="download-bar ' + barClass + '" style="width:' + pct + '%"></div></div>' +
         '<div class="download-meta"><span>' + metaLeft + '</span><span>' + speedText + '</span></div>' +

@@ -467,8 +467,10 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .proc-active { background: var(--peri-l);  color: var(--periwinkle); border: 1px solid rgba(112,128,232,0.3); }
 .proc-done   { background: var(--mint-l);  color: var(--mint);       border: 1px solid rgba(64,200,168,0.3); }
 .proc-failed { background: var(--pink-l);  color: var(--pink);       border: 1px solid rgba(240,96,168,0.3); }
-.proc-warn    { background: var(--lemon-l); color: var(--warn);     border: 1px solid rgba(248,208,64,0.35); }
-.proc-waiting { background: var(--lemon-l); color: var(--warn-dim); border: 1px solid rgba(240,192,64,0.35); }
+.proc-warn    { background: var(--lemon-l); color: var(--warn);       border: 1px solid rgba(248,208,64,0.35); }
+.proc-waiting { background: var(--lemon-l); color: var(--warn-dim);  border: 1px solid rgba(240,192,64,0.35); }
+.proc-info    { background: var(--peri-l);  color: var(--periwinkle); border: 1px solid rgba(112,128,232,0.3); }
+.proc-ok      { background: var(--mint-l);  color: var(--mint);       border: 1px solid rgba(64,200,168,0.3); }
 .download-bar.proc-bar-active  { background: var(--gradient-bar); }
 .download-bar.proc-bar-done    { background: var(--mint); }
 .download-bar.proc-bar-failed  { background: var(--pink); }
