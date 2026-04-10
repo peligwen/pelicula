@@ -14,13 +14,13 @@
 </head>
 <body data-dashboard="1">
     <!-- Login overlay -->
-    <div class="login-overlay hidden" id="login-overlay">
+    <div class="login-overlay hidden" id="login-overlay" data-testid="login-overlay">
         <div class="login-box">
             <h2>P<span class="accent">E</span>LICULA</h2>
-            <form id="login-form">
+            <form id="login-form" data-testid="login-form">
                 <div class="login-error" id="login-error">Invalid credentials</div>
-                <input type="text" id="login-username" placeholder="Username" autocomplete="username">
-                <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" autofocus>
+                <input type="text" id="login-username" data-testid="login-username" placeholder="Username" autocomplete="username">
+                <input type="password" id="login-password" data-testid="login-password" placeholder="Password" autocomplete="current-password" autofocus>
                 <button type="submit">Sign in</button>
             </form>
         </div>
@@ -55,7 +55,7 @@
             </div>
             <div class="masthead-right">
                 <!-- Health chips (managed by dashboard.js via titlebar-chip class + data attributes) -->
-                <span class="titlebar-chip titlebar-chip-ok hidden" id="chip-health-ok"><span class="pip"></span><span id="chip-health-ok-text">all good!</span></span>
+                <span class="titlebar-chip titlebar-chip-ok hidden" id="chip-health-ok" data-testid="chip-health-ok"><span class="pip"></span><span id="chip-health-ok-text">all good!</span></span>
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
                 <span class="titlebar-chip titlebar-chip-err hidden" id="chip-health-err"><span class="pip"></span><span id="chip-health-err-text"></span></span>
                 <button class="theme-toggle" id="theme-toggle" title="Toggle theme" onclick="toggleTheme()"></button>
@@ -93,10 +93,10 @@
             </div>
 
             <!-- Search -->
-            <div class="search-section" id="search-section">
+            <div class="search-section" id="search-section" data-testid="search-section">
                 <div class="pane-hdr">Find something to watch ✨</div>
                 <div class="search-box">
-                    <input type="text" id="search-input" placeholder="Search for a title...">
+                    <input type="text" id="search-input" data-testid="search-input" placeholder="Search for a title...">
                     <div class="search-warning" id="search-warning"></div>
                     <div class="search-filters" id="search-filters">
                         <button class="filter-btn active" data-type="" onclick="setFilter(this)">Everything</button>
@@ -104,11 +104,11 @@
                         <button class="filter-btn" data-type="series" onclick="setFilter(this)">TV Shows</button>
                     </div>
                 </div>
-                <div class="search-results" id="search-results"></div>
+                <div class="search-results" id="search-results" data-testid="search-results"></div>
             </div><!-- /.search-section -->
 
             <!-- Pipeline Board -->
-            <div class="section" id="pipeline-section">
+            <div class="section" id="pipeline-section" data-testid="pipeline-section">
                 <div class="section-header">
                     <span>On the way</span>
                     <span id="pipeline-stats"></span>
@@ -123,30 +123,30 @@
                     <div id="pipeline-attention-list"></div>
                 </div>
                 <!-- Active lanes -->
-                <div class="pl-lane pl-lane-downloading" id="pipeline-lane-downloading">
+                <div class="pl-lane pl-lane-downloading" id="pipeline-lane-downloading" data-testid="pipeline-lane-downloading">
                     <div class="pl-lane-header">Downloading</div>
                     <div id="pipeline-cards-downloading"></div>
                 </div>
-                <div class="pl-lane pl-lane-imported" id="pipeline-lane-imported">
+                <div class="pl-lane pl-lane-imported" id="pipeline-lane-imported" data-testid="pipeline-lane-imported">
                     <div class="pl-lane-header">Imported</div>
                     <div id="pipeline-cards-imported"></div>
                 </div>
-                <div class="pl-lane pl-lane-validating" id="pipeline-lane-validating">
+                <div class="pl-lane pl-lane-validating" id="pipeline-lane-validating" data-testid="pipeline-lane-validating">
                     <div class="pl-lane-header">Validating</div>
                     <div id="pipeline-cards-validating"></div>
                 </div>
-                <div class="pl-lane pl-lane-processing" id="pipeline-lane-processing">
+                <div class="pl-lane pl-lane-processing" id="pipeline-lane-processing" data-testid="pipeline-lane-processing">
                     <div class="pl-lane-header">Processing</div>
                     <div id="pipeline-cards-processing"></div>
                 </div>
-                <div class="pl-lane pl-lane-cataloging" id="pipeline-lane-cataloging">
+                <div class="pl-lane pl-lane-cataloging" id="pipeline-lane-cataloging" data-testid="pipeline-lane-cataloging">
                     <div class="pl-lane-header">Cataloging</div>
                     <div id="pipeline-cards-cataloging"></div>
                 </div>
                 <!-- Completed tail -->
                 <div id="pipeline-completed-wrap" style="display:none">
                     <div class="pl-lane-header pl-lane-header-done">Recently completed</div>
-                    <div id="pipeline-cards-completed"></div>
+                    <div id="pipeline-cards-completed" data-testid="pipeline-cards-completed"></div>
                 </div>
                 <!-- Event log (admin only, lazy-loaded) -->
                 <details class="pl-event-log admin-only" id="pl-event-log-details" onToggle="onEventLogToggle(this)">
@@ -221,7 +221,7 @@
             </div>
 
             <!-- Storage Explorer (media browser with import + transcode actions) -->
-            <div class="section hidden" id="storage-explorer-section">
+            <div class="section hidden" id="storage-explorer-section" data-testid="storage-explorer-section">
                 <div class="um-hero">
                     <div class="um-hero-title-row">
                         <span class="um-hero-icon">&#128193;</span>
@@ -236,7 +236,7 @@
                     <span>Media files</span>
                     <span class="import-selected-count" id="selected-count"></span>
                 </div>
-                <div class="browse-tree" id="browse-tree">
+                <div class="browse-tree" id="browse-tree" data-testid="browse-tree">
                     <div class="no-items">Loading directories...</div>
                 </div>
 
@@ -247,13 +247,13 @@
                         <button class="import-btn" onclick="clearSelection()">Clear</button>
                     </div>
                     <div class="action-bar-right">
-                        <button class="import-btn" id="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
+                        <button class="import-btn" id="btn-import" data-testid="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
                         <button class="import-btn" id="btn-transcode" onclick="onTranscodeClick()" disabled title="">&#8635; Transcode</button>
                     </div>
                 </div>
 
                 <!-- Import modal -->
-                <div class="se-modal hidden" id="import-modal">
+                <div class="se-modal hidden" id="import-modal" data-testid="import-modal">
                     <div class="se-modal-inner">
                         <div class="se-modal-header">
                             <span class="se-modal-title">Import</span>
@@ -277,7 +277,7 @@
                             <div id="match-results"></div>
                             <div class="import-nav">
                                 <button class="import-btn" onclick="closeImportModal()">Cancel</button>
-                                <button class="import-btn primary" id="btn-configure" onclick="importGoToStep('configure')" disabled>Configure Import</button>
+                                <button class="import-btn primary" id="btn-configure" data-testid="btn-configure" onclick="importGoToStep('configure')" disabled>Configure Import</button>
                             </div>
                         </div>
 
@@ -336,13 +336,13 @@
                         <!-- Apply -->
                         <div class="import-panel hidden" id="step-apply">
                             <div class="section-header"><span>Import Progress</span></div>
-                            <div id="apply-content">
+                            <div id="apply-content" data-testid="apply-content">
                                 <div class="apply-progress">
                                     <div class="apply-spinner"></div>
                                     <span>Applying import...</span>
                                 </div>
                             </div>
-                            <div class="import-nav hidden" id="apply-nav">
+                            <div class="import-nav hidden" id="apply-nav" data-testid="apply-nav">
                                 <div></div>
                                 <button class="import-btn primary" onclick="closeImportModal()">Done</button>
                             </div>
@@ -821,6 +821,7 @@
         <div class="drawer-body" id="drawer-body"></div>
     </div>
 
+    <script src="/framework.js"></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>
