@@ -1,31 +1,33 @@
 // tests/playwright/specs/subtitle-acquisition.spec.js
 const { test, expect } = require('@playwright/test');
-const { jellyfinAuth, searchJellyfin, waitForJobState, fireImportWebhook } = require('../helpers/api');
+const { jellyfinAuth, searchJellyfin, waitForJobState } = require('../helpers/api');
 
 const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:7399';
 
 const TITLE = 'Night of the Living Dead';
 const YEAR = 1968;
-// Path as seen by middleware container
-const FILE_PATH = '/downloads/Night.of.the.Living.Dead.1968.mkv';
-const FILE_SIZE = 500_000;         // 500KB (approximate synthetic file size)
-const RUNTIME_SECONDS = 96 * 60;  // 96 minutes — real film runtime, so duration check passes
+// Note: the import webhook is fired by e2e.sh Stage 9 via docker exec before
+// Playwright starts, bypassing nginx's IP restriction on /api/pelicula/hooks/import.
 
 test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
     test('import → await_subs stage fires → job completes → appears in Jellyfin', async ({ page, request }) => {
 
-        // ── 1. Fire import webhook ─────────────────────────────────
-        const webhookResp = await fireImportWebhook(request, {
-            title: TITLE,
-            year: YEAR,
-            filePath: FILE_PATH,
-            fileSize: FILE_SIZE,
-            runtimeSeconds: RUNTIME_SECONDS,
-        });
-        expect(webhookResp.status).toBe('queued');
-
-        // ── 2. Open dashboard and confirm job appears in pipeline ──
+        // ── 1. Open dashboard, log in if auth is on ───────────────
         await page.goto('/');
+
+        const loginOverlay = page.locator('[data-testid="login-overlay"]');
+        try {
+            await loginOverlay.waitFor({ state: 'visible', timeout: 5_000 });
+            await page.fill('[data-testid="login-username"]', 'admin');
+            await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
+            await page.click('[data-testid="login-form"] [type=submit]');
+            await loginOverlay.waitFor({ state: 'hidden', timeout: 10_000 });
+        } catch {
+            // Auth is off or already logged in
+        }
+
+        // ── 2. Switch to pipeline tab and confirm job appears ──────
+        await page.click('[data-tab="coming"]');
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
 
         await page.waitForFunction(
@@ -44,11 +46,12 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
 
         // ── 3. Verify await_subs stage appears ─────────────────────
         // Poll the API until the job reaches await_subs OR moves past it.
+        // Use page.request so session cookies are included (procula is behind auth_request).
         const awaitSubsDeadline = Date.now() + 60_000;
         let sawAwaitSubs = false;
 
         while (Date.now() < awaitSubsDeadline) {
-            const res = await request.get(`${BASE}/api/procula/jobs`);
+            const res = await page.request.get(`${BASE}/api/procula/jobs`);
             if (res.ok()) {
                 const jobs = await res.json();
                 const job = jobs.find(j =>
@@ -72,7 +75,8 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         }
 
         // ── 4. Wait for job to complete ────────────────────────────
-        const job = await waitForJobState(request, TITLE, 'completed', 120_000);
+        // Use page.request so session cookies are included
+        const job = await waitForJobState(page.request, TITLE, 'completed', 120_000);
 
         // ── 5. Report subtitle outcome ─────────────────────────────
         const missingSubs = job.missing_subs;
@@ -89,6 +93,8 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
 
         // ── 6. Verify completed card in UI ─────────────────────────
         await page.reload();
+        // After reload, switch to pipeline tab (reload resets to default "search" tab)
+        await page.click('[data-tab="coming"]');
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
         const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
         await expect(completedCards).toContainText(TITLE, { timeout: 15_000 });

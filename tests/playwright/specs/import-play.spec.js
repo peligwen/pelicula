@@ -10,12 +10,26 @@ const TEST_YEAR = 2024;
 test.describe('Import wizard → pipeline → Jellyfin', () => {
     test('happy path: drive import wizard, watch pipeline, verify Jellyfin', async ({ page, request }) => {
 
-        // ── 1. Open dashboard ──────────────────────────────────────
+        // ── 1. Open dashboard, log in if auth is on ───────────────
         await page.goto('/');
-        await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
+
+        // checkAuth() is async — wait up to 5s for login overlay to appear
+        // (if auth is off or user is already authenticated, it stays hidden)
+        const loginOverlay = page.locator('[data-testid="login-overlay"]');
+        try {
+            await loginOverlay.waitFor({ state: 'visible', timeout: 5_000 });
+            await page.fill('[data-testid="login-username"]', 'admin');
+            await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
+            await page.click('[data-testid="login-form"] [type=submit]');
+            await loginOverlay.waitFor({ state: 'hidden', timeout: 10_000 });
+        } catch {
+            // Auth is off or already logged in — no action needed
+        }
 
         // ── 2. Open storage explorer ───────────────────────────────
-        await page.goto('/#storage-explorer');
+        // Use evaluate instead of hash navigation — hash change doesn't reload
+        // the page, so window.location.hash check at startup won't fire again.
+        await page.evaluate(() => openStorageExplorer());
         await page.waitForSelector('[data-testid="storage-explorer-section"]:not(.hidden)', { timeout: 10_000 });
         await page.waitForSelector('[data-testid="browse-tree"] .browse-entry', { timeout: 10_000 });
 
@@ -98,7 +112,8 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.waitForSelector('[data-testid="import-modal"].hidden', { timeout: 5_000 });
 
         // ── 10. Watch pipeline section ─────────────────────────────
-        await page.goto('/');
+        // Switch to the pipeline tab — pipeline-section is only visible on "coming" tab
+        await page.click('[data-tab="coming"]');
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
 
         // Wait for a job card to appear in any active pipeline lane
@@ -117,11 +132,15 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         );
 
         // ── 11. Wait for job to complete via API ───────────────────
-        const job = await waitForJobState(request, TEST_TITLE, 'completed', 90_000);
+        // Use page.request so session cookies are included (procula is behind auth_request)
+        const job = await waitForJobState(page.request, TEST_TITLE, 'completed', 90_000);
         expect(job.catalog?.jellyfin_synced).toBe(true);
 
         // ── 12. Verify completed card appears in UI ─────────────────
         await page.reload();
+        // After reload, session cookie is still valid — no re-login needed
+        // Switch to pipeline tab (reload resets to default "search" tab)
+        await page.click('[data-tab="coming"]');
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
         const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
         await expect(completedCards).toContainText(TEST_TITLE, { timeout: 15_000 });

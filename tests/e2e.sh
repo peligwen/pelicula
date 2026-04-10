@@ -718,6 +718,16 @@ except Exception:
             warn "Playwright fixture generation failed — skipping UI tests"
         else
             t_pass "Playwright fixtures seeded"
+
+            # Pre-fire Night of the Living Dead import webhook from inside Docker
+            # (nginx IP-restricts /api/pelicula/hooks/import to internal networks;
+            # Playwright runs on the host and can't call it directly through nginx)
+            info "Pre-firing Night of the Living Dead import webhook..."
+            $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/downloads"},"movieFile":{"path":"/downloads/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
+                --header='Content-Type: application/json' \
+                'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+
             info "Running Playwright UI tests..."
 
             local pw_exit=0
