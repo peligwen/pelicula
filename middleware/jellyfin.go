@@ -217,10 +217,19 @@ func wireJellyfin(s *ServiceClients) {
 					adminUser := credVars["JELLYFIN_ADMIN_USER"]
 					adminPass := credVars["JELLYFIN_PASSWORD"]
 					if adminUser != "" && adminUser != jellyfinServiceUser && adminPass != "" {
-						if _, createErr := CreateJellyfinUser(s, adminUser, adminPass); createErr != nil {
+						if userID, createErr := CreateJellyfinUser(s, adminUser, adminPass); createErr != nil {
 							slog.Warn("could not create operator admin account", "component", "autowire", "username", adminUser, "error", createErr)
 						} else {
 							slog.Info("operator admin account created", "component", "autowire", "username", adminUser)
+							// Promote to Jellyfin admin so Pelicula grants them RoleAdmin.
+							// jellyfinAuth(s) uses the API key stored above.
+							if adminToken, authErr := jellyfinAuth(s); authErr == nil {
+								if _, polErr := jellyfinPost(s, "/Users/"+userID+"/Policy", adminToken, map[string]any{"IsAdministrator": true}); polErr != nil {
+									slog.Warn("could not promote operator admin to Jellyfin admin", "component", "autowire", "username", adminUser, "error", polErr)
+								} else {
+									slog.Info("operator admin promoted to Jellyfin administrator", "component", "autowire", "username", adminUser)
+								}
+							}
 						}
 					}
 				}

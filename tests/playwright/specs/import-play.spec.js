@@ -13,18 +13,22 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         // ── 1. Open dashboard, log in if auth is on ───────────────
         await page.goto('/');
 
-        // checkAuth() is async — wait up to 5s for login overlay to appear
-        // (if auth is off or user is already authenticated, it stays hidden)
+        // Wait for checkAuth() to finish: it fetches /api/pelicula/auth/check
+        // asynchronously and may take a moment before showing the login overlay.
         const loginOverlay = page.locator('[data-testid="login-overlay"]');
-        try {
-            await loginOverlay.waitFor({ state: 'visible', timeout: 5_000 });
+        const authCheckDone = page.waitForResponse(
+            r => r.url().includes('/api/pelicula/auth/check'), { timeout: 8_000 }
+        ).catch(() => null);  // resolve null if auth/check never fires (shouldn't happen)
+        await authCheckDone;
+
+        if (await loginOverlay.isVisible()) {
             await page.fill('[data-testid="login-username"]', 'admin');
             await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
             await page.click('[data-testid="login-form"] [type=submit]');
-            await loginOverlay.waitFor({ state: 'hidden', timeout: 10_000 });
-        } catch {
-            // Auth is off or already logged in — no action needed
+            // If login fails the overlay stays visible and this throws, failing the test.
+            await loginOverlay.waitFor({ state: 'hidden', timeout: 15_000 });
         }
+        // Auth is off or already logged in — no action needed
 
         // ── 2. Open storage explorer ───────────────────────────────
         // Use evaluate instead of hash navigation — hash change doesn't reload
