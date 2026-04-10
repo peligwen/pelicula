@@ -62,7 +62,6 @@
                 <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">&#9654; Watch</a>
                 <a href="/register" class="register-btn" title="Register a new user">+ Register</a>
                 <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users" onclick="switchTab('users')"></button>
-                <button class="settings-btn admin-only" title="Settings" onclick="switchTab('settings')">&#9881;</button>
                 <div class="bell-wrap" id="bell-wrap">
                     <button class="bell-btn" id="bell-btn" title="Notifications" onclick="toggleNotifications()">
                         &#9679;
@@ -499,6 +498,18 @@
                     </div>
                 </div>
 
+                <!-- Access -->
+                <div class="settings-panel admin-only">
+                    <div class="settings-panel-title">Access</div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Open registration</span>
+                        <span class="toggle-sub">Allow anyone on the LAN to create a viewer account at /register</span>
+                        <button class="toggle" id="st-open-registration" role="switch" onclick="toggleSetting(this)" data-key="open_registration">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                </div>
+
                 <!-- Pipeline toggles -->
                 <div class="settings-panel">
                     <div class="settings-panel-title">Pipeline</div>
@@ -631,6 +642,12 @@
                 </div>
             </div>
             <div class="svc-list" id="svc-sidebar-list">
+                <a class="svc-row" href="/prowlarr/" target="_blank" rel="noopener" data-check="/prowlarr/ping" data-svc="prowlarr">
+                    <span class="svc-pip unknown" id="svc-pip-prowlarr"></span>
+                    <span class="svc-name">Prowlarr</span>
+                    <span class="svc-desc">Indexers</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'prowlarr')" title="View logs">logs</button>
+                </a>
                 <a class="svc-row" href="/sonarr/" target="_blank" rel="noopener" data-check="/sonarr/ping" data-svc="sonarr">
                     <span class="svc-pip unknown" id="svc-pip-sonarr"></span>
                     <span class="svc-name">Sonarr</span>
@@ -643,35 +660,29 @@
                     <span class="svc-desc">Movies</span>
                     <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'radarr')" title="View logs">logs</button>
                 </a>
-                <a class="svc-row" href="/jellyfin/" target="_blank" rel="noopener" data-check="/jellyfin/health" data-svc="jellyfin">
-                    <span class="svc-pip unknown" id="svc-pip-jellyfin"></span>
-                    <span class="svc-name">Jellyfin</span>
-                    <span class="svc-desc">Media server</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'jellyfin')" title="View logs">logs</button>
-                </a>
                 <a class="svc-row" href="/qbt/" target="_blank" rel="noopener" data-check="/qbt/" data-svc="qbittorrent">
                     <span class="svc-pip unknown" id="svc-pip-qbittorrent"></span>
                     <span class="svc-name">qBittorrent</span>
                     <span class="svc-desc">Downloads</span>
                     <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'qbittorrent')" title="View logs">logs</button>
                 </a>
-                <a class="svc-row" href="/prowlarr/" target="_blank" rel="noopener" data-check="/prowlarr/ping" data-svc="prowlarr">
-                    <span class="svc-pip unknown" id="svc-pip-prowlarr"></span>
-                    <span class="svc-name">Prowlarr</span>
-                    <span class="svc-desc">Indexers</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'prowlarr')" title="View logs">logs</button>
+                <a class="svc-row" data-svc="procula">
+                    <span class="svc-pip unknown" id="svc-pip-procula"></span>
+                    <span class="svc-name">Procula</span>
+                    <span class="svc-desc">Processing</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'procula')" title="View logs">logs</button>
+                </a>
+                <a class="svc-row" href="/jellyfin/" target="_blank" rel="noopener" data-check="/jellyfin/health" data-svc="jellyfin">
+                    <span class="svc-pip unknown" id="svc-pip-jellyfin"></span>
+                    <span class="svc-name">Jellyfin</span>
+                    <span class="svc-desc">Media server</span>
+                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'jellyfin')" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/bazarr/" target="_blank" rel="noopener" data-check="/bazarr/api/system/status" data-svc="bazarr">
                     <span class="svc-pip unknown" id="svc-pip-bazarr"></span>
                     <span class="svc-name">Bazarr</span>
                     <span class="svc-desc">Subtitles</span>
                     <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'bazarr')" title="View logs">logs</button>
-                </a>
-                <a class="svc-row" data-svc="procula">
-                    <span class="svc-pip unknown" id="svc-pip-procula"></span>
-                    <span class="svc-name">Procula</span>
-                    <span class="svc-desc">Processing</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'procula')" title="View logs">logs</button>
                 </a>
             </div>
 

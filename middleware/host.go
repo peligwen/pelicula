@@ -61,7 +61,7 @@ func readUptime() float64 {
 func diskStats() hostDisk {
 	path := os.Getenv("LIBRARY_DIR")
 	if path == "" {
-		path = "/"
+		path = "/movies" // always mounted in the container; reflects real library disk
 	}
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {

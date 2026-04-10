@@ -643,12 +643,6 @@ function fmtUptime(secs) {
     return d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`;
 }
 
-function fmtBytes(b) {
-    if (b >= 1e12) return (b / 1e12).toFixed(1) + '\u202fTB';
-    if (b >= 1e9)  return (b / 1e9).toFixed(0)  + '\u202fGB';
-    return (b / 1e6).toFixed(0) + '\u202fMB';
-}
-
 async function checkHost() {
     try {
         const res = await tfetch('/api/pelicula/host');
@@ -656,7 +650,7 @@ async function checkHost() {
         const d = await res.json();
         setText('s-uptime', fmtUptime(d.uptime_seconds || 0));
         if (d.disk && d.disk.total > 0) {
-            setText('s-space', `${fmtBytes(d.disk.free)} free / ${fmtBytes(d.disk.total)}`);
+            setText('s-space', `${formatSize(d.disk.free)} free / ${formatSize(d.disk.total)}`);
             const bar = document.getElementById('s-space-bar');
             if (bar) bar.style.width = Math.round(d.disk.used_pct) + '%';
         }
@@ -1407,9 +1401,13 @@ function openStorageExplorer() {
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (!window._seLoaded) {
-        window._seLoaded = true;
         const s = document.createElement('script');
         s.src = '/import.js';
+        s.onload = () => { window._seLoaded = true; };
+        s.onerror = () => {
+            const tree = document.getElementById('browse-tree');
+            if (tree) tree.innerHTML = '<div class="no-items">Failed to load storage explorer. Try refreshing the page.</div>';
+        };
         document.head.appendChild(s);
     }
 }
@@ -2171,6 +2169,7 @@ async function loadSettingsTab() {
             if (langs) langs.value = ms.sub_langs || '';
             const mode = ms.notifications_mode || 'internal';
             document.querySelectorAll('input[name="st-notif"]').forEach(r => { r.checked = r.value === mode; });
+            setToggle('st-open-registration', ms.open_registration === 'true' || ms.open_registration === true);
         }
         _settingsLoaded = true;
     } catch (e) { console.warn('[pelicula] settings load error:', e); }
@@ -2212,6 +2211,7 @@ window.saveSettingsTab = async function() {
         const middlewarePayload = {
             sub_langs: document.getElementById('st-sub-langs')?.value || '',
             notifications_mode: document.querySelector('input[name="st-notif"]:checked')?.value || 'internal',
+            open_registration: document.getElementById('st-open-registration')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
         };
         const [r1, r2] = await Promise.all([
             tfetch('/api/pelicula/procula-settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(procPayload)}),

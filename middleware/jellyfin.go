@@ -408,6 +408,9 @@ func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
 	users := make([]JellyfinUser, 0, len(raw))
 	for _, u := range raw {
 		name, _ := u["Name"].(string)
+		if name == jellyfinServiceUser {
+			continue // hide internal service account from admin UI
+		}
 		id, _ := u["Id"].(string)
 		hasPass, _ := u["HasPassword"].(bool)
 		lastLogin, _ := u["LastLoginDate"].(string)
@@ -826,6 +829,10 @@ func handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	if target == nil {
 		writeError(w, "user not found", http.StatusNotFound)
+		return
+	}
+	if target.Name == jellyfinServiceUser {
+		writeError(w, "cannot delete internal service account", http.StatusForbidden)
 		return
 	}
 	if target.IsAdmin && adminCount <= 1 {

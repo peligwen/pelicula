@@ -86,17 +86,6 @@ body {
 }
 .watch-btn:hover { opacity: 0.9; transform: translateY(-1px); }
 
-.settings-btn {
-    color: var(--faint);
-    text-decoration: none;
-    font-size: 1.2rem;
-    line-height: 1;
-    padding: 0.2rem;
-    flex-shrink: 0;
-    transition: color 0.15s;
-    background: none; border: none; cursor: pointer;
-}
-.settings-btn:hover { color: var(--pink); }
 .theme-toggle {
     font-size: 1rem; line-height: 1;
     padding: 0.15rem 0.45rem;
