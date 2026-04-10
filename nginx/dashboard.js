@@ -1113,7 +1113,6 @@ function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 
 // ── Pipeline board ────────────────────────
 const LANE_BADGE = {
-    monitoring:     '<span class="proc-badge proc-waiting">Waiting</span>',
     downloading:    '',
     imported:       '<span class="proc-badge proc-active">Imported</span>',
     validating:     '<span class="proc-badge proc-active">Validating</span>',
@@ -1122,7 +1121,7 @@ const LANE_BADGE = {
     completed:      '<span class="proc-badge proc-done">Done</span>',
     needs_attention:'<span class="proc-badge proc-failed">Failed</span>',
 };
-const ACTIVE_LANES = ['monitoring', 'downloading', 'imported', 'validating', 'processing', 'cataloging'];
+const ACTIVE_LANES = ['downloading', 'imported', 'validating', 'processing', 'cataloging'];
 
 async function checkPipeline() {
     try {

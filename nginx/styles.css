@@ -558,10 +558,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .svc-row:hover .svc-row-log { opacity: 1; color: var(--muted); }
 .svc-row-log:hover { color: var(--pink) !important; }
 
-/* ── Monitoring pipeline lane ──────────────────────────────────────────── */
-.pl-lane-monitoring  { border-color: rgba(248,192,64,0.4);  background: rgba(248,192,64,0.05); }
-.pl-lane-monitoring .pl-lane-header { border-color: rgba(248,192,64,0.35); color: #b08820; }
-
 /* ── Settings tab ──────────────────────────────────────────────────────── */
 .settings-panel {
     background: var(--panel2); border: 1.5px solid var(--border); border-radius: 16px;

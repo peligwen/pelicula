@@ -18,6 +18,12 @@ services:
       - VPN_PORT_FORWARDING_PROVIDER=protonvpn
       - PORT_FORWARD_ONLY=on
       - TZ=${TZ}
+      # Allow containers in gluetun's namespace (Prowlarr, qBittorrent) to reach
+      # the Docker bridge network directly without routing through the VPN.
+      # Without this, Prowlarr's indexer sync requests to Sonarr/Radarr arrive
+      # from the VPN's public IP and get 401 (DisabledForLocalAddresses requires
+      # local source IP to bypass API key auth).
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
     ports:
       # Torrent incoming connections
       - "6881:6881"
@@ -63,7 +69,8 @@ services:
     profiles: [vpn]
     network_mode: "service:gluetun"
     depends_on:
-      - gluetun
+      gluetun:
+        condition: service_healthy
     environment:
       - PUID=${PUID}
       - PGID=${PGID}

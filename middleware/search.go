@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
-	"time"
 )
 
 type SearchResult struct {
@@ -262,34 +261,6 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
 		return
-	}
-
-	// Create a grabbed request so the item appears in the monitoring pipeline lane.
-	if requestStore != nil && req.Title != "" {
-		now := time.Now().UTC()
-		mreq := &MediaRequest{
-			ID:        generateRequestID(),
-			Type:      req.Type,
-			TmdbID:    req.TmdbID,
-			TvdbID:    req.TvdbID,
-			Title:     req.Title,
-			Year:      req.Year,
-			Poster:    req.Poster,
-			State:     RequestGrabbed,
-			ArrID:     arrID,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		if _, dbErr := requestStore.db.Exec(
-			`INSERT OR IGNORE INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
-			                                 requested_by, state, reason, arr_id, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, '', ?, ?, ?)`,
-			mreq.ID, mreq.Type, mreq.TmdbID, mreq.TvdbID, mreq.Title, mreq.Year, mreq.Poster,
-			string(mreq.State), mreq.ArrID,
-			mreq.CreatedAt.Format(time.RFC3339Nano), mreq.UpdatedAt.Format(time.RFC3339Nano),
-		); dbErr != nil {
-			slog.Warn("failed to create monitoring entry for search add", "component", "search", "title", req.Title, "error", dbErr)
-		}
 	}
 
 	writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})

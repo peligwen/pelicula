@@ -149,13 +149,8 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 		jobs []ProculaJobMin
 		err  error
 	}
-	type monitoringFetchResult struct {
-		items []PipelineItem
-	}
-
 	qbtCh := make(chan qbtFetchResult, 1)
 	proculaCh := make(chan proculaFetchResult, 1)
-	monitoringCh := make(chan monitoringFetchResult, 1)
 
 	go func() {
 		data, err := services.QbtGet("/api/v2/torrents/info")
@@ -213,40 +208,12 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 		proculaCh <- proculaFetchResult{jobs: jobs}
 	}()
 
-	go func() {
-		if requestStore == nil {
-			monitoringCh <- monitoringFetchResult{}
-			return
-		}
-		reqs := requestStore.all()
-		var items []PipelineItem
-		for _, req := range reqs {
-			if req.State != RequestGrabbed {
-				continue
-			}
-			items = append(items, PipelineItem{
-				Key:       "req:" + req.ID,
-				Title:     req.Title,
-				Year:      req.Year,
-				MediaType: req.Type,
-				Poster:    req.Poster,
-				Lane:      "monitoring",
-				State:     "active",
-				Actions:   []string{},
-				UpdatedAt: req.UpdatedAt,
-			})
-		}
-		monitoringCh <- monitoringFetchResult{items: items}
-	}()
-
 	qbtRes := <-qbtCh
 	proculaRes := <-proculaCh
-	monitoringRes := <-monitoringCh
 
 	lanes := map[string][]PipelineItem{
 		"downloading":     {},
 		"imported":        {},
-		"monitoring":      {},
 		"validating":      {},
 		"processing":      {},
 		"cataloging":      {},
@@ -396,12 +363,6 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Add grabbed requests to the monitoring lane.
-	// Items naturally move out of monitoring once qBt picks them up —
-	// they'll appear in the downloading lane (matched by arr_id) instead.
-	lanes["monitoring"] = append(lanes["monitoring"], monitoringRes.items...)
-	stats.Active += len(monitoringRes.items)
-
 	// Sort completed lane newest-first, then trim to 20.
 	sort.Slice(lanes["completed"], func(i, j int) bool {
 		return lanes["completed"][i].UpdatedAt.After(lanes["completed"][j].UpdatedAt)
@@ -517,8 +478,6 @@ func actionsForLane(lane string) []string {
 		return []string{"retry", "cancel_job", "view_log", "dismiss"}
 	case "completed":
 		return []string{"view_log"}
-	case "monitoring":
-		return []string{}
 	}
 	return nil
 }

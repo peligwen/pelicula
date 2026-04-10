@@ -72,11 +72,21 @@ func AutoWire(s *ServiceClients) error {
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
 		slog.Info("all services wired successfully", "component", "autowire")
+		// Force health re-check so stale "connection refused" errors clear from the *arr UI.
+		triggerHealthCheck(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
+		triggerHealthCheck(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
 	} else {
 		slog.Warn("some wiring failed — check logs above", "component", "autowire")
 	}
 
 	return nil
+}
+
+func triggerHealthCheck(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
+	_, err := s.ArrPost(baseURL, apiKey, apiPath+"/command", []byte(`{"name":"CheckHealth"}`))
+	if err != nil {
+		slog.Warn("failed to trigger health check", "component", "autowire", "service", name, "error", err)
+	}
 }
 
 func waitForServices(s *ServiceClients) error {
@@ -445,10 +455,48 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 	}
 
 	for _, a := range apps {
-		if n, _ := a["name"].(string); n == appName {
+		if n, _ := a["name"].(string); n != appName {
+			continue
+		}
+
+		// App exists — check if prowlarrUrl or apiKey are stale and update if so.
+		needsUpdate := false
+		for _, f := range a["fields"].([]any) {
+			field := f.(map[string]any)
+			switch field["name"] {
+			case "prowlarrUrl":
+				if v, _ := field["value"].(string); v != prowlarrURL {
+					needsUpdate = true
+				}
+			case "apiKey":
+				if v, _ := field["value"].(string); v != appAPIKey {
+					needsUpdate = true
+				}
+			}
+		}
+		if !needsUpdate {
 			slog.Info("Prowlarr app already connected, skipping", "component", "autowire", "app", appName)
 			return true
 		}
+
+		// Patch the fields in the existing payload and PUT.
+		for _, fRaw := range a["fields"].([]any) {
+			f := fRaw.(map[string]any)
+			switch f["name"] {
+			case "prowlarrUrl":
+				f["value"] = prowlarrURL
+			case "apiKey":
+				f["value"] = appAPIKey
+			}
+		}
+		id := int(a["id"].(float64))
+		_, err = s.ArrPut(prowlarrURL, s.ProwlarrKey, fmt.Sprintf("/api/v1/applications/%d", id), a)
+		if err != nil {
+			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
+			return false
+		}
+		slog.Info("updated Prowlarr app (stale key or URL)", "component", "autowire", "app", appName)
+		return true
 	}
 
 	payload := map[string]any{
