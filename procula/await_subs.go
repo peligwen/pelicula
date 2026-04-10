@@ -11,6 +11,9 @@ import (
 // Overridden in tests to avoid 30-second waits.
 var awaitPollInterval = 30 * time.Second
 
+// nowFn is the clock function used for deadline checks. Overridable in tests.
+var nowFn = time.Now
+
 // awaitSubtitles is the StageAwaitSubs pipeline stage.
 // It asks Bazarr to search for missing subtitles, then polls disk every 30s
 // until all sidecar files appear (or timeout/cancellation).
@@ -71,7 +74,7 @@ func awaitSubtitles(ctx context.Context, q *Queue, job *Job, settings PipelineSe
 		}
 
 		// Check exit conditions before sleeping
-		if time.Now().After(deadline) {
+		if nowFn().After(deadline) {
 			slog.Info("subtitle acquire timeout", "component", "await_subs", "job_id", job.ID, "still_missing", remaining)
 			emitEvent(PipelineEvent{
 				Type:      EventSubTimeout,

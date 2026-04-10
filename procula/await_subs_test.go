@@ -143,11 +143,9 @@ func TestAwaitSubtitles_Cancelled(t *testing.T) {
 	}
 }
 
-// TestAwaitSubtitles_Timeout — no sidecar is written; should emit EventSubTimeout and return after deadline.
-// Uses SubAcquireTimeout=0 (converted to 30min) which is too slow, so we override
-// awaitPollInterval *and* use a very short deadline by setting a near-zero duration.
-// We test this via context deadline: cancel after a short window.
-func TestAwaitSubtitles_Timeout(t *testing.T) {
+// TestAwaitSubtitles_Cancelled_Context — context deadline expires before the internal deadline;
+// function returns via the ctx.Done() path (cancellation, not EventSubTimeout).
+func TestAwaitSubtitles_Cancelled_Context(t *testing.T) {
 	orig := awaitPollInterval
 	awaitPollInterval = 50 * time.Millisecond
 	t.Cleanup(func() { awaitPollInterval = orig })
@@ -168,17 +166,13 @@ func TestAwaitSubtitles_Timeout(t *testing.T) {
 	bazarrURL = "http://127.0.0.1:0"
 	t.Cleanup(func() { bazarrURL = origURL })
 
-	// Use SubAcquireTimeout=0 which the code normalises to 30m — too long.
-	// Drive it through context cancellation as the "timeout" path is also tested
-	// by TestAwaitSubtitles_Cancelled. Instead, test the actual timeout branch
-	// by using SubAcquireTimeout=1 (1 min) but injecting a deadline context that
-	// expires after 200ms so the test stays fast.
+	// SubAcquireTimeout=1 (1 min) is the internal deadline, but ctx expires in
+	// 200ms — this exercises the ctx.Done() path, not EventSubTimeout.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	done := make(chan struct{})
 	go func() {
-		// SubAcquireTimeout=1 means 1 min real deadline, but ctx expires in 200ms
 		awaitSubtitles(ctx, q, job, PipelineSettings{SubAcquireTimeout: 1}, t.TempDir())
 		close(done)
 	}()
@@ -194,5 +188,54 @@ func TestAwaitSubtitles_Timeout(t *testing.T) {
 	updated, _ := q.Get(job.ID)
 	if len(updated.SubsAcquired) != 0 {
 		t.Errorf("SubsAcquired = %v, want empty on timeout", updated.SubsAcquired)
+	}
+}
+
+// TestAwaitSubtitles_Timeout — exercises the internal deadline path (EventSubTimeout emission).
+// Overrides nowFn so the deadline appears already expired on the first check,
+// without any context cancellation pressure.
+func TestAwaitSubtitles_Timeout(t *testing.T) {
+	fastPollInterval(t)
+
+	oldNow := nowFn
+	nowFn = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	t.Cleanup(func() { nowFn = oldNow })
+
+	q := newTestQueue(t)
+	job, err := q.Create(testSource("/movies/timeout-deadline.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := q.Update(job.ID, func(j *Job) {
+		j.MissingSubs = []string{"es"}
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	job, _ = q.Get(job.ID)
+
+	origURL := bazarrURL
+	bazarrURL = "http://127.0.0.1:0"
+	t.Cleanup(func() { bazarrURL = origURL })
+
+	done := make(chan struct{})
+	go func() {
+		awaitSubtitles(context.Background(), q, job, PipelineSettings{SubAcquireTimeout: 1}, t.TempDir())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// expected — deadline expired immediately, returned via timeout path
+	case <-time.After(2 * time.Second):
+		t.Fatal("awaitSubtitles did not return promptly after deadline")
+	}
+
+	updated, _ := q.Get(job.ID)
+	if len(updated.SubsAcquired) != 0 {
+		t.Errorf("SubsAcquired = %v, want empty", updated.SubsAcquired)
+	}
+	// MissingSubs should still contain "es" (timed out, never acquired)
+	if len(updated.MissingSubs) == 0 {
+		t.Error("expected MissingSubs to still contain 'es' after timeout")
 	}
 }
