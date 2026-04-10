@@ -1,0 +1,12 @@
+{
+  "name": "pelicula-tests",
+  "private": true,
+  "scripts": {
+    "test:ui": "playwright test --config tests/playwright/playwright.config.js",
+    "test:ui:headed": "playwright test --config tests/playwright/playwright.config.js --headed",
+    "test:ui:debug": "playwright test --config tests/playwright/playwright.config.js --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0"
+  }
+}
