@@ -13,9 +13,9 @@ import (
 type PipelineSettings struct {
 	ValidationEnabled  bool     `json:"validation_enabled"`
 	DeleteOnFailure    bool     `json:"delete_on_failure"`    // delete file when validation fails (default: false)
-	DualSubEnabled     bool     `json:"dualsub_enabled"`      // generate stacked dual-language ASS sidecar files
-	DualSubPairs       []string `json:"dualsub_pairs"`        // e.g. ["en-es","en-de"]; first lang=bottom, second=top
-	DualSubTranslator  string   `json:"dualsub_translator"`   // "argos" or "none"
+	DualSubEnabled     bool     `json:"dual_sub_enabled"`     // generate stacked dual-language ASS sidecar files
+	DualSubPairs       []string `json:"dual_sub_pairs"`       // e.g. ["en-es","en-de"]; first lang=bottom, second=top
+	DualSubTranslator  string   `json:"dual_sub_translator"`  // "argos" or "none"
 	TranscodingEnabled bool     `json:"transcoding_enabled"`
 	CatalogEnabled     bool     `json:"catalog_enabled"`
 	NotifMode          string   `json:"notification_mode"` // "internal", "apprise", "direct"
