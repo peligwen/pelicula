@@ -460,9 +460,17 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 		}
 
 		// App exists — check if prowlarrUrl or apiKey are stale and update if so.
+		fields, ok := a["fields"].([]any)
+		if !ok {
+			slog.Warn("unexpected fields type in Prowlarr app", "component", "autowire", "app", appName)
+			return false
+		}
 		needsUpdate := false
-		for _, f := range a["fields"].([]any) {
-			field := f.(map[string]any)
+		for _, f := range fields {
+			field, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
 			switch field["name"] {
 			case "prowlarrUrl":
 				if v, _ := field["value"].(string); v != prowlarrURL {
@@ -480,8 +488,11 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 		}
 
 		// Patch the fields in the existing payload and PUT.
-		for _, fRaw := range a["fields"].([]any) {
-			f := fRaw.(map[string]any)
+		for _, fRaw := range fields {
+			f, ok := fRaw.(map[string]any)
+			if !ok {
+				continue
+			}
 			switch f["name"] {
 			case "prowlarrUrl":
 				f["value"] = prowlarrURL
@@ -489,7 +500,12 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 				f["value"] = appAPIKey
 			}
 		}
-		id := int(a["id"].(float64))
+		idVal, ok := a["id"].(float64)
+		if !ok {
+			slog.Error("unexpected id type in Prowlarr app", "component", "autowire", "app", appName)
+			return false
+		}
+		id := int(idVal)
 		_, err = s.ArrPut(prowlarrURL, s.ProwlarrKey, fmt.Sprintf("/api/v1/applications/%d", id), a)
 		if err != nil {
 			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
