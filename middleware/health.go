@@ -9,10 +9,11 @@ import (
 )
 
 type VPNStatus struct {
-	Status  string `json:"status"`           // "healthy", "unhealthy", "unknown"
-	IP      string `json:"ip,omitempty"`     // public IP via gluetun
-	Country string `json:"country,omitempty"`
-	Port    int    `json:"port,omitempty"`   // forwarded port, 0 if not active
+	Status     string `json:"status"`                // "healthy", "unhealthy", "unknown"
+	IP         string `json:"ip,omitempty"`          // public IP via gluetun
+	Country    string `json:"country,omitempty"`
+	Port       int    `json:"port,omitempty"`        // forwarded port, 0 if not active
+	PortStatus string `json:"port_status,omitempty"` // "ok" or "degraded"
 }
 
 type HealthResponse struct {
@@ -98,6 +99,14 @@ func queryVPNStatus() VPNStatus {
 		if json.Unmarshal(body, &data) == nil {
 			vpn.Port = data.Port
 		}
+	}
+
+	// Annotate port_status from watchdog state.
+	ws := GetWatchdogState()
+	if ws.PortForwardStatus == string(wdDegraded) {
+		vpn.PortStatus = "degraded"
+	} else if vpn.Port > 0 {
+		vpn.PortStatus = "ok"
 	}
 
 	return vpn
