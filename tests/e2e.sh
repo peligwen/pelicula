@@ -117,13 +117,16 @@ cmd_test() {
     t_pass() { pass "$1"; test_passes=$((test_passes + 1)); }
     t_fail() { fail "$1"; test_failures=$((test_failures + 1)); }
 
-    # Compose wrapper: isolated project, test env, test overlay
+    # Compose wrapper: isolated project, test env, test overlay.
+    # --profile vpn starts gluetun/qbittorrent/prowlarr, which the overlay
+    # replaces with safe stubs (alpine for gluetun, real images with test names).
     test_compose() {
         $NEEDS_SUDO docker compose \
             --env-file "${test_env:-$SCRIPT_DIR/.env}" \
             -f "$COMPOSE_FILE" \
             -f "$SCRIPT_DIR/docker-compose.test.yml" \
             -p pelicula-test \
+            --profile vpn \
             "$@"
     }
 
