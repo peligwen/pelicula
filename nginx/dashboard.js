@@ -280,7 +280,6 @@ async function addMedia(type, id, btn) {
         } else { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
     } catch { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
 }
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // Collapse search results on click-away or scroll (show top result + "show more")
 document.addEventListener('click', e => {
@@ -343,7 +342,7 @@ function renderDownloads(data) {
     const statsEl = document.getElementById('dl-stats');
     if (data.stats) { statsEl.textContent = `${data.stats.active} active / ${data.stats.queued} queued`; }
     const shown = (data.torrents || []).filter(t => ['downloading','stalledDL','forcedDL','queuedDL','uploading','stalledUP','pausedDL','pausedUP','stoppedDL','stoppedUP','forcedUP'].includes(t.state));
-    if (!shown.length) { list.innerHTML = '<div class="no-items">No active downloads</div>'; return; }
+    if (!shown.length) { list.innerHTML = html`<div class="no-items">No active downloads</div>`.str; return; }
     const role = document.body.dataset.role || store.get('role');
     const canPause = role === 'manager' || role === 'admin';
     const canCancel = role === 'admin';
@@ -356,17 +355,17 @@ function renderDownloads(data) {
         const isFetching = t.size === 0 && !isPaused;
         const barClass = isPaused ? 'paused' : isSeeding ? 'seeding' : 'active';
         const pauseBtn = !canPause ? '' : isPaused
-            ? `<button class="dl-btn resume" title="Resume" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,false)">&#9654;</button>`
-            : `<button class="dl-btn pause" title="Pause" data-hash="${esc(t.hash)}" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>`;
-        const cancelBtn = canCancel ? `<button class="dl-btn cancel" title="Cancel download" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="dlCancelFromBtn(this,false)">&#10005;</button>` : '';
-        const blocklistBtn = canCancel ? `<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="${esc(t.hash)}" data-category="${esc(t.category)}" data-name="${esc(t.name)}" onclick="openBlocklistFromBtn(this)">&#8856;</button>` : '';
+            ? html`<button class="dl-btn resume" title="Resume" data-hash="${t.hash}" onclick="dlPauseFromBtn(this,false)">&#9654;</button>`.str
+            : html`<button class="dl-btn pause" title="Pause" data-hash="${t.hash}" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>`.str;
+        const cancelBtn = canCancel ? html`<button class="dl-btn cancel" title="Cancel download" data-hash="${t.hash}" data-category="${t.category}" data-name="${t.name}" onclick="dlCancelFromBtn(this,false)">&#10005;</button>`.str : '';
+        const blocklistBtn = canCancel ? html`<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="${t.hash}" data-category="${t.category}" data-name="${t.name}" onclick="openBlocklistFromBtn(this)">&#8856;</button>`.str : '';
         const isDone = pct >= 100 && isSeeding;
-        const statusText = isPaused ? '<span class="paused-label">paused</span>'
-            : isFetching ? '<span class="fetching-label">Fetching metadata\u2026</span>'
-            : isDone ? '<span class="seeding-label">seeding</span>'
+        const statusText = isPaused ? html`<span class="paused-label">paused</span>`.str
+            : isFetching ? html`<span class="fetching-label">Fetching metadata\u2026</span>`.str
+            : isDone ? html`<span class="seeding-label">seeding</span>`.str
             : `${speed}${eta && t.eta < 8640000 ? ' \u00b7 ' + eta : ''}`;
         const sizeText = isFetching ? '\u2014' : `${pct}% of ${formatSize(t.size)}`;
-        return `<div class="download-item"><div class="download-header"><div class="download-name" onclick="this.classList.toggle('expanded')" title="${esc(t.name)}">${esc(t.name)}</div><div class="download-actions">${pauseBtn}${cancelBtn}${blocklistBtn}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${sizeText}</span><span>${statusText}</span></div></div>`;
+        return html`<div class="download-item"><div class="download-header"><div class="download-name" onclick="this.classList.toggle('expanded')" title="${t.name}">${t.name}</div><div class="download-actions">${raw(pauseBtn)}${raw(cancelBtn)}${raw(blocklistBtn)}</div></div><div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div><div class="download-meta"><span>${sizeText}</span><span>${raw(statusText)}</span></div></div>`.str;
     }).join('');
 }
 
@@ -572,7 +571,7 @@ function showAdminToast(msg, isError) {
     const el = document.getElementById('toast');
     if (!el) return;
     const prev = el.innerHTML;
-    el.innerHTML = '<span class="toast-icon">&#10003;</span><span>' + escapeHtml(msg) + '</span>';
+    el.innerHTML = html`<span class="toast-icon">&#10003;</span><span>${msg}</span>`.str;
     el.classList.add('visible');
     setTimeout(() => { el.classList.remove('visible'); el.innerHTML = prev; }, 3000);
 }
@@ -735,7 +734,7 @@ function renderNotifications(events) {
     }
 
     if (!events.length) {
-        dropdown.innerHTML = '<div class="notif-empty">No notifications</div>';
+        dropdown.innerHTML = html`<div class="notif-empty">No notifications</div>`.str;
         return;
     }
 
@@ -744,13 +743,13 @@ function renderNotifications(events) {
         const typeClass = notifClass(e.type);
         const icon = notifIcon(e.type);
         const time = formatNotifTime(e.timestamp);
-        return `<div class="notif-item ${isUnread ? 'unread' : ''} ${typeClass}">
-            <span class="notif-icon">${icon}</span>
+        return html`<div class="notif-item ${isUnread ? 'unread' : ''} ${typeClass}">
+            <span class="notif-icon">${raw(icon)}</span>
             <div class="notif-body">
-                <div class="notif-msg">${esc(e.message)}</div>
+                <div class="notif-msg">${e.message}</div>
                 <div class="notif-time">${time}</div>
             </div>
-        </div>`;
+        </div>`.str;
     }).join('');
 }
 
@@ -805,18 +804,18 @@ function renderActivity(events) {
     const list = document.getElementById('activity-list');
     if (!section || !list) return;
     if (!Array.isArray(events) || !events.length) {
-        list.innerHTML = '<div class="activity-empty">No recent activity yet.</div>';
+        list.innerHTML = html`<div class="activity-empty">No recent activity yet.</div>`.str;
         return;
     }
     list.innerHTML = events.slice(0, 15).map(e => {
         const icon = notifIcon(e.type);
         const cls = notifClass(e.type);
         const time = formatNotifTime(e.timestamp);
-        return `<div class="activity-item ${cls}">
-            <span class="activity-icon">${icon}</span>
-            <span class="activity-msg">${esc(e.message)}</span>
+        return html`<div class="activity-item ${cls}">
+            <span class="activity-icon">${raw(icon)}</span>
+            <span class="activity-msg">${e.message}</span>
             <span class="activity-time">${time}</span>
-        </div>`;
+        </div>`.str;
     }).join('');
 }
 
@@ -926,16 +925,16 @@ function renderStorageFolders(data) {
             grandTotal += f.size;
         }
     }
-    if (!Object.keys(totals).length) { el.innerHTML = '<div class="sm-last-scan">No data yet</div>'; return; }
+    if (!Object.keys(totals).length) { el.innerHTML = html`<div class="sm-last-scan">No data yet</div>`.str; return; }
     el.innerHTML = Object.entries(totals).sort((a,b) => b[1]-a[1]).map(([label, size]) => {
         const pct = grandTotal > 0 ? (size / grandTotal * 100).toFixed(0) : 0;
         const color = folderColor(label);
-        return `<div class="sm-folder-row">
+        return html`<div class="sm-folder-row">
             <div class="sm-folder-dot" style="background:${color}"></div>
-            <div class="sm-folder-label">${esc(label)}</div>
+            <div class="sm-folder-label">${label}</div>
             <div class="sm-folder-size">${formatSize(size)}</div>
             <div class="sm-folder-pct">${pct}%</div>
-        </div>`;
+        </div>`.str;
     }).join('');
 }
 
@@ -955,7 +954,7 @@ function renderStorage(data) {
     list.innerHTML = filesystems.map(fs => {
         const pct = Math.round(fs.used_pct || 0);
         const folders = Array.isArray(fs.folders) ? fs.folders : [];
-        const diskLabel = folders.map(f => esc(f.label)).join(', ') || esc(fs.fs_id);
+        const diskLabel = folders.map(f => f.label).join(', ') || fs.fs_id;
 
         let oursTotal = 0, allKnown = true;
         for (const f of folders) {
@@ -967,11 +966,11 @@ function renderStorage(data) {
         const folderSegs = fs.total > 0 ? folders.map(f => {
             if (f.size < 0) return '';
             const w = (f.size / fs.total * 100).toFixed(2);
-            return `<div class="storage-seg" style="width:${w}%;background:${folderColor(f.label)}"></div>`;
+            return html`<div class="storage-seg" style="width:${w}%;background:${folderColor(f.label)}"></div>`.str;
         }).join('') : '';
         const otherW = fs.total > 0 ? Math.max(0, otherUsed / fs.total * 100).toFixed(2) : 0;
         const otherSeg = otherW > 0
-            ? `<div class="storage-seg storage-seg-other" style="width:${otherW}%"></div>` : '';
+            ? html`<div class="storage-seg storage-seg-other" style="width:${otherW}%"></div>`.str : '';
 
         const showFolders = folders.length > 1;
         const folderRows = folders.map(f => {
@@ -979,37 +978,37 @@ function renderStorage(data) {
                 ? (f.size / fs.total * 100).toFixed(2) : 0;
             const sizeText = f.size < 0 ? 'Calculating\u2026' : formatSize(f.size);
             const color = folderColor(f.label);
-            return `<div class="storage-folder">
+            return html`<div class="storage-folder">
                 <div class="storage-folder-header">
-                    <span class="storage-folder-label" style="color:${color}">${esc(f.label)}</span>
+                    <span class="storage-folder-label" style="color:${color}">${f.label}</span>
                     <span class="storage-folder-size">${sizeText}</span>
                 </div>
                 <div class="download-bar-bg"><div class="download-bar storage-bar-folder" style="width:${folderPct}%;background:${color}"></div></div>
-            </div>`;
+            </div>`.str;
         }).join('');
 
         const expandable = showFolders
-            ? `<div class="storage-folders collapsed">${folderRows}</div>` : '';
+            ? html`<div class="storage-folders collapsed">${raw(folderRows)}</div>`.str : '';
         const chevron = showFolders
-            ? `<span class="storage-chevron">&#9660;</span>` : '';
+            ? html`<span class="storage-chevron">&#9660;</span>`.str : '';
         const headerClick = showFolders ? ' onclick="toggleStorageDisk(this.parentElement)"' : '';
         const oursTotalText = allKnown ? formatSize(oursTotal) : 'Calculating\u2026';
 
-        return `<div class="download-item storage-disk">
-            <div class="download-header"${headerClick}>
+        return html`<div class="download-item storage-disk">
+            <div class="download-header"${raw(headerClick)}>
                 <div class="download-name">${diskLabel}</div>
                 <div class="download-actions">
                     <span class="dl-size">${formatSize(fs.used)} / ${formatSize(fs.total)}</span>
-                    ${chevron}
+                    ${raw(chevron)}
                 </div>
             </div>
-            <div class="storage-stacked-bar">${folderSegs}${otherSeg}</div>
+            <div class="storage-stacked-bar">${raw(folderSegs)}${raw(otherSeg)}</div>
             <div class="download-meta">
                 <span>Pelicula: ${oursTotalText}</span>
                 <span>${formatSize(fs.available)} free · ${pct}%</span>
             </div>
-            ${expandable}
-        </div>`;
+            ${raw(expandable)}
+        </div>`.str;
     }).join('');
 }
 
@@ -1030,7 +1029,7 @@ async function checkUpdates() {
         if (!data || typeof data !== 'object') return;
         const el = document.getElementById('footer-update');
         if (data.update_available && data.latest_version) {
-            el.innerHTML = `&#8593; Update available: <a href="https://github.com/peligwen/pelicula/releases" target="_blank" rel="noopener">${esc(data.latest_version)}</a> &nbsp;&bull;&nbsp;`;
+            el.innerHTML = html`&#8593; Update available: <a href="https://github.com/peligwen/pelicula/releases" target="_blank" rel="noopener">${data.latest_version}</a> &nbsp;&bull;&nbsp;`.str;
         }
     } catch (e) { console.warn('[pelicula] updates error:', e); }
 }
@@ -1093,59 +1092,59 @@ function renderJobCard(j) {
     const title = j.source ? j.source.title : j.id;
 
     const retryBtn = j.state === 'failed'
-        ? `<button class="dl-btn resume" title="Retry" data-job-id="${esc(j.id)}" onclick="retryFromBtn(this)">&#8635;</button>`
+        ? html`<button class="dl-btn resume" title="Retry" data-job-id="${j.id}" onclick="retryFromBtn(this)">&#8635;</button>`.str
         : '';
     const cancelBtn = (j.state === 'queued' || j.state === 'processing' || j.state === 'failed')
-        ? `<button class="dl-btn cancel" title="Cancel" data-job-id="${esc(j.id)}" onclick="cancelJobFromBtn(this)">&#x2715;</button>`
+        ? html`<button class="dl-btn cancel" title="Cancel" data-job-id="${j.id}" onclick="cancelJobFromBtn(this)">&#x2715;</button>`.str
         : '';
-    const viewLogLink = `<button class="dl-btn" onclick="openJobDrawer('${esc(j.id)}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`;
+    const viewLogLink = html`<button class="dl-btn" onclick="openJobDrawer('${j.id}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`.str;
 
     let subsBadge = '';
     if (j.stage === 'await_subs') {
         const waiting = (j.missing_subs || []).filter(l => !(j.subs_acquired || []).includes(l));
         if (waiting.length) {
-            subsBadge = `<span class="proc-badge proc-info" title="Waiting for Bazarr to deliver subtitles">Acquiring: ${waiting.map(esc).join(', ')}</span>`;
+            subsBadge = html`<span class="proc-badge proc-info" title="Waiting for Bazarr to deliver subtitles">Acquiring: ${waiting.join(', ')}</span>`.str;
         }
     } else if (j.subs_acquired && j.subs_acquired.length) {
-        subsBadge = `<span class="proc-badge proc-ok" title="Subtitles acquired by Bazarr">Subs: ${j.subs_acquired.map(esc).join(', ')}</span>`;
+        subsBadge = html`<span class="proc-badge proc-ok" title="Subtitles acquired by Bazarr">Subs: ${j.subs_acquired.join(', ')}</span>`.str;
     } else if (j.missing_subs && j.missing_subs.length) {
-        subsBadge = `<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.map(esc).join(', ')}</span>`;
+        subsBadge = html`<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${j.missing_subs.join(', ')}</span>`.str;
     }
 
     let checksHTML = '';
     if (j.state === 'failed' && j.validation) {
         const checks = j.validation.checks || {};
         const checkOrder = ['integrity', 'duration', 'sample'];
-        checksHTML = `<div class="proc-check-list">${checkOrder.map(k => {
+        checksHTML = html`<div class="proc-check-list">${raw(checkOrder.map(k => {
             const v = checks[k] || 'skip';
             const cls = ['pass', 'fail', 'warn'].includes(v) ? v : 'skip';
-            return `<span class="proc-check proc-check-${cls}">${k}: ${v}</span>`;
-        }).join('')}</div>`;
+            return html`<span class="proc-check proc-check-${cls}">${k}: ${v}</span>`.str;
+        }).join(''))}</div>`.str;
     }
 
     let metaRight = '';
     if (j.transcode_profile) {
-        metaRight = esc(j.transcode_profile) + (j.transcode_decision ? ' · ' + esc(j.transcode_decision) : '');
+        metaRight = html`${j.transcode_profile}${j.transcode_decision ? ' · ' + j.transcode_decision : ''}`.str;
     } else if (j.transcode_eta > 0) {
         metaRight = `ETA ${Math.round(j.transcode_eta)}s`;
     }
 
-    return `<div class="download-item">
+    return html`<div class="download-item">
         <div class="download-header">
-            <div class="download-name">${esc(title)}</div>
+            <div class="download-name">${title}</div>
             <div class="download-actions">
                 <span class="proc-badge ${stateClass}">${stageName}</span>
-                ${subsBadge}
-                ${retryBtn}${cancelBtn}${viewLogLink}
+                ${raw(subsBadge)}
+                ${raw(retryBtn)}${raw(cancelBtn)}${raw(viewLogLink)}
             </div>
         </div>
         <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
         <div class="download-meta">
-            <span>${pct}%${j.error ? ' — ' + esc(j.error) : ''}</span>
-            <span>${metaRight}</span>
+            <span>${pct}%${j.error ? raw(' — ' + html`${j.error}`.str) : ''}</span>
+            <span>${raw(metaRight)}</span>
         </div>
-        ${checksHTML}
-    </div>`;
+        ${raw(checksHTML)}
+    </div>`.str;
 }
 
 async function retryJob(id) {
@@ -1316,23 +1315,23 @@ function renderPipelineCard(item) {
     } else if (item.lane === 'processing' && item.eta_seconds > 0) {
         speedText = 'ETA ' + formatETA(item.eta_seconds);
     } else if (item.detail) {
-        speedText = esc(item.detail);
+        speedText = html`${item.detail}`.str;
     }
 
     // Left-side meta: pct + error snippet
-    const metaLeft = pct + '%' + (item.error ? ' \u2014 ' + esc(item.error.substring(0, 80)) : '');
+    const metaLeft = html`${pct}%${item.error ? raw(' \u2014 ' + html`${item.error.substring(0, 80)}`.str) : ''}`.str;
 
     const badge = LANE_BADGE[item.lane] || '';
     let subsBadge = '';
     if (item.stage === 'await_subs') {
         const waiting = (item.missing_subs || []).filter(l => !(item.subs_acquired || []).includes(l));
         if (waiting.length) {
-            subsBadge = '<span class="proc-badge proc-info" title="Waiting for Bazarr to deliver subtitles">Acquiring: ' + waiting.map(esc).join(', ') + '</span>';
+            subsBadge = html`<span class="proc-badge proc-info" title="Waiting for Bazarr to deliver subtitles">Acquiring: ${waiting.join(', ')}</span>`.str;
         }
     } else if (item.subs_acquired && item.subs_acquired.length) {
-        subsBadge = '<span class="proc-badge proc-ok" title="Subtitles acquired by Bazarr">Subs: ' + item.subs_acquired.map(esc).join(', ') + '</span>';
+        subsBadge = html`<span class="proc-badge proc-ok" title="Subtitles acquired by Bazarr">Subs: ${item.subs_acquired.join(', ')}</span>`.str;
     } else if (item.missing_subs && item.missing_subs.length) {
-        subsBadge = '<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ' + item.missing_subs.map(esc).join(', ') + '</span>';
+        subsBadge = html`<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ${item.missing_subs.join(', ')}</span>`.str;
     }
 
     const role = document.body.dataset.role || store.get('role');
@@ -1340,60 +1339,60 @@ function renderPipelineCard(item) {
     const canManage = role === 'manager' || role === 'admin';
     const actions = item.actions || [];
     const src = item.source || {};
-    const qbtHash = esc(src.qbt_hash || '');
-    const arrType = esc(src.arr_type || '');
-    const jobId = esc(src.job_id || '');
-    const safeTitle = esc(fullTitle);
+    const qbtHash = src.qbt_hash || '';
+    const arrType = src.arr_type || '';
+    const jobId = src.job_id || '';
 
     let actionBtns = '';
     if (actions.includes('pause') && canManage) {
         actionBtns += isPaused
-            ? '<button class="dl-btn resume" title="Resume" data-hash="' + qbtHash + '" onclick="dlPauseFromBtn(this,false)">&#9654;</button>'
-            : '<button class="dl-btn pause" title="Pause" data-hash="' + qbtHash + '" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>';
+            ? html`<button class="dl-btn resume" title="Resume" data-hash="${qbtHash}" onclick="dlPauseFromBtn(this,false)">&#9654;</button>`.str
+            : html`<button class="dl-btn pause" title="Pause" data-hash="${qbtHash}" onclick="dlPauseFromBtn(this,true)">&#9646;&#9646;</button>`.str;
     }
     if (actions.includes('cancel') && canAdmin) {
-        actionBtns += '<button class="dl-btn cancel" title="Cancel" data-hash="' + qbtHash + '" data-category="' + arrType + '" data-name="' + safeTitle + '" onclick="dlCancelFromBtn(this,false)">&#10005;</button>';
+        actionBtns += html`<button class="dl-btn cancel" title="Cancel" data-hash="${qbtHash}" data-category="${arrType}" data-name="${fullTitle}" onclick="dlCancelFromBtn(this,false)">&#10005;</button>`.str;
     }
     if (actions.includes('blocklist') && canAdmin) {
-        actionBtns += '<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="' + qbtHash + '" data-category="' + arrType + '" data-name="' + safeTitle + '" onclick="openBlocklistFromBtn(this)">&#8856;</button>';
+        actionBtns += html`<button class="dl-btn blocklist" title="Remove &amp; blocklist" data-hash="${qbtHash}" data-category="${arrType}" data-name="${fullTitle}" onclick="openBlocklistFromBtn(this)">&#8856;</button>`.str;
     }
     if (actions.includes('retry') && canAdmin) {
-        actionBtns += '<button class="dl-btn resume" title="Retry" data-job-id="' + jobId + '" onclick="retryFromBtn(this)">&#8635;</button>';
+        actionBtns += html`<button class="dl-btn resume" title="Retry" data-job-id="${jobId}" onclick="retryFromBtn(this)">&#8635;</button>`.str;
     }
     if (actions.includes('cancel_job') && canAdmin) {
-        actionBtns += '<button class="dl-btn cancel" title="Cancel job" data-job-id="' + jobId + '" onclick="cancelJobFromBtn(this)">&#10005;</button>';
+        actionBtns += html`<button class="dl-btn cancel" title="Cancel job" data-job-id="${jobId}" onclick="cancelJobFromBtn(this)">&#10005;</button>`.str;
     }
     if (actions.includes('view_log') && src.job_id) {
-        actionBtns += '<button class="dl-btn" onclick="openJobDrawer(\'' + jobId + '\')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>';
+        actionBtns += html`<button class="dl-btn" onclick="openJobDrawer('${jobId}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`.str;
     }
     if (actions.includes('dismiss') && canAdmin) {
-        actionBtns += '<button class="dl-btn" title="Dismiss" data-job-id="' + jobId + '" onclick="dismissJobFromBtn(this)" style="color:#555">&#10006;</button>';
+        actionBtns += html`<button class="dl-btn" title="Dismiss" data-job-id="${jobId}" onclick="dismissJobFromBtn(this)" style="color:#555">&#10006;</button>`.str;
     }
 
     // Validation checks for failed items
     let checksHTML = '';
     if (isFailed && item.checks) {
         const c = item.checks;
-        checksHTML = '<div class="proc-check-list">' +
+        checksHTML = html`<div class="proc-check-list">${raw(
             [['integrity', c.integrity], ['duration', c.duration], ['sample', c.sample]].map(function(pair) {
                 const v = pair[1]; if (!v) return '';
                 const cls = ['pass', 'fail', 'warn'].includes(v) ? v : 'skip';
-                return '<span class="proc-check proc-check-' + cls + '">' + pair[0] + ': ' + v + '</span>';
-            }).join('') + '</div>';
+                return html`<span class="proc-check proc-check-${cls}">${pair[0]}: ${v}</span>`.str;
+            }).join('')
+        )}</div>`.str;
     }
 
     const cardClass = 'download-item' + (isFailed ? ' pl-card-failed' : isDone ? ' pl-card-done' : '');
-    const yearSpan = year ? '<span class="pl-year">' + esc(year) + '</span>' : '';
+    const yearSpan = year ? html`<span class="pl-year">${year}</span>`.str : '';
 
-    return '<div class="' + cardClass + '" data-key="' + esc(item.key) + '" data-lane="' + esc(item.lane) + '">' +
-        '<div class="download-header">' +
-        '<div class="download-name" onclick="this.classList.toggle(\'expanded\')" title="' + safeTitle + '">' + esc(title) + yearSpan + '</div>' +
-        '<div class="download-actions">' + badge + subsBadge + actionBtns + '</div>' +
-        '</div>' +
-        '<div class="download-bar-bg"><div class="download-bar ' + barClass + '" style="width:' + pct + '%"></div></div>' +
-        '<div class="download-meta"><span>' + metaLeft + '</span><span>' + speedText + '</span></div>' +
-        checksHTML +
-        '</div>';
+    return html`<div class="${cardClass}" data-key="${item.key}" data-lane="${item.lane}">
+        <div class="download-header">
+        <div class="download-name" onclick="this.classList.toggle('expanded')" title="${fullTitle}">${title}${raw(yearSpan)}</div>
+        <div class="download-actions">${raw(badge)}${raw(subsBadge)}${raw(actionBtns)}</div>
+        </div>
+        <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
+        <div class="download-meta"><span>${raw(metaLeft)}</span><span>${raw(speedText)}</span></div>
+        ${raw(checksHTML)}
+    </div>`.str;
 }
 
 function dismissJobFromBtn(btn) { dismissJob(btn.dataset.jobId); }
@@ -1548,19 +1547,19 @@ async function loadUsers() {
             const lastSeen = u.lastLoginDate
                 ? new Date(u.lastLoginDate).toLocaleDateString()
                 : 'never';
-            const adminBadge = u.isAdmin ? '<span class="user-admin-badge">admin</span>' : '';
-            return `<li data-user-id="${escapeHtml(u.id)}" data-user-name="${escapeHtml(u.name)}">` +
-                `<div class="user-info"><span class="user-name">${escapeHtml(u.name)}</span>${adminBadge}<span class="user-meta">last login: ${lastSeen}</span></div>` +
-                `<div class="user-actions">` +
-                `<button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>` +
-                `<button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>` +
-                `</div>` +
-                `<form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">` +
-                `<input type="password" class="user-reset-input" placeholder="New password" autocomplete="new-password">` +
-                `<button type="submit" class="user-action-btn">Set</button>` +
-                `<button type="button" class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>` +
-                `</form>` +
-                `</li>`;
+            const adminBadge = u.isAdmin ? html`<span class="user-admin-badge">admin</span>`.str : '';
+            return html`<li data-user-id="${u.id}" data-user-name="${u.name}">
+                <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
+                <div class="user-actions">
+                <button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>
+                <button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>
+                </div>
+                <form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">
+                <input type="password" class="user-reset-input" placeholder="New password" autocomplete="new-password">
+                <button type="submit" class="user-action-btn">Set</button>
+                <button type="button" class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>
+                </form>
+            </li>`.str;
         }).join('');
     } catch (e) {
         console.warn('[pelicula] loadUsers error:', e);
@@ -1669,10 +1668,10 @@ async function loadSessions() {
         }
         section.classList.remove('hidden');
         list.innerHTML = active.map(s => {
-            const what = s.nowPlayingType === 'Episode' ? `episode of ${escapeHtml(s.nowPlayingTitle)}` : escapeHtml(s.nowPlayingTitle);
-            return `<li class="session-item"><span class="session-user">${escapeHtml(s.userName)}</span>` +
-                `<span class="session-sep">·</span><span class="session-title">${what}</span>` +
-                `<span class="session-sep">·</span><span class="session-device">${escapeHtml(s.client || s.deviceName)}</span></li>`;
+            const what = s.nowPlayingType === 'Episode'
+                ? html`episode of ${s.nowPlayingTitle}`.str
+                : html`${s.nowPlayingTitle}`.str;
+            return html`<li class="session-item"><span class="session-user">${s.userName}</span><span class="session-sep">·</span><span class="session-title">${raw(what)}</span><span class="session-sep">·</span><span class="session-device">${s.client || s.deviceName}</span></li>`.str;
         }).join('');
     } catch (e) {
         section.classList.add('hidden');
@@ -1703,7 +1702,7 @@ document.getElementById('add-user-form')?.addEventListener('submit', async (e) =
         document.getElementById('new-password').value = '';
         const successEl = document.getElementById('add-user-success');
         if (successEl) {
-            successEl.innerHTML = `User <strong>${escapeHtml(createdUsername)}</strong> created. <a href="/jellyfin/" target="_blank" style="color:#7dda93">Open Jellyfin &rarr;</a>`;
+            successEl.innerHTML = html`User <strong>${createdUsername}</strong> created. <a href="/jellyfin/" target="_blank" style="color:#7dda93">Open Jellyfin &rarr;</a>`.str;
             successEl.classList.remove('hidden');
             setTimeout(() => successEl.classList.add('hidden'), 8000);
         }
@@ -1714,10 +1713,6 @@ document.getElementById('add-user-form')?.addEventListener('submit', async (e) =
     }
 });
 
-
-function escapeHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 
 // ── Requests ──────────────────────────────
 let requestsLoaded = false;
@@ -1746,32 +1741,43 @@ function renderRequests(requests) {
     const mine = requests.filter(r => r.requested_by === username || (!username && !isAdmin));
 
     if (pendingList) {
-        pendingList.innerHTML = pending.map(r => `
-            <li class="request-item" data-id="${escapeHtml(r.id)}">
-                ${r.poster ? `<img class="request-poster" src="${escapeHtml(r.poster)}" alt="">` : '<div class="request-poster request-poster-placeholder"></div>'}
+        pendingList.innerHTML = pending.map(r => {
+            const poster = r.poster
+                ? html`<img class="request-poster" src="${r.poster}" alt="">`.str
+                : '<div class="request-poster request-poster-placeholder"></div>';
+            const yearSpan = r.year ? html` <span class="request-year">(${r.year})</span>`.str : '';
+            return html`<li class="request-item" data-id="${r.id}">
+                ${raw(poster)}
                 <div class="request-info">
-                    <div class="request-title">${escapeHtml(r.title)}${r.year ? ` <span class="request-year">(${r.year})</span>` : ''}</div>
-                    <div class="request-meta">${escapeHtml(r.type)} · requested by ${escapeHtml(r.requested_by)}</div>
+                    <div class="request-title">${r.title}${raw(yearSpan)}</div>
+                    <div class="request-meta">${r.type} · requested by ${r.requested_by}</div>
                 </div>
                 <div class="request-actions">
-                    <button class="request-btn request-btn-approve" onclick="approveRequest('${escapeHtml(r.id)}')">Approve</button>
-                    <button class="request-btn request-btn-deny" onclick="denyRequest('${escapeHtml(r.id)}')">Deny</button>
+                    <button class="request-btn request-btn-approve" onclick="approveRequest('${r.id}')">Approve</button>
+                    <button class="request-btn request-btn-deny" onclick="denyRequest('${r.id}')">Deny</button>
                 </div>
-            </li>`).join('');
+            </li>`.str;
+        }).join('');
         if (pendingEmpty) pendingEmpty.classList.toggle('hidden', pending.length > 0);
     }
 
     if (mineList) {
-        mineList.innerHTML = mine.map(r => `
-            <li class="request-item request-item-${escapeHtml(r.state)}" data-id="${escapeHtml(r.id)}">
-                ${r.poster ? `<img class="request-poster" src="${escapeHtml(r.poster)}" alt="">` : '<div class="request-poster request-poster-placeholder"></div>'}
+        mineList.innerHTML = mine.map(r => {
+            const poster = r.poster
+                ? html`<img class="request-poster" src="${r.poster}" alt="">`.str
+                : '<div class="request-poster request-poster-placeholder"></div>';
+            const yearSpan = r.year ? html` <span class="request-year">(${r.year})</span>`.str : '';
+            const reasonDiv = r.reason ? html`<div class="request-reason">${r.reason}</div>`.str : '';
+            return html`<li class="request-item request-item-${r.state}" data-id="${r.id}">
+                ${raw(poster)}
                 <div class="request-info">
-                    <div class="request-title">${escapeHtml(r.title)}${r.year ? ` <span class="request-year">(${r.year})</span>` : ''}</div>
-                    <div class="request-meta">${escapeHtml(r.type)}</div>
-                    ${r.reason ? `<div class="request-reason">${escapeHtml(r.reason)}</div>` : ''}
+                    <div class="request-title">${r.title}${raw(yearSpan)}</div>
+                    <div class="request-meta">${r.type}</div>
+                    ${raw(reasonDiv)}
                 </div>
-                <span class="request-state request-state-${escapeHtml(r.state)}">${escapeHtml(r.state)}</span>
-            </li>`).join('');
+                <span class="request-state request-state-${r.state}">${r.state}</span>
+            </li>`.str;
+        }).join('');
         if (mineEmpty) mineEmpty.classList.toggle('hidden', mine.length > 0);
     }
 }
@@ -1848,14 +1854,14 @@ function populateRequestsSettings(meta) {
     const fillProfiles = (selectId, profiles) => {
         const el = document.getElementById(selectId);
         if (!el || !profiles) return;
-        el.innerHTML = '<option value="">— use default —</option>' +
-            profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+        el.innerHTML = html`<option value="">— use default —</option>`.str +
+            profiles.map(p => html`<option value="${p.id}">${p.name}</option>`.str).join('');
     };
     const fillRoots = (selectId, roots) => {
         const el = document.getElementById(selectId);
         if (!el || !roots) return;
-        el.innerHTML = '<option value="">— use default —</option>' +
-            roots.map(r => `<option value="${escapeHtml(r.path)}">${escapeHtml(r.path)}</option>`).join('');
+        el.innerHTML = html`<option value="">— use default —</option>`.str +
+            roots.map(r => html`<option value="${r.path}">${r.path}</option>`.str).join('');
     };
     fillProfiles('req-radarr-profile', meta?.radarr?.qualityProfiles);
     fillRoots('req-radarr-root', meta?.radarr?.rootFolders);
@@ -1901,7 +1907,7 @@ async function loadInvites() {
         const invites = await resp.json();
         const invMetric = document.getElementById('um-metric-invites');
         if (!invites || invites.length === 0) {
-            list.innerHTML = '<li class="invite-empty">No invite links yet.</li>';
+            list.innerHTML = html`<li class="invite-empty">No invite links yet.</li>`.str;
             if (invMetric) invMetric.textContent = '0';
             return;
         }
@@ -1909,23 +1915,24 @@ async function loadInvites() {
         list.innerHTML = invites.map(inv => {
             const stateClass = {active:'invite-active', expired:'invite-dead', exhausted:'invite-dead', revoked:'invite-dead'}[inv.state] || 'invite-dead';
             const stateLabel = {active:'active', expired:'expired', exhausted:'used up', revoked:'revoked'}[inv.state] || inv.state;
-            const label = inv.label ? escapeHtml(inv.label) : '—';
             const uses = inv.max_uses != null ? `${inv.uses}/${inv.max_uses}` : `${inv.uses}/∞`;
             const expiry = inv.expires_at ? `expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'no expiry';
             const link = `${window.location.origin}/register?t=${encodeURIComponent(inv.token)}`;
             const isActive = inv.state === 'active';
-            return `<li class="invite-item" data-token="${escapeHtml(inv.token)}">` +
-                `<div class="invite-row">` +
-                `<span class="invite-badge ${stateClass}">${stateLabel}</span>` +
-                `<span class="invite-meta">${uses} use${inv.uses !== 1 ? 's' : ''} · ${expiry}</span>` +
-                (inv.label ? `<span class="invite-label-text">${label}</span>` : '') +
-                `</div>` +
-                `<div class="invite-actions">` +
-                (isActive ? `<button class="user-action-btn" onclick="copyInviteItemLink(this, '${escapeHtml(link)}')" title="Copy invite link">Copy link</button>` : '') +
-                (isActive ? `<button class="user-action-btn" onclick="revokeInvite(this)" title="Deactivate this invite">Revoke</button>` : '') +
-                `<button class="user-action-btn user-action-delete" onclick="deleteInvite(this)" title="Delete record">Delete</button>` +
-                `</div>` +
-                `</li>`;
+            const labelSpan = inv.label ? html`<span class="invite-label-text">${inv.label}</span>`.str : '';
+            const copyBtn = isActive ? html`<button class="user-action-btn" onclick="copyInviteItemLink(this, '${link}')" title="Copy invite link">Copy link</button>`.str : '';
+            const revokeBtn = isActive ? html`<button class="user-action-btn" onclick="revokeInvite(this)" title="Deactivate this invite">Revoke</button>`.str : '';
+            return html`<li class="invite-item" data-token="${inv.token}">
+                <div class="invite-row">
+                <span class="invite-badge ${stateClass}">${stateLabel}</span>
+                <span class="invite-meta">${uses} use${inv.uses !== 1 ? 's' : ''} · ${expiry}</span>
+                ${raw(labelSpan)}
+                </div>
+                <div class="invite-actions">
+                ${raw(copyBtn)}${raw(revokeBtn)}
+                <button class="user-action-btn user-action-delete" onclick="deleteInvite(this)" title="Delete record">Delete</button>
+                </div>
+            </li>`.str;
         }).join('');
     } catch (e) {
         console.warn('[pelicula] loadInvites error:', e);
@@ -2065,7 +2072,7 @@ function showInviteShareStep(invite) {
     if (typeof qrSVG === 'function') {
         const svg = qrSVG(link, 4);
         if (svg) {
-            document.getElementById('invite-qr-svg').innerHTML = svg;
+            document.getElementById('invite-qr-svg').innerHTML = raw(svg).str;
             document.getElementById('invite-qr-wrap').style.display = '';
         }
     }
@@ -2111,51 +2118,49 @@ window.openJobDrawer = async function(jobId) {
         sub.textContent = j.state + (j.stage ? ' \u00b7 ' + j.stage : '');
         // Action buttons
         if (j.state === 'failed') {
-            actions.innerHTML = '<button class="dl-btn resume" onclick="retryJob(\'' + esc(j.id) + '\');closeJobDrawer()">&#8635; Retry</button>';
+            actions.innerHTML = html`<button class="dl-btn resume" onclick="retryJob('${j.id}');closeJobDrawer()">&#8635; Retry</button>`.str;
         }
         if (j.state === 'queued' || j.state === 'processing' || j.state === 'failed') {
-            actions.innerHTML += '<button class="dl-btn cancel" onclick="cancelJob(\'' + esc(j.id) + '\');closeJobDrawer()">&#10005; Cancel</button>';
+            actions.innerHTML += html`<button class="dl-btn cancel" onclick="cancelJob('${j.id}');closeJobDrawer()">&#10005; Cancel</button>`.str;
         }
         // Body
-        let html = '';
+        let drawerHtml = '';
         // Validation checks
         if (j.validation && j.validation.checks) {
-            html += '<div class="drawer-section"><div class="drawer-section-title">Validation</div><div class="drawer-check-list">';
             const checks = j.validation.checks;
-            ['integrity', 'duration', 'sample'].forEach(k => {
+            const checkSpans = ['integrity', 'duration', 'sample'].map(k => {
                 const v = checks[k] || 'skip';
                 const cls = ['pass','fail','warn'].includes(v) ? v : 'skip';
-                html += '<span class="proc-check proc-check-' + cls + '">' + esc(k) + ': ' + esc(v) + '</span>';
-            });
-            html += '</div></div>';
+                return html`<span class="proc-check proc-check-${cls}">${k}: ${v}</span>`.str;
+            }).join('');
+            drawerHtml += html`<div class="drawer-section"><div class="drawer-section-title">Validation</div><div class="drawer-check-list">${raw(checkSpans)}</div></div>`.str;
         }
         // File info
         if (j.source) {
-            html += '<div class="drawer-section"><div class="drawer-section-title">File</div>';
-            if (j.source.path) html += '<div class="drawer-kv"><span class="drawer-kv-key">Path</span><span class="drawer-kv-val" style="word-break:break-all">' + esc(j.source.path) + '</span></div>';
-            if (j.source.size) html += '<div class="drawer-kv"><span class="drawer-kv-key">Size</span><span class="drawer-kv-val">' + formatBytes(j.source.size) + '</span></div>';
-            html += '</div>';
+            let fileRows = '';
+            if (j.source.path) fileRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Path</span><span class="drawer-kv-val" style="word-break:break-all">${j.source.path}</span></div>`.str;
+            if (j.source.size) fileRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Size</span><span class="drawer-kv-val">${formatBytes(j.source.size)}</span></div>`.str;
+            drawerHtml += html`<div class="drawer-section"><div class="drawer-section-title">File</div>${raw(fileRows)}</div>`.str;
         }
         // Transcode info
         if (j.transcode_profile || j.transcode_decision) {
-            html += '<div class="drawer-section"><div class="drawer-section-title">Transcoding</div>';
-            if (j.transcode_profile) html += '<div class="drawer-kv"><span class="drawer-kv-key">Profile</span><span class="drawer-kv-val">' + esc(j.transcode_profile) + '</span></div>';
-            if (j.transcode_decision) html += '<div class="drawer-kv"><span class="drawer-kv-key">Decision</span><span class="drawer-kv-val">' + esc(j.transcode_decision) + '</span></div>';
-            html += '</div>';
+            let txRows = '';
+            if (j.transcode_profile) txRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Profile</span><span class="drawer-kv-val">${j.transcode_profile}</span></div>`.str;
+            if (j.transcode_decision) txRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Decision</span><span class="drawer-kv-val">${j.transcode_decision}</span></div>`.str;
+            drawerHtml += html`<div class="drawer-section"><div class="drawer-section-title">Transcoding</div>${raw(txRows)}</div>`.str;
         }
         // Error
         if (j.error) {
-            html += '<div class="drawer-section"><div class="drawer-section-title">Error</div><div class="drawer-error">' + esc(j.error) + '</div></div>';
+            drawerHtml += html`<div class="drawer-section"><div class="drawer-section-title">Error</div><div class="drawer-error">${j.error}</div></div>`.str;
         }
         // Timeline
         if (j.events && j.events.length) {
-            html += '<div class="drawer-section"><div class="drawer-section-title">Timeline</div><ul class="drawer-timeline">';
-            j.events.forEach(ev => {
-                html += '<li><span class="drawer-timeline-time">' + new Date(ev.at).toLocaleTimeString() + '</span><span>' + esc(ev.message || ev.event || '') + '</span></li>';
-            });
-            html += '</ul></div>';
+            const items = j.events.map(ev =>
+                html`<li><span class="drawer-timeline-time">${new Date(ev.at).toLocaleTimeString()}</span><span>${ev.message || ev.event || ''}</span></li>`.str
+            ).join('');
+            drawerHtml += html`<div class="drawer-section"><div class="drawer-section-title">Timeline</div><ul class="drawer-timeline">${raw(items)}</ul></div>`.str;
         }
-        body.innerHTML = html || '<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">No details available.</div>';
+        body.innerHTML = drawerHtml || html`<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">No details available.</div>`.str;
     } catch (e) {
         body.innerHTML = '<div class="drawer-error">Failed to load job details.</div>';
     }
@@ -2313,15 +2318,15 @@ async function loadEventLog(page, filter) {
         list.innerHTML = events.map(ev => {
             const icon = iconMap[ev.type] || '\u25cf';
             const time = new Date(ev.at || ev.timestamp).toLocaleString();
-            return '<div class="pl-event-item"><span class="pl-event-icon">' + icon + '</span><div class="pl-event-body"><div class="pl-event-title">' + esc(ev.message || ev.event || ev.type) + '</div><div class="pl-event-meta">' + esc(ev.title || '') + (ev.title ? ' \u00b7 ' : '') + time + '</div></div></div>';
+            return html`<div class="pl-event-item"><span class="pl-event-icon">${icon}</span><div class="pl-event-body"><div class="pl-event-title">${ev.message || ev.event || ev.type}</div><div class="pl-event-meta">${ev.title || ''}${ev.title ? ' \u00b7 ' : ''}${time}</div></div></div>`.str;
         }).join('');
         // Pager
         if (pager) {
             const pages = Math.ceil(total / 20);
             let pgHtml = '';
-            if (page > 1) pgHtml += '<button onclick="loadEventLog(' + (page-1) + ',\'' + esc(_eventFilter) + '\')">&#8592; Prev</button>';
-            pgHtml += '<span style="font-size:0.68rem;color:var(--muted);padding:0.2rem 0.4rem">' + page + ' / ' + (pages||1) + '</span>';
-            if (page < pages) pgHtml += '<button onclick="loadEventLog(' + (page+1) + ',\'' + esc(_eventFilter) + '\')">Next &#8594;</button>';
+            if (page > 1) pgHtml += html`<button onclick="loadEventLog(${page-1},'${_eventFilter}')">&#8592; Prev</button>`.str;
+            pgHtml += html`<span style="font-size:0.68rem;color:var(--muted);padding:0.2rem 0.4rem">${page} / ${pages||1}</span>`.str;
+            if (page < pages) pgHtml += html`<button onclick="loadEventLog(${page+1},'${_eventFilter}')">Next &#8594;</button>`.str;
             pager.innerHTML = pgHtml;
         }
         _eventPage = page;
