@@ -654,6 +654,87 @@ except Exception:
         t_fail "Dashboard missing no-store cache header"
     fi
 
+    # ── Stage 9: Playwright UI Tests ─────────────────
+
+    if command -v npx &>/dev/null && npx playwright --version &>/dev/null 2>&1; then
+        info "Seeding Playwright test fixtures..."
+
+        # Fixture 1: valid H.264 file for import-play spec
+        local pw_movie_dir="$test_library_dir/movies/Valid H264 Test (2024)"
+        local pw_movie_file="$pw_movie_dir/valid-h264-10s.mkv"
+        mkdir -p "$pw_movie_dir"
+
+        local pw_ffmpeg_ok=false
+        if command -v ffmpeg &>/dev/null; then
+            if ffmpeg -y \
+                -f lavfi -i "color=c=blue:s=320x240:d=10:r=24" \
+                -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
+                -c:v libx264 -preset ultrafast -crf 28 \
+                -c:a aac -b:a 64k \
+                "$pw_movie_file" 2>/dev/null; then
+                pw_ffmpeg_ok=true
+            fi
+        fi
+        if [[ "$pw_ffmpeg_ok" != "true" ]]; then
+            if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                -f lavfi -i "color=c=blue:s=320x240:d=10:r=24" \
+                -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
+                -c:v libx264 -preset ultrafast -crf 28 \
+                -c:a aac -b:a 64k \
+                "/movies/Valid H264 Test (2024)/valid-h264-10s.mkv" 2>/dev/null; then
+                pw_ffmpeg_ok=true
+            fi
+        fi
+
+        # Fixture 2: Night of the Living Dead for subtitle-acquisition spec
+        local pw_notld_file="$test_work_dir/downloads/Night.of.the.Living.Dead.1968.mkv"
+        if [[ "$pw_ffmpeg_ok" == "true" ]]; then
+            if command -v ffmpeg &>/dev/null; then
+                ffmpeg -y \
+                    -f lavfi -i "color=c=black:s=320x240:d=15:r=24" \
+                    -f lavfi -i "sine=frequency=220:duration=15:sample_rate=44100" \
+                    -c:v libx264 -preset ultrafast -crf 28 \
+                    -c:a aac -b:a 64k \
+                    -metadata title="Night of the Living Dead" \
+                    -metadata year="1968" \
+                    "$pw_notld_file" 2>/dev/null || pw_ffmpeg_ok=false
+            else
+                $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                    -f lavfi -i "color=c=black:s=320x240:d=15:r=24" \
+                    -f lavfi -i "sine=frequency=220:duration=15:sample_rate=44100" \
+                    -c:v libx264 -preset ultrafast -crf 28 \
+                    -c:a aac -b:a 64k \
+                    -metadata title="Night of the Living Dead" \
+                    -metadata year="1968" \
+                    "/downloads/Night.of.the.Living.Dead.1968.mkv" 2>/dev/null || pw_ffmpeg_ok=false
+            fi
+        fi
+
+        if [[ "$pw_ffmpeg_ok" != "true" ]]; then
+            warn "Playwright fixture generation failed — skipping UI tests"
+        else
+            t_pass "Playwright fixtures seeded"
+            info "Running Playwright UI tests..."
+
+            local pw_exit=0
+            PLAYWRIGHT_BASE_URL="http://localhost:${test_port}" \
+                npx playwright test \
+                    --config tests/playwright/playwright.config.js \
+                    --reporter list \
+                2>&1 || pw_exit=$?
+
+            if [[ $pw_exit -eq 0 ]]; then
+                t_pass "Playwright UI tests passed"
+            else
+                t_fail "Playwright UI tests failed (exit code ${pw_exit})"
+                warn "Re-run with: npm run test:ui:headed"
+                warn "Or: npx playwright show-report tests/playwright/report"
+            fi
+        fi
+    else
+        warn "Node/Playwright not found — skipping UI tests (run: npm install && npx playwright install chromium)"
+    fi
+
     # ── Summary ───────────────────────────────────────
 
     echo ""
