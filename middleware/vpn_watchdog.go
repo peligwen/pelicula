@@ -151,7 +151,12 @@ func StartVPNWatchdog(s *ServiceClients) {
 	defer ticker.Stop()
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	var internal wdInternalState
+	internal := wdInternalState{status: wdUnknown}
+
+	// Publish initial state so health endpoint never returns an empty string.
+	watchdogMu.Lock()
+	watchdogState.PortForwardStatus = string(wdUnknown)
+	watchdogMu.Unlock()
 
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
