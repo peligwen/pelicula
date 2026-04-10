@@ -141,8 +141,17 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireAuthOrLocalOrigin(w, r) {
+		return
+	}
+	if !checkAdminRate(w, r) {
+		return
+	}
 	var errs []string
 	for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
+		if !isAllowedContainer(svc) {
+			continue
+		}
 		if err := dockerRestart(svc); err != nil {
 			slog.Warn("vpn restart: container error",
 				"component", "admin_ops", "svc", svc, "error", err)
@@ -151,7 +160,7 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	result := "ok"
 	if len(errs) > 0 {
-		result = "partial"
+		result = "partial: " + strings.Join(errs, "; ")
 	}
 	auditLog(r, "vpn_restart", "gluetun+qbittorrent+prowlarr", result)
 	writeJSON(w, map[string]any{"ok": true, "errors": errs})
