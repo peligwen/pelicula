@@ -28,12 +28,15 @@
 function createStore(initial) {
     const state  = Object.assign({}, initial);
     const subs   = {};   // key → Set<fn>
+    let batchDepth   = 0;
+    let batchPending = new Map();
 
     function get(key) {
         return state[key];
     }
 
     function set(key, value) {
+        if (batchDepth > 0) { batchPending.set(key, value); return; }
         if (state[key] === value) return;
         state[key] = value;
         if (subs[key]) subs[key].forEach(fn => { try { fn(value); } catch(e) { console.error('[store]', e); } });
@@ -50,14 +53,15 @@ function createStore(initial) {
     // Batch multiple set() calls without intermediate re-renders.
     // Usage: store.batch(() => { store.set('a',1); store.set('b',2); })
     function batch(fn) {
-        const pending = new Map();
-        const origSet = set;
-        // Shadow set() during fn execution
-        const batchSet = (key, value) => { pending.set(key, value); };
-        // Temporarily override — tricky in non-module context, so we call fn with a proxy store
-        const proxy = { get, set: batchSet, subscribe, unsubscribe, batch };
-        fn(proxy);
-        for (const [key, value] of pending) origSet(key, value);
+        batchDepth++;
+        try { fn(); } finally {
+            batchDepth--;
+            if (batchDepth === 0) {
+                const pending = batchPending;
+                batchPending = new Map();
+                for (const [key, value] of pending) set(key, value);
+            }
+        }
     }
 
     return { get, set, subscribe, unsubscribe, batch };
