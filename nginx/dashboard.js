@@ -1,3 +1,11 @@
+// ── App store ────────────────────────────
+// Initialised here; framework.js must be loaded first.
+const store = PeliculaFW.initStore({
+    role: 'admin',        // 'admin' | 'manager' | 'viewer'
+    username: '',
+    authEnabled: false,
+});
+
 // ── Resilient fetch (auto-abort after ms) ──
 function tfetch(url, opts, ms) {
     ms = ms || 4000;
@@ -7,7 +15,6 @@ function tfetch(url, opts, ms) {
 }
 
 // ── Auth ──────────────────────────────────
-let currentRole = 'admin'; // default when auth is off
 
 async function checkAuth() {
     try {
@@ -55,7 +62,8 @@ async function doLogin() {
 // manager: search + add, pause/resume; no cancel/blocklist
 // admin:   everything
 function applyRole(role, username) {
-    currentRole = role;
+    store.set('role', role);
+    store.set('username', username || '');
     document.body.dataset.username = username || '';
     const isManager = role === 'manager' || role === 'admin';
     const isAdmin = role === 'admin';
@@ -191,7 +199,7 @@ function renderResultCard(r) {
     const tmdbId = r.tmdbId || 0;
     const tvdbId = r.tvdbId || 0;
     const added = r.added;
-    const isManager = currentRole === 'manager' || currentRole === 'admin';
+    const isManager = store.get('role') === 'manager' || store.get('role') === 'admin';
     const stopProp = 'event.stopPropagation();';
     // Managers and admins get the direct Add button; viewers get a Request button.
     const actionBtn = isManager
@@ -300,7 +308,7 @@ function renderDownloads(data) {
     if (data.stats) { statsEl.textContent = `${data.stats.active} active / ${data.stats.queued} queued`; }
     const shown = (data.torrents || []).filter(t => ['downloading','stalledDL','forcedDL','queuedDL','uploading','stalledUP','pausedDL','pausedUP','stoppedDL','stoppedUP','forcedUP'].includes(t.state));
     if (!shown.length) { list.innerHTML = '<div class="no-items">No active downloads</div>'; return; }
-    const role = document.body.dataset.role || currentRole;
+    const role = document.body.dataset.role || store.get('role');
     const canPause = role === 'manager' || role === 'admin';
     const canCancel = role === 'admin';
     list.innerHTML = shown.slice(0, 8).map(t => {
@@ -1291,7 +1299,7 @@ function renderPipelineCard(item) {
         subsBadge = '<span class="proc-badge proc-warn" title="Bazarr will fetch these">Missing subs: ' + item.missing_subs.map(esc).join(', ') + '</span>';
     }
 
-    const role = document.body.dataset.role || currentRole;
+    const role = document.body.dataset.role || store.get('role');
     const canAdmin = role === 'admin';
     const canManage = role === 'manager' || role === 'admin';
     const actions = item.actions || [];
@@ -1690,7 +1698,7 @@ async function loadRequests() {
 }
 
 function renderRequests(requests) {
-    const isAdmin = currentRole === 'admin';
+    const isAdmin = store.get('role') === 'admin';
     const username = document.body.dataset.username || '';
 
     const pendingList = document.getElementById('requests-pending-list');
