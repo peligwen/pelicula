@@ -74,7 +74,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path)
+	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path, "episode_id", source.EpisodeID)
 
 	// Forward to Procula
 	proculaURL := proculaURL + "/api/procula/jobs"
@@ -142,6 +142,14 @@ func normalizeHookPayload(raw map[string]any) (source ProculaJobSource, err erro
 		source.TvdbID = int(floatVal(series, "tvdbId"))
 		source.TmdbID = int(floatVal(series, "tmdbId"))
 
+		if eps, ok := raw["episodes"].([]any); ok && len(eps) > 0 {
+			if ep, ok := eps[0].(map[string]any); ok {
+				source.EpisodeID = int(floatVal(ep, "id"))
+				source.SeasonNumber = int(floatVal(ep, "seasonNumber"))
+				source.EpisodeNumber = int(floatVal(ep, "episodeNumber"))
+			}
+		}
+
 		if ef, ok := raw["episodeFile"].(map[string]any); ok {
 			source.Path, _ = ef["path"].(string)
 			source.Size = int64(floatVal(ef, "size"))
@@ -174,6 +182,9 @@ type ProculaJobSource struct {
 	Size                   int64  `json:"size"`
 	ArrID                  int    `json:"arr_id"`
 	ArrType                string `json:"arr_type"`
+	EpisodeID              int    `json:"episode_id,omitempty"`
+	SeasonNumber           int    `json:"season_number,omitempty"`
+	EpisodeNumber          int    `json:"episode_number,omitempty"`
 	TmdbID                 int    `json:"tmdb_id,omitempty"`
 	TvdbID                 int    `json:"tvdb_id,omitempty"`
 	DownloadHash           string `json:"download_hash"`

@@ -24,11 +24,12 @@ const (
 type JobStage string
 
 const (
-	StageValidate JobStage = "validate"
-	StageCatalog  JobStage = "catalog"
-	StageDualSub  JobStage = "dualsub"
-	StageProcess  JobStage = "process"
-	StageDone     JobStage = "done"
+	StageValidate  JobStage = "validate"
+	StageCatalog   JobStage = "catalog"
+	StageAwaitSubs JobStage = "await_subs"  // NEW: inserted between catalog and dualsub
+	StageDualSub   JobStage = "dualsub"
+	StageProcess   JobStage = "process"
+	StageDone      JobStage = "done"
 )
 
 type JobSource struct {
@@ -39,6 +40,9 @@ type JobSource struct {
 	Size                   int64  `json:"size"`
 	ArrID                  int    `json:"arr_id"`
 	ArrType                string `json:"arr_type"` // "radarr" or "sonarr"
+	EpisodeID              int    `json:"episode_id,omitempty"`
+	SeasonNumber           int    `json:"season_number,omitempty"`
+	EpisodeNumber          int    `json:"episode_number,omitempty"`
 	DownloadHash           string `json:"download_hash"`
 	ExpectedRuntimeMinutes int    `json:"expected_runtime_minutes"`
 }
@@ -72,8 +76,9 @@ type Job struct {
 	Progress    float64           `json:"progress"`
 	Source      JobSource         `json:"source"`
 	Validation  *ValidationResult `json:"validation,omitempty"`
-	MissingSubs []string          `json:"missing_subs,omitempty"`
-	Error       string            `json:"error,omitempty"`
+	MissingSubs  []string          `json:"missing_subs,omitempty"`
+	SubsAcquired []string          `json:"subs_acquired,omitempty"`  // NEW: langs Bazarr has delivered
+	Error        string            `json:"error,omitempty"`
 	RetryCount  int               `json:"retry_count"`
 
 	// ManualProfile, when non-empty, causes the pipeline to skip Validate and
@@ -223,6 +228,7 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 func (q *Queue) Get(id string) (*Job, bool) {
 	row := q.db.QueryRow(
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
+		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
 		 FROM jobs WHERE id=?`, id,
@@ -237,6 +243,7 @@ func (q *Queue) Get(id string) (*Job, bool) {
 func (q *Queue) List() []Job {
 	rows, err := q.db.Query(
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
+		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
 		 FROM jobs ORDER BY created_at ASC`,
@@ -284,6 +291,13 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		missingSubsJSON = &s
 	}
 
+	var subsAcquiredJSON *string
+	if job.SubsAcquired != nil {
+		b, _ := json.Marshal(job.SubsAcquired)
+		s := string(b)
+		subsAcquiredJSON = &s
+	}
+
 	var dualSubOutputsJSON *string
 	if job.DualSubOutputs != nil {
 		b, _ := json.Marshal(job.DualSubOutputs)
@@ -301,12 +315,14 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 	_, err := q.db.Exec(
 		`UPDATE jobs SET
 			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
+			subs_acquired=?,
 			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
 			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?
 		 WHERE id=?`,
 		job.UpdatedAt.Format(time.RFC3339Nano),
 		string(job.State), string(job.Stage), job.Progress,
 		string(sourceJSON), validationJSON, missingSubsJSON,
+		subsAcquiredJSON,
 		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
 		id,
@@ -411,13 +427,14 @@ type scanner interface {
 // scanJob reads one job row from a scanner (either *sql.Row or *sql.Rows).
 func scanJob(s scanner) (*Job, error) {
 	var (
-		job               Job
-		createdAtStr      string
-		updatedAtStr      string
-		sourceJSON        string
-		validationJSON    *string
-		missingSubsJSON   *string
-		dualSubOutputsJSON *string
+		job                  Job
+		createdAtStr         string
+		updatedAtStr         string
+		sourceJSON           string
+		validationJSON       *string
+		missingSubsJSON      *string
+		subsAcquiredJSON     *string
+		dualSubOutputsJSON   *string
 		transcodeOutputsJSON *string
 	)
 
@@ -425,6 +442,7 @@ func scanJob(s scanner) (*Job, error) {
 		&job.ID, &createdAtStr, &updatedAtStr,
 		&job.State, &job.Stage, &job.Progress,
 		&sourceJSON, &validationJSON, &missingSubsJSON,
+		&subsAcquiredJSON,
 		&job.Error, &job.RetryCount, &job.ManualProfile,
 		&dualSubOutputsJSON, &job.DualSubError,
 		&job.TranscodeProfile, &job.TranscodeDecision,
@@ -452,6 +470,10 @@ func scanJob(s scanner) (*Job, error) {
 
 	if missingSubsJSON != nil {
 		json.Unmarshal([]byte(*missingSubsJSON), &job.MissingSubs) //nolint:errcheck
+	}
+
+	if subsAcquiredJSON != nil {
+		json.Unmarshal([]byte(*subsAcquiredJSON), &job.SubsAcquired) //nolint:errcheck
 	}
 
 	if dualSubOutputsJSON != nil {

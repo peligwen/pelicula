@@ -202,6 +202,13 @@ func TestNormalizeHookPayload(t *testing.T) {
 				"year":  float64(2008),
 				"id":    float64(7),
 			},
+			"episodes": []any{
+				map[string]any{
+					"id":            float64(42),
+					"seasonNumber":  float64(1),
+					"episodeNumber": float64(3),
+				},
+			},
 			"episodeFile": map[string]any{
 				"path": "/tv/Breaking Bad/Season 01/s01e01.mkv",
 				"size": float64(1_500_000_000),
@@ -226,6 +233,15 @@ func TestNormalizeHookPayload(t *testing.T) {
 		}
 		if source.ExpectedRuntimeMinutes != 45 {
 			t.Errorf("ExpectedRuntimeMinutes = %d, want 45", source.ExpectedRuntimeMinutes)
+		}
+		if source.EpisodeID != 42 {
+			t.Errorf("EpisodeID = %d, want 42", source.EpisodeID)
+		}
+		if source.SeasonNumber != 1 {
+			t.Errorf("SeasonNumber = %d, want 1", source.SeasonNumber)
+		}
+		if source.EpisodeNumber != 3 {
+			t.Errorf("EpisodeNumber = %d, want 3", source.EpisodeNumber)
 		}
 	})
 

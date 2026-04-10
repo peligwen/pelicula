@@ -29,6 +29,8 @@ const (
 	EventJobCancelled       EventType = "job_cancelled"
 	EventJobRetried         EventType = "job_retried"
 	EventReleaseBlocklisted EventType = "release_blocklisted"
+	EventSubAcquired        EventType = "sub_acquired"  // fired per-language when a sidecar is detected
+	EventSubTimeout         EventType = "sub_timeout"   // fired when await_subs times out with missing langs
 )
 
 // PipelineEvent is a single entry in the append-only event log.

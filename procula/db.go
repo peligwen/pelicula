@@ -58,6 +58,7 @@ type migration struct {
 // migrations is the ordered list of all schema migrations.
 var migrations = []migration{
 	{version: 1, up: migrate1},
+	{version: 2, up: migrate2},
 }
 
 // runMigrations reads the current schema version and applies all pending
@@ -94,6 +95,12 @@ func runMigrations(db *sql.DB) error {
 		slog.Info("DB migration applied", "component", "db", "version", m.version)
 	}
 	return nil
+}
+
+// migrate2 adds the subs_acquired column for tracking Bazarr-delivered subtitles.
+func migrate2(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN subs_acquired TEXT`)
+	return err
 }
 
 // migrate1 creates the initial schema (version 1).
