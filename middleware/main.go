@@ -62,6 +62,12 @@ func main() {
 	// Watch for monitored content missing files and auto-search
 	go StartMissingWatcher(services, 2*time.Minute)
 
+	// Monitor VPN port forwarding; keep qBittorrent listen port in sync.
+	// Only active when a WireGuard key is present (VPN profile enabled).
+	if os.Getenv("WIREGUARD_PRIVATE_KEY") != "" {
+		go StartVPNWatchdog(services)
+	}
+
 	mux := http.NewServeMux()
 
 	// Determine auth mode:
@@ -182,6 +188,7 @@ func main() {
 
 	// admin only: container control via docker-socket-proxy sidecar
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
+	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(handleVPNRestart)))
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
