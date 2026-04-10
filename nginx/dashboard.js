@@ -5,8 +5,6 @@ const store = PeliculaFW.initStore({
     username: '',
     authEnabled: false,
 });
-const { html, raw } = PeliculaFW;
-
 // ── Resilient fetch (auto-abort after ms) ──
 function tfetch(url, opts, ms) {
     ms = ms || 4000;

@@ -269,7 +269,7 @@ services:
       - radarr
       - docker-proxy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/api/pelicula/status || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8181/api/pelicula/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -302,6 +302,7 @@ services:
       - ./nginx/theme.css:/usr/share/nginx/html/theme.css:ro
       - ./nginx/service-overrides.css:/usr/share/nginx/html/service-overrides.css:ro
       - ./nginx/dashboard.js:/usr/share/nginx/html/dashboard.js:ro
+      - ./nginx/framework.js:/usr/share/nginx/html/framework.js:ro
       - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
       - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
       - ./nginx/import.html:/usr/share/nginx/html/import.html:ro
@@ -323,7 +324,7 @@ services:
       - procula
       - bazarr
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:80 || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
