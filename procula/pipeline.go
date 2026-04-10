@@ -175,6 +175,23 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		slog.Info("catalog skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 	}
 
+	// ── Stage 2.5: Await Subtitles ────────────────────────────────────────────────────────────
+	// Wait for Bazarr to deliver missing subtitle sidecars before generating
+	// dual-sub ASS files. The media is already watchable (Catalog Early ran).
+	if job, _ = q.Get(id); job.State == StateCancelled {
+		return
+	}
+	job, _ = q.Get(id)
+	if len(job.MissingSubs) > 0 {
+		_ = q.Update(id, func(j *Job) {
+			j.Stage = StageAwaitSubs
+			j.Progress = 0.41
+		})
+		job, _ = q.Get(id)
+		awaitSubtitles(ctx, q, job, settings, configDir)
+		job, _ = q.Get(id)
+	}
+
 	// ── Stage 3: Dual Subtitles ──────────────────────────────────────────
 	// Generate stacked ASS sidecar files (e.g. Movie.en-es.ass) before
 	// transcoding so Jellyfin picks them up in the late catalog refresh.
