@@ -164,7 +164,9 @@ func TestSyncQbtListenPort_CallsSetPreferences(t *testing.T) {
 	t.Cleanup(func() { qbtBaseURL = origURL })
 
 	s := &ServiceClients{client: &http.Client{}}
-	syncQbtListenPort(s, 51413)
+	if err := syncQbtListenPort(s, 51413); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	wantJSON := `{"listen_port":51413}`
 	if gotJSON != wantJSON {
@@ -178,5 +180,5 @@ func TestSyncQbtListenPort_ToleratesError(t *testing.T) {
 	t.Cleanup(func() { qbtBaseURL = origURL })
 
 	s := &ServiceClients{client: &http.Client{}}
-	syncQbtListenPort(s, 51413) // must not panic
+	_ = syncQbtListenPort(s, 51413) // must not panic
 }

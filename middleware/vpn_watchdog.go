@@ -131,14 +131,15 @@ func wdTick(port int, s wdInternalState) (wdInternalState, watchdogAction) {
 
 // syncQbtListenPort tells qBittorrent to listen on port via the preferences API.
 // Uses form encoding: POST /api/v2/app/setPreferences with json={"listen_port":N}
-func syncQbtListenPort(s *ServiceClients, port int) {
+func syncQbtListenPort(s *ServiceClients, port int) error {
 	prefs := fmt.Sprintf(`{"listen_port":%d}`, port)
 	if err := s.QbtPost("/api/v2/app/setPreferences", "json="+url.QueryEscape(prefs)); err != nil {
 		slog.Error("failed to sync qBittorrent listen port",
 			"component", "vpn_watchdog", "port", port, "error", err)
-		return
+		return err
 	}
 	slog.Info("synced qBittorrent listen port", "component", "vpn_watchdog", "port", port)
+	return nil
 }
 
 // ── Watchdog goroutine ─────────────────────────────────────────────────────────
@@ -161,7 +162,14 @@ func StartVPNWatchdog(s *ServiceClients) {
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
 	for range ticker.C {
-		port := fetchForwardedPort(client)
+		port, ok := fetchForwardedPort(client)
+		if !ok {
+			slog.Warn("failed to query gluetun port forwarding — skipping tick",
+				"component", "vpn_watchdog")
+			continue
+		}
+
+		prevPort := internal.lastKnownPort
 		newInternal, action := wdTick(port, internal)
 		internal = newInternal
 
@@ -170,18 +178,25 @@ func StartVPNWatchdog(s *ServiceClients) {
 		watchdogState.PortForwardStatus = string(internal.status)
 		watchdogState.ForwardedPort = internal.lastKnownPort
 		watchdogState.RestartAttempts = internal.restartAttempts
-		if action == wdActSync {
-			watchdogState.LastSyncedAt = time.Now()
-		}
 		watchdogMu.Unlock()
 
 		switch action {
 		case wdActSync:
-			syncQbtListenPort(s, port)
+			if err := syncQbtListenPort(s, port); err != nil {
+				// Sync failed — revert lastKnownPort so next tick retries
+				internal.lastKnownPort = prevPort
+			} else {
+				watchdogMu.Lock()
+				watchdogState.LastSyncedAt = time.Now()
+				watchdogMu.Unlock()
+			}
 		case wdActRestart:
 			slog.Warn("port forwarding unavailable after grace period — restarting VPN containers",
 				"component", "vpn_watchdog")
 			for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
+				if !isAllowedContainer(svc) {
+					continue
+				}
 				if err := dockerRestart(svc); err != nil {
 					slog.Error("vpn watchdog restart failed",
 						"component", "vpn_watchdog", "svc", svc, "error", err)
@@ -192,17 +207,18 @@ func StartVPNWatchdog(s *ServiceClients) {
 }
 
 // fetchForwardedPort queries gluetun for the currently forwarded port.
-// Returns 0 on any error or when no port is assigned.
-func fetchForwardedPort(client *http.Client) int {
+// Returns (port, true) on success — port may be 0 if forwarding is inactive.
+// Returns (0, false) on any transport/JSON error.
+func fetchForwardedPort(client *http.Client) (int, bool) {
 	body, ok := gluetunGet(client, "/v1/portforward")
 	if !ok {
-		return 0
+		return 0, false
 	}
 	var data struct {
 		Port int `json:"port"`
 	}
 	if json.Unmarshal(body, &data) != nil {
-		return 0
+		return 0, false
 	}
-	return data.Port
+	return data.Port, true
 }
