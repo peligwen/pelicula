@@ -205,6 +205,27 @@ func wireJellyfin(s *ServiceClients) {
 			s.mu.Unlock()
 			// Use the persistent key for all subsequent calls in this run.
 			token = apiKey
+
+			// On first boot, create the operator admin account while
+			// JELLYFIN_ADMIN_USER / JELLYFIN_PASSWORD are still in .env.
+			// jellyfinAuth(s) will use the API key we just stored on the struct.
+			if !wizardDone {
+				envMu.Lock()
+				credVars, credErr := parseEnvFile(envPath)
+				envMu.Unlock()
+				if credErr == nil {
+					adminUser := credVars["JELLYFIN_ADMIN_USER"]
+					adminPass := credVars["JELLYFIN_PASSWORD"]
+					if adminUser != "" && adminUser != jellyfinServiceUser && adminPass != "" {
+						if _, createErr := CreateJellyfinUser(s, adminUser, adminPass); createErr != nil {
+							slog.Warn("could not create operator admin account", "component", "autowire", "username", adminUser, "error", createErr)
+						} else {
+							slog.Info("operator admin account created", "component", "autowire", "username", adminUser)
+						}
+					}
+				}
+			}
+
 			// Persist to .env and clean up legacy password
 			envMu.Lock()
 			vars, readErr := parseEnvFile(envPath)
