@@ -99,7 +99,9 @@ func TestVPNStatusJSON_PortStatusField(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out map[string]any
-	json.Unmarshal(b, &out)
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
 	if out["port_status"] != "ok" {
 		t.Fatalf("port_status = %v, want \"ok\"", out["port_status"])
 	}

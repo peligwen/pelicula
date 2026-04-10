@@ -101,12 +101,16 @@ func queryVPNStatus() VPNStatus {
 		}
 	}
 
-	// Annotate port_status from watchdog state.
+	// Annotate port_status from watchdog state. The watchdog is the authority —
+	// transient states (grace, restarting, unknown) leave port_status empty.
 	ws := GetWatchdogState()
-	if ws.PortForwardStatus == string(wdDegraded) {
+	switch ws.PortForwardStatus {
+	case string(wdDegraded):
 		vpn.PortStatus = "degraded"
-	} else if vpn.Port > 0 {
-		vpn.PortStatus = "ok"
+	case string(wdSynced):
+		if vpn.Port > 0 {
+			vpn.PortStatus = "ok"
+		}
 	}
 
 	return vpn
