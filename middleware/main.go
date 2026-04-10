@@ -168,8 +168,9 @@ func main() {
 	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(handleLibraryScan)))
 	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(handleLibraryApply)))
 
-	// admin only: manual transcoding — list profiles, enqueue transcode jobs
+	// admin only: manual transcoding — list/create/update profiles, delete profile, enqueue transcode jobs
 	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(handleTranscodeProfiles)))
+	mux.Handle("/api/pelicula/transcode/profiles/{name}", auth.GuardAdmin(http.HandlerFunc(handleDeleteTranscodeProfile)))
 	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
 
 	// admin only: container control via docker-socket-proxy sidecar

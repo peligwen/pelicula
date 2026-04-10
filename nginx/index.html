@@ -536,6 +536,86 @@
                     </label>
                 </div>
 
+                <!-- Transcoding Profiles -->
+                <div class="settings-panel" id="st-profiles-panel">
+                    <div class="settings-panel-title" style="display:flex;align-items:center;justify-content:space-between">
+                        <span>Transcoding Profiles</span>
+                        <button class="sm-btn" onclick="installDefaultProfiles()">Install defaults</button>
+                    </div>
+                    <div id="st-profiles-list" class="st-profiles-list">Loading…</div>
+                    <div class="settings-panel-title" style="font-size:0.78rem;margin-top:1rem;margin-bottom:0.5rem">Add / edit profile</div>
+                    <div class="st-profile-form">
+                        <input type="hidden" id="pf-edit-original-name">
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Name</label>
+                            <input type="text" id="pf-name" class="settings-input" placeholder="My Profile">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Description</label>
+                            <input type="text" id="pf-desc" class="settings-input" placeholder="Optional description">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Trigger codecs</label>
+                            <input type="text" id="pf-codecs" class="settings-input" placeholder="hevc, h265, av1  (leave blank for any)">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Min height (px)</label>
+                            <input type="number" id="pf-minheight" class="settings-input" placeholder="0 = any" min="0">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Video codec</label>
+                            <select id="pf-vcodec" class="settings-input">
+                                <option value="libx264">H.264 (libx264)</option>
+                                <option value="libx265">H.265 (libx265)</option>
+                                <option value="copy">Copy (passthrough)</option>
+                            </select>
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Preset</label>
+                            <select id="pf-preset" class="settings-input">
+                                <option value="fast">fast</option>
+                                <option value="medium" selected>medium</option>
+                                <option value="slow">slow</option>
+                            </select>
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">CRF (quality)</label>
+                            <input type="number" id="pf-crf" class="settings-input" value="20" min="0" max="51">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Max height (px)</label>
+                            <input type="number" id="pf-maxheight" class="settings-input" placeholder="0 = no limit" min="0">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Audio codec</label>
+                            <select id="pf-acodec" class="settings-input">
+                                <option value="aac">AAC</option>
+                                <option value="ac3">AC3</option>
+                                <option value="copy">Copy</option>
+                            </select>
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Audio channels</label>
+                            <input type="number" id="pf-achannels" class="settings-input" placeholder="0 = keep original" min="0" max="8">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Output suffix</label>
+                            <input type="text" id="pf-suffix" class="settings-input" placeholder="-compat">
+                        </div>
+                        <div class="st-pf-row">
+                            <label class="st-pf-label">Enabled</label>
+                            <button class="toggle" id="pf-enabled" role="switch" aria-checked="true" onclick="toggleSetting(this)">
+                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                            </button>
+                        </div>
+                        <div class="st-pf-actions">
+                            <button class="sm-btn sm-btn-primary" onclick="saveProfile()">Save profile</button>
+                            <button class="sm-btn" onclick="clearProfileForm()" id="pf-cancel-btn" style="display:none">Cancel edit</button>
+                            <span id="st-profile-status" style="font-size:0.75rem;margin-left:0.5rem"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Subtitles -->
                 <div class="settings-panel">
                     <div class="settings-panel-title">Subtitles</div>

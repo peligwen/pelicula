@@ -1182,22 +1182,32 @@ type RetranscodeResult struct {
 	Errors []string `json:"errors,omitempty"`
 }
 
-// handleTranscodeProfiles proxies GET /api/procula/profiles so the import
-// wizard can list available transcode profiles without knowing Proculals internal URL.
+// handleTranscodeProfiles proxies GET and POST /api/procula/profiles.
+// GET lists all profiles; POST creates or updates a profile.
 func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	req, err := http.NewRequest(http.MethodGet, proculaURL+"/api/procula/profiles", nil)
+	var upstream *http.Request
+	var err error
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		upstream, err = http.NewRequest(http.MethodPost, proculaURL+"/api/procula/profiles", r.Body)
+		if err == nil {
+			upstream.Header.Set("Content-Type", "application/json")
+		}
+	} else {
+		upstream, err = http.NewRequest(http.MethodGet, proculaURL+"/api/procula/profiles", nil)
+	}
 	if err != nil {
 		writeError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		req.Header.Set("X-API-Key", key)
+		upstream.Header.Set("X-API-Key", key)
 	}
-	resp, err := services.client.Do(req)
+	resp, err := services.client.Do(upstream)
 	if err != nil {
 		writeError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -1208,6 +1218,34 @@ func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		slog.Warn("failed to stream profiles response", "component", "library", "error", err)
 	}
+}
+
+// handleDeleteTranscodeProfile proxies DELETE /api/procula/profiles/{name}.
+func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, "profile name required", http.StatusBadRequest)
+		return
+	}
+	upstream, err := http.NewRequest(http.MethodDelete, proculaURL+"/api/procula/profiles/"+url.PathEscape(name), nil)
+	if err != nil {
+		writeError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		upstream.Header.Set("X-API-Key", key)
+	}
+	resp, err := services.client.Do(upstream)
+	if err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.WriteHeader(resp.StatusCode)
 }
 
 // handleLibraryRetranscode accepts a list of library file paths and a profile

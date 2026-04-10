@@ -636,6 +636,42 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 }
 .settings-adv-link:hover { text-decoration: underline; }
 
+/* ── Small inline buttons (sm-btn) ─────────────────────────────────────── */
+.sm-btn {
+    display: inline-flex; align-items: center; padding: 0.3rem 0.75rem;
+    border-radius: 20px; border: 1.5px solid var(--border2);
+    background: var(--panel); color: var(--ink);
+    font-family: var(--font-display, 'Nunito', sans-serif);
+    font-size: 0.75rem; font-weight: 700; cursor: pointer;
+    transition: opacity 0.15s, border-color 0.15s;
+}
+.sm-btn:hover { opacity: 0.8; }
+.sm-btn-primary { background: var(--pink); color: #fff; border-color: var(--pink); }
+.sm-btn-danger { border-color: var(--danger, #e55); color: var(--danger, #e55); }
+.sm-btn-danger:hover { background: var(--danger, #e55); color: #fff; }
+
+/* ── Transcoding Profiles list ─────────────────────────────────────────── */
+.st-profiles-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.st-profile-row {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+    padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+}
+.st-profile-row:last-child { border-bottom: none; }
+.st-profile-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem; flex: 1; }
+.st-profile-name { font-size: 0.82rem; font-weight: 700; color: var(--ink); }
+.st-profile-badge { font-size: 0.65rem; font-weight: 700; padding: 0.1em 0.45em;
+    border-radius: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+.st-profile-badge.on { background: rgba(46,204,113,0.15); color: #27ae60; }
+.st-profile-badge.off { background: var(--border); color: var(--muted); }
+.st-profile-cond { font-size: 0.72rem; color: var(--muted); }
+.st-profile-desc { font-size: 0.72rem; color: var(--muted); width: 100%; }
+.st-profile-btns { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.st-profile-form { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+.st-pf-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+.st-pf-row:last-child { border-bottom: none; }
+.st-pf-label { font-size: 0.78rem; font-weight: 600; color: var(--ink); width: 110px; flex-shrink: 0; }
+.st-pf-actions { display: flex; align-items: center; gap: 0.5rem; padding-top: 0.5rem; }
+
 /* ── Job drawer ────────────────────────────────────────────────────────── */
 .drawer-backdrop {
     position: fixed; inset: 0; background: rgba(120,80,160,0.18);

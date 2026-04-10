@@ -78,6 +78,9 @@ func main() {
 	}
 	eventLog = el
 
+	// Seed default transcode profiles on first startup (no-op if profiles exist).
+	SeedDefaultProfiles(configDir)
+
 	// Single worker processes jobs sequentially
 	go RunWorker(q, configDir, peliculaAPI)
 	go RunStorageMonitor(configDir)
@@ -101,6 +104,8 @@ func main() {
 	mux.HandleFunc("GET /api/procula/settings", srv.handleGetSettings)
 	mux.HandleFunc("POST /api/procula/settings", requireAPIKey(srv.handleSaveSettings))
 	mux.HandleFunc("GET /api/procula/profiles", srv.handleListProfiles)
+	mux.HandleFunc("POST /api/procula/profiles", requireAPIKey(srv.handleSaveProfile))
+	mux.HandleFunc("DELETE /api/procula/profiles/{name}", requireAPIKey(srv.handleDeleteProfile))
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
 
@@ -300,6 +305,37 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		profiles = []TranscodeProfile{}
 	}
 	writeJSON(w, profiles)
+}
+
+func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var p TranscodeProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if p.Name == "" {
+		writeError(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if err := SaveProfile(s.configDir, p); err != nil {
+		writeError(w, "failed to save profile: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, p)
+}
+
+func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if err := DeleteProfile(s.configDir, name); err != nil {
+		writeError(w, "failed to delete profile: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleManualTranscode creates a transcoding-only job for an existing library file.

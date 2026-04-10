@@ -2239,6 +2239,7 @@ window.switchTab = window.switchTab || function(tab) {
     window.switchTab = function(tab) {
         origSwitch(tab);
         if (tab === 'settings' && !_settingsLoaded) loadSettingsTab();
+        if (tab === 'settings') loadProfilesPanel();
         if (tab === 'settings' && !arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
         // Storage tab: load import.js so the browse tree populates.
         // CSS shows storage-explorer-section whenever tab=storage, but import.js
@@ -2329,6 +2330,179 @@ window.saveSettingsTab = async function() {
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Save failed';
     }
+};
+
+// ── Transcoding Profiles ─────────────────
+// _profilesCache stores current profiles; edit/delete handlers use index to avoid
+// passing unsanitised data through inline event handlers.
+let _profilesCache = [];
+
+async function loadProfilesPanel() {
+    const listEl = document.getElementById('st-profiles-list');
+    if (!listEl) return;
+    try {
+        const res = await tfetch('/api/pelicula/transcode/profiles');
+        if (!res.ok) { listEl.textContent = 'Failed to load profiles'; return; }
+        const profiles = await res.json();
+        _profilesCache = profiles || [];
+        renderProfilesList(_profilesCache);
+    } catch (e) { listEl.textContent = 'Error loading profiles'; }
+}
+
+function renderProfilesList(profiles) {
+    const listEl = document.getElementById('st-profiles-list');
+    if (!listEl) return;
+    if (!profiles || !profiles.length) {
+        listEl.textContent = 'No profiles. Click \u201cInstall defaults\u201d or fill in the form below.';
+        return;
+    }
+    const rows = profiles.map((p, i) => {
+        const conds = [];
+        if (p.conditions?.codecs_include?.length) conds.push('codecs: ' + p.conditions.codecs_include.join(', '));
+        if (p.conditions?.min_height) conds.push('min height: ' + p.conditions.min_height + 'px');
+        const row = document.createElement('div');
+        row.className = 'st-profile-row';
+        const info = document.createElement('div');
+        info.className = 'st-profile-info';
+        info.append(Object.assign(document.createElement('span'), {className: 'st-profile-name', textContent: p.name}));
+        const badge = document.createElement('span');
+        badge.className = 'st-profile-badge ' + (p.enabled ? 'on' : 'off');
+        badge.textContent = p.enabled ? 'on' : 'off';
+        info.append(badge);
+        if (conds.length) {
+            const cond = document.createElement('span');
+            cond.className = 'st-profile-cond';
+            cond.textContent = '(' + conds.join(' \u00b7 ') + ')';
+            info.append(cond);
+        }
+        if (p.description) {
+            info.append(Object.assign(document.createElement('div'), {className: 'st-profile-desc', textContent: p.description}));
+        }
+        const btns = document.createElement('div');
+        btns.className = 'st-profile-btns';
+        const editBtn = document.createElement('button');
+        editBtn.className = 'sm-btn';
+        editBtn.textContent = 'Edit';
+        editBtn.addEventListener('click', () => editProfileByIdx(i));
+        const delBtn = document.createElement('button');
+        delBtn.className = 'sm-btn sm-btn-danger';
+        delBtn.textContent = 'Delete';
+        delBtn.addEventListener('click', () => deleteProfile(p.name));
+        btns.append(editBtn, delBtn);
+        row.append(info, btns);
+        return row;
+    });
+    listEl.replaceChildren(...rows);
+}
+
+function editProfileByIdx(idx) {
+    const p = _profilesCache[idx];
+    if (!p) return;
+    document.getElementById('pf-edit-original-name').value = p.name;
+    document.getElementById('pf-name').value = p.name || '';
+    document.getElementById('pf-desc').value = p.description || '';
+    document.getElementById('pf-codecs').value = (p.conditions?.codecs_include || []).join(', ');
+    document.getElementById('pf-minheight').value = p.conditions?.min_height || '';
+    document.getElementById('pf-vcodec').value = p.output?.video_codec || 'libx264';
+    document.getElementById('pf-preset').value = p.output?.video_preset || 'medium';
+    document.getElementById('pf-crf').value = p.output?.video_crf ?? 20;
+    document.getElementById('pf-maxheight').value = p.output?.max_height || '';
+    document.getElementById('pf-acodec').value = p.output?.audio_codec || 'aac';
+    document.getElementById('pf-achannels').value = p.output?.audio_channels || '';
+    document.getElementById('pf-suffix').value = p.output?.suffix || '';
+    setToggle('pf-enabled', p.enabled !== false);
+    const cancelBtn = document.getElementById('pf-cancel-btn');
+    if (cancelBtn) cancelBtn.style.display = '';
+    document.getElementById('pf-name').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+window.clearProfileForm = function() {
+    ['pf-edit-original-name','pf-name','pf-desc','pf-codecs','pf-minheight','pf-maxheight','pf-achannels','pf-suffix'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    document.getElementById('pf-vcodec').value = 'libx264';
+    document.getElementById('pf-preset').value = 'medium';
+    document.getElementById('pf-crf').value = 20;
+    document.getElementById('pf-acodec').value = 'aac';
+    setToggle('pf-enabled', true);
+    const cancelBtn = document.getElementById('pf-cancel-btn');
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    const statusEl = document.getElementById('st-profile-status');
+    if (statusEl) statusEl.textContent = '';
+};
+
+window.saveProfile = async function() {
+    const statusEl = document.getElementById('st-profile-status');
+    const name = document.getElementById('pf-name').value.trim();
+    if (!name) { if (statusEl) statusEl.textContent = 'Name is required'; return; }
+
+    const codecsRaw = document.getElementById('pf-codecs').value.trim();
+    const codecs = codecsRaw ? codecsRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+    const minH = parseInt(document.getElementById('pf-minheight').value) || 0;
+    const maxH = parseInt(document.getElementById('pf-maxheight').value) || 0;
+    const channels = parseInt(document.getElementById('pf-achannels').value) || 0;
+
+    const profile = {
+        name,
+        description: document.getElementById('pf-desc').value.trim(),
+        enabled: document.getElementById('pf-enabled')?.getAttribute('aria-checked') === 'true',
+        conditions: {
+            ...(codecs.length ? {codecs_include: codecs} : {}),
+            ...(minH ? {min_height: minH} : {}),
+        },
+        output: {
+            video_codec: document.getElementById('pf-vcodec').value,
+            video_preset: document.getElementById('pf-preset').value,
+            video_crf: parseInt(document.getElementById('pf-crf').value) || 20,
+            ...(maxH ? {max_height: maxH} : {}),
+            audio_codec: document.getElementById('pf-acodec').value,
+            ...(channels ? {audio_channels: channels} : {}),
+            suffix: document.getElementById('pf-suffix').value.trim(),
+        },
+    };
+
+    // If we renamed, delete the old profile first
+    const originalName = document.getElementById('pf-edit-original-name').value;
+    if (originalName && originalName !== name) {
+        await tfetch('/api/pelicula/transcode/profiles/' + encodeURIComponent(originalName), {method: 'DELETE'});
+    }
+
+    if (statusEl) statusEl.textContent = 'Saving\u2026';
+    try {
+        const res = await tfetch('/api/pelicula/transcode/profiles', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(profile),
+        });
+        if (res.ok) {
+            if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000); }
+            clearProfileForm();
+            loadProfilesPanel();
+        } else {
+            if (statusEl) statusEl.textContent = 'Save failed';
+        }
+    } catch (e) { if (statusEl) statusEl.textContent = 'Save failed'; }
+};
+
+async function deleteProfile(name) {
+    if (!confirm('Delete profile \u201c' + name + '\u201d?')) return;
+    try {
+        await tfetch('/api/pelicula/transcode/profiles/' + encodeURIComponent(name), {method: 'DELETE'});
+        loadProfilesPanel();
+    } catch (e) { /* ignore */ }
+}
+
+window.installDefaultProfiles = async function() {
+    const defaults = [
+        {name:'Compatibility 1080p',enabled:true,description:'Re-encode HEVC/AV1 to H.264 for broad device compatibility, capped at 1080p.',conditions:{codecs_include:['hevc','h265','av1']},output:{video_codec:'libx264',video_preset:'medium',video_crf:20,max_height:1080,audio_codec:'aac',audio_channels:2,suffix:'-compat'}},
+        {name:'Compatibility 720p',enabled:true,description:'Re-encode HEVC/AV1 to H.264 at 720p for mobile and older devices.',conditions:{codecs_include:['hevc','h265','av1']},output:{video_codec:'libx264',video_preset:'medium',video_crf:22,max_height:720,audio_codec:'aac',audio_channels:2,suffix:'-mobile'}},
+        {name:'Downscale 4K to 1080p',enabled:true,description:'Downscale 4K (2160p+) content to 1080p H.264 to save storage.',conditions:{min_height:2160},output:{video_codec:'libx264',video_preset:'medium',video_crf:20,max_height:1080,audio_codec:'copy',suffix:'-1080p'}},
+    ];
+    for (const p of defaults) {
+        await tfetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+    }
+    loadProfilesPanel();
 };
 
 // ── Event log ─────────────────────────────

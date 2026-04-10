@@ -37,6 +37,114 @@ type TranscodeOutput struct {
 	Suffix        string `json:"suffix"`                   // appended to output filename before extension
 }
 
+// defaultProfiles returns the 3 built-in starter profiles written on first startup.
+func defaultProfiles() []TranscodeProfile {
+	return []TranscodeProfile{
+		{
+			Name:        "Compatibility 1080p",
+			Enabled:     true,
+			Description: "Re-encode HEVC/AV1 to H.264 for broad device compatibility, capped at 1080p.",
+			Conditions:  TranscodeConditions{CodecsInclude: []string{"hevc", "h265", "av1"}},
+			Output: TranscodeOutput{
+				VideoCodec:    "libx264",
+				VideoPreset:   "medium",
+				VideoCRF:      20,
+				MaxHeight:     1080,
+				AudioCodec:    "aac",
+				AudioChannels: 2,
+				Suffix:        "-compat",
+			},
+		},
+		{
+			Name:        "Compatibility 720p",
+			Enabled:     true,
+			Description: "Re-encode HEVC/AV1 to H.264 at 720p for mobile and older devices.",
+			Conditions:  TranscodeConditions{CodecsInclude: []string{"hevc", "h265", "av1"}},
+			Output: TranscodeOutput{
+				VideoCodec:    "libx264",
+				VideoPreset:   "medium",
+				VideoCRF:      22,
+				MaxHeight:     720,
+				AudioCodec:    "aac",
+				AudioChannels: 2,
+				Suffix:        "-mobile",
+			},
+		},
+		{
+			Name:        "Downscale 4K to 1080p",
+			Enabled:     true,
+			Description: "Downscale 4K (2160p+) content to 1080p H.264 to save storage.",
+			Conditions:  TranscodeConditions{MinHeight: 2160},
+			Output: TranscodeOutput{
+				VideoCodec:  "libx264",
+				VideoPreset: "medium",
+				VideoCRF:    20,
+				MaxHeight:   1080,
+				AudioCodec:  "copy",
+				Suffix:      "-1080p",
+			},
+		},
+	}
+}
+
+// SeedDefaultProfiles writes the default profile JSON files if the profiles
+// directory exists but contains no .json files. Safe to call on every startup.
+func SeedDefaultProfiles(configDir string) {
+	dir := filepath.Join(configDir, "procula", "profiles")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			return // already has profiles
+		}
+	}
+	for _, p := range defaultProfiles() {
+		_ = saveProfile(dir, p)
+	}
+}
+
+// SaveProfile writes a single profile to disk, creating or overwriting the file.
+func SaveProfile(configDir string, p TranscodeProfile) error {
+	dir := filepath.Join(configDir, "procula", "profiles")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	return saveProfile(dir, p)
+}
+
+func saveProfile(dir string, p TranscodeProfile) error {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	filename := profileFilename(p.Name)
+	return os.WriteFile(filepath.Join(dir, filename), data, 0644)
+}
+
+// DeleteProfile removes a profile JSON file by name. Returns nil if not found.
+func DeleteProfile(configDir string, name string) error {
+	dir := filepath.Join(configDir, "procula", "profiles")
+	path := filepath.Join(dir, profileFilename(name))
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// profileFilename converts a profile name to a safe filename.
+func profileFilename(name string) string {
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, name)
+	return strings.ToLower(safe) + ".json"
+}
+
 // LoadProfiles reads all enabled profiles from /config/procula/profiles/*.json.
 func LoadProfiles(configDir string) ([]TranscodeProfile, error) {
 	dir := filepath.Join(configDir, "procula", "profiles")

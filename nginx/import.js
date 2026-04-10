@@ -719,7 +719,21 @@ async function loadRTProfiles() {
         if (!res.ok) { container.innerHTML = '<div class="no-items">Could not load profiles</div>'; return; }
         const profiles = await res.json();
         if (!profiles || !profiles.length) {
-            container.innerHTML = '<div class="no-items">No profiles installed. Run <code>./pelicula configure \u2192 Transcoding \u2192 Install defaults</code>.</div>';
+            const msg = document.createElement('div');
+            msg.className = 'no-items';
+            msg.textContent = 'No transcode profiles installed. ';
+            const btn = document.createElement('button');
+            btn.className = 'sm-btn sm-btn-primary';
+            btn.textContent = 'Install defaults';
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = 'Installing\u2026';
+                await apiFetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Compatibility 1080p',enabled:true,description:'Re-encode HEVC/AV1 to H.264 for broad device compatibility, capped at 1080p.',conditions:{codecs_include:['hevc','h265','av1']},output:{video_codec:'libx264',video_preset:'medium',video_crf:20,max_height:1080,audio_codec:'aac',audio_channels:2,suffix:'-compat'}})});
+                await apiFetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Compatibility 720p',enabled:true,description:'Re-encode HEVC/AV1 to H.264 at 720p for mobile and older devices.',conditions:{codecs_include:['hevc','h265','av1']},output:{video_codec:'libx264',video_preset:'medium',video_crf:22,max_height:720,audio_codec:'aac',audio_channels:2,suffix:'-mobile'}})});
+                await apiFetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Downscale 4K to 1080p',enabled:true,description:'Downscale 4K (2160p+) content to 1080p H.264 to save storage.',conditions:{min_height:2160},output:{video_codec:'libx264',video_preset:'medium',video_crf:20,max_height:1080,audio_codec:'copy',suffix:'-1080p'}})});
+                loadRTProfiles();
+            });
+            container.replaceChildren(msg, btn);
             return;
         }
         let html = '<div class="strategy-options">';
