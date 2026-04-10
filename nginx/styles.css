@@ -817,6 +817,11 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .vpn-kv { display: flex; flex-direction: column; gap: 0.12rem; }
 .vpn-k { font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-family: var(--font-body, 'Nunito Sans', sans-serif); }
 .vpn-v { font-size: 0.75rem; color: var(--periwinkle); font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; }
+.vpn-speedtest-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--border); }
+.vpn-speedtest-result { font-size: 0.78rem; font-weight: 700; font-family: var(--font-display, 'Nunito', sans-serif); }
+.vpn-st-green { color: #27ae60; }
+.vpn-st-yellow { color: #f39c12; }
+.vpn-st-red { color: var(--danger, #e55); }
 
 .sysinfo { padding: 0.85rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
 .sysinfo-row { display: grid; grid-template-columns: 80px 1fr; gap: 0.4rem; font-size: 0.75rem; }

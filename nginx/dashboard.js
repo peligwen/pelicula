@@ -718,6 +718,33 @@ async function checkVPN() {
 
 function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
 
+window.runSpeedTest = async function() {
+    const btn = document.getElementById('btn-speedtest');
+    const resultEl = document.getElementById('s-speedtest-result');
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing\u2026'; }
+    if (resultEl) resultEl.textContent = '';
+    try {
+        const res = await tfetch('/api/pelicula/speedtest', {method: 'POST'}, 35000);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (data.error) {
+            if (resultEl) { resultEl.textContent = 'Error: ' + data.error; resultEl.className = 'vpn-speedtest-result vpn-st-red'; }
+        } else {
+            const mbps = data.download_mbps || 0;
+            const color = mbps >= 25 ? 'vpn-st-green' : mbps >= 10 ? 'vpn-st-yellow' : 'vpn-st-red';
+            if (resultEl) {
+                resultEl.textContent = mbps.toFixed(1) + ' Mbps';
+                resultEl.className = 'vpn-speedtest-result ' + color;
+                resultEl.title = 'Tested ' + new Date(data.timestamp * 1000).toLocaleTimeString();
+            }
+        }
+    } catch (e) {
+        if (resultEl) { resultEl.textContent = 'Failed'; resultEl.className = 'vpn-speedtest-result vpn-st-red'; }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Test VPN Speed'; }
+    }
+};
+
 function fmtUptime(secs) {
     const s = Math.floor(secs);
     const d = Math.floor(s / 86400);

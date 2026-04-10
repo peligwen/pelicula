@@ -24,6 +24,10 @@ services:
       # from the VPN's public IP and get 401 (DisabledForLocalAddresses requires
       # local source IP to bypass API key auth).
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+      # HTTP proxy — lets other containers (pelicula-api) route test traffic
+      # through the VPN tunnel for speed diagnostics.
+      - HTTPPROXY=on
+      - HTTPPROXY_LISTENING_ADDRESS=:8888
     ports:
       # Torrent incoming connections
       - "6881:6881"
@@ -248,6 +252,7 @@ services:
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}
       - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - GLUETUN_PROXY_URL=${GLUETUN_PROXY_URL:-http://gluetun:8888}
     volumes:
       - ./.env:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
