@@ -738,6 +738,7 @@ async function checkVPN() {
         console.warn('[pelicula] VPN telemetry error:', e);
         setText('s-region', '\u2014');
         setText('s-port', '\u2014');
+        document.getElementById('s-port')?.classList.remove('vpn-v-error');
     }
 }
 
