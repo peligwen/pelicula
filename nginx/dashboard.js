@@ -1434,6 +1434,26 @@ function updateStaleBanner() {
 
 // ── Storage Explorer ──────────────────────────────────────────────────────────
 
+// Load import.js once. Sets _seLoaded immediately as a guard against
+// double-loading (e.g. when called from both switchTab and openStorageExplorer).
+function _ensureStorageExplorerLoaded() {
+    if (window._seLoaded) return;
+    window._seLoaded = true;
+    const s = document.createElement('script');
+    s.src = '/import.js';
+    s.onerror = () => {
+        window._seLoaded = false;
+        const tree = document.getElementById('browse-tree');
+        if (tree) {
+            const msg = document.createElement('div');
+            msg.className = 'no-items';
+            msg.textContent = 'Failed to load storage explorer. Try refreshing the page.';
+            tree.replaceChildren(msg);
+        }
+    };
+    document.head.appendChild(s);
+}
+
 function openStorageExplorer() {
     if (window.switchTab) switchTab('storage');
     const section = document.getElementById('storage-explorer-section');
@@ -1441,16 +1461,7 @@ function openStorageExplorer() {
         section.classList.remove('hidden');
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    if (!window._seLoaded) {
-        const s = document.createElement('script');
-        s.src = '/import.js';
-        s.onload = () => { window._seLoaded = true; };
-        s.onerror = () => {
-            const tree = document.getElementById('browse-tree');
-            if (tree) tree.innerHTML = '<div class="no-items">Failed to load storage explorer. Try refreshing the page.</div>';
-        };
-        document.head.appendChild(s);
-    }
+    _ensureStorageExplorerLoaded();
 }
 
 function closeStorageExplorer() {
@@ -2180,13 +2191,17 @@ window.switchTab = window.switchTab || function(tab) {
     document.body.dataset.tab = tab;
 };
 
-// Wrap switchTab to lazy-load settings when navigating there
+// Wrap switchTab to lazy-load content when navigating to tabs.
 (function() {
     const origSwitch = window.switchTab;
     window.switchTab = function(tab) {
         origSwitch(tab);
         if (tab === 'settings' && !_settingsLoaded) loadSettingsTab();
         if (tab === 'settings' && !arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
+        // Storage tab: load import.js so the browse tree populates.
+        // CSS shows storage-explorer-section whenever tab=storage, but import.js
+        // is only loaded on demand — without this, the tree stays "Loading directories...".
+        if (tab === 'storage') _ensureStorageExplorerLoaded();
     };
 })();
 
