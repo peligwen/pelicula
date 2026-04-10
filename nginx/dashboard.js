@@ -2270,3 +2270,53 @@ function formatBytes(b) {
     while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
     return n.toFixed(1) + ' ' + units[i];
 }
+
+// ── Theme ─────────────────────────────────────────────────────────────────
+function _isDarkActive() {
+    const t = document.documentElement.dataset.theme;
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function updateThemeIcon() {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    btn.textContent = _isDarkActive() ? '\u2600' : '\u263D'; // sun : crescent moon
+    btn.title = _isDarkActive() ? 'Switch to light mode' : 'Switch to dark mode';
+}
+
+function toggleTheme() {
+    const next = _isDarkActive() ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem('pelicula-theme', next);
+    updateThemeIcon();
+    _syncAppearanceRadio();
+}
+
+function setThemePref(pref) {
+    if (pref === 'system') {
+        delete document.documentElement.dataset.theme;
+        localStorage.removeItem('pelicula-theme');
+    } else {
+        document.documentElement.dataset.theme = pref;
+        localStorage.setItem('pelicula-theme', pref);
+    }
+    updateThemeIcon();
+}
+
+function _syncAppearanceRadio() {
+    const t = document.documentElement.dataset.theme || 'system';
+    const radio = document.querySelector('input[name="theme-pref"][value="' + t + '"]');
+    if (radio) radio.checked = true;
+}
+
+// Init theme icon on load and sync with system preference changes
+document.addEventListener('DOMContentLoaded', function() {
+    updateThemeIcon();
+    _syncAppearanceRadio();
+});
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+    updateThemeIcon();
+    _syncAppearanceRadio();
+});

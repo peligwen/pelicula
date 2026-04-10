@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/theme.css">
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/import.css">
+    <script>(function(){var t=localStorage.getItem('pelicula-theme');if(t)document.documentElement.dataset.theme=t;})()</script>
 </head>
 <body data-dashboard="1">
     <!-- Login overlay -->
@@ -57,6 +58,7 @@
                 <span class="titlebar-chip titlebar-chip-ok hidden" id="chip-health-ok"><span class="pip"></span><span id="chip-health-ok-text">all good!</span></span>
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
                 <span class="titlebar-chip titlebar-chip-err hidden" id="chip-health-err"><span class="pip"></span><span id="chip-health-err-text"></span></span>
+                <button class="theme-toggle" id="theme-toggle" title="Toggle theme" onclick="toggleTheme()"></button>
                 <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">&#9654; Watch</a>
                 <a href="/register/" class="register-btn" title="Register a new user">+ Register</a>
                 <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users" onclick="switchTab('users')"></button>
@@ -473,6 +475,28 @@
             <div class="section hidden" id="settings-section">
                 <div class="section-header">
                     <span>Settings</span>
+                </div>
+
+                <!-- Appearance -->
+                <div class="settings-panel">
+                    <div class="settings-panel-title">Appearance</div>
+                    <div class="settings-appearance-row">
+                        <label class="appearance-option">
+                            <input type="radio" name="theme-pref" value="system" onchange="setThemePref('system')">
+                            <span class="appearance-label">System</span>
+                            <span class="appearance-sub">Follow OS setting</span>
+                        </label>
+                        <label class="appearance-option">
+                            <input type="radio" name="theme-pref" value="light" onchange="setThemePref('light')">
+                            <span class="appearance-label">&#9788; Light</span>
+                            <span class="appearance-sub">Cotton Candy</span>
+                        </label>
+                        <label class="appearance-option">
+                            <input type="radio" name="theme-pref" value="dark" onchange="setThemePref('dark')">
+                            <span class="appearance-label">&#9790; Dark</span>
+                            <span class="appearance-sub">Starry Lavender</span>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- Pipeline toggles -->

@@ -44,12 +44,104 @@
   --gradient-cta:  linear-gradient(135deg, var(--pink) 0%, var(--periwinkle) 100%);
   --gradient-bar:  linear-gradient(90deg, var(--pink), var(--periwinkle));
   --gradient-foot: linear-gradient(90deg, var(--pink) 0%, var(--periwinkle) 100%);
+
+  /* Glass surfaces (masthead, tabbar) */
+  --glass:          rgba(255,255,255,0.92);
+  --glass2:         rgba(255,255,255,0.85);
+
+  /* Overlays */
+  --overlay:        rgba(42,31,53,0.45);
+  --login-backdrop: rgba(248,240,251,0.7);
+
+  /* Warning text (amber family) */
+  --warn:      #c09820;
+  --warn-dim:  #b08820;
+  --warn-deep: #9a7810;
+
+  /* Shadow base */
+  --shadow-color: rgba(180,140,220,0.12);
 }
 
-/* Backdrop radial gradient applied to body — component stylesheets inherit tokens */
+/* Dark Starry Foggy Lavender — auto-activates with system dark mode */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:      #0e0a18;
+    --panel:   #1a1428;
+    --panel2:  #221a34;
+
+    --ink:     #e8e0f0;
+    --muted:   #8878a0;
+    --faint:   #504068;
+
+    --border:  rgba(140,100,200,0.18);
+    --border2: rgba(140,100,200,0.30);
+
+    --pink:       #f070b0;
+    --pink-l:     rgba(240,112,176,0.12);
+    --periwinkle: #8898f8;
+    --peri-l:     rgba(136,152,248,0.12);
+    --mint:       #50d8b8;
+    --mint-l:     rgba(80,216,184,0.10);
+    --peach:      #ff9070;
+    --peach-l:    rgba(255,144,112,0.10);
+    --lemon:      #fce050;
+    --lemon-l:    rgba(252,224,80,0.10);
+
+    --glass:          rgba(18,12,28,0.85);
+    --glass2:         rgba(18,12,28,0.78);
+    --overlay:        rgba(0,0,0,0.65);
+    --login-backdrop: rgba(10,6,18,0.82);
+
+    --warn:      #e8c040;
+    --warn-dim:  #d0a830;
+    --warn-deep: #c8a030;
+
+    --shadow-color: rgba(0,0,0,0.35);
+  }
+}
+
+/* Manual dark override — wins via specificity */
+html[data-theme="dark"] {
+  --bg:      #0e0a18;
+  --panel:   #1a1428;
+  --panel2:  #221a34;
+
+  --ink:     #e8e0f0;
+  --muted:   #8878a0;
+  --faint:   #504068;
+
+  --border:  rgba(140,100,200,0.18);
+  --border2: rgba(140,100,200,0.30);
+
+  --pink:       #f070b0;
+  --pink-l:     rgba(240,112,176,0.12);
+  --periwinkle: #8898f8;
+  --peri-l:     rgba(136,152,248,0.12);
+  --mint:       #50d8b8;
+  --mint-l:     rgba(80,216,184,0.10);
+  --peach:      #ff9070;
+  --peach-l:    rgba(255,144,112,0.10);
+  --lemon:      #fce050;
+  --lemon-l:    rgba(252,224,80,0.10);
+
+  --glass:          rgba(18,12,28,0.85);
+  --glass2:         rgba(18,12,28,0.78);
+  --overlay:        rgba(0,0,0,0.65);
+  --login-backdrop: rgba(10,6,18,0.82);
+
+  --warn:      #e8c040;
+  --warn-dim:  #d0a830;
+  --warn-deep: #c8a030;
+
+  --shadow-color: rgba(0,0,0,0.35);
+}
+
+/* ── Body backgrounds ────────────────────────────────────────────────────── */
 body {
   background: var(--bg);
 }
+
+/* Light — soft ambient glow */
 body::before {
   content: '';
   position: fixed; inset: 0;
@@ -58,4 +150,102 @@ body::before {
     radial-gradient(ellipse 70% 50% at 110% -10%, rgba(112,128,232,0.12) 0%, transparent 55%),
     radial-gradient(ellipse 50% 50% at 50% 50%, rgba(64,200,168,0.06) 0%, transparent 60%);
   pointer-events: none; z-index: 0;
+}
+
+/* Dark — nebula glow + starfield */
+@media (prefers-color-scheme: dark) {
+  body:not(html[data-theme="light"] body)::before {
+    background:
+      radial-gradient(ellipse 80% 60% at -10% 110%, rgba(240,112,176,0.10) 0%, transparent 55%),
+      radial-gradient(ellipse 70% 50% at 110% -10%, rgba(136,152,248,0.12) 0%, transparent 55%),
+      radial-gradient(ellipse 60% 60% at 50% 50%, rgba(80,216,184,0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 40% at 80% 80%, rgba(240,112,176,0.06) 0%, transparent 50%);
+  }
+}
+html[data-theme="dark"] body::before {
+  background:
+    radial-gradient(ellipse 80% 60% at -10% 110%, rgba(240,112,176,0.10) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 110% -10%, rgba(136,152,248,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 60% at 50% 50%, rgba(80,216,184,0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 80% 80%, rgba(240,112,176,0.06) 0%, transparent 50%);
+}
+
+/* Star field — tiled dot pattern, dark mode only */
+@media (prefers-color-scheme: dark) {
+  body:not(html[data-theme="light"] body)::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(1.2px 1.2px at  8%  12%, rgba(255,255,255,0.30), transparent),
+      radial-gradient(1px   1px   at 23%  55%, rgba(200,180,255,0.22), transparent),
+      radial-gradient(1.5px 1.5px at 37%   8%, rgba(255,255,255,0.18), transparent),
+      radial-gradient(1px   1px   at 52%  78%, rgba(220,200,255,0.25), transparent),
+      radial-gradient(1.2px 1.2px at 68%  33%, rgba(255,255,255,0.28), transparent),
+      radial-gradient(1px   1px   at 81%  91%, rgba(180,160,240,0.20), transparent),
+      radial-gradient(1.5px 1.5px at 93%  18%, rgba(255,255,255,0.22), transparent),
+      radial-gradient(1px   1px   at 15%  88%, rgba(210,190,255,0.18), transparent),
+      radial-gradient(1px   1px   at 44%  44%, rgba(255,255,255,0.14), transparent),
+      radial-gradient(1.2px 1.2px at 76%  67%, rgba(255,255,255,0.26), transparent),
+      radial-gradient(1px   1px   at  5%  62%, rgba(180,160,240,0.16), transparent),
+      radial-gradient(1.5px 1.5px at 88%  48%, rgba(255,255,255,0.20), transparent),
+      radial-gradient(1px   1px   at 31%  29%, rgba(220,200,255,0.18), transparent),
+      radial-gradient(1px   1px   at 62%   5%, rgba(255,255,255,0.24), transparent),
+      radial-gradient(1.2px 1.2px at 97%  82%, rgba(200,180,255,0.20), transparent),
+      radial-gradient(1px   1px   at 19%  41%, rgba(255,255,255,0.16), transparent),
+      radial-gradient(1.5px 1.5px at 57%  96%, rgba(255,255,255,0.22), transparent),
+      radial-gradient(1px   1px   at 84%  14%, rgba(180,160,240,0.18), transparent),
+      radial-gradient(1px   1px   at 41%  72%, rgba(255,255,255,0.14), transparent),
+      radial-gradient(1.2px 1.2px at 73%  51%, rgba(220,200,255,0.20), transparent),
+      radial-gradient(1px   1px   at  2%  35%, rgba(255,255,255,0.16), transparent),
+      radial-gradient(1px   1px   at 90%  70%, rgba(200,180,255,0.14), transparent),
+      radial-gradient(1.5px 1.5px at 26%   3%, rgba(255,255,255,0.26), transparent),
+      radial-gradient(1px   1px   at 49%  58%, rgba(180,160,240,0.16), transparent),
+      radial-gradient(1px   1px   at 11%  79%, rgba(255,255,255,0.20), transparent),
+      radial-gradient(1.2px 1.2px at 66%  22%, rgba(220,200,255,0.18), transparent),
+      radial-gradient(1px   1px   at 35%  85%, rgba(255,255,255,0.14), transparent),
+      radial-gradient(1.5px 1.5px at 79%  39%, rgba(255,255,255,0.22), transparent),
+      radial-gradient(1px   1px   at 54%  17%, rgba(180,160,240,0.18), transparent),
+      radial-gradient(1px   1px   at 98%   5%, rgba(255,255,255,0.20), transparent);
+    background-size: 320px 320px;
+    pointer-events: none; z-index: 0;
+    opacity: 0.7;
+  }
+}
+html[data-theme="dark"] body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    radial-gradient(1.2px 1.2px at  8%  12%, rgba(255,255,255,0.30), transparent),
+    radial-gradient(1px   1px   at 23%  55%, rgba(200,180,255,0.22), transparent),
+    radial-gradient(1.5px 1.5px at 37%   8%, rgba(255,255,255,0.18), transparent),
+    radial-gradient(1px   1px   at 52%  78%, rgba(220,200,255,0.25), transparent),
+    radial-gradient(1.2px 1.2px at 68%  33%, rgba(255,255,255,0.28), transparent),
+    radial-gradient(1px   1px   at 81%  91%, rgba(180,160,240,0.20), transparent),
+    radial-gradient(1.5px 1.5px at 93%  18%, rgba(255,255,255,0.22), transparent),
+    radial-gradient(1px   1px   at 15%  88%, rgba(210,190,255,0.18), transparent),
+    radial-gradient(1px   1px   at 44%  44%, rgba(255,255,255,0.14), transparent),
+    radial-gradient(1.2px 1.2px at 76%  67%, rgba(255,255,255,0.26), transparent),
+    radial-gradient(1px   1px   at  5%  62%, rgba(180,160,240,0.16), transparent),
+    radial-gradient(1.5px 1.5px at 88%  48%, rgba(255,255,255,0.20), transparent),
+    radial-gradient(1px   1px   at 31%  29%, rgba(220,200,255,0.18), transparent),
+    radial-gradient(1px   1px   at 62%   5%, rgba(255,255,255,0.24), transparent),
+    radial-gradient(1.2px 1.2px at 97%  82%, rgba(200,180,255,0.20), transparent),
+    radial-gradient(1px   1px   at 19%  41%, rgba(255,255,255,0.16), transparent),
+    radial-gradient(1.5px 1.5px at 57%  96%, rgba(255,255,255,0.22), transparent),
+    radial-gradient(1px   1px   at 84%  14%, rgba(180,160,240,0.18), transparent),
+    radial-gradient(1px   1px   at 41%  72%, rgba(255,255,255,0.14), transparent),
+    radial-gradient(1.2px 1.2px at 73%  51%, rgba(220,200,255,0.20), transparent),
+    radial-gradient(1px   1px   at  2%  35%, rgba(255,255,255,0.16), transparent),
+    radial-gradient(1px   1px   at 90%  70%, rgba(200,180,255,0.14), transparent),
+    radial-gradient(1.5px 1.5px at 26%   3%, rgba(255,255,255,0.26), transparent),
+    radial-gradient(1px   1px   at 49%  58%, rgba(180,160,240,0.16), transparent),
+    radial-gradient(1px   1px   at 11%  79%, rgba(255,255,255,0.20), transparent),
+    radial-gradient(1.2px 1.2px at 66%  22%, rgba(220,200,255,0.18), transparent),
+    radial-gradient(1px   1px   at 35%  85%, rgba(255,255,255,0.14), transparent),
+    radial-gradient(1.5px 1.5px at 79%  39%, rgba(255,255,255,0.22), transparent),
+    radial-gradient(1px   1px   at 54%  17%, rgba(180,160,240,0.18), transparent),
+    radial-gradient(1px   1px   at 98%   5%, rgba(255,255,255,0.20), transparent);
+  background-size: 320px 320px;
+  pointer-events: none; z-index: 0;
+  opacity: 0.7;
 }

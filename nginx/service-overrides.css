@@ -20,7 +20,7 @@ body, .page-content-wrapper, .container-fluid, .page, #app {
 /* Navbar / topbar */
 .navbar, .topnav, header.navbar, .navbar-nav,
 .page-toolbar, .seriesmonitor-toolbar, .movie-toolbar {
-  background: rgba(255,255,255,0.92) !important;
+  background: var(--glass) !important;
   backdrop-filter: blur(16px) !important;
   border-bottom: 1px solid var(--border2) !important;
   color: var(--ink) !important;
@@ -68,7 +68,7 @@ body, .page-content-wrapper, .container-fluid, .page, #app {
 
 /* Success state */
 .label-success, .badge-success { background: var(--mint-l) !important; color: var(--mint) !important; border-radius: 20px !important; }
-.label-warning, .badge-warning { background: var(--lemon-l) !important; color: #c09820 !important; border-radius: 20px !important; }
+.label-warning, .badge-warning { background: var(--lemon-l) !important; color: var(--warn) !important; border-radius: 20px !important; }
 .label-danger,  .badge-danger  { background: var(--pink-l) !important; color: var(--pink) !important; border-radius: 20px !important; }
 
 /* Inputs */
