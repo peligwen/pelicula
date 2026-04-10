@@ -5,6 +5,7 @@ const store = PeliculaFW.initStore({
     username: '',
     authEnabled: false,
 });
+const { html, raw } = PeliculaFW;
 
 // ── Resilient fetch (auto-abort after ms) ──
 function tfetch(url, opts, ms) {
@@ -178,36 +179,71 @@ async function doSearch(q) {
 }
 function buildDetailChips(r) {
     const chips = [];
-    if (r.rating > 0) chips.push(`<span class="search-detail-chip search-detail-rating">&#9733; ${r.rating.toFixed(1)}</span>`);
-    if (r.certification) chips.push(`<span class="search-detail-chip">${esc(r.certification)}</span>`);
+    if (r.rating > 0) chips.push(html`<span class="search-detail-chip search-detail-rating">&#9733; ${r.rating.toFixed(1)}</span>`);
+    if (r.certification) chips.push(html`<span class="search-detail-chip">${r.certification}</span>`);
     if (r.runtime > 0) {
         const label = r.type === 'series' ? `${r.runtime} min/ep` : `${r.runtime} min`;
-        chips.push(`<span class="search-detail-chip">${label}</span>`);
+        chips.push(html`<span class="search-detail-chip">${raw(label)}</span>`);
     }
     if (r.network) {
-        const networkLabel = r.seasonCount > 0 ? `${esc(r.network)} &middot; ${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}` : esc(r.network);
-        chips.push(`<span class="search-detail-chip">${networkLabel}</span>`);
+        const networkLabel = r.seasonCount > 0
+            ? html`${r.network} &middot; ${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}`
+            : html`${r.network}`;
+        chips.push(html`<span class="search-detail-chip">${networkLabel}</span>`);
     } else if (r.seasonCount > 0) {
-        chips.push(`<span class="search-detail-chip">${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}</span>`);
+        chips.push(html`<span class="search-detail-chip">${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}</span>`);
     }
-    if (r.genres && r.genres.length) chips.push(`<span class="search-detail-chip">${r.genres.slice(0, 3).map(esc).join(' &middot; ')}</span>`);
-    return chips.join('');
+    if (r.genres && r.genres.length) {
+        const genreText = r.genres.slice(0, 3).map(g => html`${g}`).join(' &middot; ');
+        chips.push(html`<span class="search-detail-chip">${raw(genreText)}</span>`);
+    }
+    return chips.map(c => c.str).join('');
 }
 function renderResultCard(r) {
-    const poster = r.poster ? `<img src="${r.poster}" alt="">` : '<div class="no-poster"></div>';
+    const poster = r.poster
+        ? html`<img src="${r.poster}" alt="">`
+        : raw('<div class="no-poster"></div>');
     const badge = r.type === 'movie' ? 'Movie' : 'Series';
     const tmdbId = r.tmdbId || 0;
     const tvdbId = r.tvdbId || 0;
     const added = r.added;
     const isManager = store.get('role') === 'manager' || store.get('role') === 'admin';
-    const stopProp = 'event.stopPropagation();';
-    // Managers and admins get the direct Add button; viewers get a Request button.
     const actionBtn = isManager
-        ? `<button class="${added ? 'search-add added' : 'search-add'}" ${added ? 'disabled' : ''} data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" onclick="${stopProp}addMedia(this.dataset.type, this.dataset.type==='movie'?parseInt(this.dataset.tmdb):parseInt(this.dataset.tvdb), this)">${added ? 'Added' : 'Add'}</button>`
-        : `<button class="search-request" data-type="${esc(r.type)}" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-title="${esc(r.title)}" data-year="${r.year||0}" data-poster="${esc(r.poster||'')}" onclick="${stopProp}submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true">Request</button>`;
+        ? html`<button
+                class="${added ? 'search-add added' : 'search-add'}"
+                ${added ? raw('disabled') : raw('')}
+                data-type="${r.type}"
+                data-tmdb="${tmdbId}"
+                data-tvdb="${tvdbId}"
+                data-testid="search-add-btn"
+                onclick="event.stopPropagation();addMedia(this.dataset.type,this.dataset.type==='movie'?parseInt(this.dataset.tmdb):parseInt(this.dataset.tvdb),this)"
+              >${added ? 'Added' : 'Add'}</button>`
+        : html`<button
+                class="search-request"
+                data-type="${r.type}"
+                data-tmdb="${tmdbId}"
+                data-tvdb="${tvdbId}"
+                data-title="${r.title}"
+                data-year="${r.year || 0}"
+                data-poster="${r.poster || ''}"
+                data-testid="search-request-btn"
+                onclick="event.stopPropagation();submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true"
+              >Request</button>`;
     const detailChips = buildDetailChips(r);
-    const detail = detailChips ? `<div class="search-detail">${detailChips}</div>` : '';
-    return `<div class="search-result" onclick="this.classList.toggle('expanded')">${poster}<div class="search-info"><div class="search-title">${esc(r.title)}</div><div class="search-meta">${r.year || ''} &middot; ${badge}</div><div class="search-overview">${esc(r.overview || '')}</div>${detail}</div>${actionBtn}</div>`;
+    return html`
+        <div class="search-card" data-testid="search-result-card" data-tmdb="${tmdbId}" data-type="${r.type}"
+             onclick="showMediaDetail(${tmdbId},${tvdbId},'${r.type}')">
+            <div class="search-poster">${poster}</div>
+            <div class="search-info">
+                <div class="search-title">${r.title}</div>
+                <div class="search-meta">
+                    <span class="search-year">${r.year || ''}</span>
+                    <span class="search-badge">${badge}</span>
+                    ${raw(detailChips)}
+                </div>
+            </div>
+            <div class="search-actions">${actionBtn}</div>
+        </div>`.str;
 }
 function renderResults(results, collapsed) {
     if (!results.length) {
