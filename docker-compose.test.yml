@@ -16,6 +16,7 @@ services:
 
   # ── VPN stub ─────────────────────────────────────────────────────────────
   gluetun:
+    profiles: []  # override [vpn] profile so the stub starts without --profile vpn
     image: alpine:3.20
     container_name: pelicula-test-gluetun
     entrypoint:
@@ -40,9 +41,11 @@ services:
 
   # ── Container name overrides (prevent conflicts with production stack) ────
   qbittorrent:
+    profiles: []  # override [vpn] profile
     container_name: pelicula-test-qbittorrent
 
   prowlarr:
+    profiles: []  # override [vpn] profile
     container_name: pelicula-test-prowlarr
 
   sonarr:
