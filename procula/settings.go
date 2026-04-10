@@ -23,7 +23,7 @@ type PipelineSettings struct {
 	DirectURL          string   `json:"direct_url,omitempty"`
 	StorageWarningPct  float64  `json:"storage_warning_pct"`  // emit warning notification above this % (default: 85)
 	StorageCriticalPct float64  `json:"storage_critical_pct"` // emit critical notification above this % (default: 95)
-	SubAcquireTimeout  int      `json:"sub_acquire_timeout_min"` // minutes to wait for Bazarr (0 = use default)
+	SubAcquireTimeout  int      `json:"sub_acquire_timeout_min"` // minutes to wait for Bazarr before proceeding (default: 30)
 }
 
 // GetSettings returns the pipeline settings from the DB, falling back to defaults.

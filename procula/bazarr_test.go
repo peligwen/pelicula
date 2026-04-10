@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -61,7 +62,7 @@ func TestBazarrSearchSubtitles_Movie(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = r
-		capturedBody, _ = io_readAll(r.Body)
+		capturedBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -111,7 +112,7 @@ func TestBazarrSearchSubtitles_Episode(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = r
-		capturedBody, _ = io_readAll(r.Body)
+		capturedBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -222,17 +223,24 @@ func writeTestAPIKey(t *testing.T, configDir, apiKey string) {
 	}
 }
 
-// io_readAll is a local alias to avoid importing io in the test file while
-// keeping the test readable. It drains an io.Reader into a byte slice.
-func io_readAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
-	var buf []byte
-	tmp := make([]byte, 512)
-	for {
-		n, err := r.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if err != nil {
-			break
-		}
+func TestBazarrSearchSubtitles_UnknownArrType(t *testing.T) {
+	// No HTTP request should be made for an unknown arr type.
+	dir := t.TempDir()
+	writeTestAPIKey(t, dir, "any-key")
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	old := bazarrURL
+	bazarrURL = srv.URL
+	t.Cleanup(func() { bazarrURL = old })
+
+	job := &Job{ID: "j1", Source: JobSource{ArrType: "unknown"}}
+	bazarrSearchSubtitles(context.Background(), dir, job)
+	if called {
+		t.Error("expected no HTTP call for unknown arr_type")
 	}
-	return buf, nil
 }

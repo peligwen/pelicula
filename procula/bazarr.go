@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,7 +26,8 @@ func readBazarrAPIKey(configDir string) (string, error) {
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "apikey") {
+		rest := strings.TrimPrefix(line, "apikey")
+		if len(rest) == 0 || rest[0] == '=' || rest[0] == ' ' || rest[0] == '\t' {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
 				if key := strings.TrimSpace(parts[1]); key != "" {
@@ -89,6 +91,7 @@ func bazarrSearchSubtitles(ctx context.Context, configDir string, job *Job) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
 		slog.Warn("bazarr: subtitle search returned error status", "component", "bazarr", "status", resp.StatusCode)
 		return
 	}
