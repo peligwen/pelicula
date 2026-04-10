@@ -63,5 +63,8 @@ services:
   bazarr:
     container_name: pelicula-test-bazarr
 
+  docker-proxy:
+    container_name: pelicula-test-docker-proxy
+
   nginx:
     container_name: pelicula-test-nginx
