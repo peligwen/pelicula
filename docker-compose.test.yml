@@ -53,6 +53,7 @@ services:
 
   jellyfin:
     container_name: pelicula-test-jellyfin
+    ports: []  # suppress 7359:7359/udp LAN discovery — conflicts with production stack
 
   procula:
     container_name: pelicula-test-procula
