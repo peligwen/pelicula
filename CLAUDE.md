@@ -65,6 +65,23 @@ Remote Jellyfin access (Peligrosa) is opt-in — see PELIGROSA.md.
 - **qBittorrent v5** renamed pause/resume to stop/start — middleware uses the v5 endpoints
 - All volume paths in `docker-compose.yml` are env vars — never hardcode paths
 
+## Bug Fixing
+
+- Before editing, confirm which side of the stack (frontend/backend/infra) should own the change. When a fix could go either way (e.g., JSON key mismatches, data format differences), ask rather than assume.
+
+## Debugging
+
+- For infrastructure/networking issues (Docker, VPN routing, API connectivity), check network topology and container routing first — before diving into code. Connectivity failures in this stack are more often config/infra than code bugs.
+
+## Refactoring
+
+- When replacing a pattern across files, exhaustively grep with multiple search terms (different indentation, aliasing, method chaining) to catalog every instance before editing.
+
+## Git & Commits
+
+- Commit changes in logical chunks as you go — don't accumulate large uncommitted diffs.
+- Group related changes into focused commits; never bundle unrelated changes.
+
 ## More Detail In
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compose overlays, middleware startup/auto-wiring, config seeding + `enforce_arr_auth()`, platform detection, nginx file map
