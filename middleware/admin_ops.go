@@ -132,6 +132,26 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// handleVPNRestart restarts the VPN stack (gluetun, qbittorrent, prowlarr).
+// qBittorrent and Prowlarr run on gluetun's network namespace and must be
+// restarted alongside it.
+// POST /api/pelicula/admin/vpn/restart
+func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var errs []string
+	for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
+		if err := dockerRestart(svc); err != nil {
+			slog.Warn("vpn restart: container error",
+				"component", "admin_ops", "svc", svc, "error", err)
+			errs = append(errs, svc+": "+err.Error())
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true, "errors": errs})
+}
+
 // handleServiceLogs returns recent log lines for a named container.
 // GET /api/pelicula/admin/logs?svc=<name>&tail=<n>  (default 200, max 500)
 func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
