@@ -172,6 +172,7 @@ services:
       - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
     volumes:
       - ${CONFIG_DIR}/procula:/config
+      - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${WORK_DIR}/downloads:/downloads:ro
       - ${LIBRARY_DIR}/movies:/movies
       - ${LIBRARY_DIR}/tv:/tv
