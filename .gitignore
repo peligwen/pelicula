@@ -17,3 +17,6 @@ docs/superpowers/
 .superpowers/
 .env.bak*
 .worktrees/
+node_modules/
+tests/playwright/report/
+test-results/

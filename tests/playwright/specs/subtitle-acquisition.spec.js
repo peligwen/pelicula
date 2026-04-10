@@ -2,6 +2,8 @@
 const { test, expect } = require('@playwright/test');
 const { jellyfinAuth, searchJellyfin, waitForJobState, fireImportWebhook } = require('../helpers/api');
 
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:7399';
+
 const TITLE = 'Night of the Living Dead';
 const YEAR = 1968;
 // Path as seen by middleware container
@@ -46,7 +48,7 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         let sawAwaitSubs = false;
 
         while (Date.now() < awaitSubsDeadline) {
-            const res = await request.get('http://localhost:7399/api/procula/jobs');
+            const res = await request.get(`${BASE}/api/procula/jobs`);
             if (res.ok()) {
                 const jobs = await res.json();
                 const job = jobs.find(j =>
