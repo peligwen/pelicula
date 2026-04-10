@@ -455,7 +455,7 @@ function confirmBlocklist() {
     dlCancel(hash, category, name, true, reason);
 }
 function formatSpeed(bps) { if (bps > 1048576) return (bps/1048576).toFixed(1)+' MB/s'; if (bps > 1024) return (bps/1024).toFixed(0)+' KB/s'; if (bps > 0) return bps+' B/s'; return 'idle'; }
-function formatSize(b) { if (b > 1099511627776) return (b/1099511627776).toFixed(1)+' TB'; if (b > 1073741824) return (b/1073741824).toFixed(1)+' GB'; if (b > 1048576) return (b/1048576).toFixed(0)+' MB'; return (b/1024).toFixed(0)+' KB'; }
+function formatSize(b) { if (!b) return '0 B'; const u=['B','KB','MB','GB','TB']; let i=0,n=b; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(1)+' '+u[i]; }
 function formatETA(s) { if (s > 86400) return Math.floor(s/86400)+'d'; if (s > 3600) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m'; if (s > 60) return Math.floor(s/60)+'m'; return s+'s'; }
 
 // ── Services ──────────────────────────────
@@ -2190,7 +2190,7 @@ window.openJobDrawer = async function(jobId) {
         if (j.source) {
             let fileRows = '';
             if (j.source.path) fileRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Path</span><span class="drawer-kv-val" style="word-break:break-all">${j.source.path}</span></div>`.str;
-            if (j.source.size) fileRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Size</span><span class="drawer-kv-val">${formatBytes(j.source.size)}</span></div>`.str;
+            if (j.source.size) fileRows += html`<div class="drawer-kv"><span class="drawer-kv-key">Size</span><span class="drawer-kv-val">${formatSize(j.source.size)}</span></div>`.str;
             drawerHtml += html`<div class="drawer-section"><div class="drawer-section-title">File</div>${raw(fileRows)}</div>`.str;
         }
         // Transcode info
@@ -2390,13 +2390,6 @@ async function loadEventLog(page, filter) {
     }
 }
 
-function formatBytes(b) {
-    if (!b) return '0 B';
-    const units = ['B','KB','MB','GB','TB'];
-    let i = 0; let n = b;
-    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-    return n.toFixed(1) + ' ' + units[i];
-}
 
 // ── Theme ─────────────────────────────────────────────────────────────────
 function _isDarkActive() {

@@ -130,7 +130,7 @@ func buildStorageReport() StorageReport {
 		if !exists {
 			total := int64(stat.Blocks) * int64(stat.Bsize)
 			avail := int64(stat.Bavail) * int64(stat.Bsize)
-			used := total - int64(stat.Bfree)*int64(stat.Bsize)
+			used := total - avail
 
 			var usedPct float64
 			if total > 0 {
