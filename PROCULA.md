@@ -40,7 +40,7 @@ Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives t
 
 Procula runs as a single Go binary with FFmpeg installed in the container image (Alpine + FFmpeg). No external Go dependencies (stdlib only).
 
-Bazarr (subtitle acquisition) is planned but not yet shipped — see ROADMAP.md.
+Bazarr (subtitle acquisition) is integrated — see the Await Subs stage below.
 
 ## Container Definition
 
@@ -180,7 +180,7 @@ ffmpeg -i input.mkv -af loudnorm=I=-14:TP=-2:LRA=7 ...
 
 **2d. Subtitle handling**
 - Detect embedded subtitle tracks via FFprobe
-- If none found for configured languages, flag for Bazarr (planned — see ROADMAP.md); Bazarr auto-discovers from Sonarr/Radarr via its own polling
+- If none found for configured languages, flags them in `missing_subs`; the Await Subs stage then kicks Bazarr and waits for sidecars
 
 ### Stage 3: Catalog
 
@@ -257,7 +257,7 @@ Add a **Processing** section between Downloads and Services:
 |       +-- "Movies: 1.2 TB / 4 TB" with fill bar
 |       +-- "TV: 800 GB / 4 TB" with fill bar
 |       +-- growth rate + time-to-full estimate
-+-- Services (add Procula card; Bazarr card planned)
++-- Services (Procula card, Bazarr card)
 ```
 
 The dashboard polls `GET /api/pelicula/processing` on the same 15-second refresh cycle.

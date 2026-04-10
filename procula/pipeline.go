@@ -181,7 +181,6 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	job, _ = q.Get(id)
 	if len(job.MissingSubs) > 0 {
 		_ = q.Update(id, func(j *Job) {
 			j.Stage = StageAwaitSubs
@@ -260,12 +259,13 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	job, _ = q.Get(id)
 
 	// ── Stage 5: Catalog (late) ───────────────────────────────────────────
-	// Trigger a second refresh if any sidecar was written (dual-sub ASS or
-	// transcoded alternate) so the new file appears in Jellyfin's pickers.
+	// Trigger a second refresh if any sidecar was written (dual-sub ASS,
+	// transcoded alternate, or Bazarr-delivered subtitles) so the new file
+	// appears in Jellyfin's pickers.
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	if settings.CatalogEnabled && (len(job.TranscodeOutputs) > 0 || len(job.DualSubOutputs) > 0) {
+	if settings.CatalogEnabled && (len(job.TranscodeOutputs) > 0 || len(job.DualSubOutputs) > 0 || len(job.SubsAcquired) > 0) {
 		_ = q.Update(id, func(j *Job) { j.Progress = 0.95 })
 		job, _ = q.Get(id)
 		CatalogLate(job, peliculaAPI)

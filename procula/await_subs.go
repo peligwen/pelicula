@@ -30,6 +30,9 @@ func awaitSubtitles(ctx context.Context, q *Queue, job *Job, settings PipelineSe
 	if timeout <= 0 {
 		timeout = 30 * time.Minute
 	}
+	// deadline uses real time.Now() so it is a fixed wall-clock point.
+	// The check (nowFn().After(deadline)) uses the overridable clock so tests
+	// can advance it without waiting real time.
 	deadline := time.Now().Add(timeout)
 
 	// remaining tracks langs not yet acquired
