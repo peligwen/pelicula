@@ -1254,3 +1254,37 @@ details[open] .add-user-summary::before { content: '− '; }
     color: #FF9800;
     font-weight: 600;
 }
+
+/* ── VPN port-forward warning banner ───────────────────────────────────── */
+.vpn-port-warn-banner {
+    padding: 0.6rem 1rem;
+    background: rgba(224, 80, 80, 0.08);
+    border: 1px solid rgba(224, 80, 80, 0.25);
+    border-radius: 6px;
+    font-size: 0.82rem;
+    color: #e05050;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.vpn-port-warn-banner button {
+    background: rgba(224, 80, 80, 0.12);
+    border: 1px solid rgba(224, 80, 80, 0.3);
+    color: #e05050;
+    border-radius: 4px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+.vpn-port-warn-banner button:hover { background: rgba(224, 80, 80, 0.2); }
+.vpn-port-warn-banner button:disabled { opacity: 0.5; cursor: default; }
+.vpn-port-warn-banner .banner-dismiss {
+    margin-left: auto;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.1rem 0.4rem;
+}
+.vpn-v-error { color: #e05050 !important; }

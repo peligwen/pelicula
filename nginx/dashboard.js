@@ -691,28 +691,112 @@ document.getElementById('log-modal')?.addEventListener('click', (e) => {
 });
 
 // ── VPN Telemetry ─────────────────────────
+let _vpnBannerDismissed = false;
+
 async function checkVPN() {
     try {
-        const [ipResult, portResult] = await Promise.allSettled([
+        const [ipResult, portResult, healthResult] = await Promise.allSettled([
             tfetch('/api/vpn/v1/publicip/ip'),
-            tfetch('/api/vpn/v1/portforward')
+            tfetch('/api/vpn/v1/portforward'),
+            tfetch('/api/pelicula/health')
         ]);
+
+        // Region
         const ipRes = ipResult.status === 'fulfilled' ? ipResult.value : null;
-        const portRes = portResult.status === 'fulfilled' ? portResult.value : null;
         if (ipRes && ipRes.ok) {
             const data = await ipRes.json();
             setText('s-region', data.country || '\u2014');
         } else if (!ipRes) {
             throw new Error('VPN timeout');
         }
-        if (portRes && portRes.ok) {
-            const pd = await portRes.json();
-            setText('s-port', pd.port || '\u2014');
+
+        // Port forwarding status from middleware watchdog
+        let portDegraded = false;
+        if (healthResult.status === 'fulfilled' && healthResult.value.ok) {
+            const hd = await healthResult.value.json();
+            portDegraded = hd.vpn?.port_status === 'degraded';
         }
+
+        // Port display — show error text when degraded, numeric port otherwise
+        const portEl = document.getElementById('s-port');
+        if (portDegraded) {
+            if (portEl) {
+                portEl.textContent = 'No forwarding';
+                portEl.classList.add('vpn-v-error');
+            }
+        } else {
+            if (portEl) portEl.classList.remove('vpn-v-error');
+            const portRes = portResult.status === 'fulfilled' ? portResult.value : null;
+            if (portRes && portRes.ok) {
+                const pd = await portRes.json();
+                setText('s-port', pd.port || '\u2014');
+            }
+        }
+
+        updateVPNPortBanner(portDegraded);
     } catch (e) {
         console.warn('[pelicula] VPN telemetry error:', e);
         setText('s-region', '\u2014');
         setText('s-port', '\u2014');
+    }
+}
+
+function updateVPNPortBanner(degraded) {
+    const bannerId = 'vpn-port-warn-banner';
+    let banner = document.getElementById(bannerId);
+    if (!degraded) {
+        _vpnBannerDismissed = false; // reset so banner re-shows if port degrades again later
+        if (banner) banner.remove();
+        return;
+    }
+    if (_vpnBannerDismissed || banner) return; // already showing or dismissed this session
+
+    // Build banner using safe DOM methods (no innerHTML).
+    banner = document.createElement('div');
+    banner.id = bannerId;
+    banner.className = 'vpn-port-warn-banner';
+
+    const msg = document.createTextNode(
+        'Port forwarding is unavailable \u2014 download speeds will be limited. '
+    );
+    banner.appendChild(msg);
+
+    const restartBtn = document.createElement('button');
+    restartBtn.textContent = 'Restart VPN';
+    restartBtn.addEventListener('click', function() { restartVPN(restartBtn); });
+    banner.appendChild(restartBtn);
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'banner-dismiss';
+    dismissBtn.textContent = '\u00d7';
+    dismissBtn.addEventListener('click', function() {
+        _vpnBannerDismissed = true;
+        banner.remove();
+    });
+    banner.appendChild(dismissBtn);
+
+    const pipelineSection = document.getElementById('pipeline-section');
+    if (pipelineSection) {
+        pipelineSection.insertAdjacentElement('beforebegin', banner);
+    } else {
+        (document.querySelector('.main-content') || document.body).prepend(banner);
+    }
+}
+
+async function restartVPN(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Restarting\u2026';
+    try {
+        const res = await tfetch('/api/pelicula/admin/vpn/restart', { method: 'POST' }, 35000);
+        if (res && res.ok) {
+            btn.textContent = 'Restarted';
+        } else {
+            btn.textContent = 'Failed';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
     }
 }
 
