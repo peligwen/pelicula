@@ -173,6 +173,10 @@ func main() {
 	mux.Handle("/api/pelicula/transcode/profiles/{name}", auth.GuardAdmin(http.HandlerFunc(handleDeleteTranscodeProfile)))
 	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
 
+	// admin only: subtitle re-acquisition
+	mux.Handle("/api/pelicula/library/resub", auth.GuardAdmin(http.HandlerFunc(handleLibraryResub)))
+	mux.Handle("/api/pelicula/procula/jobs/{id}/resub", auth.GuardAdmin(http.HandlerFunc(handleJobResub)))
+
 	// admin only: container control via docker-socket-proxy sidecar
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))

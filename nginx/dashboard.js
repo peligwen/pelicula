@@ -1137,6 +1137,10 @@ function renderJobCard(j) {
     const cancelBtn = (j.state === 'queued' || j.state === 'processing' || j.state === 'failed')
         ? html`<button class="dl-btn cancel" title="Cancel" data-job-id="${j.id}" onclick="cancelJobFromBtn(this)">&#x2715;</button>`.str
         : '';
+    // Show re-search subs button on completed/failed jobs that have arr_type set
+    const resubBtn = (j.state === 'done' || j.state === 'failed') && j.source?.arr_type
+        ? html`<button class="dl-btn" title="Re-search subtitles" data-job-id="${j.id}" onclick="resubFromBtn(this)" style="font-size:0.7rem;padding:0.2rem 0.4rem">CC</button>`.str
+        : '';
     const viewLogLink = html`<button class="dl-btn" onclick="openJobDrawer('${j.id}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`.str;
 
     let subsBadge = '';
@@ -1175,7 +1179,7 @@ function renderJobCard(j) {
             <div class="download-actions">
                 <span class="proc-badge ${stateClass}">${stageName}</span>
                 ${raw(subsBadge)}
-                ${raw(retryBtn)}${raw(cancelBtn)}${raw(viewLogLink)}
+                ${raw(resubBtn)}${raw(retryBtn)}${raw(cancelBtn)}${raw(viewLogLink)}
             </div>
         </div>
         <div class="download-bar-bg"><div class="download-bar ${barClass}" style="width:${pct}%"></div></div>
@@ -1202,6 +1206,15 @@ async function cancelJob(id) {
 }
 
 function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
+
+async function resubJob(id) {
+    try {
+        const res = await tfetch(`/api/pelicula/procula/jobs/${id}/resub`, {method: 'POST'});
+        if (!res.ok) console.warn('[pelicula] resub failed:', res.status);
+    } catch (e) { console.warn('[pelicula] resub error:', e); }
+}
+
+function resubFromBtn(btn) { resubJob(btn.dataset.jobId); }
 
 // ── Pipeline board ────────────────────────
 const LANE_BADGE = {

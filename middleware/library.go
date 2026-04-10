@@ -1304,3 +1304,123 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, result)
 }
 
+// handleJobResub proxies POST /api/procula/jobs/{id}/resub — re-triggers
+// Bazarr subtitle search for an existing pipeline job.
+func handleJobResub(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, "job id required", http.StatusBadRequest)
+		return
+	}
+	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/jobs/"+url.PathEscape(id)+"/resub", nil)
+	if err != nil {
+		writeError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		upstream.Header.Set("X-API-Key", key)
+	}
+	resp, err := services.client.Do(upstream)
+	if err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body) //nolint:errcheck
+}
+
+// handleLibraryResub looks up a media file in Radarr/Sonarr by path and
+// triggers Bazarr subtitle search via Procula.
+// Accepts POST with body {"path": "/movies/..."}.
+func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	clean := filepath.Clean(req.Path)
+	if !isUnderPrefixes(clean, []string{"/movies", "/tv"}) {
+		writeError(w, "path not under /movies or /tv", http.StatusBadRequest)
+		return
+	}
+
+	sonarrKey, radarrKey, _ := services.Keys()
+
+	// Try Radarr first.
+	if radarrKey != "" {
+		data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie?path="+url.QueryEscape(clean))
+		if err == nil {
+			var movies []map[string]any
+			if json.Unmarshal(data, &movies) == nil {
+				for _, m := range movies {
+					if id, ok := m["id"].(float64); ok && id > 0 {
+						sendSubSearch(w, r, "radarr", int(id), 0)
+						return
+					}
+				}
+			}
+		}
+	}
+
+	// Fall back to Sonarr: look up by episode file path.
+	if sonarrKey != "" {
+		data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/episodefile?path="+url.QueryEscape(clean))
+		if err == nil {
+			var epFiles []map[string]any
+			if json.Unmarshal(data, &epFiles) == nil {
+				for _, ef := range epFiles {
+					seriesID, _ := ef["seriesId"].(float64)
+					epIDs, _ := ef["episodeIds"].([]any)
+					if seriesID > 0 && len(epIDs) > 0 {
+						epID, _ := epIDs[0].(float64)
+						sendSubSearch(w, r, "sonarr", int(seriesID), int(epID))
+						return
+					}
+				}
+			}
+		}
+	}
+
+	writeError(w, "file not found in Radarr or Sonarr", http.StatusNotFound)
+}
+
+// sendSubSearch calls Procula's subtitle search endpoint for the given arr item.
+func sendSubSearch(w http.ResponseWriter, r *http.Request, arrType string, arrID, episodeID int) {
+	payload, _ := json.Marshal(map[string]any{
+		"arr_type":   arrType,
+		"arr_id":     arrID,
+		"episode_id": episodeID,
+	})
+	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/subtitles/search", bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	upstream.Header.Set("Content-Type", "application/json")
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		upstream.Header.Set("X-API-Key", key)
+	}
+	resp, err := services.client.Do(upstream)
+	if err != nil {
+		writeError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body) //nolint:errcheck
+}
+

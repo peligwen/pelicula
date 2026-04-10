@@ -297,6 +297,14 @@ function updateActionBar() {
     const btnTranscode = document.getElementById('btn-transcode');
     btnTranscode.disabled = !allInLibrary;
     btnTranscode.title = allInLibrary ? '' : 'Select only files inside /movies or /tv to transcode';
+
+    // Re-search Subs: enabled for single file selections inside library roots
+    const btnResub = document.getElementById('btn-resub');
+    if (btnResub) {
+        const singleFile = state.selected.length === 1 && !state.selected[0].isDir;
+        btnResub.disabled = !(singleFile && allInLibrary);
+        btnResub.title = singleFile && allInLibrary ? '' : 'Select a single media file inside /movies or /tv';
+    }
 }
 
 function clearSelection() {
@@ -803,6 +811,30 @@ function renderRTResult(result) {
     }
     content.innerHTML = html;
     document.getElementById('rt-apply-nav').classList.remove('hidden');
+}
+
+// ── Re-search Subtitles action ────────────────────────────────────────────────
+
+async function onResubClick() {
+    const file = state.selected.find(s => !s.isDir);
+    if (!file) return;
+    const btn = document.getElementById('btn-resub');
+    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
+    try {
+        const res = await apiFetch('/api/pelicula/library/resub', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: file.path}),
+        });
+        if (res.ok) {
+            if (btn) { btn.textContent = 'CC Triggered \u2713'; setTimeout(() => { btn.textContent = 'CC Re-search Subs'; btn.disabled = false; }, 3000); }
+        } else {
+            const err = await res.json().catch(() => ({}));
+            if (btn) { btn.textContent = 'CC ' + (err.error || 'Not found'); setTimeout(() => { btn.textContent = 'CC Re-search Subs'; btn.disabled = false; }, 3000); }
+        }
+    } catch (e) {
+        if (btn) { btn.textContent = 'CC Error'; setTimeout(() => { btn.textContent = 'CC Re-search Subs'; btn.disabled = false; }, 3000); }
+    }
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
