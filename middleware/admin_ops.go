@@ -149,6 +149,11 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, svc+": "+err.Error())
 		}
 	}
+	result := "ok"
+	if len(errs) > 0 {
+		result = "partial"
+	}
+	auditLog(r, "vpn_restart", "gluetun+qbittorrent+prowlarr", result)
 	writeJSON(w, map[string]any{"ok": true, "errors": errs})
 }
 
