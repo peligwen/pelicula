@@ -21,3 +21,5 @@ docs/superpowers/
 node_modules/
 tests/playwright/report/
 test-results/
+.playwright-mcp/
+/*.png
