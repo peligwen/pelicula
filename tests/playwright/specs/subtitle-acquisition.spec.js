@@ -88,8 +88,6 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         // ── 6. Verify completed card in UI ─────────────────────────
         await page.reload();
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
-        await page.waitForTimeout(5000);
-
         const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
         await expect(completedCards).toContainText(TITLE, { timeout: 15_000 });
 

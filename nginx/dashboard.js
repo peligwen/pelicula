@@ -183,7 +183,7 @@ function buildDetailChips(r) {
     if (r.certification) chips.push(html`<span class="search-detail-chip">${r.certification}</span>`);
     if (r.runtime > 0) {
         const label = r.type === 'series' ? `${r.runtime} min/ep` : `${r.runtime} min`;
-        chips.push(html`<span class="search-detail-chip">${raw(label)}</span>`);
+        chips.push(html`<span class="search-detail-chip">${label}</span>`);
     }
     if (r.network) {
         const networkLabel = r.seasonCount > 0
@@ -194,7 +194,7 @@ function buildDetailChips(r) {
         chips.push(html`<span class="search-detail-chip">${r.seasonCount} season${r.seasonCount !== 1 ? 's' : ''}</span>`);
     }
     if (r.genres && r.genres.length) {
-        const genreText = r.genres.slice(0, 3).map(g => html`${g}`).join(' &middot; ');
+        const genreText = r.genres.slice(0, 3).map(g => html`${g}`.str).join(' &middot; ');
         chips.push(html`<span class="search-detail-chip">${raw(genreText)}</span>`);
     }
     return chips.map(c => c.str).join('');
@@ -252,11 +252,11 @@ function renderResults(results, collapsed) {
         return;
     }
     const items = results.slice(0, 10);
-    let html = items.map(r => renderResultCard(r)).join('');
+    let markup = items.map(r => renderResultCard(r)).join('');
     if (collapsed && items.length > 1) {
-        html += `<div class="search-show-more" onclick="expandResults(); event.stopPropagation();">Show <span class="count">${items.length - 1}</span> more result${items.length > 2 ? 's' : ''}</div>`;
+        markup += `<div class="search-show-more" onclick="expandResults(); event.stopPropagation();">Show <span class="count">${items.length - 1}</span> more result${items.length > 2 ? 's' : ''}</div>`;
     }
-    searchResults.innerHTML = html;
+    searchResults.innerHTML = markup;
     searchResults.className = collapsed ? 'search-results collapsed' : 'search-results visible';
 }
 function expandResults() {

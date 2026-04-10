@@ -123,8 +123,6 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         // ── 12. Verify completed card appears in UI ─────────────────
         await page.reload();
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
-        await page.waitForTimeout(5000);
-
         const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
         await expect(completedCards).toContainText(TEST_TITLE, { timeout: 15_000 });
 

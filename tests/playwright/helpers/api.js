@@ -2,7 +2,7 @@
 // Shared API helpers for Playwright specs.
 // All functions accept a Playwright `request` fixture (APIRequestContext).
 
-const BASE = 'http://localhost:7399';
+const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:7399';
 const JF_AUTH_HEADER = 'MediaBrowser Client="PeliculaTest", Device="playwright", DeviceId="pelicula-playwright", Version="1.0"';
 
 /**

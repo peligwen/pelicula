@@ -7,10 +7,10 @@ module.exports = defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,      // stack is shared; run sequentially
   retries: 0,
-  reporter: [['list'], ['html', { outputFolder: 'tests/playwright/report', open: 'never' }]],
+  reporter: [['list'], ['html', { outputFolder: './report', open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:7399',
-    trace: 'on-first-retry',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:7399',
+    trace: 'retain-on-failure',
     headless: true,
   },
   projects: [
