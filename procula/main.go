@@ -243,7 +243,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var settings PipelineSettings
+	// Start from current settings so partial payloads (e.g. only storage
+	// thresholds, or only pipeline toggles) don't zero out unrelated fields.
+	settings := GetSettings(s.db)
 	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
