@@ -109,7 +109,7 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
 
         // ── 9. Close modal ─────────────────────────────────────────
         await page.locator('[data-testid="apply-nav"] button.import-btn.primary').click();
-        await page.waitForSelector('[data-testid="import-modal"].hidden', { timeout: 5_000 });
+        await page.locator('[data-testid="import-modal"]').waitFor({ state: 'hidden', timeout: 5_000 });
 
         // ── 10. Watch pipeline section ─────────────────────────────
         // Switch to the pipeline tab — pipeline-section is only visible on "coming" tab

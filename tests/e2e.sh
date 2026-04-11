@@ -693,8 +693,12 @@ except Exception:
             fi
         fi
 
-        # Fixture 2: Night of the Living Dead for subtitle-acquisition spec
-        local pw_notld_file="$test_work_dir/downloads/Night.of.the.Living.Dead.1968.mkv"
+        # Fixture 2: Night of the Living Dead for subtitle-acquisition spec.
+        # Place the file in /movies (Jellyfin's library root) so the Jellyfin refresh
+        # fired by CatalogEarly actually makes the movie visible in the library.
+        local pw_notld_dir="$test_library_dir/movies/Night of the Living Dead (1968)"
+        local pw_notld_file="$pw_notld_dir/Night.of.the.Living.Dead.1968.mkv"
+        mkdir -p "$pw_notld_dir"
         if [[ "$pw_ffmpeg_ok" == "true" ]]; then
             if command -v ffmpeg &>/dev/null; then
                 ffmpeg -y \
@@ -713,7 +717,7 @@ except Exception:
                     -c:a aac -b:a 64k \
                     -metadata title="Night of the Living Dead" \
                     -metadata year="1968" \
-                    "/downloads/Night.of.the.Living.Dead.1968.mkv" 2>/dev/null || pw_ffmpeg_ok=false
+                    "/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv" 2>/dev/null || pw_ffmpeg_ok=false
             fi
         fi
 
@@ -725,9 +729,10 @@ except Exception:
             # Pre-fire Night of the Living Dead import webhook from inside Docker
             # (nginx IP-restricts /api/pelicula/hooks/import to internal networks;
             # Playwright runs on the host and can't call it directly through nginx)
+            # Path uses /movies so CatalogEarly's Jellyfin refresh picks it up.
             info "Pre-firing Night of the Living Dead import webhook..."
             $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
-                --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/downloads"},"movieFile":{"path":"/downloads/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
+                --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
                 --header='Content-Type: application/json' \
                 'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
 
