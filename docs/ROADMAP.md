@@ -17,8 +17,7 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md) for the full threat model and current surface.
 
 - [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
-- [x] **[Peligrosa] `middleware/peligrosa/` subpackage** — deferred. The current random-token + SQLite pattern is already secure (256-bit entropy); the extraction is organizational hygiene, not a security gap. Revisit if a new auth feature creates a natural seam.
-- [x] **[Peligrosa] Jellyfin auth** — `PELICULA_AUTH=jellyfin` (now the only auth mode): credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed.
+- [x] **[Peligrosa] Jellyfin auth** — `PELICULA_AUTH=jellyfin`: credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed. `off` mode still present, deprecated pending removal alongside the `middleware/peligrosa/` subpackage extraction.
 - [x] **[Peligrosa] Remote role capping** — defense-in-depth: the remote nginx vhost injects `X-Pelicula-Remote: true`; middleware caps effective role to `viewer` regardless of stored role. Prevents credential escalation via the remote vhost.
 - [x] **[Peligrosa] Open LAN registration** — optional `PELICULA_OPEN_REGISTRATION` setting: `/register` without a token creates a Jellyfin viewer account. LAN-only, rate-limited, always viewer role.
 - [x] **[Peligrosa] First-admin password** — setup wizard generates `JELLYFIN_PASSWORD` and prints admin credentials after ``pelicula up``.
