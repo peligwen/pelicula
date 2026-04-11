@@ -1,6 +1,10 @@
 package main
 
-import "database/sql"
+import (
+	"database/sql"
+
+	"pelicula-api/clients"
+)
 
 // peligrosaDeps bundles the dependencies needed by handlers that span
 // multiple peligrosa-scope stores. It is constructed once in main() and
@@ -13,9 +17,9 @@ type peligrosaDeps struct {
 	Auth     *Auth
 	Invites  *InviteStore
 	Requests *RequestStore
-	Jellyfin JellyfinClient
+	Jellyfin clients.JellyfinClient
 }
 
-func newPeligrosaDeps(db *sql.DB, auth *Auth, invites *InviteStore, requests *RequestStore, jf JellyfinClient) *peligrosaDeps {
+func newPeligrosaDeps(db *sql.DB, auth *Auth, invites *InviteStore, requests *RequestStore, jf clients.JellyfinClient) *peligrosaDeps {
 	return &peligrosaDeps{DB: db, Auth: auth, Invites: invites, Requests: requests, Jellyfin: jf}
 }

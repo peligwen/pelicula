@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"strings"
 	"time"
@@ -66,13 +67,13 @@ type InviteWithState struct {
 // SQLite handles concurrency; no additional mutex is needed.
 type InviteStore struct {
 	db       *sql.DB
-	jellyfin JellyfinClient
+	jellyfin clients.JellyfinClient
 }
 
 // NewInviteStore creates an InviteStore backed by db.
 // jc may be nil when the store is used in contexts that never call Redeem
 // (e.g. export/import tests).
-func NewInviteStore(db *sql.DB, jc JellyfinClient) *InviteStore {
+func NewInviteStore(db *sql.DB, jc clients.JellyfinClient) *InviteStore {
 	return &InviteStore{db: db, jellyfin: jc}
 }
 

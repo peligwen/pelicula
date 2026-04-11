@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"strings"
 	"time"
@@ -26,25 +27,7 @@ const jellyfinServiceUser = "pelicula-internal"
 // ErrPasswordRequired is returned by CreateJellyfinUser when password is empty.
 var ErrPasswordRequired = errors.New("password is required")
 
-// JellyfinLoginResult holds the fields Peligrosa needs after authenticating a
-// user against Jellyfin's /Users/AuthenticateByName endpoint.
-type JellyfinLoginResult struct {
-	UserID          string
-	Username        string
-	IsAdministrator bool
-	AccessToken     string
-}
-
-// JellyfinClient is the subset of Jellyfin operations that peligrosa-scope
-// code needs. A concrete *jellyfinHTTPClient wraps the existing package-level
-// helpers. Consumers depend on this interface so peligrosa can live in a
-// subpackage without importing the main package.
-type JellyfinClient interface {
-	AuthenticateByName(username, password string) (*JellyfinLoginResult, error)
-	CreateUser(username, password string) (string, error)
-}
-
-// jellyfinHTTPClient is the production implementation of JellyfinClient.
+// jellyfinHTTPClient is the production implementation of clients.JellyfinClient.
 // It forwards to the existing package-level helpers which already handle
 // URL construction, header auth, and error wrapping.
 type jellyfinHTTPClient struct {
@@ -52,13 +35,13 @@ type jellyfinHTTPClient struct {
 	services   *ServiceClients
 }
 
-// NewJellyfinHTTPClient returns a JellyfinClient backed by the given http.Client
+// NewJellyfinHTTPClient returns a clients.JellyfinClient backed by the given http.Client
 // (for authenticate calls) and ServiceClients (for user CRUD that needs API key auth).
-func NewJellyfinHTTPClient(hc *http.Client, s *ServiceClients) JellyfinClient {
+func NewJellyfinHTTPClient(hc *http.Client, s *ServiceClients) clients.JellyfinClient {
 	return &jellyfinHTTPClient{httpClient: hc, services: s}
 }
 
-func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*JellyfinLoginResult, error) {
+func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*clients.JellyfinLoginResult, error) {
 	return jellyfinAuthenticateByName(c.httpClient, username, password)
 }
 
@@ -69,7 +52,7 @@ func (c *jellyfinHTTPClient) CreateUser(username, password string) (string, erro
 // jellyfinAuthenticateByName authenticates username/password against Jellyfin.
 // Uses the package-level jellyfinURL so tests can point it at an httptest.Server.
 // Returns a *jellyfinHTTPError (with StatusCode 401) for bad credentials.
-func jellyfinAuthenticateByName(client *http.Client, username, password string) (*JellyfinLoginResult, error) {
+func jellyfinAuthenticateByName(client *http.Client, username, password string) (*clients.JellyfinLoginResult, error) {
 	payload, err := json.Marshal(map[string]string{"Username": username, "Pw": password})
 	if err != nil {
 		return nil, err
@@ -110,7 +93,7 @@ func jellyfinAuthenticateByName(client *http.Client, username, password string) 
 	if result.User.Id == "" || result.AccessToken == "" {
 		return nil, fmt.Errorf("incomplete Jellyfin auth response")
 	}
-	return &JellyfinLoginResult{
+	return &clients.JellyfinLoginResult{
 		UserID:          result.User.Id,
 		Username:        result.User.Name,
 		IsAdministrator: result.User.Policy.IsAdministrator,

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"strings"
 	"time"
@@ -65,10 +66,10 @@ func (r *MediaRequest) isTerminal() bool {
 // SQLite handles concurrency; no additional mutex is needed.
 type RequestStore struct {
 	db        *sql.DB
-	fulfiller Fulfiller
+	fulfiller clients.Fulfiller
 }
 
-func NewRequestStore(db *sql.DB, fulfiller Fulfiller) *RequestStore {
+func NewRequestStore(db *sql.DB, fulfiller clients.Fulfiller) *RequestStore {
 	return &RequestStore{db: db, fulfiller: fulfiller}
 }
 

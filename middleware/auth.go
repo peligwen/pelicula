@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 )
 
@@ -52,9 +53,9 @@ type loginAttempts struct {
 // newTestAuth), the in-memory maps are used exclusively.
 type Auth struct {
 	mode       string
-	db         *sql.DB        // non-nil in production; nil in tests that don't need persistence
-	rolesStore *RolesStore    // non-nil in "jellyfin" mode
-	jellyfin   JellyfinClient // used for Jellyfin auth calls
+	db         *sql.DB                // non-nil in production; nil in tests that don't need persistence
+	rolesStore *RolesStore            // non-nil in "jellyfin" mode
+	jellyfin   clients.JellyfinClient // used for Jellyfin auth calls
 	sessions   map[string]session
 	failures   map[string]*loginAttempts // IP → recent failure timestamps
 	mu         sync.RWMutex
@@ -63,8 +64,8 @@ type Auth struct {
 // AuthConfig holds parameters for NewAuth.
 type AuthConfig struct {
 	Mode     string
-	DB       *sql.DB        // for session + rate-limit persistence (nil = in-memory only)
-	Jellyfin JellyfinClient // for "jellyfin" mode; must be non-nil when Mode == "jellyfin"
+	DB       *sql.DB                // for session + rate-limit persistence (nil = in-memory only)
+	Jellyfin clients.JellyfinClient // for "jellyfin" mode; must be non-nil when Mode == "jellyfin"
 }
 
 func NewAuth(cfg AuthConfig) *Auth {
