@@ -666,9 +666,9 @@ except Exception:
     if command -v npx &>/dev/null && npx playwright --version &>/dev/null 2>&1; then
         info "Seeding Playwright test fixtures..."
 
-        # Fixture 1: valid H.264 file for import-play spec
-        local pw_movie_dir="$test_library_dir/movies/Valid H264 Test (2024)"
-        local pw_movie_file="$pw_movie_dir/valid-h264-10s.mkv"
+        # Fixture 1: Sintel (2010) — real TMDB title so scan produces a match
+        local pw_movie_dir="$test_library_dir/movies/Sintel (2010)"
+        local pw_movie_file="$pw_movie_dir/Sintel.2010.mkv"
         mkdir -p "$pw_movie_dir"
 
         local pw_ffmpeg_ok=false
@@ -688,7 +688,7 @@ except Exception:
                 -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                 -c:v libx264 -preset ultrafast -crf 28 \
                 -c:a aac -b:a 64k \
-                "/movies/Valid H264 Test (2024)/valid-h264-10s.mkv" 2>/dev/null; then
+                "/movies/Sintel (2010)/Sintel.2010.mkv" 2>/dev/null; then
                 pw_ffmpeg_ok=true
             fi
         fi

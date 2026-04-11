@@ -4,8 +4,9 @@ const { jellyfinAuth, searchJellyfin, waitForJobState } = require('../helpers/ap
 
 // File placed in the library by e2e.sh before Playwright runs.
 // Path is as seen by the middleware container (/movies = $LIBRARY_DIR/movies).
-const TEST_TITLE = 'Valid H264 Test';
-const TEST_YEAR = 2024;
+// "Sintel" is a real TMDB title (Blender Foundation, 2010) so scan produces a match.
+const TEST_TITLE = 'Sintel';
+const TEST_YEAR = 2010;
 
 test.describe('Import wizard → pipeline → Jellyfin', () => {
     test('happy path: drive import wizard, watch pipeline, verify Jellyfin', async ({ page, request }) => {
@@ -52,7 +53,7 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.waitForFunction(
             () => {
                 const entries = document.querySelectorAll('[data-testid="browse-tree"] .browse-entry');
-                return Array.from(entries).some(e => e.textContent.includes('valid-h264-10s.mkv'));
+                return Array.from(entries).some(e => e.textContent.includes('Sintel.2010.mkv'));
             },
             { timeout: 10_000 }
         );
@@ -60,7 +61,7 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         // ── 5. Select the file ─────────────────────────────────────
         const fileEntry = page
             .locator('[data-testid="browse-tree"] .browse-entry')
-            .filter({ hasText: 'valid-h264-10s.mkv' })
+            .filter({ hasText: 'Sintel.2010.mkv' })
             .first();
         const checkbox = fileEntry.locator('input.browse-checkbox');
         await checkbox.check();
