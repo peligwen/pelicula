@@ -96,6 +96,12 @@ type Job struct {
 	TranscodeOutputs  []string `json:"transcode_outputs,omitempty"`
 	TranscodeError    string   `json:"transcode_error,omitempty"`
 	TranscodeETA      float64  `json:"transcode_eta,omitempty"`
+
+	// Action-bus discriminator and payload. ActionType="pipeline" runs the
+	// legacy stage machine; anything else is dispatched via the action registry.
+	ActionType string         `json:"action_type,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
+	Result     map[string]any `json:"result,omitempty"`
 }
 
 type Queue struct {
@@ -194,8 +200,9 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 
 	_, err = q.db.Exec(
 		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
-		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0)`,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
+		                   action_type, params, result)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, 'pipeline', NULL, NULL)`,
 		id,
 		now.Format(time.RFC3339Nano),
 		now.Format(time.RFC3339Nano),
@@ -208,12 +215,13 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	}
 
 	job := &Job{
-		ID:        id,
-		CreatedAt: now,
-		UpdatedAt: now,
-		State:     StateQueued,
-		Stage:     StageValidate,
-		Source:    source,
+		ID:         id,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		State:      StateQueued,
+		Stage:      StageValidate,
+		Source:     source,
+		ActionType: "pipeline",
 	}
 
 	select {
@@ -230,7 +238,8 @@ func (q *Queue) Get(id string) (*Job, bool) {
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
-		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
+		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
+		        action_type, params, result
 		 FROM jobs WHERE id=?`, id,
 	)
 	job, err := scanJob(row)
@@ -245,7 +254,8 @@ func (q *Queue) List() []Job {
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
-		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
+		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
+		        action_type, params, result
 		 FROM jobs ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -312,12 +322,26 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		transcodeOutputsJSON = &s
 	}
 
+	var paramsJSON *string
+	if job.Params != nil {
+		b, _ := json.Marshal(job.Params)
+		s := string(b)
+		paramsJSON = &s
+	}
+	var resultJSON *string
+	if job.Result != nil {
+		b, _ := json.Marshal(job.Result)
+		s := string(b)
+		resultJSON = &s
+	}
+
 	_, err := q.db.Exec(
 		`UPDATE jobs SET
 			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
 			subs_acquired=?,
 			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
-			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?
+			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?,
+			action_type=?, params=?, result=?
 		 WHERE id=?`,
 		job.UpdatedAt.Format(time.RFC3339Nano),
 		string(job.State), string(job.Stage), job.Progress,
@@ -325,6 +349,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		subsAcquiredJSON,
 		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
+		job.ActionType, paramsJSON, resultJSON,
 		id,
 	)
 	if err != nil {
@@ -436,6 +461,9 @@ func scanJob(s scanner) (*Job, error) {
 		subsAcquiredJSON     *string
 		dualSubOutputsJSON   *string
 		transcodeOutputsJSON *string
+		actionType           string
+		paramsJSON           *string
+		resultJSON           *string
 	)
 
 	err := s.Scan(
@@ -447,6 +475,7 @@ func scanJob(s scanner) (*Job, error) {
 		&dualSubOutputsJSON, &job.DualSubError,
 		&job.TranscodeProfile, &job.TranscodeDecision,
 		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,
+		&actionType, &paramsJSON, &resultJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -482,6 +511,18 @@ func scanJob(s scanner) (*Job, error) {
 
 	if transcodeOutputsJSON != nil {
 		json.Unmarshal([]byte(*transcodeOutputsJSON), &job.TranscodeOutputs) //nolint:errcheck
+	}
+
+	job.ActionType = actionType
+	if job.ActionType == "" {
+		job.ActionType = "pipeline"
+	}
+
+	if paramsJSON != nil {
+		json.Unmarshal([]byte(*paramsJSON), &job.Params) //nolint:errcheck
+	}
+	if resultJSON != nil {
+		json.Unmarshal([]byte(*resultJSON), &job.Result) //nolint:errcheck
 	}
 
 	return &job, nil

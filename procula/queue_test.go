@@ -338,6 +338,40 @@ func TestQueueLoadExisting(t *testing.T) {
 	}
 }
 
+func TestQueueCreateWithActionType(t *testing.T) {
+	q := newTestQueue(t)
+
+	job, err := q.Create(JobSource{Path: "/movies/Foo (2024)/foo.mkv", ArrType: "radarr", Type: "movie"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if job.ActionType != "pipeline" {
+		t.Errorf("ActionType default = %q, want %q", job.ActionType, "pipeline")
+	}
+
+	err = q.Update(job.ID, func(j *Job) {
+		j.ActionType = "validate"
+		j.Params = map[string]any{"path": "/movies/Foo (2024)/foo.mkv"}
+		j.Result = map[string]any{"passed": true}
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, ok := q.Get(job.ID)
+	if !ok {
+		t.Fatal("Get: not found")
+	}
+	if got.ActionType != "validate" {
+		t.Errorf("ActionType = %q, want %q", got.ActionType, "validate")
+	}
+	if got.Params["path"] != "/movies/Foo (2024)/foo.mkv" {
+		t.Errorf("Params[path] = %v", got.Params["path"])
+	}
+	if got.Result["passed"] != true {
+		t.Errorf("Result[passed] = %v", got.Result["passed"])
+	}
+}
+
 func TestQueueLoadSkipsCorruptFiles(t *testing.T) {
 	// With SQLite backing there are no corrupt files to skip —
 	// DB rows are always valid. Verify the queue loads normally.
