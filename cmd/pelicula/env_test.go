@@ -66,21 +66,21 @@ func TestWriteEnv(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	m := EnvMap{
-		"CONFIG_DIR":          "/test/config",
-		"LIBRARY_DIR":         "/test/lib",
-		"WORK_DIR":            "/test/work",
-		"PUID":                "1000",
-		"PGID":                "1000",
-		"TZ":                  "UTC",
+		"CONFIG_DIR":            "/test/config",
+		"LIBRARY_DIR":           "/test/lib",
+		"WORK_DIR":              "/test/work",
+		"PUID":                  "1000",
+		"PGID":                  "1000",
+		"TZ":                    "UTC",
 		"WIREGUARD_PRIVATE_KEY": "abc123",
-		"SERVER_COUNTRIES":    "Netherlands",
-		"PELICULA_PORT":       "7354",
-		"PELICULA_AUTH":       "jellyfin",
-		"JELLYFIN_PASSWORD":   "pass-word-123",
-		"PROCULA_API_KEY":     "key123",
-		"TRANSCODING_ENABLED": "false",
+		"SERVER_COUNTRIES":      "Netherlands",
+		"PELICULA_PORT":         "7354",
+		"PELICULA_AUTH":         "jellyfin",
+		"JELLYFIN_PASSWORD":     "pass-word-123",
+		"PROCULA_API_KEY":       "key123",
+		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
-		"NOTIFICATIONS_MODE":  "internal",
+		"NOTIFICATIONS_MODE":    "internal",
 	}
 
 	if err := WriteEnv(path, m); err != nil {

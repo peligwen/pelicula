@@ -12,7 +12,7 @@ import (
 )
 
 // getScriptDir returns the pelicula project root directory.
-// It walks up from the binary's location looking for docker-compose.yml.
+// It walks up from the binary's location looking for compose/docker-compose.yml.
 // Falls back to the binary's directory if not found.
 func getScriptDir() string {
 	// Start from the binary's resolved location
@@ -30,10 +30,10 @@ func getScriptDir() string {
 		start, _ = os.Getwd()
 	}
 
-	// Walk up looking for docker-compose.yml (the project root marker)
+	// Walk up looking for compose/docker-compose.yml (the project root marker)
 	dir := start
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "docker-compose.yml")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "compose", "docker-compose.yml")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)

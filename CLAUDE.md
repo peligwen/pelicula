@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pelicula` — thin bash wrapper at repo root; auto-builds the Go CLI on first run
 - `cmd/pelicula/` — Go CLI source (cross-platform: macOS/Linux/Windows/Synology), stdlib-only
 - `tests/e2e.sh` — end-to-end integration test runner (bash, standalone)
-- `docker-compose.yml` — parameterized with `${CONFIG_DIR}` and `${MEDIA_DIR}` env vars
+- `compose/docker-compose.yml` — parameterized with `${CONFIG_DIR}` and `${MEDIA_DIR}` env vars
 - `middleware/` — Go backend (pelicula-api): auto-wiring, unified search, download management, auth, settings, request queue. SQLite for mutable state (`modernc.org/sqlite`).
 - `procula/` — Go processing pipeline: validation, FFprobe/FFmpeg, transcoding, Jellyfin catalog, storage monitoring. SQLite for job queue and settings.
 - `nginx/nginx.conf` — reverse proxy config, path-based routing to all services
@@ -63,7 +63,7 @@ Remote Jellyfin access (Peligrosa) is opt-in — see docs/PELIGROSA.md.
 - **LinuxServer.io images are Alpine-based** — healthchecks use `wget`, not `curl`
 - **Both Go services use `modernc.org/sqlite`** — the single external dependency (pure-Go SQLite driver, no CGO). The Go CLI (`cmd/pelicula/`) is stdlib-only.
 - **qBittorrent v5** renamed pause/resume to stop/start — middleware uses the v5 endpoints
-- All volume paths in `docker-compose.yml` are env vars — never hardcode paths
+- All volume paths in `compose/docker-compose.yml` are env vars — never hardcode paths
 
 ## Bug Fixing
 

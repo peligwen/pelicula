@@ -2,8 +2,8 @@
 .claude/
 .env
 config/
-docker-compose.override.yml
-docker-compose.remote.yml
+compose/docker-compose.override.yml
+compose/docker-compose.remote.yml
 nginx/remote.conf
 *.tar.gz
 /reviews

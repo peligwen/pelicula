@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+COMPOSE_FILE="$SCRIPT_DIR/compose/docker-compose.yml"
 
 # ── Colors ──────────────────────────────────────────
 RED='\033[0;31m'
@@ -122,9 +122,10 @@ cmd_test() {
     # replaces with safe stubs (alpine for gluetun, real images with test names).
     test_compose() {
         $NEEDS_SUDO docker compose \
+            --project-directory "$SCRIPT_DIR" \
             --env-file "${test_env:-$SCRIPT_DIR/.env}" \
             -f "$COMPOSE_FILE" \
-            -f "$SCRIPT_DIR/docker-compose.test.yml" \
+            -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
             -p pelicula-test \
             --profile vpn \
             "$@"
@@ -143,9 +144,10 @@ cmd_test() {
         if [[ ${keep:-0} -eq 0 ]]; then
             info "Cleaning up test stack..."
             $NEEDS_SUDO docker compose \
+                --project-directory "$SCRIPT_DIR" \
                 --env-file "${test_env:-$SCRIPT_DIR/.env}" \
                 -f "$COMPOSE_FILE" \
-                -f "$SCRIPT_DIR/docker-compose.test.yml" \
+                -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
                 -p pelicula-test \
                 down -v --remove-orphans 2>/dev/null || true
             rm -rf "${test_dir:-}"

@@ -27,9 +27,9 @@ func cmdUp(_ []string) {
 		plat := Detect(scriptDir)
 		c := NewCompose(scriptDir, plat.NeedsSudo)
 
-		setupCompose := filepath.Join(scriptDir, "docker-compose.setup.yml")
+		setupCompose := filepath.Join(scriptDir, "compose", "docker-compose.setup.yml")
 		if _, err := os.Stat(setupCompose); err != nil {
-			fatal("docker-compose.setup.yml not found — make sure you're running from the pelicula directory")
+			fatal("compose/docker-compose.setup.yml not found — make sure you're running from the pelicula directory")
 		}
 
 		home, _ := os.UserHomeDir()

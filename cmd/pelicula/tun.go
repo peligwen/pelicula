@@ -14,7 +14,7 @@ const tunOverrideContent = `services:
       - /dev/net/tun:/dev/net/tun
 `
 
-// SetupTUN checks for /dev/net/tun on Linux and writes docker-compose.override.yml.
+// SetupTUN checks for /dev/net/tun on Linux and writes compose/docker-compose.override.yml.
 // On macOS/Windows, Docker Desktop handles TUN devices natively — nothing to do.
 func SetupTUN(scriptDir string) error {
 	if runtime.GOOS != "linux" {
@@ -47,17 +47,17 @@ func SetupTUN(scriptDir string) error {
 		pass("/dev/net/tun exists")
 	}
 
-	// Write docker-compose.override.yml with TUN device mapping
-	overrideFile := filepath.Join(scriptDir, "docker-compose.override.yml")
+	// Write compose/docker-compose.override.yml with TUN device mapping
+	overrideFile := filepath.Join(scriptDir, "compose", "docker-compose.override.yml")
 	if _, err := os.Stat(overrideFile); err == nil {
 		// Back up existing override
 		bak := fmt.Sprintf("%s.bak.%d", overrideFile, time.Now().Unix())
 		_ = copyFile(overrideFile, bak)
 	}
 	if err := os.WriteFile(overrideFile, []byte(tunOverrideContent), 0644); err != nil {
-		return fmt.Errorf("write docker-compose.override.yml: %w", err)
+		return fmt.Errorf("write compose/docker-compose.override.yml: %w", err)
 	}
-	pass("Wrote docker-compose.override.yml (TUN device mapping)")
+	pass("Wrote compose/docker-compose.override.yml (TUN device mapping)")
 	return nil
 }
 

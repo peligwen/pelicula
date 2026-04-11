@@ -367,7 +367,7 @@ Build in this order — each stage is independently useful:
 2. Implement JSON file job queue (queue.go)
 3. Implement validation stage (validate.go) — FFprobe checks
 4. Add webhook receiver to pelicula-api (`/api/pelicula/hooks/import`)
-5. Add Procula to docker-compose.yml
+5. Add Procula to compose/docker-compose.yml
 6. Add nginx proxy rule
 7. Wire health check into dashboard service grid
 8. **Result:** Bad downloads get auto-blocklisted and re-searched
@@ -386,7 +386,7 @@ Build in this order — each stage is independently useful:
 5. **Result:** Users get notified when content is ready; dashboard shows pipeline status
 
 ### Phase 4: Subtitles (Bazarr) *(Planned)*
-1. Add Bazarr to docker-compose.yml
+1. Add Bazarr to compose/docker-compose.yml
 2. Seed Bazarr config (UrlBase)
 3. Auto-wire Bazarr to Sonarr/Radarr in middleware
 4. Add nginx proxy rule

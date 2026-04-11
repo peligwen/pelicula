@@ -34,15 +34,20 @@ func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
 // args builds the full docker compose argument list.
 // Profile flags are inserted before the subcommand (required by Docker Compose v5+).
 func (c *Compose) buildArgs(extra ...string) []string {
-	args := []string{"compose", "--env-file", c.envFile, "-f", filepath.Join(c.projectDir, "docker-compose.yml")}
+	args := []string{
+		"compose",
+		"--project-directory", c.projectDir,
+		"--env-file", c.envFile,
+		"-f", filepath.Join(c.projectDir, "compose", "docker-compose.yml"),
+	}
 
 	// Optional override files
-	override := filepath.Join(c.projectDir, "docker-compose.override.yml")
+	override := filepath.Join(c.projectDir, "compose", "docker-compose.override.yml")
 	if _, err := os.Stat(override); err == nil {
 		args = append(args, "-f", override)
 	}
 
-	remote := filepath.Join(c.projectDir, "docker-compose.remote.yml")
+	remote := filepath.Join(c.projectDir, "compose", "docker-compose.remote.yml")
 	if _, err := os.Stat(remote); err == nil {
 		args = append(args, "-f", remote)
 	}
@@ -97,7 +102,7 @@ func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
 // buildSetupCmd creates an exec.Cmd for `docker compose -f setupCompose up -d --build`
 // with the given environment variables.
 func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
-	cmd := c.dockerCmd("compose", "-f", setupCompose, "up", "-d", "--build")
+	cmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "up", "-d", "--build")
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -107,7 +112,7 @@ func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
 
 // runSetupDown tears down the setup compose stack.
 func (c *Compose) runSetupDown(setupCompose string) error {
-	return c.dockerCmd("compose", "-f", setupCompose, "down").Run()
+	return c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "down").Run()
 }
 
 // DockerInspect runs docker inspect --format=... on a container.

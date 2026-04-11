@@ -11,7 +11,7 @@ import (
 
 // Platform holds detected host environment info.
 type Platform struct {
-	OS        string // "darwin", "linux", "windows"
+	OS         string // "darwin", "linux", "windows"
 	IsSynology bool
 	IsWSL      bool
 	NeedsSudo  bool

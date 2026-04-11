@@ -46,7 +46,7 @@ func handleSetupDetect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// All detection is done on the host and passed via env vars.
-	// The CLI sets these when starting docker-compose.setup.yml.
+	// The CLI sets these when starting compose/docker-compose.setup.yml.
 	resp := SetupDetect{
 		Platform:   envOr("HOST_PLATFORM", "linux"),
 		TZ:         envOr("HOST_TZ", "America/New_York"),

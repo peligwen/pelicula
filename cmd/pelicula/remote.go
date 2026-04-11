@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// RenderRemoteConfigs renders nginx remote vhost config and docker-compose.remote.yml
+// RenderRemoteConfigs renders nginx remote vhost config and compose/docker-compose.remote.yml
 // from .env values. If remote access is disabled, it writes a placeholder and removes
 // the remote compose file.
 func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
@@ -15,7 +15,7 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 	remoteEnabled := env["REMOTE_ACCESS_ENABLED"]
 
 	remoteConf := filepath.Join(configDir, "nginx", "remote.conf")
-	remoteCompose := filepath.Join(scriptDir, "docker-compose.remote.yml")
+	remoteCompose := filepath.Join(scriptDir, "compose", "docker-compose.remote.yml")
 
 	// Ensure nginx config dir exists
 	if err := os.MkdirAll(filepath.Join(configDir, "nginx"), 0755); err != nil {
@@ -99,7 +99,7 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 	}
 	pass(fmt.Sprintf("Rendered nginx remote vhost (%s:%s)", hostname, httpsPort))
 
-	// Write docker-compose.remote.yml
+	// Write compose/docker-compose.remote.yml
 	if err := writeRemoteCompose(remoteCompose, httpPort, httpsPort, certMode, leEmail, leStaging, hostname, certDir, acmeDir, leStateDir); err != nil {
 		return err
 	}
