@@ -263,15 +263,40 @@ func inviteAdminRequest(t *testing.T, method, path string, body any) *http.Reque
 	return r
 }
 
+// newTestDeps builds a peligrosaDeps from a given auth and invite store,
+// using a nil RequestStore (sufficient for invite-only tests).
+func newTestDeps(auth *Auth, invites *InviteStore) *peligrosaDeps {
+	return &peligrosaDeps{Auth: auth, Invites: invites}
+}
+
 func TestHandleInvitesCreateAndList(t *testing.T) {
 	s := newTestInviteStore(t)
 	setInviteStore(t, s)
 
+	// Build a shared auth instance with an admin session.
+	a := newTestAuth("jellyfin")
+	tok := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
+	deps := newTestDeps(a, s)
+
+	makeReq := func(method string, body any) *http.Request {
+		var rb *bytes.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			rb = bytes.NewReader(b)
+		} else {
+			rb = bytes.NewReader(nil)
+		}
+		r := httptest.NewRequest(method, "/api/pelicula/invites", rb)
+		r.Header.Set("Content-Type", "application/json")
+		addSessionCookie(r, tok)
+		return r
+	}
+
 	// POST /api/pelicula/invites
 	body := map[string]any{"label": "Test invite", "expires_in_hours": 24, "max_uses": 1}
-	r := inviteAdminRequest(t, http.MethodPost, "/api/pelicula/invites", body)
+	r := makeReq(http.MethodPost, body)
 	w := httptest.NewRecorder()
-	handleInvites(w, r)
+	deps.HandleInvites(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -282,9 +307,9 @@ func TestHandleInvitesCreateAndList(t *testing.T) {
 	}
 
 	// GET /api/pelicula/invites
-	r2 := inviteAdminRequest(t, http.MethodGet, "/api/pelicula/invites", nil)
+	r2 := makeReq(http.MethodGet, nil)
 	w2 := httptest.NewRecorder()
-	handleInvites(w2, r2)
+	deps.HandleInvites(w2, r2)
 	if w2.Code != http.StatusOK {
 		t.Fatalf("list: expected 200, got %d", w2.Code)
 	}
@@ -303,11 +328,12 @@ func TestHandleInviteCheck(t *testing.T) {
 	setInviteStore(t, s)
 	maxUses := 1
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
+	deps := newTestDeps(newTestAuth("jellyfin"), s)
 
 	// Valid token
 	r := httptest.NewRequest(http.MethodGet, "/api/pelicula/invites/"+inv.Token+"/check", nil)
 	w := httptest.NewRecorder()
-	handleInviteOp(w, r)
+	deps.HandleInviteOp(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("check active: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -321,7 +347,7 @@ func TestHandleInviteCheck(t *testing.T) {
 	s.Revoke(inv.Token)
 	r2 := httptest.NewRequest(http.MethodGet, "/api/pelicula/invites/"+inv.Token+"/check", nil)
 	w2 := httptest.NewRecorder()
-	handleInviteOp(w2, r2)
+	deps.HandleInviteOp(w2, r2)
 	if w2.Code != http.StatusGone {
 		t.Errorf("check revoked: expected 410, got %d", w2.Code)
 	}
@@ -329,7 +355,7 @@ func TestHandleInviteCheck(t *testing.T) {
 	// Malformed token → 400
 	r3 := httptest.NewRequest(http.MethodGet, "/api/pelicula/invites/badtoken/check", nil)
 	w3 := httptest.NewRecorder()
-	handleInviteOp(w3, r3)
+	deps.HandleInviteOp(w3, r3)
 	if w3.Code != http.StatusBadRequest {
 		t.Errorf("bad token: expected 400, got %d", w3.Code)
 	}
@@ -365,6 +391,7 @@ func TestHandleInviteRedeem(t *testing.T) {
 
 	maxUses := 2
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
+	deps := newTestDeps(newTestAuth("jellyfin"), s)
 
 	doRedeem := func(username, password string) *httptest.ResponseRecorder {
 		body := map[string]string{"username": username, "password": password}
@@ -372,7 +399,7 @@ func TestHandleInviteRedeem(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+inv.Token+"/redeem", bytes.NewReader(b))
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		handleInviteOp(w, r)
+		deps.HandleInviteOp(w, r)
 		return w
 	}
 
@@ -415,14 +442,12 @@ func TestHandleInviteRedeem(t *testing.T) {
 func TestHandleInviteOffMode(t *testing.T) {
 	s := newTestInviteStore(t)
 	setInviteStore(t, s)
-	orig := authMiddleware
-	authMiddleware = newTestAuth("off")
-	t.Cleanup(func() { authMiddleware = orig })
+	deps := newTestDeps(newTestAuth("off"), s)
 
 	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", strings.NewReader(`{}`))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleInvites(w, r)
+	deps.HandleInvites(w, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("off mode: expected 403, got %d", w.Code)
 	}

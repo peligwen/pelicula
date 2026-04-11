@@ -54,6 +54,7 @@ func main() {
 	inviteStore = NewInviteStore(db, jellyfinClient)
 	dismissedStore = NewDismissedStore(db)
 	requestStore = NewRequestStore(db, NewArrFulfiller())
+	deps := newPeligrosaDeps(db, nil, inviteStore, requestStore, jellyfinClient) // Auth set below
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -96,6 +97,7 @@ func main() {
 		Jellyfin: jellyfinClient,
 	})
 	auth := authMiddleware
+	deps.Auth = authMiddleware
 
 	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
 	mux.HandleFunc("/api/pelicula/health", handleHealth)
@@ -129,9 +131,9 @@ func main() {
 	mux.Handle("/api/pelicula/events", auth.Guard(http.HandlerFunc(handleEventsProxy)))
 
 	// viewer+: request queue (list own requests + create)
-	mux.Handle("/api/pelicula/requests", auth.Guard(http.HandlerFunc(handleRequests)))
+	mux.Handle("/api/pelicula/requests", auth.Guard(http.HandlerFunc(deps.HandleRequests)))
 	// admin only: per-request approve/deny/delete and *arr metadata for settings dropdowns
-	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(http.HandlerFunc(handleRequestOp)))
+	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(http.HandlerFunc(deps.HandleRequestOp)))
 	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(handleArrMeta)))
 
 	// manager+: search and add content, pause/resume downloads
@@ -159,8 +161,8 @@ func main() {
 
 	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
 	// Peligrosa: httputil.RequireLocalOriginSoft on both routes — redeem is public but invite-gated.
-	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleInvites))))
-	mux.HandleFunc("/api/pelicula/invites/", httputil.RequireLocalOriginSoft(http.HandlerFunc(handleInviteOp)).ServeHTTP)
+	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(deps.HandleInvites))))
+	mux.HandleFunc("/api/pelicula/invites/", httputil.RequireLocalOriginSoft(http.HandlerFunc(deps.HandleInviteOp)).ServeHTTP)
 
 	// Open registration (LAN-only, optional): public account creation without invite tokens.
 	// Peligrosa: httputil.RequireLocalOriginStrict ensures only LAN browsers can POST.

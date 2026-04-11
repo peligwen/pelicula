@@ -288,23 +288,23 @@ func (s *RequestStore) InsertFull(req RequestExport) error {
 
 // --- HTTP handlers ---
 
-// handleRequests dispatches GET (list) and POST (create) on /api/pelicula/requests.
-func handleRequests(w http.ResponseWriter, r *http.Request) {
+// HandleRequests dispatches GET (list) and POST (create) on /api/pelicula/requests.
+func (p *peligrosaDeps) HandleRequests(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		handleRequestList(w, r)
+		p.HandleRequestList(w, r)
 	case http.MethodPost:
-		handleRequestCreate(w, r)
+		p.HandleRequestCreate(w, r)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// handleRequestList returns all requests. Admins see all; viewers see only their own.
-func handleRequestList(w http.ResponseWriter, r *http.Request) {
-	username, role, _ := authMiddleware.SessionFor(r)
+// HandleRequestList returns all requests. Admins see all; viewers see only their own.
+func (p *peligrosaDeps) HandleRequestList(w http.ResponseWriter, r *http.Request) {
+	username, role, _ := p.Auth.SessionFor(r)
 
-	all := requestStore.all()
+	all := p.Requests.all()
 	var out []*MediaRequest
 	for _, req := range all {
 		if role.atLeast(RoleAdmin) || req.RequestedBy == username {
@@ -317,10 +317,10 @@ func handleRequestList(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, out)
 }
 
-// handleRequestCreate creates a new request from a viewer.
-func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
-	username, _, ok := authMiddleware.SessionFor(r)
-	if !ok && authMiddleware.mode != "off" {
+// HandleRequestCreate creates a new request from a viewer.
+func (p *peligrosaDeps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
+	username, _, ok := p.Auth.SessionFor(r)
+	if !ok && p.Auth.mode != "off" {
 		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -357,7 +357,7 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Deduplicate: return existing non-terminal request for the same content.
-	existing := requestStore.findActive(body.Type, body.TmdbID, body.TvdbID)
+	existing := p.Requests.findActive(body.Type, body.TmdbID, body.TvdbID)
 	if existing != nil {
 		httputil.WriteJSON(w, existing)
 		return
@@ -378,7 +378,7 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   now,
 	}
 
-	_, err := requestStore.db.Exec(
+	_, err := p.Requests.db.Exec(
 		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
 		                       requested_by, state, reason, arr_id, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?)`,
@@ -393,7 +393,7 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ev := RequestEvent{At: now, State: RequestPending, Actor: username}
-	if err := requestStore.insertEvent(req.ID, ev); err != nil {
+	if err := p.Requests.insertEvent(req.ID, ev); err != nil {
 		slog.Warn("failed to insert initial request event", "component", "requests", "error", err)
 	}
 	req.History = []RequestEvent{ev}
@@ -403,8 +403,8 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, req)
 }
 
-// handleRequestOp dispatches approve/deny/delete on /api/pelicula/requests/{id}[/action].
-func handleRequestOp(w http.ResponseWriter, r *http.Request) {
+// HandleRequestOp dispatches approve/deny/delete on /api/pelicula/requests/{id}[/action].
+func (p *peligrosaDeps) HandleRequestOp(w http.ResponseWriter, r *http.Request) {
 	// Path: /api/pelicula/requests/{id} or /api/pelicula/requests/{id}/approve|deny
 	path := strings.TrimPrefix(r.URL.Path, "/api/pelicula/requests/")
 	path = strings.TrimSuffix(path, "/")
@@ -427,19 +427,19 @@ func handleRequestOp(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		requestStore.handleRequestApprove(w, r, id)
+		p.Requests.handleRequestApprove(w, r, id)
 	case "deny":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handleRequestDeny(w, r, id)
+		p.HandleRequestDeny(w, r, id)
 	case "":
 		if r.Method != http.MethodDelete {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handleRequestDelete(w, r, id)
+		p.Requests.HandleRequestDelete(w, r, id)
 	default:
 		httputil.WriteError(w, "unknown action: "+action, http.StatusNotFound)
 	}
@@ -520,8 +520,9 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	httputil.WriteJSON(w, req)
 }
 
-func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
-	actorUsername, _, _ := authMiddleware.SessionFor(r)
+// HandleRequestDeny denies a pending media request.
+func (p *peligrosaDeps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
+	actorUsername, _, _ := p.Auth.SessionFor(r)
 
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	var body struct {
@@ -529,7 +530,7 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	json.NewDecoder(r.Body).Decode(&body) // best-effort; reason is optional
 
-	req := requestStore.get(id)
+	req := p.Requests.get(id)
 	if req == nil {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
@@ -545,7 +546,7 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	req.State = RequestDenied
 	req.Reason = body.Reason
 	req.UpdatedAt = time.Now().UTC()
-	if err := requestStore.updateRequest(req); err != nil {
+	if err := p.Requests.updateRequest(req); err != nil {
 		slog.Error("failed to save request after deny", "component", "requests", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -556,7 +557,7 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 		Actor: actorUsername,
 		Note:  body.Reason,
 	}
-	if err := requestStore.insertEvent(req.ID, ev); err != nil {
+	if err := p.Requests.insertEvent(req.ID, ev); err != nil {
 		slog.Warn("failed to insert deny event", "component", "requests", "error", err)
 	}
 	req.History = append(req.History, ev)
@@ -571,8 +572,9 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	httputil.WriteJSON(w, req)
 }
 
-func handleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
-	res, err := requestStore.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
+// HandleRequestDelete hard-deletes a media request record.
+func (rs *RequestStore) HandleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
+	res, err := rs.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
 	if err != nil {
 		slog.Error("failed to delete request", "component", "requests", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)

@@ -240,12 +240,17 @@ func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 
 // ── HTTP handler tests ───────────────────────────────────────────────────────
 
+// newTestRequestDeps builds a peligrosaDeps for request handler tests.
+func newTestRequestDeps(auth *Auth, rs *RequestStore) *peligrosaDeps {
+	return &peligrosaDeps{Auth: auth, Requests: rs}
+}
+
 func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 	// Set up a store and jellyfin-mode auth (no active sessions → 401).
 	s := newRequestStore(t)
-	requestStore = s
 	db := testDB(t)
-	authMiddleware = NewAuth(AuthConfig{Mode: "jellyfin", DB: db})
+	auth := NewAuth(AuthConfig{Mode: "jellyfin", DB: db})
+	deps := newTestRequestDeps(auth, s)
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",
@@ -254,7 +259,7 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleRequestCreate(w, req)
+	deps.HandleRequestCreate(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 when not authenticated in users mode", w.Code)
@@ -263,8 +268,7 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 
 func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
 	s := newRequestStore(t)
-	requestStore = s
-	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
+	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "movie",
@@ -274,7 +278,7 @@ func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleRequestCreate(w, req)
+	deps.HandleRequestCreate(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("status = %d, want 201 in off mode", w.Code)
@@ -290,8 +294,7 @@ func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
 
 func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 	s := newRequestStore(t)
-	requestStore = s
-	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
+	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
 
 	// Seed an existing request.
 	existing := &MediaRequest{
@@ -310,7 +313,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleRequestCreate(w, req)
+	deps.HandleRequestCreate(w, req)
 
 	// Should return 200 (not 201) with the existing request.
 	if w.Code == http.StatusCreated {
@@ -324,8 +327,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 
 func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
 	s := newRequestStore(t)
-	requestStore = s
-	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
+	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
 
 	body, _ := json.Marshal(map[string]any{
 		"type":    "anime",
@@ -334,7 +336,7 @@ func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleRequestCreate(w, req)
+	deps.HandleRequestCreate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for invalid type", w.Code)
@@ -344,15 +346,14 @@ func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
 func TestHandleRequestList_ViewerSeesOnlyOwn(t *testing.T) {
 	// Off mode: all requests treated as owned by ""
 	s := newRequestStore(t)
-	requestStore = s
-	authMiddleware = NewAuth(AuthConfig{Mode: "off"})
+	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
 
 	insertRequest(t, s, &MediaRequest{ID: "r1", Type: "movie", TmdbID: 1, Title: "Film1", State: RequestPending, RequestedBy: "alice"})
 	insertRequest(t, s, &MediaRequest{ID: "r2", Type: "movie", TmdbID: 2, Title: "Film2", State: RequestPending, RequestedBy: "bob"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests", nil)
 	w := httptest.NewRecorder()
-	handleRequestList(w, req)
+	deps.HandleRequestList(w, req)
 
 	// In "off" mode, SessionFor returns ("", RoleAdmin, true) so admin sees all.
 	if w.Code != http.StatusOK {

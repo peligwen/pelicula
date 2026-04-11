@@ -388,18 +388,18 @@ func (s *InviteStore) Delete(token string) error {
 
 // ── HTTP handlers ──────────────────────────────────────────────────────────────
 
-// handleInvites serves GET /api/pelicula/invites (list) and
+// HandleInvites serves GET /api/pelicula/invites (list) and
 // POST /api/pelicula/invites (create). Both require admin.
-func handleInvites(w http.ResponseWriter, r *http.Request) {
+func (p *peligrosaDeps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 	// Block mutations in auth=off mode (same guard as handleUsers).
-	if authMiddleware != nil && authMiddleware.IsOffMode() {
+	if p.Auth != nil && p.Auth.IsOffMode() {
 		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		httputil.WriteJSON(w, inviteStore.ListInvites())
+		httputil.WriteJSON(w, p.Invites.ListInvites())
 
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
@@ -432,13 +432,13 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 
 		// Determine creator username from session (fallback: "admin").
 		createdBy := "admin"
-		if authMiddleware != nil {
-			if sess, ok := authMiddleware.getSession(r); ok {
+		if p.Auth != nil {
+			if sess, ok := p.Auth.getSession(r); ok {
 				createdBy = sess.username
 			}
 		}
 
-		inv, err := inviteStore.CreateInvite(createdBy, req.Label, expiresAt, maxUses)
+		inv, err := p.Invites.CreateInvite(createdBy, req.Label, expiresAt, maxUses)
 		if err != nil {
 			slog.Error("create invite failed", "component", "invites", "error", err)
 			httputil.WriteError(w, "could not create invite", http.StatusInternalServerError)
@@ -453,9 +453,9 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleInviteOp dispatches requests to /api/pelicula/invites/{token}/...
+// HandleInviteOp dispatches requests to /api/pelicula/invites/{token}/...
 // check and redeem are public; revoke and delete require admin.
-func handleInviteOp(w http.ResponseWriter, r *http.Request) {
+func (p *peligrosaDeps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
 	tail := strings.TrimPrefix(r.URL.Path, "/api/pelicula/invites/")
 	parts := strings.SplitN(tail, "/", 2)
 	token := parts[0]
@@ -473,19 +473,19 @@ func handleInviteOp(w http.ResponseWriter, r *http.Request) {
 	case op == "check" && r.Method == http.MethodGet:
 		// check and redeem are intentionally public — the token IS the credential.
 		// Off-mode blocks admin endpoints only; viewers still need a way to register.
-		handleInviteCheck(w, r, token)
+		p.Invites.HandleInviteCheck(w, r, token)
 	case op == "redeem" && r.Method == http.MethodPost:
-		handleInviteRedeem(w, r, token)
+		p.HandleInviteRedeem(w, r, token)
 	case op == "revoke" && r.Method == http.MethodPost:
-		if !checkInviteAdmin(w, r) {
+		if !p.checkInviteAdmin(w, r) {
 			return
 		}
-		handleInviteRevoke(w, r, token)
+		p.Invites.HandleInviteRevoke(w, r, token)
 	case op == "" && r.Method == http.MethodDelete:
-		if !checkInviteAdmin(w, r) {
+		if !p.checkInviteAdmin(w, r) {
 			return
 		}
-		handleInviteDelete(w, r, token)
+		p.Invites.HandleInviteDelete(w, r, token)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -494,15 +494,15 @@ func handleInviteOp(w http.ResponseWriter, r *http.Request) {
 // checkInviteAdmin verifies admin auth for invite management operations.
 // CSRF is enforced at the route level via httputil.RequireLocalOriginSoft in main.go.
 // Returns false and writes the error if the check fails.
-func checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if authMiddleware != nil && authMiddleware.IsOffMode() {
+func (p *peligrosaDeps) checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if p.Auth != nil && p.Auth.IsOffMode() {
 		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return false
 	}
-	if authMiddleware == nil || authMiddleware.mode == "off" {
+	if p.Auth == nil || p.Auth.mode == "off" {
 		return true
 	}
-	sess, ok := authMiddleware.getSession(r)
+	sess, ok := p.Auth.getSession(r)
 	if !ok {
 		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return false
@@ -514,8 +514,9 @@ func checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func handleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
-	state, found := inviteStore.CheckInvite(token)
+// HandleInviteCheck checks the state of an invite token without consuming it.
+func (s *InviteStore) HandleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
+	state, found := s.CheckInvite(token)
 	if !found {
 		httputil.WriteError(w, "invite not found", http.StatusNotFound)
 		return
@@ -529,10 +530,11 @@ func handleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
 	httputil.WriteJSON(w, map[string]any{"valid": true})
 }
 
-func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
+// HandleInviteRedeem redeems an invite token to create a new Jellyfin account.
+func (p *peligrosaDeps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 	// Rate-limit by IP — reuse the auth limiter to prevent brute-force token abuse.
 	ip := httputil.ClientIP(r)
-	if authMiddleware != nil && authMiddleware.isRateLimited(ip) {
+	if p.Auth != nil && p.Auth.isRateLimited(ip) {
 		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
@@ -559,7 +561,7 @@ func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 		return
 	}
 
-	err := inviteStore.Redeem(token, req.Username, req.Password)
+	err := p.Invites.Redeem(token, req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
 			httputil.WriteError(w, "invite not found", http.StatusNotFound)
@@ -586,8 +588,8 @@ func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 			})
 			return
 		}
-		if authMiddleware != nil {
-			authMiddleware.recordFailure(ip)
+		if p.Auth != nil {
+			p.Auth.recordFailure(ip)
 		}
 		slog.Error("invite redemption failed", "component", "invites", "username", req.Username, "error", err)
 		httputil.WriteError(w, "could not create account", http.StatusBadGateway)
@@ -598,8 +600,9 @@ func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 	httputil.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
-func handleInviteRevoke(w http.ResponseWriter, r *http.Request, token string) {
-	if err := inviteStore.Revoke(token); err != nil {
+// HandleInviteRevoke marks an invite as revoked.
+func (s *InviteStore) HandleInviteRevoke(w http.ResponseWriter, r *http.Request, token string) {
+	if err := s.Revoke(token); err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
 			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
@@ -612,8 +615,9 @@ func handleInviteRevoke(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleInviteDelete(w http.ResponseWriter, r *http.Request, token string) {
-	if err := inviteStore.Delete(token); err != nil {
+// HandleInviteDelete hard-deletes an invite record.
+func (s *InviteStore) HandleInviteDelete(w http.ResponseWriter, r *http.Request, token string) {
+	if err := s.Delete(token); err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
 			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
