@@ -404,6 +404,43 @@ func (q *Queue) Cancel(id string) error {
 	return nil
 }
 
+// Wait polls the queue for a terminal state on the given job ID.
+// Returns the final job snapshot when state transitions to completed, failed,
+// or cancelled. Returns an error on timeout or if the job ID is unknown.
+// Caller should cap timeout at ~10 seconds; this is intended for synchronous
+// action calls with ?wait=N.
+func (q *Queue) Wait(id string, timeout time.Duration) (*Job, error) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	if job, ok := q.Get(id); ok {
+		if isTerminal(job.State) {
+			return job, nil
+		}
+	} else {
+		return nil, fmt.Errorf("job %s not found", id)
+	}
+
+	for {
+		<-ticker.C
+		job, ok := q.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("job %s not found", id)
+		}
+		if isTerminal(job.State) {
+			return job, nil
+		}
+		if time.Now().After(deadline) {
+			return job, fmt.Errorf("timeout after %s waiting for job %s", timeout, id)
+		}
+	}
+}
+
+func isTerminal(s JobState) bool {
+	return s == StateCompleted || s == StateFailed || s == StateCancelled
+}
+
 // registerCancel stores a context cancel func for a running job.
 // The caller must call unregisterCancel (or defer it) when the job finishes.
 func (q *Queue) registerCancel(id string, fn context.CancelFunc) {

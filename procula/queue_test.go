@@ -372,6 +372,47 @@ func TestQueueCreateWithActionType(t *testing.T) {
 	}
 }
 
+func TestQueueWaitReturnsOnTerminal(t *testing.T) {
+	q := newTestQueue(t)
+	job, err := q.Create(testSource("/movies/foo.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = q.Update(job.ID, func(j *Job) { j.State = StateCompleted })
+	}()
+
+	got, err := q.Wait(job.ID, 2*time.Second)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if got.State != StateCompleted {
+		t.Errorf("State = %q, want %q", got.State, StateCompleted)
+	}
+}
+
+func TestQueueWaitTimesOut(t *testing.T) {
+	q := newTestQueue(t)
+	job, err := q.Create(testSource("/movies/bar.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err = q.Wait(job.ID, 150*time.Millisecond)
+	if err == nil {
+		t.Fatal("Wait: expected timeout error, got nil")
+	}
+}
+
+func TestQueueWaitNotFound(t *testing.T) {
+	q := newTestQueue(t)
+	_, err := q.Wait("nope", 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("Wait: expected not-found error, got nil")
+	}
+}
+
 func TestQueueLoadSkipsCorruptFiles(t *testing.T) {
 	// With SQLite backing there are no corrupt files to skip —
 	// DB rows are always valid. Verify the queue loads normally.
