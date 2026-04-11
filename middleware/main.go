@@ -49,7 +49,9 @@ func main() {
 	}
 	migrateAllJSON(db, "/config/pelicula")
 
-	inviteStore = NewInviteStore(db)
+	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, services)
+
+	inviteStore = NewInviteStore(db, jellyfinClient)
 	dismissedStore = NewDismissedStore(db)
 	requestStore = NewRequestStore(db)
 
@@ -89,8 +91,9 @@ func main() {
 	openRegistration = os.Getenv("PELICULA_OPEN_REGISTRATION") == "true"
 
 	authMiddleware = NewAuth(AuthConfig{
-		Mode: authMode,
-		DB:   db,
+		Mode:     authMode,
+		DB:       db,
+		Jellyfin: jellyfinClient,
 	})
 	auth := authMiddleware
 

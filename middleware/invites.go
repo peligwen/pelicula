@@ -65,12 +65,15 @@ type InviteWithState struct {
 // InviteStore persists invites in SQLite.
 // SQLite handles concurrency; no additional mutex is needed.
 type InviteStore struct {
-	db *sql.DB
+	db       *sql.DB
+	jellyfin JellyfinClient
 }
 
 // NewInviteStore creates an InviteStore backed by db.
-func NewInviteStore(db *sql.DB) *InviteStore {
-	return &InviteStore{db: db}
+// jc may be nil when the store is used in contexts that never call Redeem
+// (e.g. export/import tests).
+func NewInviteStore(db *sql.DB, jc JellyfinClient) *InviteStore {
+	return &InviteStore{db: db, jellyfin: jc}
 }
 
 // generateInviteToken returns a 32-byte URL-safe base64 token (43 chars, no padding).
@@ -327,7 +330,7 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 	}
 
 	// Phase 2: create Jellyfin user (outside tx — can be slow).
-	jellyfinID, err := CreateJellyfinUser(services, username, password)
+	jellyfinID, err := s.jellyfin.CreateUser(username, password)
 	if err != nil {
 		// Release the slot so the invite can be reused.
 		if _, rollErr := s.db.Exec(`UPDATE invites SET uses = uses - 1 WHERE token = ?`, token); rollErr != nil {

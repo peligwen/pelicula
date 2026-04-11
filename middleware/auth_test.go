@@ -70,6 +70,7 @@ func newTestJellyfinAuth(t *testing.T, store *RolesStore, httpClient *http.Clien
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
 		httpClient: httpClient,
+		jellyfin:   NewJellyfinHTTPClient(httpClient, nil),
 	}
 }
 

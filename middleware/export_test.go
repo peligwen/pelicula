@@ -211,7 +211,7 @@ func TestBackupVersionBoundaries(t *testing.T) {
 
 func TestInviteStoreInsertFull(t *testing.T) {
 	db := testDB(t)
-	store := NewInviteStore(db)
+	store := NewInviteStore(db, nil)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	maxUses := 5

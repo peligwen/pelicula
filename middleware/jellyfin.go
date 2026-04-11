@@ -35,6 +35,37 @@ type JellyfinLoginResult struct {
 	AccessToken     string
 }
 
+// JellyfinClient is the subset of Jellyfin operations that peligrosa-scope
+// code needs. A concrete *jellyfinHTTPClient wraps the existing package-level
+// helpers. Consumers depend on this interface so peligrosa can live in a
+// subpackage without importing the main package.
+type JellyfinClient interface {
+	AuthenticateByName(username, password string) (*JellyfinLoginResult, error)
+	CreateUser(username, password string) (string, error)
+}
+
+// jellyfinHTTPClient is the production implementation of JellyfinClient.
+// It forwards to the existing package-level helpers which already handle
+// URL construction, header auth, and error wrapping.
+type jellyfinHTTPClient struct {
+	httpClient *http.Client
+	services   *ServiceClients
+}
+
+// NewJellyfinHTTPClient returns a JellyfinClient backed by the given http.Client
+// (for authenticate calls) and ServiceClients (for user CRUD that needs API key auth).
+func NewJellyfinHTTPClient(hc *http.Client, s *ServiceClients) JellyfinClient {
+	return &jellyfinHTTPClient{httpClient: hc, services: s}
+}
+
+func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*JellyfinLoginResult, error) {
+	return jellyfinAuthenticateByName(c.httpClient, username, password)
+}
+
+func (c *jellyfinHTTPClient) CreateUser(username, password string) (string, error) {
+	return CreateJellyfinUser(c.services, username, password)
+}
+
 // jellyfinAuthenticateByName authenticates username/password against Jellyfin.
 // Uses the package-level jellyfinURL so tests can point it at an httptest.Server.
 // Returns a *jellyfinHTTPError (with StatusCode 401) for bad credentials.

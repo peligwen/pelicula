@@ -125,7 +125,7 @@ func TestMigrateInvitesJSON_Inserts(t *testing.T) {
 	}
 
 	// Verify invite in DB.
-	store := NewInviteStore(db)
+	store := NewInviteStore(db, nil)
 	list := store.ListInvites()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 invite, got %d", len(list))

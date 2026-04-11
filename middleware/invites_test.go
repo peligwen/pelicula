@@ -14,10 +14,13 @@ import (
 )
 
 // newTestInviteStore creates an InviteStore backed by a test database.
+// A JellyfinClient is built from the global services so that tests using
+// newFakeJellyfin + resetServices get a correctly-wired client.
 func newTestInviteStore(t *testing.T) *InviteStore {
 	t.Helper()
 	db := testDB(t)
-	return NewInviteStore(db)
+	jc := NewJellyfinHTTPClient(http.DefaultClient, services)
+	return NewInviteStore(db, jc)
 }
 
 // setInviteStore replaces the package-level inviteStore for the duration of a test.
@@ -84,7 +87,7 @@ func TestCreateAndList(t *testing.T) {
 func TestPersistence(t *testing.T) {
 	// Both stores share the same DB — verify data written by s1 is visible via s2.
 	db := testDB(t)
-	s1 := NewInviteStore(db)
+	s1 := NewInviteStore(db, nil)
 	maxUses := 3
 	exp := time.Now().Add(24 * time.Hour).Truncate(time.Second)
 	inv, err := s1.CreateInvite("admin", "saved label", &exp, &maxUses)
@@ -92,7 +95,7 @@ func TestPersistence(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	// Second store reading same DB
-	s2 := NewInviteStore(db)
+	s2 := NewInviteStore(db, nil)
 	list := s2.ListInvites()
 	if len(list) != 1 {
 		t.Fatalf("invite not persisted: got %d", len(list))
