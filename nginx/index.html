@@ -372,43 +372,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Transcode modal -->
-                <div class="se-modal hidden" id="transcode-modal">
-                    <div class="se-modal-inner">
-                        <div class="se-modal-header">
-                            <span class="se-modal-title">Transcode</span>
-                            <button class="section-action" onclick="closeTranscodeModal()">&#10005;</button>
-                        </div>
-
-                        <!-- Profile picker -->
-                        <div class="import-panel" id="transcode-configure">
-                            <div class="section-header"><span>Select a transcode profile</span></div>
-                            <div id="rt-profiles-container">
-                                <div class="no-items">Loading profiles...</div>
-                            </div>
-                            <div class="import-nav">
-                                <button class="import-btn" onclick="closeTranscodeModal()">Cancel</button>
-                                <button class="import-btn primary" id="rt-btn-apply" onclick="doRetranscode()" disabled>Apply</button>
-                            </div>
-                        </div>
-
-                        <!-- Result -->
-                        <div class="import-panel hidden" id="transcode-apply">
-                            <div class="section-header"><span>Re-transcode</span></div>
-                            <div id="rt-apply-content">
-                                <div class="apply-progress">
-                                    <div class="apply-spinner"></div>
-                                    <span>Queuing transcode jobs...</span>
-                                </div>
-                            </div>
-                            <div class="import-nav hidden" id="rt-apply-nav">
-                                <button class="import-btn" onclick="openTranscodeModal()">Transcode more</button>
-                                <button class="import-btn primary" onclick="closeTranscodeModal()">Done</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- Activity -->

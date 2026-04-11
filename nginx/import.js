@@ -285,7 +285,6 @@ function updateActionBar() {
     // Classify paths (folders count as their root path for library detection)
     const paths = state.selected.map(s => s.path);
     const anyOutside = paths.some(p => !isInLibrary(p));
-    const allInLibrary = paths.every(p => isInLibrary(p));
 
     // Import: enabled if at least one selected path is outside library roots
     const btnImport = document.getElementById('btn-import');
