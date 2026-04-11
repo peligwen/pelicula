@@ -19,6 +19,7 @@ type SetupRequest struct {
 	WorkDir      string `json:"work_dir"`
 	WireguardKey string `json:"wireguard_key"`
 	VPNSkipped   bool   `json:"vpn_skipped"`
+	LANUrl       string `json:"lan_url"`
 }
 
 // SetupDetect is returned by GET /api/pelicula/setup/detect.
@@ -31,6 +32,7 @@ type SetupDetect struct {
 	ConfigDir  string `json:"config_dir"`
 	LibraryDir string `json:"library_dir"`
 	WorkDir    string `json:"work_dir"`
+	LANUrl     string `json:"lan_url"`
 }
 
 func isSetupMode() bool {
@@ -53,6 +55,7 @@ func handleSetupDetect(w http.ResponseWriter, r *http.Request) {
 		ConfigDir:  envOr("HOST_CONFIG_DIR", "./config"),
 		LibraryDir: envOr("HOST_LIBRARY_DIR", "~/media"),
 		WorkDir:    envOr("HOST_WORK_DIR", "~/media"),
+		LANUrl:     envOr("HOST_LAN_URL", ""),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -83,6 +86,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		{"media_dir", req.MediaDir},
 		{"library_dir", req.LibraryDir},
 		{"work_dir", req.WorkDir},
+		{"lan_url", req.LANUrl},
 	} {
 		if strings.ContainsAny(check.val, "\"\n\r") {
 			http.Error(w, check.name+" contains invalid characters", http.StatusBadRequest)
@@ -152,6 +156,11 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
 		"PELICULA_SUB_LANGS":    "en",
+	}
+
+	// Only persist JELLYFIN_PUBLISHED_URL when the user provided a value.
+	if lan := strings.TrimSpace(req.LANUrl); lan != "" {
+		vars["JELLYFIN_PUBLISHED_URL"] = lan
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {
