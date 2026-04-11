@@ -300,7 +300,7 @@ Session\DefaultSavePath=/downloads/'
         -X POST "http://localhost:${test_port}/api/procula/settings" \
         -H "Content-Type: application/json" \
         -H "X-API-Key: ${test_api_key}" \
-        -d '{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95}' \
+        -d '{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
         2>/dev/null || echo "error")"
     if [[ "$settings_resp" == "error" ]]; then
         warn "Could not configure Procula settings (non-fatal, defaults will apply)"
@@ -721,6 +721,167 @@ except Exception:
             fi
         fi
 
+        # Fixture 3: Sub Timeout (2099) — no subtitle tracks, padded to 64 MB
+        # so the validation sample-floor check (≥50 MB) passes.  Bazarr has no
+        # configured providers in the test stack, so await_subs will time out
+        # after sub_acquire_timeout_min=1 minute (set in Stage 3 settings).
+        local pw_timeout_dir="$test_library_dir/movies/Pelicula Timeout Fixture (2099)"
+        local pw_timeout_file="$pw_timeout_dir/Pelicula.Timeout.Fixture.2099.mkv"
+        mkdir -p "$pw_timeout_dir"
+        if [[ "$pw_ffmpeg_ok" == "true" ]]; then
+            local pw_timeout_ok=false
+            if command -v ffmpeg &>/dev/null; then
+                if ffmpeg -y \
+                    -f lavfi -i "color=c=red:s=320x240:d=15:r=24" \
+                    -f lavfi -i "sine=frequency=440:duration=15:sample_rate=44100" \
+                    -c:v libx264 -preset ultrafast -crf 28 \
+                    -c:a aac -b:a 64k \
+                    -metadata title="Pelicula Timeout Fixture" -metadata year="2099" \
+                    "$pw_timeout_file" 2>/dev/null; then
+                    pw_timeout_ok=true
+                fi
+            fi
+            if [[ "$pw_timeout_ok" != "true" ]]; then
+                if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                        -f lavfi -i "color=c=red:s=320x240:d=15:r=24" \
+                        -f lavfi -i "sine=frequency=440:duration=15:sample_rate=44100" \
+                        -c:v libx264 -preset ultrafast -crf 28 \
+                        -c:a aac -b:a 64k \
+                        -metadata title="Pelicula Timeout Fixture" -metadata year="2099" \
+                        "/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv" 2>/dev/null; then
+                    pw_timeout_ok=true
+                fi
+            fi
+            if [[ "$pw_timeout_ok" == "true" ]]; then
+                # Pad to 64 MB so it clears the 50 MB validation sample floor.
+                # truncate fills with zero bytes; ffprobe ignores trailing nulls
+                # because MKV parsing is EBML-bounded.
+                if command -v truncate &>/dev/null; then
+                    truncate -s 67108864 "$pw_timeout_file" 2>/dev/null || true
+                else
+                    local timeout_sz
+                    timeout_sz=$(stat -f%z "$pw_timeout_file" 2>/dev/null || stat -c%s "$pw_timeout_file" 2>/dev/null || echo 0)
+                    if [[ "$timeout_sz" -gt 0 && "$timeout_sz" -lt 67108864 ]]; then
+                        dd if=/dev/zero bs=1048576 \
+                            count=$(( (67108864 - timeout_sz + 1048575) / 1048576 )) \
+                            >> "$pw_timeout_file" 2>/dev/null || true
+                    fi
+                fi
+            else
+                warn "Sub Timeout fixture generation failed (non-fatal — sub-timeout spec will be skipped)"
+            fi
+        fi
+
+        # Fixture 4: Dualsub Happy (2024) — embedded en+es SRT streams so
+        # GenerateDualSubs can extract both cue sets and write .en-es.ass.
+        local pw_happy_dir="$test_library_dir/movies/Dualsub Happy (2024)"
+        local pw_happy_file="$pw_happy_dir/Dualsub.Happy.2024.mkv"
+        mkdir -p "$pw_happy_dir"
+        if [[ "$pw_ffmpeg_ok" == "true" ]]; then
+            printf '1\n00:00:01,000 --> 00:00:03,000\nHello world\n\n2\n00:00:04,000 --> 00:00:06,000\nGoodbye world\n' \
+                > "$pw_happy_dir/en.srt"
+            printf '1\n00:00:01,000 --> 00:00:03,000\nHola mundo\n\n2\n00:00:04,000 --> 00:00:06,000\nAdios mundo\n' \
+                > "$pw_happy_dir/es.srt"
+            local pw_happy_base="$pw_happy_dir/base.mkv"
+            local pw_happy_ok=false
+            if command -v ffmpeg &>/dev/null; then
+                if ffmpeg -y \
+                        -f lavfi -i "color=c=purple:s=320x240:d=10:r=24" \
+                        -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
+                        -c:v libx264 -preset ultrafast -crf 28 \
+                        -c:a aac -b:a 64k \
+                        "$pw_happy_base" 2>/dev/null && \
+                    ffmpeg -y \
+                        -i "$pw_happy_base" \
+                        -i "$pw_happy_dir/en.srt" -i "$pw_happy_dir/es.srt" \
+                        -map 0:v -map 0:a -map 1 -map 2 \
+                        -c:v copy -c:a copy -c:s srt \
+                        -metadata:s:s:0 language=eng \
+                        -metadata:s:s:1 language=spa \
+                        -metadata title="Dualsub Happy" -metadata year="2024" \
+                        "$pw_happy_file" 2>/dev/null; then
+                    pw_happy_ok=true
+                fi
+            fi
+            if [[ "$pw_happy_ok" != "true" ]]; then
+                if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                            -f lavfi -i "color=c=purple:s=320x240:d=10:r=24" \
+                            -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
+                            -c:v libx264 -preset ultrafast -crf 28 \
+                            -c:a aac -b:a 64k \
+                            "/movies/Dualsub Happy (2024)/base.mkv" 2>/dev/null && \
+                    $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                            -i "/movies/Dualsub Happy (2024)/base.mkv" \
+                            -i "/movies/Dualsub Happy (2024)/en.srt" \
+                            -i "/movies/Dualsub Happy (2024)/es.srt" \
+                            -map 0:v -map 0:a -map 1 -map 2 \
+                            -c:v copy -c:a copy -c:s srt \
+                            -metadata:s:s:0 language=eng \
+                            -metadata:s:s:1 language=spa \
+                            -metadata title="Dualsub Happy" -metadata year="2024" \
+                            "/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv" 2>/dev/null; then
+                    pw_happy_ok=true
+                fi
+            fi
+            rm -f "$pw_happy_dir/base.mkv" "$pw_happy_dir/en.srt" "$pw_happy_dir/es.srt"
+            if [[ "$pw_happy_ok" != "true" ]]; then
+                warn "Dualsub Happy fixture generation failed — dualsub-happy spec may fail"
+            fi
+        fi
+
+        # Fixture 5: Dualsub Failed (2024) — embedded en only; es cue set is
+        # empty and dual_sub_translator="none", so GenerateDualSubs records a
+        # dualsub_error and DualSubOutputs is empty (non-fatal).
+        local pw_failed_dir="$test_library_dir/movies/Dualsub Failed (2024)"
+        local pw_failed_file="$pw_failed_dir/Dualsub.Failed.2024.mkv"
+        mkdir -p "$pw_failed_dir"
+        if [[ "$pw_ffmpeg_ok" == "true" ]]; then
+            printf '1\n00:00:01,000 --> 00:00:03,000\nHello world\n\n2\n00:00:04,000 --> 00:00:06,000\nGoodbye world\n' \
+                > "$pw_failed_dir/en.srt"
+            local pw_failed_base="$pw_failed_dir/base.mkv"
+            local pw_failed_ok=false
+            if command -v ffmpeg &>/dev/null; then
+                if ffmpeg -y \
+                        -f lavfi -i "color=c=green:s=320x240:d=10:r=24" \
+                        -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
+                        -c:v libx264 -preset ultrafast -crf 28 \
+                        -c:a aac -b:a 64k \
+                        "$pw_failed_base" 2>/dev/null && \
+                    ffmpeg -y \
+                        -i "$pw_failed_base" \
+                        -i "$pw_failed_dir/en.srt" \
+                        -map 0:v -map 0:a -map 1 \
+                        -c:v copy -c:a copy -c:s srt \
+                        -metadata:s:s:0 language=eng \
+                        -metadata title="Dualsub Failed" -metadata year="2024" \
+                        "$pw_failed_file" 2>/dev/null; then
+                    pw_failed_ok=true
+                fi
+            fi
+            if [[ "$pw_failed_ok" != "true" ]]; then
+                if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                            -f lavfi -i "color=c=green:s=320x240:d=10:r=24" \
+                            -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
+                            -c:v libx264 -preset ultrafast -crf 28 \
+                            -c:a aac -b:a 64k \
+                            "/movies/Dualsub Failed (2024)/base.mkv" 2>/dev/null && \
+                    $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                            -i "/movies/Dualsub Failed (2024)/base.mkv" \
+                            -i "/movies/Dualsub Failed (2024)/en.srt" \
+                            -map 0:v -map 0:a -map 1 \
+                            -c:v copy -c:a copy -c:s srt \
+                            -metadata:s:s:0 language=eng \
+                            -metadata title="Dualsub Failed" -metadata year="2024" \
+                            "/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv" 2>/dev/null; then
+                    pw_failed_ok=true
+                fi
+            fi
+            rm -f "$pw_failed_dir/base.mkv" "$pw_failed_dir/en.srt"
+            if [[ "$pw_failed_ok" != "true" ]]; then
+                warn "Dualsub Failed fixture generation failed — dualsub-failed spec may fail"
+            fi
+        fi
+
         if [[ "$pw_ffmpeg_ok" != "true" ]]; then
             warn "Playwright fixture generation failed — skipping UI tests"
         else
@@ -735,6 +896,55 @@ except Exception:
                 --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
                 --header='Content-Type: application/json' \
                 'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+
+            # Pre-fire Sub Timeout webhook.
+            # Temporarily re-enable validation so checkMissingSubtitles runs and
+            # populates MissingSubs → await_subs stage is entered.  Bazarr has no
+            # configured providers, so it times out after sub_acquire_timeout_min=1 min.
+            # Validation is re-disabled after a brief sleep to ensure the worker has
+            # picked up the job and read its settings (worker reads settings once at
+            # job start; the sleep makes the race window negligibly small).
+            if [[ -f "$pw_timeout_file" ]]; then
+                info "Temporarily enabling validation for Sub Timeout fixture..."
+                curl -sf --max-time 5 \
+                    -X POST "http://localhost:${test_port}/api/procula/settings" \
+                    -H "Content-Type: application/json" \
+                    -H "X-API-Key: ${test_api_key}" \
+                    -d '{"validation_enabled":true,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
+                    2>/dev/null || true
+                info "Pre-firing Sub Timeout import webhook..."
+                $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                    --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
+                    --header='Content-Type: application/json' \
+                    'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+                # Brief wait so the worker has picked up the job and read validation=true.
+                sleep 5
+                # Restore standard test settings (validation off, transcoding on).
+                curl -sf --max-time 5 \
+                    -X POST "http://localhost:${test_port}/api/procula/settings" \
+                    -H "Content-Type: application/json" \
+                    -H "X-API-Key: ${test_api_key}" \
+                    -d '{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
+                    2>/dev/null || true
+            fi
+
+            # Pre-fire Dualsub Happy import webhook.
+            if [[ -f "$pw_happy_file" ]]; then
+                info "Pre-firing Dualsub Happy import webhook..."
+                $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                    --post-data='{"eventType":"Download","movie":{"id":2024,"title":"Dualsub Happy","year":2024,"folderPath":"/movies/Dualsub Happy (2024)"},"movieFile":{"path":"/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv","relativePath":"Dualsub.Happy.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-happy-test"}' \
+                    --header='Content-Type: application/json' \
+                    'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+            fi
+
+            # Pre-fire Dualsub Failed import webhook.
+            if [[ -f "$pw_failed_file" ]]; then
+                info "Pre-firing Dualsub Failed import webhook..."
+                $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                    --post-data='{"eventType":"Download","movie":{"id":2025,"title":"Dualsub Failed","year":2024,"folderPath":"/movies/Dualsub Failed (2024)"},"movieFile":{"path":"/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv","relativePath":"Dualsub.Failed.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-failed-test"}' \
+                    --header='Content-Type: application/json' \
+                    'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+            fi
 
             info "Running Playwright UI tests..."
 
