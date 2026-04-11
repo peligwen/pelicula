@@ -1,4 +1,0 @@
-# Test fixtures — these are literally the string "testkeytestkeytestkeytestkey1"
-# base64-encoded, used by the e2e suite to stand in for a WireGuard key.
-# Safe to ignore; do not treat as a real secret.
-dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE=
