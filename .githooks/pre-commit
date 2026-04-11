@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# pre-commit: fast per-module checks on staged Go/shell files.
-# Mirrors the .claude/settings.json PostToolUse hook so editing locally and
-# editing via Claude Code give the same fast-feedback shape.
+# pre-commit: per-module checks on staged Go/shell files.
+# Source of truth for module-wide vet/build/test; Claude Code's PostToolUse
+# hook runs a faster, package-scoped subset of these checks on each edit.
 # Bypass: git commit --no-verify
 set -euo pipefail
 
