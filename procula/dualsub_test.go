@@ -553,3 +553,36 @@ func TestProbeSubStreams_NoBitmapSubs(t *testing.T) {
 		t.Errorf("hdmv_pgs_subtitle should not be a text sub codec")
 	}
 }
+
+func TestIsTextSubCodec(t *testing.T) {
+	cases := []struct {
+		codec string
+		want  bool
+	}{
+		// Text-based codecs accepted by isTextSubCodec
+		{"subrip", true},
+		{"ass", true},
+		{"ssa", true},
+		{"webvtt", true},
+		{"mov_text", true},
+		{"text", true},
+		// Codec names are lower-cased before the switch; verify case-insensitivity
+		{"SUBRIP", true},
+		{"ASS", true},
+		// Bitmap codecs — not supported (require OCR)
+		{"hdmv_pgs_subtitle", false},
+		{"dvd_subtitle", false},
+		{"dvb_subtitle", false},
+		{"xsub", false},
+		// Unknown / empty
+		{"", false},
+		{"unknown_codec", false},
+	}
+	for _, c := range cases {
+		t.Run(c.codec, func(t *testing.T) {
+			if got := isTextSubCodec(c.codec); got != c.want {
+				t.Errorf("isTextSubCodec(%q) = %v, want %v", c.codec, got, c.want)
+			}
+		})
+	}
+}
