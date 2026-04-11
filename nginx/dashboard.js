@@ -2370,6 +2370,7 @@ window.switchTab = window.switchTab || function(tab) {
         // CSS shows storage-explorer-section whenever tab=storage, but import.js
         // is only loaded on demand — without this, the tree stays "Loading directories...".
         if (tab === 'storage') _ensureStorageExplorerLoaded();
+        document.dispatchEvent(new CustomEvent('pelicula:tab-changed', { detail: { tab: tab } }));
     };
 })();
 

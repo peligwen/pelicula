@@ -183,6 +183,16 @@ func main() {
 	mux.Handle("/api/pelicula/library/resub", auth.GuardAdmin(http.HandlerFunc(handleLibraryResub)))
 	mux.Handle("/api/pelicula/procula/jobs/{id}/resub", auth.GuardAdmin(http.HandlerFunc(handleJobResub)))
 
+	// viewer+: catalog (live Radarr/Sonarr library view)
+	mux.Handle("/api/pelicula/catalog", auth.Guard(http.HandlerFunc(handleCatalogList)))
+	mux.Handle("/api/pelicula/catalog/series/{id}", auth.Guard(http.HandlerFunc(handleCatalogSeriesDetail)))
+	mux.Handle("/api/pelicula/catalog/series/{id}/season/{n}", auth.Guard(http.HandlerFunc(handleCatalogSeason)))
+	mux.Handle("/api/pelicula/catalog/item/history", auth.Guard(http.HandlerFunc(handleCatalogItemHistory)))
+
+	// admin only: action bus (mutating) — proxy to procula
+	mux.Handle("/api/pelicula/actions", auth.GuardAdmin(http.HandlerFunc(handleActionsCreate)))
+	mux.Handle("/api/pelicula/actions/registry", auth.Guard(http.HandlerFunc(handleActionsRegistry)))
+
 	// admin only: VPN speed test
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(handleSpeedTest)))
 

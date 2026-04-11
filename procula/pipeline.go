@@ -41,6 +41,17 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		return
 	}
 
+	// Action bus: non-pipeline jobs dispatch through the registry instead of
+	// running the stage machine.
+	if job.ActionType != "" && job.ActionType != "pipeline" {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		q.registerCancel(id, cancel)
+		defer q.unregisterCancel(id)
+		runActionJob(ctx, q, job)
+		return
+	}
+
 	// Manual transcode jobs skip Validate and CatalogEarly — the file is
 	// already in the library and the user explicitly chose a profile.
 	if job.ManualProfile != "" {
@@ -497,6 +508,38 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 		j.Progress = 1.0
 	})
 	slog.Info("manual transcode completed", "component", "pipeline", "job_id", id, "title", job.Source.Title, "output", outputPath)
+}
+
+// runActionJob dispatches a non-pipeline job to a registered action handler,
+// writes the result JSON back to the job row, and marks the job
+// completed/failed based on the handler's return.
+func runActionJob(ctx context.Context, q *Queue, job *Job) {
+	def := Lookup(job.ActionType)
+	if def == nil {
+		_ = q.Update(job.ID, func(j *Job) {
+			j.State = StateFailed
+			j.Error = "unknown action: " + j.ActionType
+		})
+		return
+	}
+	_ = q.Update(job.ID, func(j *Job) {
+		j.State = StateProcessing
+	})
+	result, err := def.Handler(ctx, q, job)
+	_ = q.Update(job.ID, func(j *Job) {
+		if ctx.Err() != nil && (j.State == StateProcessing || j.State == StateQueued) {
+			j.State = StateCancelled
+			return
+		}
+		if err != nil {
+			j.State = StateFailed
+			j.Error = err.Error()
+			return
+		}
+		j.State = StateCompleted
+		j.Progress = 1.0
+		j.Result = result
+	})
 }
 
 // isAllowedJobPath checks that path is under a known media directory.

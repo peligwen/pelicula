@@ -338,6 +338,97 @@ func TestQueueLoadExisting(t *testing.T) {
 	}
 }
 
+func TestQueueCreateWithActionType(t *testing.T) {
+	q := newTestQueue(t)
+
+	job, err := q.Create(JobSource{Path: "/movies/Foo (2024)/foo.mkv", ArrType: "radarr", Type: "movie"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if job.ActionType != "pipeline" {
+		t.Errorf("ActionType default = %q, want %q", job.ActionType, "pipeline")
+	}
+
+	err = q.Update(job.ID, func(j *Job) {
+		j.ActionType = "validate"
+		j.Params = map[string]any{"path": "/movies/Foo (2024)/foo.mkv"}
+		j.Result = map[string]any{"passed": true}
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, ok := q.Get(job.ID)
+	if !ok {
+		t.Fatal("Get: not found")
+	}
+	if got.ActionType != "validate" {
+		t.Errorf("ActionType = %q, want %q", got.ActionType, "validate")
+	}
+	if got.Params["path"] != "/movies/Foo (2024)/foo.mkv" {
+		t.Errorf("Params[path] = %v", got.Params["path"])
+	}
+	if got.Result["passed"] != true {
+		t.Errorf("Result[passed] = %v", got.Result["passed"])
+	}
+}
+
+func TestQueueWaitReturnsOnTerminal(t *testing.T) {
+	q := newTestQueue(t)
+	job, err := q.Create(testSource("/movies/foo.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = q.Update(job.ID, func(j *Job) { j.State = StateCompleted })
+	}()
+
+	got, err := q.Wait(job.ID, 2*time.Second)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if got.State != StateCompleted {
+		t.Errorf("State = %q, want %q", got.State, StateCompleted)
+	}
+}
+
+func TestQueueWaitTimesOut(t *testing.T) {
+	q := newTestQueue(t)
+	job, err := q.Create(testSource("/movies/bar.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err = q.Wait(job.ID, 150*time.Millisecond)
+	if err == nil {
+		t.Fatal("Wait: expected timeout error, got nil")
+	}
+}
+
+func TestQueueWaitNotFound(t *testing.T) {
+	q := newTestQueue(t)
+	_, err := q.Wait("nope", 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("Wait: expected not-found error, got nil")
+	}
+}
+
+func TestQueueListByActionType(t *testing.T) {
+	q := newTestQueue(t)
+	a, _ := q.Create(testSource("/movies/a.mkv"))
+	b, _ := q.Create(testSource("/movies/b.mkv"))
+	_ = q.Update(b.ID, func(j *Job) { j.ActionType = "validate" })
+
+	pipe := q.ListByActionType("pipeline")
+	if len(pipe) != 1 || pipe[0].ID != a.ID {
+		t.Errorf("pipeline filter: got %d jobs", len(pipe))
+	}
+	val := q.ListByActionType("validate")
+	if len(val) != 1 || val[0].ID != b.ID {
+		t.Errorf("validate filter: got %d jobs", len(val))
+	}
+}
+
 func TestQueueLoadSkipsCorruptFiles(t *testing.T) {
 	// With SQLite backing there are no corrupt files to skip —
 	// DB rows are always valid. Verify the queue loads normally.

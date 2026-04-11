@@ -143,6 +143,42 @@ func TestGenerateReadablePassword_Unique(t *testing.T) {
 	}
 }
 
+func TestHandleSetupDetect_ReturnsLANURL(t *testing.T) {
+	t.Setenv("HOST_LAN_URL", "http://192.168.1.42:7354/jellyfin")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup/detect", nil)
+	w := httptest.NewRecorder()
+	handleSetupDetect(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp SetupDetect
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.LANUrl != "http://192.168.1.42:7354/jellyfin" {
+		t.Errorf("LANUrl = %q, want http://192.168.1.42:7354/jellyfin", resp.LANUrl)
+	}
+}
+
+func TestHandleSetupDetect_EmptyLANURLWhenUnset(t *testing.T) {
+	t.Setenv("HOST_LAN_URL", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup/detect", nil)
+	w := httptest.NewRecorder()
+	handleSetupDetect(w, req)
+
+	var resp SetupDetect
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.LANUrl != "" {
+		t.Errorf("LANUrl = %q, want empty string when HOST_LAN_URL unset", resp.LANUrl)
+	}
+}
+
 // ── writeEnvFile uses writeEnvFile (not fmt.Sprintf) ────────────────────────
 
 func TestSetupUsesWriteEnvFile(t *testing.T) {
@@ -173,5 +209,67 @@ func TestSetupUsesWriteEnvFile(t *testing.T) {
 	// Strings must be quoted
 	if !strings.Contains(content, `CONFIG_DIR="/config"`) {
 		t.Error(`expected CONFIG_DIR="/config" (quoted)`)
+	}
+}
+
+func TestSetupRequest_DecodesLANURL(t *testing.T) {
+	raw := `{"lan_url":"http://192.168.1.42:7354/jellyfin","vpn_skipped":true}`
+	var req SetupRequest
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if req.LANUrl != "http://192.168.1.42:7354/jellyfin" {
+		t.Errorf("LANUrl = %q, want http://192.168.1.42:7354/jellyfin", req.LANUrl)
+	}
+}
+
+func TestHandleSetupSubmit_RejectsInjectionInLANURL(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"config_dir":  "./config",
+		"media_dir":   "~/media",
+		"lan_url":     "http://1.2.3.4:7354/jellyfin\nX-Evil: yes",
+		"vpn_skipped": true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	handleSetupSubmit(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for newline in lan_url", w.Code)
+	}
+}
+
+func TestWriteEnvFile_IncludesJellyfinPublishedURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+
+	vars := map[string]string{
+		"CONFIG_DIR":             "/config",
+		"JELLYFIN_PUBLISHED_URL": "http://192.168.1.42:7354/jellyfin",
+	}
+	if err := writeEnvFile(path, vars); err != nil {
+		t.Fatalf("writeEnvFile: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	want := `JELLYFIN_PUBLISHED_URL="http://192.168.1.42:7354/jellyfin"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("env file missing %s\n got: %s", want, string(data))
+	}
+}
+
+func TestWriteEnvFile_OmitsEmptyJellyfinPublishedURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+
+	vars := map[string]string{
+		"CONFIG_DIR": "/config",
+	}
+	if err := writeEnvFile(path, vars); err != nil {
+		t.Fatalf("writeEnvFile: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "JELLYFIN_PUBLISHED_URL") {
+		t.Errorf("env file should not mention JELLYFIN_PUBLISHED_URL when absent\n got: %s", string(data))
 	}
 }

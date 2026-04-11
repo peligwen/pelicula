@@ -96,6 +96,12 @@ type Job struct {
 	TranscodeOutputs  []string `json:"transcode_outputs,omitempty"`
 	TranscodeError    string   `json:"transcode_error,omitempty"`
 	TranscodeETA      float64  `json:"transcode_eta,omitempty"`
+
+	// Action-bus discriminator and payload. ActionType="pipeline" runs the
+	// legacy stage machine; anything else is dispatched via the action registry.
+	ActionType string         `json:"action_type,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
+	Result     map[string]any `json:"result,omitempty"`
 }
 
 type Queue struct {
@@ -194,8 +200,9 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 
 	_, err = q.db.Exec(
 		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
-		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0)`,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
+		                   action_type, params, result)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, 'pipeline', NULL, NULL)`,
 		id,
 		now.Format(time.RFC3339Nano),
 		now.Format(time.RFC3339Nano),
@@ -208,12 +215,13 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	}
 
 	job := &Job{
-		ID:        id,
-		CreatedAt: now,
-		UpdatedAt: now,
-		State:     StateQueued,
-		Stage:     StageValidate,
-		Source:    source,
+		ID:         id,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		State:      StateQueued,
+		Stage:      StageValidate,
+		Source:     source,
+		ActionType: "pipeline",
 	}
 
 	select {
@@ -225,12 +233,70 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	return job, nil
 }
 
+// createActionJob inserts a new action-bus job directly, bypassing the
+// path-dedup logic that Create uses for pipeline jobs. Each action call
+// always gets a fresh job row — dedup would corrupt in-flight pipeline jobs
+// that happen to share the same source path.
+func (q *Queue) createActionJob(source JobSource, actionType string, params map[string]any) (*Job, error) {
+	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
+	now := time.Now().UTC()
+
+	sourceJSON, err := json.Marshal(source)
+	if err != nil {
+		return nil, fmt.Errorf("marshal source: %w", err)
+	}
+	var paramsJSON *string
+	if params != nil {
+		b, _ := json.Marshal(params)
+		s := string(b)
+		paramsJSON = &s
+	}
+
+	_, err = q.db.Exec(
+		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
+		                   action_type, params, result)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL)`,
+		id,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		string(StateQueued),
+		string(StageValidate),
+		string(sourceJSON),
+		actionType,
+		paramsJSON,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert action job: %w", err)
+	}
+
+	job := &Job{
+		ID:         id,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		State:      StateQueued,
+		Stage:      StageValidate,
+		Source:     source,
+		ActionType: actionType,
+		Params:     params,
+	}
+
+	select {
+	case q.pending <- id:
+	default:
+		slog.Warn("pending channel full, action job will not run until restart", "component", "queue", "job_id", id)
+	}
+
+	return job, nil
+}
+
 func (q *Queue) Get(id string) (*Job, bool) {
 	row := q.db.QueryRow(
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
-		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
+		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
+		        action_type, params, result
 		 FROM jobs WHERE id=?`, id,
 	)
 	job, err := scanJob(row)
@@ -245,7 +311,8 @@ func (q *Queue) List() []Job {
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
-		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta
+		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
+		        action_type, params, result
 		 FROM jobs ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -262,6 +329,22 @@ func (q *Queue) List() []Job {
 			continue
 		}
 		out = append(out, *job)
+	}
+	return out
+}
+
+// ListByActionType returns jobs filtered by action_type (e.g. "pipeline"
+// or "validate"). Empty string means all action types.
+func (q *Queue) ListByActionType(actionType string) []Job {
+	all := q.List()
+	if actionType == "" {
+		return all
+	}
+	var out []Job
+	for _, j := range all {
+		if j.ActionType == actionType {
+			out = append(out, j)
+		}
 	}
 	return out
 }
@@ -312,12 +395,26 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		transcodeOutputsJSON = &s
 	}
 
+	var paramsJSON *string
+	if job.Params != nil {
+		b, _ := json.Marshal(job.Params)
+		s := string(b)
+		paramsJSON = &s
+	}
+	var resultJSON *string
+	if job.Result != nil {
+		b, _ := json.Marshal(job.Result)
+		s := string(b)
+		resultJSON = &s
+	}
+
 	_, err := q.db.Exec(
 		`UPDATE jobs SET
 			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
 			subs_acquired=?,
 			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
-			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?
+			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?,
+			action_type=?, params=?, result=?
 		 WHERE id=?`,
 		job.UpdatedAt.Format(time.RFC3339Nano),
 		string(job.State), string(job.Stage), job.Progress,
@@ -325,6 +422,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		subsAcquiredJSON,
 		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
+		job.ActionType, paramsJSON, resultJSON,
 		id,
 	)
 	if err != nil {
@@ -377,6 +475,43 @@ func (q *Queue) Cancel(id string) error {
 	}
 	q.cancelsMu.Unlock()
 	return nil
+}
+
+// Wait polls the queue for a terminal state on the given job ID.
+// Returns the final job snapshot when state transitions to completed, failed,
+// or cancelled. Returns an error on timeout or if the job ID is unknown.
+// Caller should cap timeout at ~10 seconds; this is intended for synchronous
+// action calls with ?wait=N.
+func (q *Queue) Wait(id string, timeout time.Duration) (*Job, error) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	if job, ok := q.Get(id); ok {
+		if isTerminal(job.State) {
+			return job, nil
+		}
+	} else {
+		return nil, fmt.Errorf("job %s not found", id)
+	}
+
+	for {
+		<-ticker.C
+		job, ok := q.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("job %s not found", id)
+		}
+		if isTerminal(job.State) {
+			return job, nil
+		}
+		if time.Now().After(deadline) {
+			return job, fmt.Errorf("timeout after %s waiting for job %s", timeout, id)
+		}
+	}
+}
+
+func isTerminal(s JobState) bool {
+	return s == StateCompleted || s == StateFailed || s == StateCancelled
 }
 
 // registerCancel stores a context cancel func for a running job.
@@ -436,6 +571,9 @@ func scanJob(s scanner) (*Job, error) {
 		subsAcquiredJSON     *string
 		dualSubOutputsJSON   *string
 		transcodeOutputsJSON *string
+		actionType           string
+		paramsJSON           *string
+		resultJSON           *string
 	)
 
 	err := s.Scan(
@@ -447,6 +585,7 @@ func scanJob(s scanner) (*Job, error) {
 		&dualSubOutputsJSON, &job.DualSubError,
 		&job.TranscodeProfile, &job.TranscodeDecision,
 		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,
+		&actionType, &paramsJSON, &resultJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -482,6 +621,18 @@ func scanJob(s scanner) (*Job, error) {
 
 	if transcodeOutputsJSON != nil {
 		json.Unmarshal([]byte(*transcodeOutputsJSON), &job.TranscodeOutputs) //nolint:errcheck
+	}
+
+	job.ActionType = actionType
+	if job.ActionType == "" {
+		job.ActionType = "pipeline"
+	}
+
+	if paramsJSON != nil {
+		json.Unmarshal([]byte(*paramsJSON), &job.Params) //nolint:errcheck
+	}
+	if resultJSON != nil {
+		json.Unmarshal([]byte(*resultJSON), &job.Result) //nolint:errcheck
 	}
 
 	return &job, nil

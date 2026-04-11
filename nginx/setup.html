@@ -86,6 +86,10 @@
                 </div>
             </details>
 
+            <label for="published-url">Jellyfin LAN URL</label>
+            <p class="field-help">What Jellyfin clients on your network should connect to. Leave blank to skip.</p>
+            <input id="published-url" type="url" placeholder="http://192.168.1.42:7354/jellyfin">
+
             <div class="step-nav">
                 <button onclick="goStep(1)" class="btn-secondary">Back</button>
                 <button onclick="goStep(3)" class="btn-primary">Next</button>
@@ -143,6 +147,7 @@ let vpnSkipped = false;
             detected = await r.json();
             document.getElementById('path-config').value = detected.config_dir || '';
             document.getElementById('path-media').value = detected.library_dir || '';
+            document.getElementById('published-url').value = detected.lan_url || '';
 
             const badge = document.getElementById('platform-badge');
             const labels = { synology: 'Synology NAS', macos: 'macOS', wsl: 'WSL', linux: 'Linux' };
@@ -299,6 +304,14 @@ async function submitSetup() {
     const errEl = document.getElementById('setup-error');
     errEl.classList.add('hidden');
 
+    // Light validation: if published URL is non-empty and does not end with
+    // /jellyfin, append it before submitting. Jellyfin's BaseUrl is /jellyfin,
+    // so LAN discovery URLs must include that suffix.
+    let publishedURL = document.getElementById('published-url').value.trim();
+    if (publishedURL && !publishedURL.replace(/\/+$/, '').endsWith('/jellyfin')) {
+        publishedURL = publishedURL.replace(/\/+$/, '') + '/jellyfin';
+    }
+
     const body = {
         config_dir: document.getElementById('path-config').value.trim(),
         media_dir: document.getElementById('path-media').value.trim(),
@@ -306,6 +319,7 @@ async function submitSetup() {
         work_dir: document.getElementById('path-work').value.trim() || '',
         wireguard_key: vpnSkipped ? '' : document.getElementById('vpn-key').value.trim(),
         vpn_skipped: vpnSkipped,
+        lan_url: publishedURL,
     };
 
     const endpoint = mode === 'settings' ? '/api/pelicula/settings' : '/api/pelicula/setup';

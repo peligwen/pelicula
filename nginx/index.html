@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/theme.css">
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/import.css">
+    <link rel="stylesheet" href="/catalog.css">
     <script>(function(){var t=localStorage.getItem('pelicula-theme');if(t)document.documentElement.dataset.theme=t;})()</script>
 </head>
 <body data-dashboard="1">
@@ -77,6 +78,7 @@
     <nav class="tabbar" id="tabbar">
         <button class="tab active" data-tab="search" onclick="switchTab('search')">search</button>
         <button class="tab" data-tab="coming" onclick="switchTab('coming')">pipeline</button>
+        <button class="tab" data-tab="catalog" onclick="switchTab('catalog')">catalog</button>
         <button class="tab" data-tab="storage" onclick="switchTab('storage')">storage</button>
         <button class="tab" data-tab="users" onclick="switchTab('users')">users</button>
         <button class="tab" data-tab="settings" onclick="switchTab('settings')">settings</button>
@@ -166,6 +168,28 @@
                 </details>
             </div>
 
+            <!-- Catalog -->
+            <div class="section hidden" id="catalog-section">
+                <div class="um-hero">
+                    <div class="um-hero-title-row">
+                        <span class="um-hero-icon">&#127916;</span>
+                        <h2 class="um-hero-title">Catalog</h2>
+                    </div>
+                    <p class="um-hero-sub">Your library — movies and TV shows</p>
+                </div>
+                <div class="cat-controls">
+                    <input type="search" id="cat-search" class="cat-search-input" placeholder="Search…" oninput="catSearch(this.value)">
+                    <div class="cat-type-chips">
+                        <button class="cat-chip cat-chip-active" data-type="" onclick="catSetType(this,'')">All</button>
+                        <button class="cat-chip" data-type="movie" onclick="catSetType(this,'movie')">Movies</button>
+                        <button class="cat-chip" data-type="show" onclick="catSetType(this,'show')">TV</button>
+                    </div>
+                </div>
+                <div id="cat-list" class="cat-list">
+                    <div class="no-items">Loading…</div>
+                </div>
+            </div>
+
             <!-- Storage Management -->
             <div class="section hidden" id="storage-section">
                 <div class="um-hero">
@@ -248,8 +272,6 @@
                     </div>
                     <div class="action-bar-right">
                         <button class="import-btn" id="btn-import" data-testid="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
-                        <button class="import-btn" id="btn-transcode" onclick="onTranscodeClick()" disabled title="">&#8635; Transcode</button>
-                        <button class="import-btn" id="btn-resub" onclick="onResubClick()" disabled title="">CC Re-search Subs</button>
                     </div>
                 </div>
 
@@ -346,43 +368,6 @@
                             <div class="import-nav hidden" id="apply-nav" data-testid="apply-nav">
                                 <div></div>
                                 <button class="import-btn primary" onclick="closeImportModal()">Done</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Transcode modal -->
-                <div class="se-modal hidden" id="transcode-modal">
-                    <div class="se-modal-inner">
-                        <div class="se-modal-header">
-                            <span class="se-modal-title">Transcode</span>
-                            <button class="section-action" onclick="closeTranscodeModal()">&#10005;</button>
-                        </div>
-
-                        <!-- Profile picker -->
-                        <div class="import-panel" id="transcode-configure">
-                            <div class="section-header"><span>Select a transcode profile</span></div>
-                            <div id="rt-profiles-container">
-                                <div class="no-items">Loading profiles...</div>
-                            </div>
-                            <div class="import-nav">
-                                <button class="import-btn" onclick="closeTranscodeModal()">Cancel</button>
-                                <button class="import-btn primary" id="rt-btn-apply" onclick="doRetranscode()" disabled>Apply</button>
-                            </div>
-                        </div>
-
-                        <!-- Result -->
-                        <div class="import-panel hidden" id="transcode-apply">
-                            <div class="section-header"><span>Re-transcode</span></div>
-                            <div id="rt-apply-content">
-                                <div class="apply-progress">
-                                    <div class="apply-spinner"></div>
-                                    <span>Queuing transcode jobs...</span>
-                                </div>
-                            </div>
-                            <div class="import-nav hidden" id="rt-apply-nav">
-                                <button class="import-btn" onclick="openTranscodeModal()">Transcode more</button>
-                                <button class="import-btn primary" onclick="closeTranscodeModal()">Done</button>
                             </div>
                         </div>
                     </div>
@@ -907,6 +892,7 @@
     </div>
 
     <script src="/framework.js"></script>
+    <script src="/catalog.js" defer></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>

@@ -98,6 +98,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"JELLYFIN_ADMIN_USER", // legacy: kept for upgrade-path ordering
 		"JELLYFIN_PASSWORD",   // legacy: kept for upgrade-path ordering
 		"JELLYFIN_API_KEY",
+		"JELLYFIN_PUBLISHED_URL",
 		"PROCULA_API_KEY", "WEBHOOK_SECRET",
 		"TRANSCODING_ENABLED",
 		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",

@@ -20,6 +20,22 @@ func xmlEscape(s string) string {
 	return s
 }
 
+// jellyfinNetworkXML returns the contents of Jellyfin's network.xml.
+// When JELLYFIN_PUBLISHED_URL is set in the environment, it is included as a
+// <PublishedServerUrl> element so LAN clients discovering the server via UDP
+// 7359 broadcast see the correct host-reachable URL instead of the container's
+// internal IP. When unset, the element is omitted — Jellyfin falls back to its
+// default advertising behavior, and the file stays byte-identical to prior
+// versions (backwards compatible for existing installs).
+func jellyfinNetworkXML() string {
+	const header = `<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl>`
+	const footer = `</NetworkConfiguration>`
+	if url := os.Getenv("JELLYFIN_PUBLISHED_URL"); url != "" {
+		return header + "<PublishedServerUrl>" + xmlEscape(url) + "</PublishedServerUrl>" + footer
+	}
+	return header + footer
+}
+
 // seedConfig writes content to file only if the file does not already exist.
 func seedConfig(file, content string) error {
 	if _, err := os.Stat(file); err == nil {
@@ -117,7 +133,7 @@ func SeedAllConfigs(configDir string) error {
 	// Jellyfin network.xml
 	if err := seedConfig(
 		filepath.Join(configDir, "jellyfin", "network.xml"),
-		`<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>`,
+		jellyfinNetworkXML(),
 	); err != nil {
 		return fmt.Errorf("seed jellyfin network.xml: %w", err)
 	}
@@ -239,7 +255,7 @@ func resetJellyfin(configDir string) error {
 	}
 	if err := os.WriteFile(
 		filepath.Join(jellyfinDir, "network.xml"),
-		[]byte(`<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>`),
+		[]byte(jellyfinNetworkXML()),
 		0644,
 	); err != nil {
 		return err

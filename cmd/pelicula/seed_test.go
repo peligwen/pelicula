@@ -182,6 +182,59 @@ func TestSeedAllConfigs(t *testing.T) {
 	}
 }
 
+func TestSeedAllConfigs_WritesPublishedServerURLWhenSet(t *testing.T) {
+	t.Setenv("JELLYFIN_PUBLISHED_URL", "http://192.168.1.42:7354/jellyfin")
+
+	dir := t.TempDir()
+	if err := SeedAllConfigs(dir); err != nil {
+		t.Fatalf("SeedAllConfigs: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "jellyfin", "network.xml"))
+	got := string(data)
+
+	if !strings.Contains(got, "<PublishedServerUrl>http://192.168.1.42:7354/jellyfin</PublishedServerUrl>") {
+		t.Errorf("network.xml missing PublishedServerUrl\n got: %s", got)
+	}
+	if !strings.Contains(got, "<BaseUrl>/jellyfin</BaseUrl>") {
+		t.Errorf("network.xml missing BaseUrl\n got: %s", got)
+	}
+}
+
+func TestSeedAllConfigs_OmitsPublishedServerURLWhenUnset(t *testing.T) {
+	t.Setenv("JELLYFIN_PUBLISHED_URL", "")
+
+	dir := t.TempDir()
+	if err := SeedAllConfigs(dir); err != nil {
+		t.Fatalf("SeedAllConfigs: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "jellyfin", "network.xml"))
+	got := string(data)
+
+	if strings.Contains(got, "PublishedServerUrl") {
+		t.Errorf("network.xml should not mention PublishedServerUrl when env unset\n got: %s", got)
+	}
+}
+
+func TestSeedAllConfigs_EscapesPublishedServerURL(t *testing.T) {
+	t.Setenv("JELLYFIN_PUBLISHED_URL", "http://h&t<s>:7354/jellyfin")
+
+	dir := t.TempDir()
+	if err := SeedAllConfigs(dir); err != nil {
+		t.Fatalf("SeedAllConfigs: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "jellyfin", "network.xml"))
+	got := string(data)
+
+	// Raw unescaped characters must not appear inside the element
+	if strings.Contains(got, "h&t<s>") {
+		t.Errorf("network.xml should XML-escape special chars\n got: %s", got)
+	}
+	// Escaped form must appear
+	if !strings.Contains(got, "http://h&amp;t&lt;s&gt;:7354/jellyfin") {
+		t.Errorf("network.xml missing escaped PublishedServerUrl\n got: %s", got)
+	}
+}
+
 func TestResetArrService(t *testing.T) {
 	dir := t.TempDir()
 	svcDir := filepath.Join(dir, "sonarr")
