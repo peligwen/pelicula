@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"pelicula-api/httputil"
 	"regexp"
 	"sort"
 	"strconv"
@@ -322,12 +323,12 @@ func handleBrowse(w http.ResponseWriter, r *http.Request) {
 				ModTime: info.ModTime(),
 			})
 		}
-		writeJSON(w, BrowseResponse{Entries: entries})
+		httputil.WriteJSON(w, BrowseResponse{Entries: entries})
 		return
 	}
 
 	if !isAllowedBrowsePath(dir) {
-		writeError(w, "path not under an allowed directory", http.StatusForbidden)
+		httputil.WriteError(w, "path not under an allowed directory", http.StatusForbidden)
 		return
 	}
 
@@ -336,14 +337,14 @@ func handleBrowse(w http.ResponseWriter, r *http.Request) {
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeError(w, "directory not found", http.StatusNotFound)
+			httputil.WriteError(w, "directory not found", http.StatusNotFound)
 		} else {
-			writeError(w, "path not under an allowed directory", http.StatusForbidden)
+			httputil.WriteError(w, "path not under an allowed directory", http.StatusForbidden)
 		}
 		return
 	}
 	if !isAllowedBrowsePath(resolved) {
-		writeError(w, "path not under an allowed directory", http.StatusForbidden)
+		httputil.WriteError(w, "path not under an allowed directory", http.StatusForbidden)
 		return
 	}
 	dir = resolved
@@ -351,9 +352,9 @@ func handleBrowse(w http.ResponseWriter, r *http.Request) {
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeError(w, "directory not found", http.StatusNotFound)
+			httputil.WriteError(w, "directory not found", http.StatusNotFound)
 		} else {
-			writeError(w, "failed to read directory", http.StatusInternalServerError)
+			httputil.WriteError(w, "failed to read directory", http.StatusInternalServerError)
 		}
 		return
 	}
@@ -412,7 +413,7 @@ func handleBrowse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, BrowseResponse{Entries: entries, Truncated: truncated})
+	httputil.WriteJSON(w, BrowseResponse{Entries: entries, Truncated: truncated})
 }
 
 // handleLibraryScan receives a list of local media files and returns a match
@@ -427,7 +428,7 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5 MB
 	var req ScanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -450,13 +451,13 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 	req.Files = collapseHardlinks(req.Files)
 
 	if len(req.Files) == 0 {
-		writeJSON(w, []MatchItem{})
+		httputil.WriteJSON(w, []MatchItem{})
 		return
 	}
 
 	sonarrKey, radarrKey, _ := services.Keys()
 	if radarrKey == "" || sonarrKey == "" {
-		writeError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
+		httputil.WriteError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -524,7 +525,7 @@ func handleLibraryScan(w http.ResponseWriter, r *http.Request) {
 		"high", high, "medium", medium, "low", low,
 		"unmatched", unmatched, "exists", exists)
 
-	writeJSON(w, results)
+	httputil.WriteJSON(w, results)
 }
 
 // handleLibraryApply receives a list of matched items and registers them in
@@ -539,7 +540,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5 MB
 	var req ApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -561,7 +562,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(dups) > 0 {
 			sort.Strings(dups)
-			writeError(w,
+			httputil.WriteError(w,
 				"duplicate group keys in apply request (resolve before applying): "+strings.Join(dups, ", "),
 				http.StatusBadRequest)
 			return
@@ -570,7 +571,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 
 	sonarrKey, radarrKey, _ := services.Keys()
 	if radarrKey == "" || sonarrKey == "" {
-		writeError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
+		httputil.WriteError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -703,7 +704,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, result)
+	httputil.WriteJSON(w, result)
 }
 
 // ── Match helpers ─────────────────────────────────────────────────────────────
@@ -1186,7 +1187,7 @@ type RetranscodeResult struct {
 // GET lists all profiles; POST creates or updates a profile.
 func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var upstream *http.Request
@@ -1201,7 +1202,7 @@ func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
 		upstream, err = http.NewRequest(http.MethodGet, proculaURL+"/api/procula/profiles", nil)
 	}
 	if err != nil {
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
@@ -1209,7 +1210,7 @@ func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := services.client.Do(upstream)
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -1223,17 +1224,17 @@ func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
 // handleDeleteTranscodeProfile proxies DELETE /api/procula/profiles/{name}.
 func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		writeError(w, "profile name required", http.StatusBadRequest)
+		httputil.WriteError(w, "profile name required", http.StatusBadRequest)
 		return
 	}
 	upstream, err := http.NewRequest(http.MethodDelete, proculaURL+"/api/procula/profiles/"+url.PathEscape(name), nil)
 	if err != nil {
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
@@ -1241,7 +1242,7 @@ func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := services.client.Do(upstream)
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -1253,17 +1254,17 @@ func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
 // Only paths under /movies or /tv are accepted.
 func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req RetranscodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if len(req.Files) == 0 || req.Profile == "" {
-		writeError(w, "files and profile are required", http.StatusBadRequest)
+		httputil.WriteError(w, "files and profile are required", http.StatusBadRequest)
 		return
 	}
 
@@ -1301,24 +1302,24 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 		result.Queued++
 	}
 
-	writeJSON(w, result)
+	httputil.WriteJSON(w, result)
 }
 
 // handleJobResub proxies POST /api/procula/jobs/{id}/resub — re-triggers
 // Bazarr subtitle search for an existing pipeline job.
 func handleJobResub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, "job id required", http.StatusBadRequest)
+		httputil.WriteError(w, "job id required", http.StatusBadRequest)
 		return
 	}
 	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/jobs/"+url.PathEscape(id)+"/resub", nil)
 	if err != nil {
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
@@ -1326,7 +1327,7 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := services.client.Do(upstream)
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -1340,7 +1341,7 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 // Accepts POST with body {"path": "/movies/..."}.
 func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -1348,12 +1349,12 @@ func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	clean := filepath.Clean(req.Path)
 	if !isUnderPrefixes(clean, []string{"/movies", "/tv"}) {
-		writeError(w, "path not under /movies or /tv", http.StatusBadRequest)
+		httputil.WriteError(w, "path not under /movies or /tv", http.StatusBadRequest)
 		return
 	}
 
@@ -1394,7 +1395,7 @@ func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeError(w, "file not found in Radarr or Sonarr", http.StatusNotFound)
+	httputil.WriteError(w, "file not found in Radarr or Sonarr", http.StatusNotFound)
 }
 
 // sendSubSearch calls Procula's subtitle search endpoint for the given arr item.
@@ -1406,7 +1407,7 @@ func sendSubSearch(w http.ResponseWriter, r *http.Request, arrType string, arrID
 	})
 	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/subtitles/search", bytes.NewReader(payload))
 	if err != nil {
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	upstream.Header.Set("Content-Type", "application/json")
@@ -1415,7 +1416,7 @@ func sendSubSearch(w http.ResponseWriter, r *http.Request, arrType string, arrID
 	}
 	resp, err := services.client.Do(upstream)
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

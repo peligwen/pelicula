@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
+
+	"pelicula-api/httputil"
 )
 
 var services *ServiceClients
@@ -33,7 +34,7 @@ func main() {
 		})
 		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
 		// Peligrosa: requireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
-		mux.Handle("/api/pelicula/setup", requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
+		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
 		serveWithShutdown(":8181", mux)
 		return
@@ -140,8 +141,8 @@ func main() {
 
 	// admin only: settings (read and update .env)
 	// Peligrosa: requireLocalOriginStrict guards the POST paths against cross-origin mutations.
-	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(requireLocalOriginStrict(http.HandlerFunc(handleSettings))))
-	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(requireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
+	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettings))))
+	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
 
 	// admin only: backup export / import
 	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
@@ -149,20 +150,20 @@ func main() {
 
 	// admin only: Jellyfin user management (list + create)
 	// Peligrosa: requireLocalOriginSoft allows API callers, blocks browser cross-origin.
-	mux.Handle("/api/pelicula/users", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleUsers))))
+	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsers))))
 	// admin only: per-user operations (delete + password reset)
-	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
+	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
 
 	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
 	// Peligrosa: requireLocalOriginSoft on both routes — redeem is public but invite-gated.
-	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(requireLocalOriginSoft(http.HandlerFunc(handleInvites))))
-	mux.HandleFunc("/api/pelicula/invites/", requireLocalOriginSoft(http.HandlerFunc(handleInviteOp)).ServeHTTP)
+	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleInvites))))
+	mux.HandleFunc("/api/pelicula/invites/", httputil.RequireLocalOriginSoft(http.HandlerFunc(handleInviteOp)).ServeHTTP)
 
 	// Open registration (LAN-only, optional): public account creation without invite tokens.
 	// Peligrosa: requireLocalOriginStrict ensures only LAN browsers can POST.
 	mux.HandleFunc("/api/pelicula/register/check", handleOpenRegCheck)
 	mux.HandleFunc("/api/pelicula/generate-password", handleGeneratePassword)
-	mux.Handle("/api/pelicula/register", requireLocalOriginStrict(http.HandlerFunc(handleOpenRegister)))
+	mux.Handle("/api/pelicula/register", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleOpenRegister)))
 
 	// read: active Jellyfin sessions for the now-playing card.
 	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.
@@ -255,30 +256,5 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		"indexers":       indexerCount,
 		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",
 	}
-	writeJSON(w, status)
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, msg string, code int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-// clientIP extracts the real client IP from X-Real-IP (set by nginx) or falls
-// back to the remote address. Used for rate limiting.
-func clientIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-	// Strip port from RemoteAddr
-	addr := r.RemoteAddr
-	if i := strings.LastIndex(addr, ":"); i != -1 {
-		return addr[:i]
-	}
-	return addr
+	httputil.WriteJSON(w, status)
 }

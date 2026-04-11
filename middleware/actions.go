@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"pelicula-api/httputil"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +27,7 @@ const registryTTL = 60 * time.Second
 // 60-second in-memory cache.
 func handleActionsRegistry(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	registryCache.mu.Lock()
@@ -39,7 +40,7 @@ func handleActionsRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := services.client.Get(proculaURL + "/api/procula/actions/registry")
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -57,13 +58,13 @@ func handleActionsRegistry(w http.ResponseWriter, r *http.Request) {
 // and any ?wait= query param unchanged. PROCULA_API_KEY is injected.
 func handleActionsCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, "read body: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	target := proculaURL + "/api/procula/actions"
@@ -72,7 +73,7 @@ func handleActionsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		writeError(w, "build request", http.StatusInternalServerError)
+		httputil.WriteError(w, "build request", http.StatusInternalServerError)
 		return
 	}
 	upstream.Header.Set("Content-Type", "application/json")
@@ -81,7 +82,7 @@ func handleActionsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := services.client.Do(upstream)
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

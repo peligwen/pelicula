@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"pelicula-api/httputil"
 	"sync"
 	"time"
 )
@@ -34,7 +35,7 @@ type speedTestResult struct {
 
 func handleSpeedTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -42,7 +43,7 @@ func handleSpeedTest(w http.ResponseWriter, r *http.Request) {
 	defer speedTestMu.Unlock()
 
 	if time.Since(speedTestLastRun) < speedTestCooldown && speedTestLastResult != nil {
-		writeJSON(w, speedTestLastResult)
+		httputil.WriteJSON(w, speedTestLastResult)
 		return
 	}
 
@@ -53,7 +54,7 @@ func handleSpeedTest(w http.ResponseWriter, r *http.Request) {
 
 	parsed, err := url.Parse(proxyURL)
 	if err != nil {
-		writeError(w, "invalid proxy URL: "+err.Error(), http.StatusInternalServerError)
+		httputil.WriteError(w, "invalid proxy URL: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -75,7 +76,7 @@ func handleSpeedTest(w http.ResponseWriter, r *http.Request) {
 		}
 		speedTestLastResult = result
 		speedTestLastRun = time.Now()
-		writeJSON(w, result)
+		httputil.WriteJSON(w, result)
 		return
 	}
 	defer resp.Body.Close()
@@ -90,7 +91,7 @@ func handleSpeedTest(w http.ResponseWriter, r *http.Request) {
 		}
 		speedTestLastResult = result
 		speedTestLastRun = time.Now()
-		writeJSON(w, result)
+		httputil.WriteJSON(w, result)
 		return
 	}
 
@@ -111,5 +112,5 @@ func handleSpeedTest(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("speed test complete", "component", "speedtest",
 		"mbps", mbps, "bytes", n, "elapsed_ms", elapsedMs)
-	writeJSON(w, result)
+	httputil.WriteJSON(w, result)
 }

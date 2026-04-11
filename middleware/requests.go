@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"pelicula-api/httputil"
 	"strings"
 	"time"
 )
@@ -312,14 +313,14 @@ func handleRequestList(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []*MediaRequest{}
 	}
-	writeJSON(w, out)
+	httputil.WriteJSON(w, out)
 }
 
 // handleRequestCreate creates a new request from a viewer.
 func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	username, _, ok := authMiddleware.SessionFor(r)
 	if !ok && authMiddleware.mode != "off" {
-		writeError(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -333,31 +334,31 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		Poster string `json:"poster"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if body.Type != "movie" && body.Type != "series" {
-		writeError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
+		httputil.WriteError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
 		return
 	}
 	if body.Title == "" {
-		writeError(w, "title is required", http.StatusBadRequest)
+		httputil.WriteError(w, "title is required", http.StatusBadRequest)
 		return
 	}
 	if body.Type == "movie" && body.TmdbID == 0 {
-		writeError(w, "tmdb_id is required for movies", http.StatusBadRequest)
+		httputil.WriteError(w, "tmdb_id is required for movies", http.StatusBadRequest)
 		return
 	}
 	if body.Type == "series" && body.TvdbID == 0 {
-		writeError(w, "tvdb_id is required for series", http.StatusBadRequest)
+		httputil.WriteError(w, "tvdb_id is required for series", http.StatusBadRequest)
 		return
 	}
 
 	// Deduplicate: return existing non-terminal request for the same content.
 	existing := requestStore.findActive(body.Type, body.TmdbID, body.TvdbID)
 	if existing != nil {
-		writeJSON(w, existing)
+		httputil.WriteJSON(w, existing)
 		return
 	}
 
@@ -386,7 +387,7 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		slog.Error("failed to save request", "component", "requests", "error", err)
-		writeError(w, "failed to save request", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to save request", http.StatusInternalServerError)
 		return
 	}
 
@@ -398,7 +399,7 @@ func handleRequestCreate(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("request created", "component", "requests", "id", req.ID, "title", req.Title, "user", username)
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, req)
+	httputil.WriteJSON(w, req)
 }
 
 // handleRequestOp dispatches approve/deny/delete on /api/pelicula/requests/{id}[/action].
@@ -415,7 +416,7 @@ func handleRequestOp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if id == "" {
-		writeError(w, "request id required", http.StatusBadRequest)
+		httputil.WriteError(w, "request id required", http.StatusBadRequest)
 		return
 	}
 
@@ -439,7 +440,7 @@ func handleRequestOp(w http.ResponseWriter, r *http.Request) {
 		}
 		handleRequestDelete(w, r, id)
 	default:
-		writeError(w, "unknown action: "+action, http.StatusNotFound)
+		httputil.WriteError(w, "unknown action: "+action, http.StatusNotFound)
 	}
 }
 
@@ -454,11 +455,11 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 
 	req := requestStore.get(id)
 	if req == nil {
-		writeError(w, "request not found", http.StatusNotFound)
+		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	if req.State != RequestPending {
-		writeError(w, fmt.Sprintf("request is %s, not pending", req.State), http.StatusConflict)
+		httputil.WriteError(w, fmt.Sprintf("request is %s, not pending", req.State), http.StatusConflict)
 		return
 	}
 
@@ -478,19 +479,19 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	case "series":
 		arrID, addErr = addSeriesInternal(tvdbID, sonarrProfileID, sonarrRoot)
 	default:
-		writeError(w, "unknown request type", http.StatusInternalServerError)
+		httputil.WriteError(w, "unknown request type", http.StatusInternalServerError)
 		return
 	}
 	if addErr != nil {
 		slog.Error("failed to add content to *arr", "component", "requests", "id", id, "error", addErr)
-		writeError(w, "failed to add to *arr: "+addErr.Error(), http.StatusBadGateway)
+		httputil.WriteError(w, "failed to add to *arr: "+addErr.Error(), http.StatusBadGateway)
 		return
 	}
 
 	// Re-fetch to ensure it still exists, then update state.
 	req = requestStore.get(id)
 	if req == nil {
-		writeError(w, "request not found", http.StatusNotFound)
+		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	req.State = RequestGrabbed
@@ -498,7 +499,7 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	req.UpdatedAt = time.Now().UTC()
 	if err := requestStore.updateRequest(req); err != nil {
 		slog.Error("failed to save request after approve", "component", "requests", "error", err)
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	ev := RequestEvent{
@@ -515,7 +516,7 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	slog.Info("request approved", "component", "requests", "id", id, "title", title, "arr_id", arrID)
 	go notifyApprise("Request approved: "+title, fmt.Sprintf("%s requested %q — it's been added to the download queue.", requester, title))
 
-	writeJSON(w, req)
+	httputil.WriteJSON(w, req)
 }
 
 func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
@@ -529,11 +530,11 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 
 	req := requestStore.get(id)
 	if req == nil {
-		writeError(w, "request not found", http.StatusNotFound)
+		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	if req.isTerminal() {
-		writeError(w, fmt.Sprintf("request is already %s", req.State), http.StatusConflict)
+		httputil.WriteError(w, fmt.Sprintf("request is already %s", req.State), http.StatusConflict)
 		return
 	}
 
@@ -545,7 +546,7 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	req.UpdatedAt = time.Now().UTC()
 	if err := requestStore.updateRequest(req); err != nil {
 		slog.Error("failed to save request after deny", "component", "requests", "error", err)
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	ev := RequestEvent{
@@ -566,22 +567,22 @@ func handleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	go notifyApprise("Request denied: "+title, requester+" — "+msg)
 
-	writeJSON(w, req)
+	httputil.WriteJSON(w, req)
 }
 
 func handleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
 	res, err := requestStore.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
 	if err != nil {
 		slog.Error("failed to delete request", "component", "requests", "error", err)
-		writeError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		writeError(w, "request not found", http.StatusNotFound)
+		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, map[string]string{"status": "deleted"})
 }
 
 // MarkRequestAvailable transitions a request to "available" when its content has been imported.

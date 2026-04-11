@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"pelicula-api/httputil"
 )
 
 type Torrent struct {
@@ -39,13 +40,13 @@ func handleDownloads(w http.ResponseWriter, r *http.Request) {
 
 	data, err := services.QbtGet("/api/v2/torrents/info")
 	if err != nil {
-		writeError(w, "failed to reach qBittorrent: "+err.Error(), http.StatusBadGateway)
+		httputil.WriteError(w, "failed to reach qBittorrent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	var rawTorrents []map[string]any
 	if err := json.Unmarshal(data, &rawTorrents); err != nil {
-		writeError(w, "failed to parse torrent data", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to parse torrent data", http.StatusInternalServerError)
 		return
 	}
 
@@ -88,7 +89,7 @@ func handleDownloads(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, DownloadsResponse{
+	httputil.WriteJSON(w, DownloadsResponse{
 		Torrents: torrents,
 		Stats:    stats,
 	})
@@ -102,13 +103,13 @@ func handleDownloadStats(w http.ResponseWriter, r *http.Request) {
 
 	statsData, err := services.QbtGet("/api/v2/transfer/info")
 	if err != nil {
-		writeError(w, "failed to reach qBittorrent", http.StatusBadGateway)
+		httputil.WriteError(w, "failed to reach qBittorrent", http.StatusBadGateway)
 		return
 	}
 
 	var rawStats map[string]any
 	if err := json.Unmarshal(statsData, &rawStats); err != nil {
-		writeError(w, "failed to parse stats", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to parse stats", http.StatusInternalServerError)
 		return
 	}
 
@@ -116,7 +117,7 @@ func handleDownloadStats(w http.ResponseWriter, r *http.Request) {
 		DLSpeed: intVal(rawStats, "dl_info_speed"),
 		UPSpeed: intVal(rawStats, "up_info_speed"),
 	}
-	writeJSON(w, stats)
+	httputil.WriteJSON(w, stats)
 }
 
 // handleDownloadPause pauses or resumes a torrent in qBittorrent.
@@ -132,7 +133,7 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 		Paused bool   `json:"paused"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Hash == "" {
-		writeError(w, "invalid request", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
@@ -145,7 +146,7 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := services.QbtPost(endpoint, "hashes="+url.QueryEscape(req.Hash)); err != nil {
-		writeError(w, "qBittorrent error: "+err.Error(), http.StatusBadGateway)
+		httputil.WriteError(w, "qBittorrent error: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
@@ -154,7 +155,7 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 		action = "paused"
 	}
 	slog.Info("torrent state changed", "component", "downloads", "action", action, "hash", shortHash(req.Hash))
-	writeJSON(w, map[string]string{"status": action})
+	httputil.WriteJSON(w, map[string]string{"status": action})
 }
 
 // handleDownloadCancel removes a torrent and unmonitors the item in Radarr/Sonarr.
@@ -172,7 +173,7 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 		Reason    string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Hash == "" {
-		writeError(w, "invalid request", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
@@ -204,5 +205,5 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 		action = "cancelled+blocklisted"
 	}
 	slog.Info("torrent cancelled", "component", "downloads", "action", action, "hash", shortHash(req.Hash), "category", req.Category, "blocklist", req.Blocklist, "reason", req.Reason)
-	writeJSON(w, map[string]string{"status": "removed"})
+	httputil.WriteJSON(w, map[string]string{"status": "removed"})
 }

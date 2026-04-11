@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"pelicula-api/httputil"
 	"sort"
 	"strconv"
 	"strings"
@@ -135,7 +136,7 @@ func (ds *DismissedStore) Dismiss(id string) error {
 // classified into lanes based on their state.
 func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -371,7 +372,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 		lanes["completed"] = lanes["completed"][:20]
 	}
 
-	writeJSON(w, PipelineResponse{
+	httputil.WriteJSON(w, PipelineResponse{
 		Lanes:       lanes,
 		Stats:       stats,
 		GeneratedAt: time.Now().UTC(),
@@ -382,7 +383,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 // appears in the needs_attention lane.
 func handlePipelineDismiss(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<10) // 1 KB
@@ -390,16 +391,16 @@ func handlePipelineDismiss(w http.ResponseWriter, r *http.Request) {
 		JobID string `json:"job_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.JobID) == "" {
-		writeError(w, "invalid request: job_id required", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request: job_id required", http.StatusBadRequest)
 		return
 	}
 	if err := dismissedStore.Dismiss(req.JobID); err != nil {
 		slog.Error("failed to persist dismissed job", "component", "pipeline", "job_id", req.JobID, "error", err)
-		writeError(w, "failed to persist", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to persist", http.StatusInternalServerError)
 		return
 	}
 	slog.Info("dismissed job", "component", "pipeline", "job_id", req.JobID)
-	writeJSON(w, map[string]string{"status": "dismissed"})
+	httputil.WriteJSON(w, map[string]string{"status": "dismissed"})
 }
 
 // ── Classification helpers ────────────────────────────────────────────────────

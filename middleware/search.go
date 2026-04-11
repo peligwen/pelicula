@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"pelicula-api/httputil"
 	"sync"
 )
 
@@ -35,7 +36,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		writeJSON(w, map[string]any{"results": []SearchResult{}})
+		httputil.WriteJSON(w, map[string]any{"results": []SearchResult{}})
 		return
 	}
 
@@ -221,7 +222,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]any{"results": results})
+	httputil.WriteJSON(w, map[string]any{"results": results})
 }
 
 func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +240,7 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		Poster string `json:"poster"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -249,21 +250,21 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	case "movie":
 		arrID, err = addMovieInternal(req.TmdbID, 0, "")
 		if err != nil {
-			writeError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
+			httputil.WriteError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	case "series":
 		arrID, err = addSeriesInternal(req.TvdbID, 0, "")
 		if err != nil {
-			writeError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
+			httputil.WriteError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	default:
-		writeError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
+		httputil.WriteError(w, "type must be 'movie' or 'series'", http.StatusBadRequest)
 		return
 	}
 
-	writeJSON(w, map[string]any{"status": "added", "arr_id": arrID})
+	httputil.WriteJSON(w, map[string]any{"status": "added", "arr_id": arrID})
 }
 
 // addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.
@@ -426,7 +427,7 @@ func handleArrMeta(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, map[string]any{
 		"radarr": arrMeta{
 			QualityProfiles: fetchProfiles(radarrURL, radarrKey),
 			RootFolders:     fetchRoots(radarrURL, radarrKey),

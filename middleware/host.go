@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"pelicula-api/httputil"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,7 +40,7 @@ func handleHost(w http.ResponseWriter, r *http.Request) {
 		Disk:          diskStats(),
 		Library:       libraryCounts(),
 	}
-	writeJSON(w, resp)
+	httputil.WriteJSON(w, resp)
 }
 
 // readUptime reads /proc/uptime and returns the system uptime in seconds.

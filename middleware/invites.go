@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"pelicula-api/httputil"
 	"strings"
 	"time"
 )
@@ -389,13 +390,13 @@ func (s *InviteStore) Delete(token string) error {
 func handleInvites(w http.ResponseWriter, r *http.Request) {
 	// Block mutations in auth=off mode (same guard as handleUsers).
 	if authMiddleware != nil && authMiddleware.IsOffMode() {
-		writeError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
+		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, inviteStore.ListInvites())
+		httputil.WriteJSON(w, inviteStore.ListInvites())
 
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
@@ -405,11 +406,11 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 			MaxUses        *int   `json:"max_uses"`         // nil = unlimited
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, "invalid request body", http.StatusBadRequest)
+			httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
 		if req.Label != "" && !validLabel(req.Label) {
-			writeError(w, "label must be ≤64 chars with no control characters", http.StatusBadRequest)
+			httputil.WriteError(w, "label must be ≤64 chars with no control characters", http.StatusBadRequest)
 			return
 		}
 
@@ -437,12 +438,12 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 		inv, err := inviteStore.CreateInvite(createdBy, req.Label, expiresAt, maxUses)
 		if err != nil {
 			slog.Error("create invite failed", "component", "invites", "error", err)
-			writeError(w, "could not create invite", http.StatusInternalServerError)
+			httputil.WriteError(w, "could not create invite", http.StatusInternalServerError)
 			return
 		}
 		slog.Info("invite created", "component", "invites", "token", inv.Token[:8]+"…", "createdBy", createdBy)
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, inv)
+		httputil.WriteJSON(w, inv)
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -461,7 +462,7 @@ func handleInviteOp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validInviteToken(token) {
-		writeError(w, "invalid invite token", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid invite token", http.StatusBadRequest)
 		return
 	}
 
@@ -488,11 +489,11 @@ func handleInviteOp(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkInviteAdmin verifies admin auth for invite management operations.
-// CSRF is enforced at the route level via requireLocalOriginSoft in main.go.
+// CSRF is enforced at the route level via httputil.RequireLocalOriginSoft in main.go.
 // Returns false and writes the error if the check fails.
 func checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if authMiddleware != nil && authMiddleware.IsOffMode() {
-		writeError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
+		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return false
 	}
 	if authMiddleware == nil || authMiddleware.mode == "off" {
@@ -500,11 +501,11 @@ func checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	sess, ok := authMiddleware.getSession(r)
 	if !ok {
-		writeError(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
 	if !sess.role.atLeast(RoleAdmin) {
-		writeError(w, "forbidden", http.StatusForbidden)
+		httputil.WriteError(w, "forbidden", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -513,7 +514,7 @@ func checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 func handleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
 	state, found := inviteStore.CheckInvite(token)
 	if !found {
-		writeError(w, "invite not found", http.StatusNotFound)
+		httputil.WriteError(w, "invite not found", http.StatusNotFound)
 		return
 	}
 	if state != "active" {
@@ -522,14 +523,14 @@ func handleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "invite " + state, "state": state})
 		return
 	}
-	writeJSON(w, map[string]any{"valid": true})
+	httputil.WriteJSON(w, map[string]any{"valid": true})
 }
 
 func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 	// Rate-limit by IP — reuse the auth limiter to prevent brute-force token abuse.
-	ip := clientIP(r)
+	ip := httputil.ClientIP(r)
 	if authMiddleware != nil && authMiddleware.isRateLimited(ip) {
-		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
 
@@ -539,26 +540,26 @@ func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	if !validUsername(req.Username) {
 		if req.Username == "" {
-			writeError(w, "username is required", http.StatusBadRequest)
+			httputil.WriteError(w, "username is required", http.StatusBadRequest)
 		} else {
-			writeError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no slashes)", http.StatusBadRequest)
+			httputil.WriteError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no slashes)", http.StatusBadRequest)
 		}
 		return
 	}
 	if req.Password == "" {
-		writeError(w, "password is required", http.StatusBadRequest)
+		httputil.WriteError(w, "password is required", http.StatusBadRequest)
 		return
 	}
 
 	err := inviteStore.Redeem(token, req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
-			writeError(w, "invite not found", http.StatusNotFound)
+			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
 		}
 		if errors.Is(err, ErrInviteNotActive) {
@@ -568,7 +569,7 @@ func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 			return
 		}
 		if errors.Is(err, ErrPasswordRequired) {
-			writeError(w, "password is required", http.StatusBadRequest)
+			httputil.WriteError(w, "password is required", http.StatusBadRequest)
 			return
 		}
 		// Detect username-already-taken (Jellyfin returns 400)
@@ -586,22 +587,22 @@ func handleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 			authMiddleware.recordFailure(ip)
 		}
 		slog.Error("invite redemption failed", "component", "invites", "username", req.Username, "error", err)
-		writeError(w, "could not create account", http.StatusBadGateway)
+		httputil.WriteError(w, "could not create account", http.StatusBadGateway)
 		return
 	}
 
 	slog.Info("invite redeemed", "component", "invites", "username", req.Username)
-	writeJSON(w, map[string]string{"status": "ok"})
+	httputil.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
 func handleInviteRevoke(w http.ResponseWriter, r *http.Request, token string) {
 	if err := inviteStore.Revoke(token); err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
-			writeError(w, "invite not found", http.StatusNotFound)
+			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
 		}
 		slog.Error("revoke invite failed", "component", "invites", "error", err)
-		writeError(w, "could not revoke invite", http.StatusInternalServerError)
+		httputil.WriteError(w, "could not revoke invite", http.StatusInternalServerError)
 		return
 	}
 	slog.Info("invite revoked", "component", "invites", "token", token[:8]+"…")
@@ -611,11 +612,11 @@ func handleInviteRevoke(w http.ResponseWriter, r *http.Request, token string) {
 func handleInviteDelete(w http.ResponseWriter, r *http.Request, token string) {
 	if err := inviteStore.Delete(token); err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
-			writeError(w, "invite not found", http.StatusNotFound)
+			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
 		}
 		slog.Error("delete invite failed", "component", "invites", "error", err)
-		writeError(w, "could not delete invite", http.StatusInternalServerError)
+		httputil.WriteError(w, "could not delete invite", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

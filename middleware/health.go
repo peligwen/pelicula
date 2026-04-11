@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"pelicula-api/httputil"
 	"time"
 )
 
@@ -69,7 +70,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("health check", "component", "health", "passed", passed, "total", total)
-	writeJSON(w, resp)
+	httputil.WriteJSON(w, resp)
 }
 
 // queryVPNStatus queries the Gluetun control API (port 8000) for VPN status,

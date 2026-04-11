@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"pelicula-api/httputil"
 	"strings"
 	"testing"
 )
@@ -85,7 +86,7 @@ func TestParseEnvFile_NotExist(t *testing.T) {
 	}
 }
 
-// ── isLocalOrigin truth table ─────────────────────────────────────────────────
+// ── httputil.IsLocalOrigin truth table ─────────────────────────────────────────────────
 
 func TestIsLocalOrigin(t *testing.T) {
 	cases := []struct {
@@ -110,9 +111,9 @@ func TestIsLocalOrigin(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.origin, func(t *testing.T) {
-			got := isLocalOrigin(c.origin)
+			got := httputil.IsLocalOrigin(c.origin)
 			if got != c.want {
-				t.Errorf("isLocalOrigin(%q) = %v, want %v", c.origin, got, c.want)
+				t.Errorf("httputil.IsLocalOrigin(%q) = %v, want %v", c.origin, got, c.want)
 			}
 		})
 	}
@@ -180,7 +181,7 @@ func TestHandleSettingsUpdate_RejectsForeignOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
-	requireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
@@ -193,7 +194,7 @@ func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	// No Origin header set
 	w := httptest.NewRecorder()
-	requireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for missing Origin (CSRF guard)", w.Code)
@@ -247,7 +248,7 @@ func TestHandleSettingsReset_RejectsEmptyOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings/reset", bytes.NewReader(body))
 	// No Origin header
 	w := httptest.NewRecorder()
-	requireLocalOriginStrict(http.HandlerFunc(handleSettingsReset)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin on reset", w.Code)

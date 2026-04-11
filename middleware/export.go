@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"pelicula-api/httputil"
 	"sync"
 	"time"
 )
@@ -114,7 +115,7 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 
 	sonarrKey, radarrKey, _ := services.Keys()
 	if radarrKey == "" || sonarrKey == "" {
-		writeError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
+		httputil.WriteError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -157,7 +158,7 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	if len(errs) > 0 {
-		writeError(w, errs[0].Error(), http.StatusBadGateway)
+		httputil.WriteError(w, errs[0].Error(), http.StatusBadGateway)
 		return
 	}
 
@@ -237,17 +238,17 @@ func handleImportBackup(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 100<<20) // 100 MB
 	var backup BackupExport
 	if err := json.NewDecoder(r.Body).Decode(&backup); err != nil {
-		writeError(w, "invalid backup JSON: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid backup JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if backup.Version < 1 || backup.Version > currentBackupVersion {
-		writeError(w, fmt.Sprintf("unsupported backup version %d", backup.Version), http.StatusBadRequest)
+		httputil.WriteError(w, fmt.Sprintf("unsupported backup version %d", backup.Version), http.StatusBadRequest)
 		return
 	}
 
 	sonarrKey, radarrKey, _ := services.Keys()
 	if radarrKey == "" || sonarrKey == "" {
-		writeError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
+		httputil.WriteError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -281,7 +282,7 @@ func handleImportBackup(w http.ResponseWriter, r *http.Request) {
 		"series_added", result.SeriesAdded, "series_skipped", result.SeriesSkipped,
 		"errors", len(result.Errors))
 
-	writeJSON(w, result)
+	httputil.WriteJSON(w, result)
 }
 
 // importRoles upserts roles from a v2 backup into the roles store.

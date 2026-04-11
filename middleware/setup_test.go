@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"pelicula-api/httputil"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestHandleSetupSubmit_RejectsForeignOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
-	requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
@@ -43,7 +44,7 @@ func TestHandleSetupSubmit_RejectsEmptyOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	// No Origin header — should be rejected by the strict CSRF guard.
 	w := httptest.NewRecorder()
-	requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin", w.Code)

@@ -1,6 +1,6 @@
 // Peligrosa: trust boundary layer.
 // Open LAN registration: optional public account creation without invite tokens.
-// LAN-only (requireLocalOriginStrict in route table), viewer role only.
+// LAN-only (httputil.RequireLocalOriginStrict in route table), viewer role only.
 // See ../docs/PELIGROSA.md.
 package main
 
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"pelicula-api/httputil"
 	"sync"
 	"time"
 )
@@ -28,12 +29,12 @@ func handleGeneratePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ip := clientIP(r)
+	ip := httputil.ClientIP(r)
 	if authMiddleware != nil && authMiddleware.isRateLimited(ip) {
-		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
-	writeJSON(w, map[string]string{"password": generateReadablePassword()})
+	httputil.WriteJSON(w, map[string]string{"password": generateReadablePassword()})
 }
 
 func handleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +50,7 @@ func handleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
 		// Note: the pelicula-internal Jellyfin service user is never in this table.
 		initialSetup = authMiddleware.rolesStore.IsEmpty()
 	}
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, map[string]any{
 		"open_registration": openRegistration,
 		"initial_setup":     initialSetup,
 	})
@@ -68,21 +69,21 @@ func handleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	initialSetup := authMiddleware != nil && authMiddleware.rolesStore != nil && authMiddleware.rolesStore.IsEmpty()
 	if !openRegistration && !initialSetup {
 		initialSetupMu.Unlock()
-		writeError(w, "open registration is not enabled", http.StatusForbidden)
+		httputil.WriteError(w, "open registration is not enabled", http.StatusForbidden)
 		return
 	}
 
 	if authMiddleware != nil && authMiddleware.IsOffMode() {
 		initialSetupMu.Unlock()
-		writeError(w, "registration requires auth to be enabled (PELICULA_AUTH=jellyfin)", http.StatusForbidden)
+		httputil.WriteError(w, "registration requires auth to be enabled (PELICULA_AUTH=jellyfin)", http.StatusForbidden)
 		return
 	}
 
 	// Rate-limit by IP — reuse the auth limiter.
-	ip := clientIP(r)
+	ip := httputil.ClientIP(r)
 	if authMiddleware != nil && authMiddleware.isRateLimited(ip) {
 		initialSetupMu.Unlock()
-		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
 
@@ -93,22 +94,22 @@ func handleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		initialSetupMu.Unlock()
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if !validUsername(req.Username) {
 		initialSetupMu.Unlock()
 		if req.Username == "" {
-			writeError(w, "username is required", http.StatusBadRequest)
+			httputil.WriteError(w, "username is required", http.StatusBadRequest)
 		} else {
-			writeError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no slashes)", http.StatusBadRequest)
+			httputil.WriteError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no slashes)", http.StatusBadRequest)
 		}
 		return
 	}
 	if req.Password == "" {
 		initialSetupMu.Unlock()
-		writeError(w, "password is required", http.StatusBadRequest)
+		httputil.WriteError(w, "password is required", http.StatusBadRequest)
 		return
 	}
 
@@ -136,7 +137,7 @@ func handleOpenRegister(w http.ResponseWriter, r *http.Request) {
 			authMiddleware.recordFailure(ip)
 		}
 		slog.Error("open registration failed", "component", "register", "username", req.Username, "error", err)
-		writeError(w, "Could not create account — Jellyfin may still be starting up. Wait a moment and try again.", http.StatusBadGateway)
+		httputil.WriteError(w, "Could not create account — Jellyfin may still be starting up. Wait a moment and try again.", http.StatusBadGateway)
 		return
 	}
 
@@ -156,5 +157,5 @@ func handleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	if !initialSetup {
 		slog.Info("open registration: account created", "component", "register", "username", req.Username)
 	}
-	writeJSON(w, map[string]string{"status": "ok"})
+	httputil.WriteJSON(w, map[string]string{"status": "ok"})
 }

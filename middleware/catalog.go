@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"pelicula-api/httputil"
 	"strings"
 )
 
@@ -17,7 +18,7 @@ type catalogResponse struct {
 // handleCatalogList returns movies and series from Radarr+Sonarr in parallel.
 func handleCatalogList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
@@ -56,7 +57,7 @@ func handleCatalogList(w http.ResponseWriter, r *http.Request) {
 	if sf := <-sonarrCh; sf.err == nil && len(sf.data) > 0 {
 		resp.Series = filterByTitle(sf.data, q)
 	}
-	writeJSON(w, resp)
+	httputil.WriteJSON(w, resp)
 }
 
 // filterByTitle applies a case-insensitive substring filter to the "title"
@@ -86,18 +87,18 @@ func filterByTitle(data []byte, q string) []json.RawMessage {
 // handleCatalogSeriesDetail proxies Sonarr /api/v3/series/{id}.
 func handleCatalogSeriesDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, "series id required", http.StatusBadRequest)
+		httputil.WriteError(w, "series id required", http.StatusBadRequest)
 		return
 	}
 	sonarrKey, _, _ := services.Keys()
 	body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/"+url.PathEscape(id))
 	if err != nil {
-		writeError(w, "sonarr unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "sonarr unavailable", http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -107,13 +108,13 @@ func handleCatalogSeriesDetail(w http.ResponseWriter, r *http.Request) {
 // handleCatalogSeason merges Sonarr episode and episodefile lists.
 func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	seriesID := r.PathValue("id")
 	seasonNum := r.PathValue("n")
 	if seriesID == "" || seasonNum == "" {
-		writeError(w, "series id and season required", http.StatusBadRequest)
+		httputil.WriteError(w, "series id and season required", http.StatusBadRequest)
 		return
 	}
 	sonarrKey, _, _ := services.Keys()
@@ -121,13 +122,13 @@ func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 	epData, err := services.ArrGet(sonarrURL, sonarrKey,
 		"/api/v3/episode?seriesId="+url.QueryEscape(seriesID)+"&seasonNumber="+url.QueryEscape(seasonNum))
 	if err != nil {
-		writeError(w, "sonarr episode fetch failed", http.StatusBadGateway)
+		httputil.WriteError(w, "sonarr episode fetch failed", http.StatusBadGateway)
 		return
 	}
 	fileData, err := services.ArrGet(sonarrURL, sonarrKey,
 		"/api/v3/episodefile?seriesId="+url.QueryEscape(seriesID))
 	if err != nil {
-		writeError(w, "sonarr episodefile fetch failed", http.StatusBadGateway)
+		httputil.WriteError(w, "sonarr episodefile fetch failed", http.StatusBadGateway)
 		return
 	}
 
@@ -148,23 +149,23 @@ func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, eps)
+	httputil.WriteJSON(w, eps)
 }
 
 // handleCatalogItemHistory returns recent job history for a file path.
 func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeError(w, "path required", http.StatusBadRequest)
+		httputil.WriteError(w, "path required", http.StatusBadRequest)
 		return
 	}
 	resp, err := services.client.Get(proculaURL + "/api/procula/jobs")
 	if err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -182,5 +183,5 @@ func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 			matching = append(matching, j)
 		}
 	}
-	writeJSON(w, matching)
+	httputil.WriteJSON(w, matching)
 }

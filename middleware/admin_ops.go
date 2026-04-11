@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"pelicula-api/httputil"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,14 +49,14 @@ func adminRateLimitKey(r *http.Request) string {
 			return "user:" + sess.username
 		}
 	}
-	return "ip:" + clientIP(r)
+	return "ip:" + httputil.ClientIP(r)
 }
 
 // checkAdminRate returns false and writes a 429 if the caller is rate-limited.
 func checkAdminRate(w http.ResponseWriter, r *http.Request) bool {
 	key := adminRateLimitKey(r)
 	if !adminLimiter.allow(key) {
-		writeError(w, "rate limited — try again in a moment", http.StatusTooManyRequests)
+		httputil.WriteError(w, "rate limited — try again in a moment", http.StatusTooManyRequests)
 		return false
 	}
 	return true
@@ -80,8 +81,8 @@ func requireAuthOrLocalOrigin(w http.ResponseWriter, r *http.Request) bool {
 	if authMiddleware == nil || !authMiddleware.IsOffMode() {
 		return true
 	}
-	if origin := r.Header.Get("Origin"); origin == "" || !isLocalOrigin(origin) {
-		writeError(w, "forbidden: enable PELICULA_AUTH or access from a local origin", http.StatusForbidden)
+	if origin := r.Header.Get("Origin"); origin == "" || !httputil.IsLocalOrigin(origin) {
+		httputil.WriteError(w, "forbidden: enable PELICULA_AUTH or access from a local origin", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -94,7 +95,7 @@ func requireAuthOrLocalOrigin(w http.ResponseWriter, r *http.Request) bool {
 // POST /api/pelicula/admin/stack/restart
 func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if !requireAuthOrLocalOrigin(w, r) {
@@ -123,9 +124,9 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 		result = "partial: " + strings.Join(errs, "; ")
 	}
 	auditLog(r, "stack_restart", "all", result)
-	writeJSON(w, map[string]any{"ok": true, "errors": errs})
+	httputil.WriteJSON(w, map[string]any{"ok": true, "errors": errs})
 	// Restart ourselves last — response has already been sent above (flush happens
-	// after writeJSON returns). Give it 500ms.
+	// after httputil.WriteJSON returns). Give it 500ms.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		dockerRestart("pelicula-api") //nolint:errcheck — we won't be here to log it
@@ -138,7 +139,7 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 // POST /api/pelicula/admin/vpn/restart
 func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if !requireAuthOrLocalOrigin(w, r) {
@@ -163,14 +164,14 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 		result = "partial: " + strings.Join(errs, "; ")
 	}
 	auditLog(r, "vpn_restart", "gluetun+qbittorrent+prowlarr", result)
-	writeJSON(w, map[string]any{"ok": true, "errors": errs})
+	httputil.WriteJSON(w, map[string]any{"ok": true, "errors": errs})
 }
 
 // handleServiceLogs returns recent log lines for a named container.
 // GET /api/pelicula/admin/logs?svc=<name>&tail=<n>  (default 200, max 500)
 func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if !requireAuthOrLocalOrigin(w, r) {
@@ -181,7 +182,7 @@ func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	svc := r.URL.Query().Get("svc")
 	if !isAllowedContainer(svc) {
-		writeError(w, "unknown service", http.StatusBadRequest)
+		httputil.WriteError(w, "unknown service", http.StatusBadRequest)
 		return
 	}
 	tail := 200
@@ -193,7 +194,7 @@ func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	logs, err := dockerLogs(svc, tail)
 	if err != nil {
 		slog.Warn("logs failed", "component", "admin_ops", "svc", svc, "error", err)
-		writeError(w, "logs unavailable: "+err.Error(), http.StatusBadGateway)
+		httputil.WriteError(w, "logs unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	auditLog(r, "logs", svc, "ok")

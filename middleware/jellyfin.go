@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"pelicula-api/httputil"
 	"strings"
 	"time"
 	"unicode"
@@ -775,7 +776,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	// create accounts without credentials.
 	// Read-only GET is fine in off mode since the dashboard uses it for display only.
 	if r.Method != http.MethodGet && authMiddleware != nil && authMiddleware.IsOffMode() {
-		writeError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
+		httputil.WriteError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return
 	}
 
@@ -784,10 +785,10 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		users, err := ListJellyfinUsers(services)
 		if err != nil {
 			slog.Error("list jellyfin users failed", "component", "users", "error", err)
-			writeError(w, "could not list users", http.StatusBadGateway)
+			httputil.WriteError(w, "could not list users", http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, users)
+		httputil.WriteJSON(w, users)
 
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap
@@ -796,29 +797,29 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 			Password string `json:"password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, "invalid request body", http.StatusBadRequest)
+			httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
 		if !validUsername(req.Username) {
 			if req.Username == "" {
-				writeError(w, "username is required", http.StatusBadRequest)
+				httputil.WriteError(w, "username is required", http.StatusBadRequest)
 			} else {
-				writeError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no control chars or slashes)", http.StatusBadRequest)
+				httputil.WriteError(w, "username is invalid (1–64 chars, no leading/trailing whitespace, no control chars or slashes)", http.StatusBadRequest)
 			}
 			return
 		}
 		if _, err := CreateJellyfinUser(services, req.Username, req.Password); err != nil {
 			slog.Error("create jellyfin user failed", "component", "users", "username", req.Username, "error", err)
 			if errors.Is(err, ErrPasswordRequired) {
-				writeError(w, "password is required", http.StatusBadRequest)
+				httputil.WriteError(w, "password is required", http.StatusBadRequest)
 				return
 			}
 			var jErr *jellyfinHTTPError
 			if errors.As(err, &jErr) && jErr.StatusCode == http.StatusBadRequest {
-				writeError(w, "could not create user: name already taken or invalid", http.StatusBadRequest)
+				httputil.WriteError(w, "could not create user: name already taken or invalid", http.StatusBadRequest)
 				return
 			}
-			writeError(w, "could not create user", http.StatusBadGateway)
+			httputil.WriteError(w, "could not create user", http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -833,7 +834,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
 	// Mutations require auth to be enabled (same guard as handleUsers POST).
 	if authMiddleware != nil && authMiddleware.IsOffMode() {
-		writeError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
+		httputil.WriteError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return
 	}
 	// Strip the route prefix to get "{id}" or "{id}/password".
@@ -842,7 +843,7 @@ func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(tail, "/password") {
 		id := strings.TrimSuffix(tail, "/password")
 		if !validJellyfinID(id) {
-			writeError(w, "invalid user ID", http.StatusBadRequest)
+			httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
 			return
 		}
 		if r.Method != http.MethodPost {
@@ -854,7 +855,7 @@ func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validJellyfinID(tail) {
-		writeError(w, "invalid user ID", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
 		return
 	}
 	switch r.Method {
@@ -871,7 +872,7 @@ func handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
 	users, err := ListJellyfinUsers(services)
 	if err != nil {
 		slog.Error("list users for delete check failed", "component", "users", "error", err)
-		writeError(w, "could not verify user before deletion", http.StatusBadGateway)
+		httputil.WriteError(w, "could not verify user before deletion", http.StatusBadGateway)
 		return
 	}
 	var target *JellyfinUser
@@ -885,20 +886,20 @@ func handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 	if target == nil {
-		writeError(w, "user not found", http.StatusNotFound)
+		httputil.WriteError(w, "user not found", http.StatusNotFound)
 		return
 	}
 	if target.Name == jellyfinServiceUser {
-		writeError(w, "cannot delete internal service account", http.StatusForbidden)
+		httputil.WriteError(w, "cannot delete internal service account", http.StatusForbidden)
 		return
 	}
 	if target.IsAdmin && adminCount <= 1 {
-		writeError(w, "cannot delete the only admin account", http.StatusConflict)
+		httputil.WriteError(w, "cannot delete the only admin account", http.StatusConflict)
 		return
 	}
 	if err := DeleteJellyfinUser(services, id); err != nil {
 		slog.Error("delete jellyfin user failed", "component", "users", "userId", id, "error", err)
-		writeError(w, "could not delete user", http.StatusBadGateway)
+		httputil.WriteError(w, "could not delete user", http.StatusBadGateway)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -912,21 +913,21 @@ func handleUserPassword(w http.ResponseWriter, r *http.Request, id string) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	if err := SetJellyfinUserPassword(services, id, req.Password); err != nil {
 		slog.Error("reset password failed", "component", "users", "userId", id, "error", err)
 		if errors.Is(err, ErrPasswordRequired) {
-			writeError(w, "password is required", http.StatusBadRequest)
+			httputil.WriteError(w, "password is required", http.StatusBadRequest)
 			return
 		}
 		var jErr *jellyfinHTTPError
 		if errors.As(err, &jErr) && jErr.StatusCode == http.StatusBadRequest {
-			writeError(w, "could not set password: invalid or rejected by Jellyfin", http.StatusBadRequest)
+			httputil.WriteError(w, "could not set password: invalid or rejected by Jellyfin", http.StatusBadRequest)
 			return
 		}
-		writeError(w, "could not set password", http.StatusBadGateway)
+		httputil.WriteError(w, "could not set password", http.StatusBadGateway)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -942,8 +943,8 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := GetJellyfinSessions(services)
 	if err != nil {
 		slog.Error("list sessions failed", "component", "sessions", "error", err)
-		writeError(w, "could not list sessions", http.StatusBadGateway)
+		httputil.WriteError(w, "could not list sessions", http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, sessions)
+	httputil.WriteJSON(w, sessions)
 }

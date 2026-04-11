@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"pelicula-api/httputil"
 	"sort"
 	"strings"
 	"sync"
@@ -37,7 +38,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
 		provided := r.URL.Query().Get("secret")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) == 0 {
-			writeError(w, "unauthorized", http.StatusUnauthorized)
+			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
@@ -45,32 +46,32 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, "failed to read body", http.StatusBadRequest)
+		httputil.WriteError(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
 
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+		httputil.WriteError(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	eventType, _ := raw["eventType"].(string)
 	// Only process Download (import) events; silently accept test pings
 	if strings.EqualFold(eventType, "test") {
-		writeJSON(w, map[string]string{"status": "ok"})
+		httputil.WriteJSON(w, map[string]string{"status": "ok"})
 		return
 	}
 	if !strings.EqualFold(eventType, "download") {
 		slog.Info("ignoring webhook event", "component", "hooks", "event_type", eventType)
-		writeJSON(w, map[string]string{"status": "ignored"})
+		httputil.WriteJSON(w, map[string]string{"status": "ignored"})
 		return
 	}
 
 	source, err := normalizeHookPayload(raw)
 	if err != nil {
 		slog.Error("failed to normalize webhook", "component", "hooks", "error", err)
-		writeError(w, "invalid webhook payload: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid webhook payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -81,7 +82,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	if err := forwardToProcula(proculaURL, source); err != nil {
 		slog.Error("failed to forward to Procula", "component", "hooks", "error", err)
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
-		writeJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
+		httputil.WriteJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
 		return
 	}
 
@@ -107,7 +108,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]string{"status": "queued"})
+	httputil.WriteJSON(w, map[string]string{"status": "queued"})
 }
 
 // normalizeHookPayload converts a Radarr or Sonarr webhook body into a JobSource.
@@ -218,7 +219,7 @@ func forwardToProcula(url string, source ProculaJobSource) error {
 // handleProcessingProxy proxies Procula's status + jobs for the dashboard Processing section.
 func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -257,7 +258,7 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 	jobsRes := <-jobsCh
 
 	if statusRes.err != nil {
-		writeError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
 	}
 
@@ -268,7 +269,7 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(jobsRes.body, &jobsData)
 	}
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, map[string]any{
 		"status": statusData,
 		"jobs":   jobsData,
 	})
@@ -284,16 +285,16 @@ func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
 		provided := r.Header.Get("X-API-Key")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(key)) == 0 {
-			writeError(w, "unauthorized", http.StatusUnauthorized)
+			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
 	if err := TriggerLibraryRefresh(services); err != nil {
 		slog.Error("library refresh failed", "component", "jellyfin", "error", err)
-		writeError(w, "refresh failed", http.StatusInternalServerError)
+		httputil.WriteError(w, "refresh failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]string{"status": "ok"})
+	httputil.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
 // dashNotif is the shape the dashboard notification panel expects.
@@ -309,7 +310,7 @@ type dashNotif struct {
 // before Procula has processed anything.
 func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -388,7 +389,7 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 		deduped = deduped[:30]
 	}
 
-	writeJSON(w, deduped)
+	httputil.WriteJSON(w, deduped)
 }
 
 // fetchArrHistory fetches the last 20 history records from a Sonarr or Radarr
@@ -504,7 +505,7 @@ func proxyProcula(path string, forwardQuery ...bool) http.HandlerFunc {
 	fwd := len(forwardQuery) > 0 && forwardQuery[0]
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		target := proculaURL + path
@@ -515,7 +516,7 @@ func proxyProcula(path string, forwardQuery ...bool) http.HandlerFunc {
 		}
 		resp, err := services.client.Get(target)
 		if err != nil {
-			writeError(w, "procula unavailable", http.StatusBadGateway)
+			httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 			return
 		}
 		defer resp.Body.Close()
@@ -553,7 +554,7 @@ func proxyProculaMutate(path string) http.HandlerFunc {
 		}
 		req, err := http.NewRequestWithContext(r.Context(), r.Method, proculaURL+path, body)
 		if err != nil {
-			writeError(w, "proxy error", http.StatusInternalServerError)
+			httputil.WriteError(w, "proxy error", http.StatusInternalServerError)
 			return
 		}
 		if ct := r.Header.Get("Content-Type"); ct != "" {
@@ -564,7 +565,7 @@ func proxyProculaMutate(path string) http.HandlerFunc {
 		}
 		resp, err := services.client.Do(req)
 		if err != nil {
-			writeError(w, "procula unavailable", http.StatusBadGateway)
+			httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 			return
 		}
 		defer resp.Body.Close()
