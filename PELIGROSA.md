@@ -133,7 +133,7 @@ Enable via `the Settings UI → 8) Remote access`.
 
 - **WireGuard private key** and API keys are stored in `.env` in plaintext on the host. ``pelicula up` (first-run setup)` sets `chmod 600`, but anyone with host access can read it.
 - **Auth rate limiter** is in-memory, per-IP, and resets on middleware restart. Protects against online brute force.
-- **Invite tokens** are random but not HMAC-signed — token validity requires a database lookup. HMAC signing is a [roadmap item](#roadmap).
+- **Invite tokens** are random (32 bytes, 256-bit entropy) — token validity requires a database lookup. This is intentional: brute-force enumeration is infeasible, and revocation/exhaustion cannot be made stateless without a blocklist anyway.
 - **Self-signed HTTPS** breaks Chrome on the LAN (Chrome blocks JS). Default LAN setup uses HTTP; use Peligrosa remote vhost for TLS.
 - **`WEBHOOK_SECRET`** is optional for backward compatibility. Fresh installs get a random secret from setup; nginx additionally restricts the endpoint to Docker-internal networks.
 - **CSRF guards** use `requireLocalOriginStrict` / `requireLocalOriginSoft` wrappers wired per-route in `main.go`. `admin_ops.go` uses a separate auth-conditional variant; see [Reading the Code](#reading-the-code).

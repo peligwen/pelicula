@@ -8,10 +8,7 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 ### Peligrosa Hardening
 
-Remaining security items from the Peligrosa initiative:
-
-- [ ] **HMAC invite tokens** — sign tokens with a server secret so validity is verifiable without a DB lookup
-- [ ] **`middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD into a Go subpackage with explicit API surface
+- [ ] **`middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Blocked on `JellyfinClient` interface, `Fulfiller` injection, and shared HTTP helpers extraction.
 
 ---
 
@@ -19,13 +16,13 @@ Remaining security items from the Peligrosa initiative:
 
 Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md) for the full threat model and current surface.
 
-- [ ] **[Peligrosa] HMAC invite tokens** — sign tokens with a server secret so validity is verifiable without a DB lookup. Prevents brute-force token enumeration.
 - [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
-- [ ] **[Peligrosa] `middleware/peligrosa/` subpackage** — extract auth, invites, requests, user CRUD, and webhook validation into a Go subpackage with an explicit API surface. Blocked on `JellyfinClient` interface, `Fulfiller` injection, and shared HTTP helpers extraction. See plan file for incremental path.
+- [x] **[Peligrosa] `middleware/peligrosa/` subpackage** — deferred. The current random-token + SQLite pattern is already secure (256-bit entropy); the extraction is organizational hygiene, not a security gap. Revisit if a new auth feature creates a natural seam.
 - [x] **[Peligrosa] Jellyfin auth** — `PELICULA_AUTH=jellyfin` (now the only auth mode): credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed.
 - [x] **[Peligrosa] Remote role capping** — defense-in-depth: the remote nginx vhost injects `X-Pelicula-Remote: true`; middleware caps effective role to `viewer` regardless of stored role. Prevents credential escalation via the remote vhost.
 - [x] **[Peligrosa] Open LAN registration** — optional `PELICULA_OPEN_REGISTRATION` setting: `/register` without a token creates a Jellyfin viewer account. LAN-only, rate-limited, always viewer role.
 - [x] **[Peligrosa] First-admin password** — setup wizard generates `JELLYFIN_PASSWORD` and prints admin credentials after ``pelicula up``.
+- [x] **[Peligrosa] HMAC invite tokens** — closed. 256-bit random token + SQLite lookup is already secure; HMAC signing adds no practical security and can't eliminate DB lookups (revocation still requires one).
 - [ ] **[Peligrosa] Plex SSO** — deferred; different API shape (plex.tv OAuth dance).
 
 ---
@@ -33,7 +30,6 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 ## Deferred
 
 - **Invite Apprise notification**: notify admin via Apprise/internal feed when an invite is claimed. Deferred; low priority since the dashboard shows active invites and redemption history.
-- **`the Settings UI` invite management**: list active invites and revoke them from the CLI menu. Deferred; the dashboard Users section covers this via the UI.
 
 - **Plex SSO**: moved to Peligrosa initiative above (Jellyfin SSO shipped).
 - **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
