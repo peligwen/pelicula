@@ -164,9 +164,9 @@ func main() {
 
 	// Open registration (LAN-only, optional): public account creation without invite tokens.
 	// Peligrosa: httputil.RequireLocalOriginStrict ensures only LAN browsers can POST.
-	mux.HandleFunc("/api/pelicula/register/check", handleOpenRegCheck)
-	mux.HandleFunc("/api/pelicula/generate-password", handleGeneratePassword)
-	mux.Handle("/api/pelicula/register", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleOpenRegister)))
+	mux.HandleFunc("/api/pelicula/register/check", auth.HandleOpenRegCheck)
+	mux.HandleFunc("/api/pelicula/generate-password", auth.HandleGeneratePassword)
+	mux.Handle("/api/pelicula/register", httputil.RequireLocalOriginStrict(http.HandlerFunc(auth.HandleOpenRegister)))
 
 	// read: active Jellyfin sessions for the now-playing card.
 	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.

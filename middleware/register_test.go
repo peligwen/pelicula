@@ -14,9 +14,10 @@ func TestOpenRegCheck_Enabled(t *testing.T) {
 	openRegistration = true
 	t.Cleanup(func() { openRegistration = orig })
 
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/register/check", nil)
 	w := httptest.NewRecorder()
-	handleOpenRegCheck(w, req)
+	a.HandleOpenRegCheck(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -31,9 +32,10 @@ func TestOpenRegCheck_Disabled(t *testing.T) {
 	openRegistration = false
 	t.Cleanup(func() { openRegistration = orig })
 
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/register/check", nil)
 	w := httptest.NewRecorder()
-	handleOpenRegCheck(w, req)
+	a.HandleOpenRegCheck(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -44,9 +46,10 @@ func TestOpenRegCheck_Disabled(t *testing.T) {
 }
 
 func TestOpenRegCheck_MethodNotAllowed(t *testing.T) {
+	a := newTestAuth("jellyfin")
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register/check", nil)
 	w := httptest.NewRecorder()
-	handleOpenRegCheck(w, req)
+	a.HandleOpenRegCheck(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", w.Code)
 	}
@@ -66,7 +69,7 @@ func TestOpenRegister_Disabled_Returns403(t *testing.T) {
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
@@ -81,7 +84,7 @@ func TestOpenRegister_AuthOff_Returns403(t *testing.T) {
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (auth off)", w.Code)
 	}
@@ -90,7 +93,7 @@ func TestOpenRegister_AuthOff_Returns403(t *testing.T) {
 func TestOpenRegister_MethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/register", nil)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", w.Code)
 	}
@@ -105,7 +108,7 @@ func TestOpenRegister_EmptyUsername_Returns400(t *testing.T) {
 	body := strings.NewReader(`{"username":"","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -120,7 +123,7 @@ func TestOpenRegister_EmptyPassword_Returns400(t *testing.T) {
 	body := strings.NewReader(`{"username":"alice","password":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -143,7 +146,7 @@ func TestOpenRegister_Success(t *testing.T) {
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
@@ -170,11 +173,18 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 
 	// Set authMiddleware AFTER newFakeJellyfin (which also sets it) so the
 	// rolesStore we inspect is the one the handler actually writes to.
+	// Use the global services (set by resetServices above) so CreateUser works.
 	store := NewRolesStore(testDB(t))
 	// Seed an existing admin so IsEmpty() returns false — this test verifies
 	// that subsequent registrants get viewer, not admin.
 	_ = store.Upsert("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
-	auth := newTestJellyfinAuth(t, store, nil)
+	auth := &Auth{
+		mode:       "jellyfin",
+		sessions:   make(map[string]session),
+		failures:   make(map[string]*loginAttempts),
+		rolesStore: store,
+		jellyfin:   NewJellyfinHTTPClient(http.DefaultClient, services),
+	}
 	origAuth := authMiddleware
 	authMiddleware = auth
 	t.Cleanup(func() { authMiddleware = origAuth })
@@ -182,7 +192,7 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 	body := strings.NewReader(`{"username":"bob","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
@@ -214,8 +224,15 @@ func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
 	resetServices(t)
 
 	// Fresh roles store — IsEmpty() returns true.
+	// Use the global services (set by resetServices above) so CreateUser works.
 	store := NewRolesStore(testDB(t))
-	auth := newTestJellyfinAuth(t, store, nil)
+	auth := &Auth{
+		mode:       "jellyfin",
+		sessions:   make(map[string]session),
+		failures:   make(map[string]*loginAttempts),
+		rolesStore: store,
+		jellyfin:   NewJellyfinHTTPClient(http.DefaultClient, services),
+	}
 	origAuth := authMiddleware
 	authMiddleware = auth
 	t.Cleanup(func() { authMiddleware = origAuth })
@@ -223,7 +240,7 @@ func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
 	body := strings.NewReader(`{"username":"gwen","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
@@ -251,7 +268,7 @@ func TestOpenRegister_UsernameTaken_Returns409(t *testing.T) {
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", w.Code)
@@ -278,7 +295,7 @@ func TestOpenRegister_RateLimited_Returns429(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	req.Header.Set("X-Real-IP", ip)
 	w := httptest.NewRecorder()
-	handleOpenRegister(w, req)
+	authMiddleware.HandleOpenRegister(w, req)
 
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429", w.Code)

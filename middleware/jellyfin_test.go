@@ -42,10 +42,21 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) *httptest.Ser
 		srv.Close()
 		jellyfinURL = orig
 	})
-	// authMiddleware in off mode by default — tests that need a specific mode
-	// assign authMiddleware themselves.
+	// Wire authMiddleware with a JellyfinClient that can call CreateUser on the
+	// fake server. We build a minimal ServiceClients with a test API key so that
+	// jellyfinAuth() returns immediately without touching the filesystem, then
+	// pass srv.Client() so all HTTP goes to the test server.
+	// Tests that need a specific mode or store assign authMiddleware themselves
+	// after calling newFakeJellyfin.
+	testSvcs := NewServiceClients(t.TempDir())
+	testSvcs.JellyfinAPIKey = "test-token"
 	origAuth := authMiddleware
-	authMiddleware = newTestAuth("jellyfin") // non-off mode so POST isn't blocked
+	authMiddleware = &Auth{
+		mode:     "jellyfin",
+		sessions: make(map[string]session),
+		failures: make(map[string]*loginAttempts),
+		jellyfin: NewJellyfinHTTPClient(srv.Client(), testSvcs),
+	}
 	t.Cleanup(func() { authMiddleware = origAuth })
 	return srv
 }
