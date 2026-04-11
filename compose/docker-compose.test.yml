@@ -18,6 +18,10 @@ services:
   gluetun:
     image: alpine:3.20
     container_name: pelicula-test-gluetun
+    # Clear the inherited 6881:6881 torrent port — the alpine stub has no torrents, and
+    # without !reset, compose CONCATENATES list fields across overlays rather than replacing
+    # them, so a plain `ports: []` would leave 6881 bound and racing the production stack.
+    ports: !reset []
     entrypoint:
       - sh
       - -c
@@ -53,7 +57,7 @@ services:
 
   jellyfin:
     container_name: pelicula-test-jellyfin
-    ports: []  # suppress 7359:7359/udp LAN discovery — conflicts with production stack
+    ports: !reset []  # suppress 7359:7359/udp LAN discovery — conflicts with production stack (plain [] would concatenate, see gluetun note)
 
   procula:
     container_name: pelicula-test-procula
