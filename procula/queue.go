@@ -276,6 +276,22 @@ func (q *Queue) List() []Job {
 	return out
 }
 
+// ListByActionType returns jobs filtered by action_type (e.g. "pipeline"
+// or "validate"). Empty string means all action types.
+func (q *Queue) ListByActionType(actionType string) []Job {
+	all := q.List()
+	if actionType == "" {
+		return all
+	}
+	var out []Job
+	for _, j := range all {
+		if j.ActionType == actionType {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
 func (q *Queue) Update(id string, fn func(*Job)) error {
 	job, ok := q.Get(id)
 	if !ok {

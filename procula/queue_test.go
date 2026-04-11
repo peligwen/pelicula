@@ -413,6 +413,22 @@ func TestQueueWaitNotFound(t *testing.T) {
 	}
 }
 
+func TestQueueListByActionType(t *testing.T) {
+	q := newTestQueue(t)
+	a, _ := q.Create(testSource("/movies/a.mkv"))
+	b, _ := q.Create(testSource("/movies/b.mkv"))
+	_ = q.Update(b.ID, func(j *Job) { j.ActionType = "validate" })
+
+	pipe := q.ListByActionType("pipeline")
+	if len(pipe) != 1 || pipe[0].ID != a.ID {
+		t.Errorf("pipeline filter: got %d jobs", len(pipe))
+	}
+	val := q.ListByActionType("validate")
+	if len(val) != 1 || val[0].ID != b.ID {
+		t.Errorf("validate filter: got %d jobs", len(val))
+	}
+}
+
 func TestQueueLoadSkipsCorruptFiles(t *testing.T) {
 	// With SQLite backing there are no corrupt files to skip —
 	// DB rows are always valid. Verify the queue loads normally.

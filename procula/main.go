@@ -136,8 +136,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
-	jobs := s.queue.List()
-	writeJSON(w, jobs)
+	if at := r.URL.Query().Get("action_type"); at != "" {
+		writeJSON(w, s.queue.ListByActionType(at))
+		return
+	}
+	writeJSON(w, s.queue.List())
 }
 
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
