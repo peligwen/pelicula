@@ -273,15 +273,15 @@ html[data-theme="dark"] .footer {
   :root:not([data-theme="light"]) .watch-btn,
   :root:not([data-theme="light"]) .watch-btn:visited {
     background:
-      url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 36' preserveAspectRatio='none'><defs><clipPath id='bmc'><circle cx='95' cy='18' r='5'/></clipPath></defs><ellipse cx='30' cy='32' rx='40' ry='6' fill='%231c1838' opacity='.4'/><circle cx='15' cy='8' r='1' fill='%23fff' opacity='.7'/><circle cx='28' cy='14' r='.8' fill='%23c8c0e0' opacity='.6'/><circle cx='45' cy='6' r='1.2' fill='%23fff' opacity='.65'/><circle cx='60' cy='12' r='.9' fill='%23e0d8f8' opacity='.55'/><circle cx='78' cy='7' r='1' fill='%23fff' opacity='.6'/><circle cx='95' cy='18' r='5' fill='%23e8dfc4' opacity='.9'/><circle cx='92' cy='15' r='5' fill='%23120e26' opacity='.95' clip-path='url(%23bmc)'/></svg>") center / cover no-repeat,
-      linear-gradient(90deg, #0c0820, #141030, #1a1040, #0e0a20);
+      url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 36' preserveAspectRatio='none'><defs><clipPath id='bmc'><circle cx='95' cy='18' r='5'/></clipPath></defs><ellipse cx='30' cy='32' rx='40' ry='6' fill='%231c1838' opacity='.4'/><circle cx='15' cy='8' r='1' fill='%23fff' opacity='.7'/><circle cx='28' cy='14' r='.8' fill='%23c8c0e0' opacity='.6'/><circle cx='45' cy='6' r='1.2' fill='%23fff' opacity='.65'/><circle cx='60' cy='12' r='.9' fill='%23e0d8f8' opacity='.55'/><circle cx='78' cy='7' r='1' fill='%23fff' opacity='.6'/><circle cx='95' cy='18' r='5' fill='%23e8dfc4' opacity='.9'/><circle cx='98' cy='15' r='5' fill='%23120e26' opacity='.95' clip-path='url(%23bmc)'/></svg>") center / cover no-repeat,
+      linear-gradient(90deg, #0c0820 0%, #141030 40%, #1a1040 70%, #0e0a20 100%);
     box-shadow: 0 3px 12px rgba(20,16,48,0.55);
   }
 }
 html[data-theme="dark"] .watch-btn,
 html[data-theme="dark"] .watch-btn:visited {
   background:
-    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 36' preserveAspectRatio='none'><defs><clipPath id='bmc'><circle cx='95' cy='18' r='5'/></clipPath></defs><ellipse cx='30' cy='32' rx='40' ry='6' fill='%231c1838' opacity='.4'/><circle cx='15' cy='8' r='1' fill='%23fff' opacity='.7'/><circle cx='28' cy='14' r='.8' fill='%23c8c0e0' opacity='.6'/><circle cx='45' cy='6' r='1.2' fill='%23fff' opacity='.65'/><circle cx='60' cy='12' r='.9' fill='%23e0d8f8' opacity='.55'/><circle cx='78' cy='7' r='1' fill='%23fff' opacity='.6'/><circle cx='95' cy='18' r='5' fill='%23e8dfc4' opacity='.9'/><circle cx='92' cy='15' r='5' fill='%23120e26' opacity='.95' clip-path='url(%23bmc)'/></svg>") center / cover no-repeat,
-    linear-gradient(90deg, #0c0820, #141030, #1a1040, #0e0a20);
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 36' preserveAspectRatio='none'><defs><clipPath id='bmc'><circle cx='95' cy='18' r='5'/></clipPath></defs><ellipse cx='30' cy='32' rx='40' ry='6' fill='%231c1838' opacity='.4'/><circle cx='15' cy='8' r='1' fill='%23fff' opacity='.7'/><circle cx='28' cy='14' r='.8' fill='%23c8c0e0' opacity='.6'/><circle cx='45' cy='6' r='1.2' fill='%23fff' opacity='.65'/><circle cx='60' cy='12' r='.9' fill='%23e0d8f8' opacity='.55'/><circle cx='78' cy='7' r='1' fill='%23fff' opacity='.6'/><circle cx='95' cy='18' r='5' fill='%23e8dfc4' opacity='.9'/><circle cx='98' cy='15' r='5' fill='%23120e26' opacity='.95' clip-path='url(%23bmc)'/></svg>") center / cover no-repeat,
+    linear-gradient(90deg, #0c0820 0%, #141030 40%, #1a1040 70%, #0e0a20 100%);
   box-shadow: 0 3px 12px rgba(20,16,48,0.55);
 }
