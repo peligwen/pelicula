@@ -59,6 +59,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 1, up: migrate1},
 	{version: 2, up: migrate2},
+	{version: 3, up: migrate3},
 }
 
 // runMigrations reads the current schema version and applies all pending
@@ -101,6 +102,23 @@ func runMigrations(db *sql.DB) error {
 func migrate2(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN subs_acquired TEXT`)
 	return err
+}
+
+// migrate3 adds action-bus discriminator columns to the jobs table.
+// action_type defaults to 'pipeline' so legacy rows continue to route
+// through the stage machine.
+func migrate3(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE jobs ADD COLUMN action_type TEXT NOT NULL DEFAULT 'pipeline'`,
+		`ALTER TABLE jobs ADD COLUMN params TEXT`,
+		`ALTER TABLE jobs ADD COLUMN result TEXT`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrate1 creates the initial schema (version 1).

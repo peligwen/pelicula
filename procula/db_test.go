@@ -26,8 +26,8 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if ver != 2 {
-		t.Errorf("user_version = %d, want 2", ver)
+	if ver != 3 {
+		t.Errorf("user_version = %d, want 3", ver)
 	}
 
 	tables := []string{"jobs", "settings"}
@@ -40,6 +40,46 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 			t.Errorf("table %q not found", table)
 		} else if err != nil {
 			t.Errorf("query table %q: %v", table, err)
+		}
+	}
+}
+
+func TestMigrate3AddsActionColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if ver < 3 {
+		t.Fatalf("user_version = %d, want >= 3", ver)
+	}
+
+	rows, err := db.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+
+	cols := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols[name] = true
+	}
+	for _, want := range []string{"action_type", "params", "result"} {
+		if !cols[want] {
+			t.Errorf("missing column %q", want)
 		}
 	}
 }
@@ -63,7 +103,7 @@ func TestOpenDB_IdempotentOnSecondOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if ver != 2 {
-		t.Errorf("user_version = %d after second open, want 2", ver)
+	if ver != 3 {
+		t.Errorf("user_version = %d after second open, want 3", ver)
 	}
 }
