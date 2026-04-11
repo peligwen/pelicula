@@ -165,7 +165,7 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 Pelicula requires a login after first use. The first POST to `/api/pelicula/register` on an empty install claims the admin account. Credentials are verified against Jellyfin; roles are stored locally in `roles.json`; Jellyfin admins automatically get admin in Pelicula.
 
-For convenience, requests originating on the host machine are granted an admin session automatically — no login required from the box running the stack. This is a per-request transient grant (no cookie is set); LAN and remote clients must authenticate normally.
+For convenience, requests originating on the host machine are granted an admin session automatically — no login required from the box running the stack. This is a per-request transient grant (no cookie is set); LAN and remote clients must authenticate normally. See [docs/PELIGROSA.md](docs/PELIGROSA.md) for the full security model.
 
 Role capabilities: **viewer** sees the dashboard and can submit content requests; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
 

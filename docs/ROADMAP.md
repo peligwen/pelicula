@@ -13,7 +13,7 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md) for the full threat model and current surface.
 
 - [x] **[Peligrosa] Central CSRF middleware** — `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`, replacing 8 inline checks across 5 files.
-- [x] **[Peligrosa] Jellyfin auth** — credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed. Legacy `off` mode removed (Tasks 1–11).
+- [x] **[Peligrosa] Jellyfin auth** — credentials verified against Jellyfin's `/Users/AuthenticateByName`; roles stored in `roles.json`; Jellyfin admins auto-promoted. `password` and `users` modes removed.
 - [x] **[Peligrosa] `PELICULA_AUTH=off` removal** — auth is now always on. A narrowly-scoped loopback auto-session grants admin access to requests from the host machine (docker upstream CIDR + loopback `X-Real-IP` + loopback `Host`). Existing installs: no action needed — the next restart picks up the change.
 - [x] **[Peligrosa] `middleware/peligrosa/` subpackage** — auth, invites, requests, user CRUD, and webhook validation extracted into a Go subpackage with an explicit API surface (`peligrosa.RegisterRoutes`).
 - [x] **[Peligrosa] Hardened X-Real-IP trust (MEDIUM-3)** — `ClientIP` now honors `X-Real-IP` only when the socket peer is within the trusted upstream CIDR. Rate-limit bypass via header spoofing is closed.
@@ -48,7 +48,7 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 **Phase A — Onboarding:** Two-prompt setup (VPN key + country), `--advanced` walkthrough, `the Settings UI` runtime menu, `set_env_var` helper, `$CONFIG_DIR/pelicula/` directory.
 
-**Phase B — Auth & Roles:** Jellyfin-backed auth with viewer / manager / admin roles, `Guard` / `GuardManager` / `GuardAdmin` middleware, dashboard login form, role-based UI hiding. Post-ship hardening: CSRF origin check, `MaxBytesReader`, username and UUID validation. Legacy `off` mode later removed in the Peligrosa extraction (Tasks 1–11).
+**Phase B — Auth & Roles:** Jellyfin-backed auth with viewer / manager / admin roles, `Guard` / `GuardManager` / `GuardAdmin` middleware, dashboard login form, role-based UI hiding. Post-ship hardening: CSRF origin check, `MaxBytesReader`, username and UUID validation. Legacy `off` mode later removed in the Peligrosa extraction.
 
 **Phase C — In-Dashboard Notifications:** Procula catalog stage writes to `/config/procula/notifications_feed.json` (ring buffer, 50 events), bell icon with unread badge, Processing section on dashboard with job cards and progress bars.
 

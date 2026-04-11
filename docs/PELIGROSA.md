@@ -53,13 +53,13 @@ Three gates must all pass:
 
 **Remote role capping (defense-in-depth):** The remote nginx vhost injects `X-Pelicula-Remote: true` on all proxy blocks. The middleware's `effectiveRole()` caps any session to `viewer` when this header is present, regardless of the stored role. This prevents a compromised admin credential from escalating via the remote vhost. The LAN vhost strips the header (`proxy_set_header X-Pelicula-Remote ""`) to prevent spoofing. `HandleCheck` returns `"remote": true/false` so the dashboard can adapt.
 
-### Open Registration (`middleware/register.go`)
+### Open Registration (`middleware/peligrosa/register.go`)
 
 Optional LAN-only public registration without invite tokens. Controlled by `PELICULA_OPEN_REGISTRATION` in `.env` (default `false`), toggleable via settings UI.
 
 When enabled, `/register` without a `?t=` token shows a registration form. `POST /api/pelicula/register` creates a Jellyfin user and assigns `viewer` role. Rate-limited by IP (reuses auth limiter). LAN-only via `requireLocalOriginStrict` — not exposed on the remote vhost.
 
-### CSRF Origin Guard (`middleware/auth.go`)
+### CSRF Origin Guard (`middleware/peligrosa/auth.go`)
 
 `isLocalOrigin(origin string) bool` — returns true if the `Origin` header is an RFC1918/localhost address. Parses as URL to prevent substring-match bypasses. Returns false for empty strings.
 
@@ -75,7 +75,7 @@ Pelicula manages users through Jellyfin. `CreateJellyfinUser` creates the Jellyf
 
 Roles: `viewer` (read + request), `manager` (search + add + pause downloads), `admin` (full access + user management).
 
-### Invites (`middleware/invites.go`)
+### Invites (`middleware/peligrosa/invites.go`)
 
 32-byte crypto/rand token, base64url-encoded (43 chars), stored at `/config/pelicula/invites.json` (0600). Not HMAC-signed — a future Peligrosa upgrade will add HMAC-signing so tokens are verifiable without a database lookup. See [roadmap](#roadmap).
 
@@ -83,7 +83,7 @@ Roles: `viewer` (read + request), `manager` (search + add + pause downloads), `a
 
 Redemption creates a Jellyfin user via the bridge. The `/api/pelicula/invites/:token/redeem` endpoint is public but invite-gated; admin management endpoints are admin-only.
 
-### Request Queue (`middleware/requests.go`)
+### Request Queue (`middleware/peligrosa/requests.go`)
 
 Viewer-created media requests: viewers submit via the dashboard search; admins approve or deny with configurable Radarr/Sonarr quality profiles. Apprise notifies on state change.
 
@@ -147,7 +147,7 @@ Enable via `the Settings UI → 8) Remote access`.
 - **Invite tokens** are random (32 bytes, 256-bit entropy) — token validity requires a database lookup. This is intentional: brute-force enumeration is infeasible, and revocation/exhaustion cannot be made stateless without a blocklist anyway.
 - **Self-signed HTTPS** breaks Chrome on the LAN (Chrome blocks JS). Default LAN setup uses HTTP; use Peligrosa remote vhost for TLS.
 - **`WEBHOOK_SECRET`** is optional for backward compatibility. Fresh installs get a random secret from setup; nginx additionally restricts the endpoint to Docker-internal networks.
-- **CSRF guards** use `requireLocalOriginStrict` / `requireLocalOriginSoft` wrappers wired per-route in `main.go`. `admin_ops.go` uses a separate auth-conditional variant; see [Reading the Code](#reading-the-code).
+- **CSRF guards** use `requireLocalOriginStrict` / `requireLocalOriginSoft` wrappers wired per-route in `main.go`. `admin_ops.go` uses `requireLocalOriginStrict` — state-mutating admin ops require both a valid admin session and a local Origin.
 - **Remote role capping** relies on the `X-Pelicula-Remote` header injected by the remote nginx vhost. The LAN vhost strips it. If nginx is bypassed and the middleware is accessed directly, the header won't be present and the cap won't apply (defense-in-depth only — middleware is not directly exposed).
 
 ---

@@ -10,9 +10,9 @@ import (
 
 // loopbackAutoSession reports whether the request should be granted a
 // transient admin session without a cookie. It is the host-machine
-// convenience path that replaces the legacy off-mode: requests that
-// originate on the Docker host get admin access automatically, LAN and
-// remote clients do not.
+// convenience path that replaces the removed PELICULA_AUTH=off mode:
+// requests that originate on the Docker host get admin access
+// automatically, LAN and remote clients do not.
 //
 // Returns true only when ALL three gates pass:
 //  1. r.RemoteAddr falls within httputil.TrustedUpstreamCIDR — the

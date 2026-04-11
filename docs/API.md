@@ -2,7 +2,7 @@
 
 All `pelicula-api` endpoints are proxied through nginx at `/api/pelicula/`. Internal endpoints are restricted to Docker networks in nginx config — not reachable from the LAN.
 
-All mutating endpoints require an admin or manager session. A session is either cookie-based (from `POST /api/pelicula/login`) or the loopback auto-session granted to requests from the host machine — see [docs/PELIGROSA.md](PELIGROSA.md#loopback-auto-session).
+All mutating endpoints require an admin or manager session. A session is either cookie-based (from `POST /api/pelicula/login`) or the loopback auto-session granted to requests from the host machine — see [docs/PELIGROSA.md](PELIGROSA.md#loopback-auto-session-middlewarepeligrosaloopbackgo).
 
 Auth levels: **Admin** = session with admin role; **Manager+** = manager or admin session; **Viewer+** = any authenticated session; **Public** = no auth required; **Internal** = Docker-network-only.
 
