@@ -54,7 +54,6 @@ func main() {
 	inviteStore = NewInviteStore(db, jellyfinClient)
 	dismissedStore = NewDismissedStore(db)
 	requestStore = NewRequestStore(db, NewArrFulfiller())
-	deps := newPeligrosaDeps(db, nil, inviteStore, requestStore, jellyfinClient) // Auth set below
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -97,7 +96,7 @@ func main() {
 		Jellyfin: jellyfinClient,
 	})
 	auth := authMiddleware
-	deps.Auth = authMiddleware
+	deps := newPeligrosaDeps(db, authMiddleware, inviteStore, requestStore, jellyfinClient)
 
 	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
 	mux.HandleFunc("/api/pelicula/health", handleHealth)

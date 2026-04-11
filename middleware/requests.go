@@ -427,7 +427,8 @@ func (p *peligrosaDeps) HandleRequestOp(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		p.Requests.handleRequestApprove(w, r, id)
+		actorUsername, _, _ := p.Auth.SessionFor(r)
+		p.Requests.handleRequestApprove(w, r, id, actorUsername)
 	case "deny":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -445,9 +446,7 @@ func (p *peligrosaDeps) HandleRequestOp(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
-	actorUsername, _, _ := authMiddleware.SessionFor(r)
-
+func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id, actorUsername string) {
 	// Read profile/root from settings env vars (set at container start from .env)
 	radarrProfileID := envIntOr("REQUESTS_RADARR_PROFILE_ID", 0)
 	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
