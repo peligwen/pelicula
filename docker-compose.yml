@@ -70,6 +70,7 @@ services:
   # ═══════════════════════════════════════════════════
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
     profiles: [vpn]
     network_mode: "service:gluetun"
     depends_on:
