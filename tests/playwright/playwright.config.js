@@ -6,6 +6,7 @@ module.exports = defineConfig({
   timeout: 120_000,          // pipeline stages can take 60s+
   expect: { timeout: 10_000 },
   fullyParallel: false,      // stack is shared; run sequentially
+  workers: 1,                // one worker total — avoids concurrent hits on the single Jellyfin/middleware auth path
   retries: 0,
   reporter: [['list'], ['html', { outputFolder: './report', open: 'never' }]],
   use: {
