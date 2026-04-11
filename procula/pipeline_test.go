@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -143,15 +144,61 @@ func TestMaybeTranscode_Disabled(t *testing.T) {
 	}
 }
 
-func TestMaybeTranscode_NoValidation(t *testing.T) {
+// TestMaybeTranscode_NoValidation_ProbeFailureReturnsNil covers the path where
+// validation was skipped (job.Validation == nil) but ffprobe also fails (e.g.
+// corrupt or missing file). Transcoding should be skipped gracefully — no crash,
+// no error returned to the caller.
+func TestMaybeTranscode_NoValidation_ProbeFailureReturnsNil(t *testing.T) {
 	overrideSettings(t, PipelineSettings{TranscodingEnabled: true})
 
 	q := newTestQueue(t)
-	job := &Job{Source: testSource("/fake/movie.mkv")}
-	// job.Validation is nil
+	job := &Job{Source: testSource("/nonexistent/movie.mkv")}
+	// job.Validation is nil and the file doesn't exist, so runFFprobe will fail
 
 	if err := maybeTranscode(nil, q, job, t.TempDir()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestMaybeTranscode_NoValidation_ProbesAndTranscodes verifies that when
+// validation was skipped (job.Validation == nil), maybeTranscode probes the
+// source file directly with ffprobe and proceeds to profile matching.
+// Uses a fake ffprobe (h264/1080p) and a profile targeting h264 ≤1080p so the
+// result is passthrough — no real ffmpeg invocation needed.
+func TestMaybeTranscode_NoValidation_ProbesAndTranscodes(t *testing.T) {
+	cfgDir := t.TempDir()
+	overrideSettings(t, PipelineSettings{TranscodingEnabled: true})
+
+	// Fake ffprobe returning h264 @ 1080p
+	setupFakeFFprobe(t)
+	t.Setenv("GO_TEST_FFPROBE", "success")
+
+	// Profile: match h264, max_height 1080 — source is already 1080p → passthrough
+	profileDir := filepath.Join(cfgDir, "procula", "profiles")
+	os.MkdirAll(profileDir, 0755)
+	os.WriteFile(filepath.Join(profileDir, "h264.json"), []byte(`{
+		"name":"h264-1080p","enabled":true,
+		"conditions":{"codecs_include":["h264"]},
+		"output":{"video_codec":"libx264","audio_codec":"aac","max_height":1080,"suffix":".test"}
+	}`), 0644)
+
+	// Need a real queue entry so the Update calls inside maybeTranscode have an ID
+	q := newTestQueue(t)
+	created, _ := q.Create(testSource("/fake/movie.mkv"))
+	job, _ := q.Get(created.ID)
+	// Deliberately leave job.Validation nil to exercise the direct-probe path
+
+	if err := maybeTranscode(nil, q, job, cfgDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated, _ := q.Get(created.ID)
+	if updated.TranscodeProfile != "h264-1080p" {
+		t.Errorf("TranscodeProfile = %q, want %q — direct probe path did not reach profile matching",
+			updated.TranscodeProfile, "h264-1080p")
+	}
+	if updated.TranscodeDecision != "passthrough" {
+		t.Errorf("TranscodeDecision = %q, want passthrough", updated.TranscodeDecision)
 	}
 }
 

@@ -308,10 +308,21 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 		return nil
 	}
 
-	if job.Validation == nil || job.Validation.Checks.Codecs == nil {
-		return nil
+	var codecs *CodecInfo
+	if job.Validation != nil && job.Validation.Checks.Codecs != nil {
+		codecs = job.Validation.Checks.Codecs
+	} else {
+		// Validation stage didn't populate codec info (e.g. validation_enabled=false).
+		// Probe directly so transcoding works independently of the validate stage.
+		probe, err := runFFprobe(job.Source.Path)
+		if err != nil {
+			slog.Warn("transcode: ffprobe failed, skipping",
+				"component", "pipeline", "job_id", job.ID, "error", err)
+			return nil
+		}
+		c := extractCodecs(probe)
+		codecs = &c
 	}
-	codecs := job.Validation.Checks.Codecs
 
 	profiles, err := LoadProfiles(configDir)
 	if err != nil || len(profiles) == 0 {
