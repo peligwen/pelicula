@@ -401,7 +401,7 @@ func (p *Deps) HandleRequestList(w http.ResponseWriter, r *http.Request) {
 // HandleRequestCreate creates a new request from a viewer.
 func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	username, _, ok := p.Auth.SessionFor(r)
-	if !ok && p.Auth.mode != "off" {
+	if !ok {
 		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

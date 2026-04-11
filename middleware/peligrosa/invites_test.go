@@ -249,7 +249,7 @@ func TestHandleInvitesCreateAndList(t *testing.T) {
 	s := newTestInviteStore(t)
 
 	// Build a shared auth instance with an admin session.
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	tok := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
 	deps := newTestDeps(a, s)
 
@@ -302,7 +302,7 @@ func TestHandleInviteCheck(t *testing.T) {
 	s := newTestInviteStore(t)
 	maxUses := 1
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
-	deps := newTestDeps(newTestAuth("jellyfin"), s)
+	deps := newTestDeps(newTestAuth(), s)
 
 	// Valid token
 	r := httptest.NewRequest(http.MethodGet, "/api/pelicula/invites/"+inv.Token+"/check", nil)
@@ -363,7 +363,7 @@ func TestHandleInviteRedeem(t *testing.T) {
 
 	maxUses := 2
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
-	deps := newTestDeps(newTestAuth("jellyfin"), s)
+	deps := newTestDeps(newTestAuth(), s)
 
 	doRedeem := func(username, password string) *httptest.ResponseRecorder {
 		body := map[string]string{"username": username, "password": password}
@@ -408,18 +408,5 @@ func TestHandleInviteRedeem(t *testing.T) {
 	list := s.ListInvites()
 	if list[0].Uses != 2 {
 		t.Errorf("expected 2 uses, got %d", list[0].Uses)
-	}
-}
-
-func TestHandleInviteOffMode(t *testing.T) {
-	s := newTestInviteStore(t)
-	deps := newTestDeps(newTestAuth("off"), s)
-
-	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", strings.NewReader(`{}`))
-	r.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	deps.HandleInvites(w, r)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("off mode: expected 403, got %d", w.Code)
 	}
 }

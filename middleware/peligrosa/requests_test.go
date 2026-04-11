@@ -246,7 +246,7 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 	// Set up a store and jellyfin-mode auth (no active sessions → 401).
 	s := newRequestStore(t)
 	db := testDB(t)
-	auth := NewAuth(AuthConfig{Mode: "jellyfin", DB: db})
+	auth := NewAuth(AuthConfig{DB: db})
 	deps := newTestRequestDeps(auth, s)
 
 	body, _ := json.Marshal(map[string]any{
@@ -260,105 +260,5 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 when not authenticated in users mode", w.Code)
-	}
-}
-
-func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
-	s := newRequestStore(t)
-	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
-
-	body, _ := json.Marshal(map[string]any{
-		"type":    "movie",
-		"tmdb_id": 42,
-		"title":   "Open Film",
-		"year":    2024,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	deps.HandleRequestCreate(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Errorf("status = %d, want 201 in off mode", w.Code)
-	}
-	all := s.All()
-	if len(all) != 1 {
-		t.Fatalf("expected 1 request created, got %d", len(all))
-	}
-	if all[0].TmdbID != 42 {
-		t.Errorf("TmdbID = %d, want 42", all[0].TmdbID)
-	}
-}
-
-func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
-	s := newRequestStore(t)
-	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
-
-	// Seed an existing request.
-	existing := &MediaRequest{
-		ID:     "req_already",
-		Type:   "movie",
-		TmdbID: 42,
-		Title:  "Open Film",
-		State:  RequestPending,
-	}
-	insertRequest(t, s, existing)
-
-	body, _ := json.Marshal(map[string]any{
-		"type":    "movie",
-		"tmdb_id": 42,
-		"title":   "Open Film",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	deps.HandleRequestCreate(w, req)
-
-	// Should return 200 (not 201) with the existing request.
-	if w.Code == http.StatusCreated {
-		t.Error("expected non-201 (deduped): should return existing request")
-	}
-	all := s.All()
-	if len(all) != 1 {
-		t.Errorf("expected 1 request (deduped), got %d", len(all))
-	}
-}
-
-func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
-	s := newRequestStore(t)
-	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
-
-	body, _ := json.Marshal(map[string]any{
-		"type":    "anime",
-		"tmdb_id": 1,
-		"title":   "A Show",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	deps.HandleRequestCreate(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for invalid type", w.Code)
-	}
-}
-
-func TestHandleRequestList_ViewerSeesOnlyOwn(t *testing.T) {
-	// Off mode: all requests treated as owned by ""
-	s := newRequestStore(t)
-	deps := newTestRequestDeps(NewAuth(AuthConfig{Mode: "off"}), s)
-
-	insertRequest(t, s, &MediaRequest{ID: "r1", Type: "movie", TmdbID: 1, Title: "Film1", State: RequestPending, RequestedBy: "alice"})
-	insertRequest(t, s, &MediaRequest{ID: "r2", Type: "movie", TmdbID: 2, Title: "Film2", State: RequestPending, RequestedBy: "bob"})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests", nil)
-	w := httptest.NewRecorder()
-	deps.HandleRequestList(w, req)
-
-	// In "off" mode, SessionFor returns ("", RoleAdmin, true) so admin sees all.
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-	var out []*MediaRequest
-	json.NewDecoder(w.Body).Decode(&out)
-	if len(out) != 2 {
-		t.Errorf("admin (off mode) should see all 2 requests, got %d", len(out))
 	}
 }

@@ -53,7 +53,6 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) *httptest.Ser
 	testSvcs.JellyfinAPIKey = "test-token"
 	origAuth := authMiddleware
 	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{
-		Mode:     "jellyfin",
 		Jellyfin: NewJellyfinHTTPClient(srv.Client(), testSvcs),
 	})
 	t.Cleanup(func() { authMiddleware = origAuth })
@@ -243,22 +242,6 @@ func TestHandleUsers_PostForeignOrigin(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
-	}
-}
-
-func TestHandleUsers_OffMode(t *testing.T) {
-	// Restore global after test.
-	orig := authMiddleware
-	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{Mode: "off"})
-	t.Cleanup(func() { authMiddleware = orig })
-
-	body := strings.NewReader(`{"username":"bob","password":"hunter2"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/users", body)
-	w := httptest.NewRecorder()
-	handleUsers(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 when PELICULA_AUTH=off", w.Code)
 	}
 }
 
@@ -504,29 +487,6 @@ func isErrPasswordRequired(err error) bool {
 }
 
 // ── Session / auth wiring sanity ──────────────────────────────────────────────
-
-// TestHandleUsers_OffMode_GetIsAllowed ensures the off-mode guard only blocks
-// state-mutating POST, not the read-only GET (dashboard listing still works).
-func TestHandleUsers_OffMode_GetIsAllowed(t *testing.T) {
-	newFakeJellyfin(t, func(mux *http.ServeMux) {
-		mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[]`))
-		})
-	})
-	resetServices(t)
-
-	// Switch authMiddleware to off mode.
-	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{Mode: "off"})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/users", nil)
-	w := httptest.NewRecorder()
-	handleUsers(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("GET in off mode: status = %d, want 200", w.Code)
-	}
-}
 
 // TestHandleUsers_NilAuthMiddlewareDoesNotPanic ensures that if authMiddleware
 // is nil (e.g. in setup mode) the handler falls through without panicking.
@@ -803,20 +763,6 @@ func TestHandleUserPassword_EmptyPassword(t *testing.T) {
 }
 
 // ── handleUsersWithID routing ─────────────────────────────────────────────────
-
-func TestHandleUsersWithID_OffMode(t *testing.T) {
-	orig := authMiddleware
-	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{Mode: "off"})
-	t.Cleanup(func() { authMiddleware = orig })
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", nil)
-	w := httptest.NewRecorder()
-	handleUsersWithID(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 in off mode", w.Code)
-	}
-}
 
 func TestHandleUsersWithID_ForeignOrigin(t *testing.T) {
 	newFakeJellyfin(t, nil)

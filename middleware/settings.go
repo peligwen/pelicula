@@ -26,7 +26,6 @@ type SettingsResponse struct {
 	LibraryDir           string `json:"library_dir"`
 	WorkDir              string `json:"work_dir"`
 	Port                 string `json:"port"`
-	AuthMode             string `json:"auth_mode"`
 	OpenRegistration     string `json:"open_registration"`
 	ProculaAPIKey        string `json:"procula_api_key"`
 	TranscodingEnabled   string `json:"transcoding_enabled"`
@@ -93,7 +92,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"CONFIG_DIR", "LIBRARY_DIR", "WORK_DIR",
 		"PUID", "PGID", "TZ",
 		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
-		"PELICULA_PORT", "PELICULA_AUTH",
+		"PELICULA_PORT",
 		"PELICULA_OPEN_REGISTRATION",
 		"JELLYFIN_ADMIN_USER", // legacy: kept for upgrade-path ordering
 		"JELLYFIN_PASSWORD",   // legacy: kept for upgrade-path ordering
@@ -187,7 +186,6 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		LibraryDir:              vars["LIBRARY_DIR"],
 		WorkDir:                 vars["WORK_DIR"],
 		Port:                    vars["PELICULA_PORT"],
-		AuthMode:                vars["PELICULA_AUTH"],
 		OpenRegistration:        vars["PELICULA_OPEN_REGISTRATION"],
 		ProculaAPIKey:           maskedValue,
 		TranscodingEnabled:      vars["TRANSCODING_ENABLED"],
@@ -271,17 +269,6 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		req.WireguardKey = key
 	}
 
-	// Validate auth mode if being changed
-	if req.AuthMode != "" {
-		switch req.AuthMode {
-		case "off", "jellyfin":
-			// valid
-		default:
-			http.Error(w, "auth_mode must be one of: off, jellyfin", http.StatusBadRequest)
-			return
-		}
-	}
-
 	envMu.Lock()
 	defer envMu.Unlock()
 
@@ -310,9 +297,6 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Port != "" {
 		vars["PELICULA_PORT"] = req.Port
-	}
-	if req.AuthMode != "" {
-		vars["PELICULA_AUTH"] = req.AuthMode
 	}
 	if req.OpenRegistration != "" {
 		switch req.OpenRegistration {
@@ -483,7 +467,6 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"WIREGUARD_PRIVATE_KEY":      wgKey,
 		"SERVER_COUNTRIES":           "Netherlands",
 		"PELICULA_PORT":              "7354",
-		"PELICULA_AUTH":              "jellyfin",
 		"PELICULA_OPEN_REGISTRATION": "false",
 		"PROCULA_API_KEY":            proculaKey,
 		"WEBHOOK_SECRET":             webhookSecret,

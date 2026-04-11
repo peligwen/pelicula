@@ -21,7 +21,6 @@ func TestParseEnvFile_RoundTrip(t *testing.T) {
 	in := map[string]string{
 		"CONFIG_DIR":            "/config",
 		"PELICULA_PORT":         "7354",
-		"PELICULA_AUTH":         "off",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 	}
@@ -102,7 +101,6 @@ func newSettingsEnv(t *testing.T) string {
 		"WIREGUARD_PRIVATE_KEY": strings.Repeat("A", 43) + "=",
 		"SERVER_COUNTRIES":      "Netherlands",
 		"PELICULA_PORT":         "7354",
-		"PELICULA_AUTH":         "off",
 		"PROCULA_API_KEY":       "testkey",
 		"WEBHOOK_SECRET":        "testsecret",
 		"TRANSCODING_ENABLED":   "false",
@@ -165,34 +163,6 @@ func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for missing Origin (CSRF guard)", w.Code)
-	}
-}
-
-func TestHandleSettingsUpdate_AcceptsValidAuthMode(t *testing.T) {
-	for _, mode := range []string{"off", "jellyfin"} {
-		t.Run(mode, func(t *testing.T) {
-			body, _ := json.Marshal(SettingsResponse{AuthMode: mode})
-			req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
-			req.Header.Set("Origin", "http://192.168.1.1:7354")
-			w := httptest.NewRecorder()
-			handleSettingsUpdate(w, req)
-			// Should not fail with 400 (invalid auth mode)
-			if w.Code == http.StatusBadRequest {
-				t.Errorf("auth_mode=%q: got 400, should be accepted at validation stage", mode)
-			}
-		})
-	}
-}
-
-func TestHandleSettingsUpdate_RejectsInvalidAuthMode(t *testing.T) {
-	body, _ := json.Marshal(SettingsResponse{AuthMode: "superadmin"})
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
-	req.Header.Set("Origin", "http://localhost:7354")
-	w := httptest.NewRecorder()
-	handleSettingsUpdate(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for invalid auth mode", w.Code)
 	}
 }
 

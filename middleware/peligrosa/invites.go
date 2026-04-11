@@ -389,12 +389,6 @@ func (s *InviteStore) Delete(token string) error {
 // HandleInvites serves GET /api/pelicula/invites (list) and
 // POST /api/pelicula/invites (create). Both require admin.
 func (p *Deps) HandleInvites(w http.ResponseWriter, r *http.Request) {
-	// Block mutations in auth=off mode (same guard as handleUsers).
-	if p.Auth != nil && p.Auth.IsOffMode() {
-		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
 		httputil.WriteJSON(w, p.Invites.ListInvites())
@@ -431,8 +425,8 @@ func (p *Deps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 		// Determine creator username from session (fallback: "admin").
 		createdBy := "admin"
 		if p.Auth != nil {
-			if sess, ok := p.Auth.getSession(r); ok {
-				createdBy = sess.username
+			if username, _, ok := p.Auth.SessionFor(r); ok && username != "" {
+				createdBy = username
 			}
 		}
 
@@ -470,7 +464,6 @@ func (p *Deps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case op == "check" && r.Method == http.MethodGet:
 		// check and redeem are intentionally public — the token IS the credential.
-		// Off-mode blocks admin endpoints only; viewers still need a way to register.
 		p.Invites.HandleInviteCheck(w, r, token)
 	case op == "redeem" && r.Method == http.MethodPost:
 		p.HandleInviteRedeem(w, r, token)
@@ -493,19 +486,16 @@ func (p *Deps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
 // CSRF is enforced at the route level via httputil.RequireLocalOriginSoft in main.go.
 // Returns false and writes the error if the check fails.
 func (p *Deps) checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if p.Auth != nil && p.Auth.IsOffMode() {
-		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
+	if p.Auth == nil {
+		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	if p.Auth == nil || p.Auth.mode == "off" {
-		return true
-	}
-	sess, ok := p.Auth.getSession(r)
+	_, role, ok := p.Auth.SessionFor(r)
 	if !ok {
 		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	if !sess.role.atLeast(RoleAdmin) {
+	if !role.atLeast(RoleAdmin) {
 		httputil.WriteError(w, "forbidden", http.StatusForbidden)
 		return false
 	}

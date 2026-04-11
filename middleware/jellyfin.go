@@ -785,14 +785,6 @@ func setEmbyAuth(req *http.Request, token string) {
 
 // handleUsers handles GET /api/pelicula/users (list) and POST /api/pelicula/users (create).
 func handleUsers(w http.ResponseWriter, r *http.Request) {
-	// Block state-mutating requests when auth is off: anyone on the network could
-	// create accounts without credentials.
-	// Read-only GET is fine in off mode since the dashboard uses it for display only.
-	if r.Method != http.MethodGet && authMiddleware != nil && authMiddleware.IsOffMode() {
-		httputil.WriteError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
 		users, err := ListJellyfinUsers(services)
@@ -845,11 +837,6 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 // handleUsersWithID dispatches requests to /api/pelicula/users/{id} and
 // /api/pelicula/users/{id}/password based on path suffix and HTTP method.
 func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
-	// Mutations require auth to be enabled (same guard as handleUsers POST).
-	if authMiddleware != nil && authMiddleware.IsOffMode() {
-		httputil.WriteError(w, "user management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
-		return
-	}
 	// Strip the route prefix to get "{id}" or "{id}/password".
 	tail := strings.TrimPrefix(r.URL.Path, "/api/pelicula/users/")
 

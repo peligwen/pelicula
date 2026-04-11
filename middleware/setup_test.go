@@ -189,7 +189,6 @@ func TestSetupUsesWriteEnvFile(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	vars := map[string]string{
-		"PELICULA_AUTH":         "jellyfin",
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"CONFIG_DIR":            "/config",

@@ -45,16 +45,17 @@ type loginAttempts struct {
 }
 
 // Auth handles authentication and authorization.
-// mode "off"      — all requests pass through
-// mode "jellyfin" — credentials verified against Jellyfin; roles from rolesStore
+// The only auth mode is "jellyfin": credentials are verified against Jellyfin
+// and roles are stored in rolesStore. Host-machine callers (nginx upstream +
+// loopback X-Real-IP + loopback Host) get admin automatically via
+// loopbackAutoSession — see loopback.go.
 //
 // When db is non-nil, sessions and rate-limit data are persisted to SQLite so
 // they survive process restarts. When db is nil (e.g. in tests created with
 // newTestAuth), the in-memory maps are used exclusively.
 type Auth struct {
-	mode       string
 	db         *sql.DB                // non-nil in production; nil in tests that don't need persistence
-	rolesStore *RolesStore            // non-nil in "jellyfin" mode
+	rolesStore *RolesStore            // non-nil when db is non-nil
 	jellyfin   clients.JellyfinClient // used for Jellyfin auth calls
 	sessions   map[string]session
 	failures   map[string]*loginAttempts // IP → recent failure timestamps
@@ -63,25 +64,21 @@ type Auth struct {
 
 // AuthConfig holds parameters for NewAuth.
 type AuthConfig struct {
-	Mode     string
-	DB       *sql.DB                // for session + rate-limit persistence (nil = in-memory only)
-	Jellyfin clients.JellyfinClient // for "jellyfin" mode; must be non-nil when Mode == "jellyfin"
+	DB       *sql.DB // for session + rate-limit persistence (nil = in-memory only)
+	Jellyfin clients.JellyfinClient
 }
 
 func NewAuth(cfg AuthConfig) *Auth {
 	a := &Auth{
-		mode:     cfg.Mode,
 		db:       cfg.DB,
 		sessions: make(map[string]session),
 		failures: make(map[string]*loginAttempts),
 		jellyfin: cfg.Jellyfin,
 	}
-	if cfg.Mode == "jellyfin" {
-		if cfg.DB != nil {
-			a.rolesStore = NewRolesStore(cfg.DB)
-		}
-		slog.Info("auth mode: jellyfin — credentials verified against Jellyfin", "component", "auth")
+	if cfg.DB != nil {
+		a.rolesStore = NewRolesStore(cfg.DB)
 	}
+	slog.Info("auth: Jellyfin credentials required for login", "component", "auth")
 	// Restore persisted sessions from DB into the in-memory map on startup.
 	if cfg.DB != nil {
 		a.loadSessionsFromDB()
@@ -90,7 +87,7 @@ func NewAuth(cfg AuthConfig) *Auth {
 	return a
 }
 
-// Roles returns the roles store, or nil when auth runs in off mode.
+// Roles returns the roles store, or nil when db is nil (e.g. in tests).
 // Used by the main-package export/import backup codepath.
 func (a *Auth) Roles() *RolesStore {
 	if a == nil {
@@ -196,14 +193,7 @@ func (a *Auth) recordFailure(ip string) {
 	a.mu.Unlock()
 }
 
-// IsOffMode reports whether auth is disabled (PELICULA_AUTH=off).
-// Used by endpoints that must block state-mutating requests even in off mode.
-func (a *Auth) IsOffMode() bool {
-	return a.mode == "off"
-}
-
-// Guard wraps a handler; if auth is off it passes through, otherwise
-// it requires a valid session regardless of role.
+// Guard wraps a handler; requires a valid session regardless of role.
 func (a *Auth) Guard(next http.Handler) http.Handler {
 	return a.guardRole(next, RoleViewer)
 }
@@ -236,12 +226,14 @@ func effectiveRole(sess session, r *http.Request) UserRole {
 }
 
 func (a *Auth) guardRole(next http.Handler, minRole UserRole) http.Handler {
-	if a.mode == "off" {
-		return next
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := a.getSession(r)
 		if !ok {
+			// Loopback callers (host-machine via nginx) get a synthetic admin session.
+			if loopbackAutoSession(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -270,11 +262,6 @@ func (a *Auth) getSession(r *http.Request) (session, bool) {
 func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if a.mode == "off" {
-		httputil.WriteJSON(w, map[string]any{"auth": false, "message": "auth disabled"})
 		return
 	}
 
@@ -389,29 +376,33 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
-	if a.mode == "off" {
-		httputil.WriteJSON(w, map[string]any{"auth": false, "valid": true})
-		return
-	}
-
 	sess, ok := a.getSession(r)
 	if !ok {
+		if loopbackAutoSession(r) {
+			httputil.WriteJSON(w, map[string]any{
+				"auth":     true,
+				"valid":    true,
+				"username": "(loopback)",
+				"role":     string(RoleAdmin),
+				"remote":   false,
+			})
+			return
+		}
 		// nginx auth_request requires a non-2xx status to deny access.
 		// The dashboard JS uses the JSON body, so we still send it.
 		if r.URL.Query().Get("nginx") == "1" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprintf(w, `{"auth":true,"valid":false,"mode":%q}`, a.mode)
+			fmt.Fprint(w, `{"auth":true,"valid":false}`)
 			return
 		}
-		httputil.WriteJSON(w, map[string]any{"auth": true, "valid": false, "mode": a.mode})
+		httputil.WriteJSON(w, map[string]any{"auth": true, "valid": false})
 		return
 	}
 
 	httputil.WriteJSON(w, map[string]any{
 		"auth":     true,
 		"valid":    true,
-		"mode":     a.mode,
 		"username": sess.username,
 		"role":     string(effectiveRole(sess, r)),
 		"remote":   isRemoteRequest(r),
@@ -419,16 +410,16 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // SessionFor returns the authenticated username and role for the request.
-// Returns ("", "", false) if not authenticated. In off mode, returns ("", RoleAdmin, true).
+// Returns ("", "", false) if not authenticated.
+// Loopback callers (host-machine via nginx) get ("(loopback)", RoleAdmin, true).
 func (a *Auth) SessionFor(r *http.Request) (username string, role UserRole, ok bool) {
-	if a.mode == "off" {
-		return "", RoleAdmin, true
+	if sess, sOk := a.getSession(r); sOk {
+		return sess.username, effectiveRole(sess, r), true
 	}
-	sess, sOk := a.getSession(r)
-	if !sOk {
-		return "", "", false
+	if loopbackAutoSession(r) {
+		return "(loopback)", RoleAdmin, true
 	}
-	return sess.username, effectiveRole(sess, r), true
+	return "", "", false
 }
 
 func generateToken() (string, error) {

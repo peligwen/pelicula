@@ -43,15 +43,14 @@ func boolStr(b bool) string {
 // The cleanup goroutine is harmless in tests (sleeps 10 min, then GC'd).
 // jellyfin is nil — tests that exercise HandleLogin or any CreateUser path must
 // use newTestJellyfinAuth instead.
-func newTestAuth(mode string) *Auth {
+func newTestAuth() *Auth {
 	return &Auth{
-		mode:     mode,
 		sessions: make(map[string]session),
 		failures: make(map[string]*loginAttempts),
 	}
 }
 
-// newTestJellyfinAuth creates an Auth in "jellyfin" mode for testing.
+// newTestJellyfinAuth creates an Auth for testing.
 // store may be nil — a fresh RolesStore backed by a test DB is used.
 // jfClient should point at an httptest.Server serving the Jellyfin API.
 func newTestJellyfinAuth(t *testing.T, store *RolesStore, jfClient *fakeJellyfinHTTPClient) *Auth {
@@ -64,7 +63,6 @@ func newTestJellyfinAuth(t *testing.T, store *RolesStore, jfClient *fakeJellyfin
 		jc = jfClient
 	}
 	a := &Auth{
-		mode:       "jellyfin",
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
@@ -125,23 +123,8 @@ func TestUserRoleAtLeast(t *testing.T) {
 
 // ── HandleLogin ─────────────────────────────────────────────────────────
 
-func TestLogin_AuthOff(t *testing.T) {
-	a := newTestAuth("off")
-	body := strings.NewReader(`{"username":"any","password":"any"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
-	w := httptest.NewRecorder()
-	a.HandleLogin(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	m := parseJSONBody(t, w)
-	if m["auth"] != false {
-		t.Errorf("auth = %v, want false", m["auth"])
-	}
-}
-
 func TestLogin_MethodNotAllowed(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/login", nil)
 	w := httptest.NewRecorder()
 	a.HandleLogin(w, req)
@@ -151,7 +134,7 @@ func TestLogin_MethodNotAllowed(t *testing.T) {
 }
 
 func TestLogin_BadJSON(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	body := strings.NewReader(`not json`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
@@ -197,7 +180,7 @@ func TestLogin_RateLimited(t *testing.T) {
 // ── HandleLogout ────────────────────────────────────────────────────────
 
 func TestLogout_ClearsSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/logout", nil)
@@ -224,7 +207,7 @@ func TestLogout_ClearsSession(t *testing.T) {
 }
 
 func TestLogout_NoCookie(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/logout", nil)
 	w := httptest.NewRecorder()
 	a.HandleLogout(w, req)
@@ -234,7 +217,7 @@ func TestLogout_NoCookie(t *testing.T) {
 }
 
 func TestLogout_MethodNotAllowed(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/logout", nil)
 	w := httptest.NewRecorder()
 	a.HandleLogout(w, req)
@@ -245,25 +228,8 @@ func TestLogout_MethodNotAllowed(t *testing.T) {
 
 // ── HandleCheck ─────────────────────────────────────────────────────────
 
-func TestCheck_AuthOff(t *testing.T) {
-	a := newTestAuth("off")
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
-	w := httptest.NewRecorder()
-	a.HandleCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	m := parseJSONBody(t, w)
-	if m["auth"] != false {
-		t.Errorf("auth = %v, want false", m["auth"])
-	}
-	if m["valid"] != true {
-		t.Errorf("valid = %v, want true", m["valid"])
-	}
-}
-
 func TestCheck_ValidSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleManager, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
@@ -287,7 +253,7 @@ func TestCheck_ValidSession(t *testing.T) {
 }
 
 func TestCheck_NoSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
 	w := httptest.NewRecorder()
 	a.HandleCheck(w, req)
@@ -302,7 +268,7 @@ func TestCheck_NoSession(t *testing.T) {
 }
 
 func TestCheck_NginxSubrequest_NoSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
 	w := httptest.NewRecorder()
 	a.HandleCheck(w, req)
@@ -313,7 +279,7 @@ func TestCheck_NginxSubrequest_NoSession(t *testing.T) {
 }
 
 func TestCheck_NginxSubrequest_ValidSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
@@ -331,7 +297,7 @@ func TestCheck_NginxSubrequest_ValidSession(t *testing.T) {
 }
 
 func TestCheck_ExpiredSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(-time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
@@ -345,24 +311,8 @@ func TestCheck_ExpiredSession(t *testing.T) {
 
 // ── Guard middleware ────────────────────────────────────────────────────
 
-func TestGuard_AuthOff(t *testing.T) {
-	a := newTestAuth("off")
-	called := false
-	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-	handler := a.Guard(dummy)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if !called {
-		t.Error("handler should be called when auth is off")
-	}
-}
-
 func TestGuard_NoSession(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -376,7 +326,7 @@ func TestGuard_NoSession(t *testing.T) {
 }
 
 func TestGuard_RoleMatrix(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -413,30 +363,6 @@ func TestGuard_RoleMatrix(t *testing.T) {
 				t.Errorf("status = 200, want 403")
 			}
 		})
-	}
-}
-
-// TestGuardAdmin_OffMode_HandleUsers_StillBlocked documents that the off-mode
-// bypass in guardRole does NOT protect handleUsers — instead handleUsers has its
-// own explicit off-mode check so POST is blocked even when GuardAdmin is a no-op.
-func TestGuardAdmin_OffMode_HandleUsers_StillBlocked(t *testing.T) {
-	a := newTestAuth("off")
-	// In off mode, GuardAdmin passes through unconditionally.
-	called := false
-	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-	handler := a.GuardAdmin(dummy)
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/users", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if !called {
-		t.Error("GuardAdmin in off mode should not block the handler (handleUsers handles it itself)")
-	}
-	// Confirm IsOffMode reports true so handleUsers can enforce its own check.
-	if !a.IsOffMode() {
-		t.Error("IsOffMode() should return true when mode is 'off'")
 	}
 }
 
@@ -502,7 +428,7 @@ func TestEffectiveRole_RemoteViewerUnchanged(t *testing.T) {
 }
 
 func TestGuardRole_RemoteAdminBlockedByGuardManager(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -519,7 +445,7 @@ func TestGuardRole_RemoteAdminBlockedByGuardManager(t *testing.T) {
 }
 
 func TestGuardRole_RemoteAdminPassesGuard(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
 	dummy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -536,7 +462,7 @@ func TestGuardRole_RemoteAdminPassesGuard(t *testing.T) {
 }
 
 func TestHandleCheck_RemoteReturnsViewerRole(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
 	addSessionCookie(req, token)
@@ -556,7 +482,7 @@ func TestHandleCheck_RemoteReturnsViewerRole(t *testing.T) {
 }
 
 func TestSessionFor_RemoteAdminReturnsViewer(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	token := insertSession(a, "alice", RoleAdmin, time.Now().Add(time.Hour))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	addSessionCookie(req, token)
@@ -879,7 +805,6 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 
 	// Auth1: perform a login — this writes the session to SQLite.
 	a1 := NewAuth(AuthConfig{
-		Mode:     "jellyfin",
 		DB:       db,
 		Jellyfin: jc,
 	})
@@ -906,7 +831,6 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 
 	// Auth2: new instance on the same DB — must restore sessions from SQLite.
 	a2 := NewAuth(AuthConfig{
-		Mode:     "jellyfin",
 		DB:       db,
 		Jellyfin: jc,
 	})

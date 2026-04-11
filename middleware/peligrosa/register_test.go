@@ -20,7 +20,7 @@ func setOpenRegistration(t *testing.T, val bool) {
 func TestOpenRegCheck_Enabled(t *testing.T) {
 	setOpenRegistration(t, true)
 
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/register/check", nil)
 	w := httptest.NewRecorder()
 	a.HandleOpenRegCheck(w, req)
@@ -36,7 +36,7 @@ func TestOpenRegCheck_Enabled(t *testing.T) {
 func TestOpenRegCheck_Disabled(t *testing.T) {
 	setOpenRegistration(t, false)
 
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/register/check", nil)
 	w := httptest.NewRecorder()
 	a.HandleOpenRegCheck(w, req)
@@ -50,7 +50,7 @@ func TestOpenRegCheck_Disabled(t *testing.T) {
 }
 
 func TestOpenRegCheck_MethodNotAllowed(t *testing.T) {
-	a := newTestAuth("jellyfin")
+	a := newTestAuth()
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register/check", nil)
 	w := httptest.NewRecorder()
 	a.HandleOpenRegCheck(w, req)
@@ -63,7 +63,7 @@ func TestOpenRegCheck_MethodNotAllowed(t *testing.T) {
 
 func TestOpenRegister_Disabled_Returns403(t *testing.T) {
 	setOpenRegistration(t, false)
-	auth := newTestAuth("jellyfin")
+	auth := newTestAuth()
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
 	w := httptest.NewRecorder()
@@ -73,21 +73,8 @@ func TestOpenRegister_Disabled_Returns403(t *testing.T) {
 	}
 }
 
-func TestOpenRegister_AuthOff_Returns403(t *testing.T) {
-	setOpenRegistration(t, true)
-	auth := newTestAuth("off")
-
-	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
-	w := httptest.NewRecorder()
-	auth.HandleOpenRegister(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (auth off)", w.Code)
-	}
-}
-
 func TestOpenRegister_MethodNotAllowed(t *testing.T) {
-	auth := newTestAuth("jellyfin")
+	auth := newTestAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/register", nil)
 	w := httptest.NewRecorder()
 	auth.HandleOpenRegister(w, req)
@@ -98,7 +85,7 @@ func TestOpenRegister_MethodNotAllowed(t *testing.T) {
 
 func TestOpenRegister_EmptyUsername_Returns400(t *testing.T) {
 	setOpenRegistration(t, true)
-	auth := newTestAuth("jellyfin")
+	auth := newTestAuth()
 
 	body := strings.NewReader(`{"username":"","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
@@ -111,7 +98,7 @@ func TestOpenRegister_EmptyUsername_Returns400(t *testing.T) {
 
 func TestOpenRegister_EmptyPassword_Returns400(t *testing.T) {
 	setOpenRegistration(t, true)
-	auth := newTestAuth("jellyfin")
+	auth := newTestAuth()
 
 	body := strings.NewReader(`{"username":"alice","password":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
@@ -137,7 +124,6 @@ func TestOpenRegister_Success(t *testing.T) {
 
 	store := NewRolesStore(testDB(t))
 	auth := &Auth{
-		mode:       "jellyfin",
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
@@ -176,7 +162,6 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 	// that subsequent registrants get viewer, not admin.
 	_ = store.Upsert("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
 	auth := &Auth{
-		mode:       "jellyfin",
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
@@ -219,7 +204,6 @@ func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
 	// Fresh roles store — IsEmpty() returns true.
 	store := NewRolesStore(testDB(t))
 	auth := &Auth{
-		mode:       "jellyfin",
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
@@ -255,7 +239,6 @@ func TestOpenRegister_UsernameTaken_Returns409(t *testing.T) {
 
 	store := NewRolesStore(testDB(t))
 	auth := &Auth{
-		mode:       "jellyfin",
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
@@ -278,7 +261,7 @@ func TestOpenRegister_UsernameTaken_Returns409(t *testing.T) {
 
 func TestOpenRegister_RateLimited_Returns429(t *testing.T) {
 	setOpenRegistration(t, true)
-	auth := newTestAuth("jellyfin")
+	auth := newTestAuth()
 
 	ip := "10.0.0.99"
 	for i := 0; i < 5; i++ {

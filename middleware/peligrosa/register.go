@@ -80,12 +80,6 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a != nil && a.IsOffMode() {
-		initialSetupMu.Unlock()
-		httputil.WriteError(w, "registration requires auth to be enabled (PELICULA_AUTH=jellyfin)", http.StatusForbidden)
-		return
-	}
-
 	// Rate-limit by IP — reuse the auth limiter.
 	ip := httputil.ClientIP(r)
 	if a != nil && a.isRateLimited(ip) {

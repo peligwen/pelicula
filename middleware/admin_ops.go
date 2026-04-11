@@ -42,9 +42,9 @@ func (rl *adminRateLimiter) allow(key string) bool {
 }
 
 // adminRateLimitKey extracts a per-user key for rate limiting.
-// Uses the session username when auth is on, else client IP.
+// Uses the session username when authenticated, else client IP.
 func adminRateLimitKey(r *http.Request) string {
-	if authMiddleware != nil && !authMiddleware.IsOffMode() {
+	if authMiddleware != nil {
 		if username, _, ok := authMiddleware.SessionFor(r); ok && username != "" {
 			return "user:" + username
 		}
@@ -69,25 +69,6 @@ func auditLog(r *http.Request, action, target, result string) {
 		"actor", key, "action", action, "target", target, "result", result)
 }
 
-// ── Off-mode guard ───────────────────────────────────────────────────────────
-
-// requireAuthOrLocalOrigin enforces that when PELICULA_AUTH=off the request
-// carries a same-origin / localhost / RFC1918 Origin header. In auth modes
-// the caller is already authenticated via GuardAdmin; this guard is a no-op.
-// Returns false and writes 403 if the check fails.
-//
-// Pattern mirrors invites.go, jellyfin.go, and settings.go.
-func requireAuthOrLocalOrigin(w http.ResponseWriter, r *http.Request) bool {
-	if authMiddleware == nil || !authMiddleware.IsOffMode() {
-		return true
-	}
-	if origin := r.Header.Get("Origin"); origin == "" || !httputil.IsLocalOrigin(origin) {
-		httputil.WriteError(w, "forbidden: enable PELICULA_AUTH or access from a local origin", http.StatusForbidden)
-		return false
-	}
-	return true
-}
-
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 // handleStackRestart restarts all whitelisted containers.
@@ -96,9 +77,6 @@ func requireAuthOrLocalOrigin(w http.ResponseWriter, r *http.Request) bool {
 func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !requireAuthOrLocalOrigin(w, r) {
 		return
 	}
 	if !checkAdminRate(w, r) {
@@ -142,9 +120,6 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !requireAuthOrLocalOrigin(w, r) {
-		return
-	}
 	if !checkAdminRate(w, r) {
 		return
 	}
@@ -172,9 +147,6 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !requireAuthOrLocalOrigin(w, r) {
 		return
 	}
 	if !checkAdminRate(w, r) {
