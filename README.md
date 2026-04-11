@@ -169,6 +169,97 @@ the threat model, known limitations, and how to report a vulnerability
 privately. The opt-in Peligrosa remote access feature exposes **only
 Jellyfin** over TLS — never the admin stack.
 
+## Feature Coverage
+
+The table below lists every feature claimed in this README. **E2E** shows automated coverage from `tests/e2e.sh` and the Playwright specs in `tests/playwright/specs/`. **Manual** is a verification column for you to tick off yourself.
+
+> **Note on CLI coverage:** `tests/e2e.sh` runs `docker compose` directly — it does not invoke the `pelicula` wrapper. CLI *effects* are often covered; the wrapper commands themselves are not.
+
+| Feature | E2E | Manual |
+|---------|-----|--------|
+| **What Happens Automatically** | | |
+| Seeds service configs (URL bases, auth bypass, download paths) | ✓ e2e.sh | ☐ |
+| Starts 9 containers behind nginx reverse proxy | ~ partial (health check passes; container count not asserted) | ☐ |
+| Waits for VPN connection and port forwarding | — | ☐ |
+| Auto-wires qBittorrent as download client in Sonarr and Radarr | ✓ e2e.sh | ☐ |
+| Connects Prowlarr indexers to Sonarr and Radarr | ✓ e2e.sh | ☐ |
+| Validates downloads (FFprobe integrity, sample detection, blocklist + re-search) | ~ partial (pipeline via import webhook; blocklist/re-search path not exercised) | ☐ |
+| Missing content watcher (2-min interval auto-search) | — | ☐ |
+| Enforces auth bypass on every start | — | ☐ |
+| **Dashboard** | | |
+| Unified search (Sonarr + Radarr in parallel, interleaved, type filter tabs) | — | ☐ |
+| One-click add (search starts immediately) | — | ☐ |
+| Watch button links directly to Jellyfin | ~ partial (Jellyfin library populated + searchable; button click not asserted) | ☐ |
+| Download management (pause / resume / cancel / blocklist) | — | ☐ |
+| Processing pipeline live status with progress bars | ✓ playwright (import-play: pipeline lane card → completed) | ☐ |
+| Notifications bell icon with unread count | — | ☐ |
+| Storage monitoring (per-volume usage bars, growth rate, time-to-full) | — | ☐ |
+| Service awareness (search disables with red/yellow when *arr down) | — | ☐ |
+| VPN telemetry (IP, country, forwarded port, transfer speeds) | — | ☐ |
+| Service status indicators (red until up, green when healthy) | — | ☐ |
+| Collapse search results to top result / "Show N more" expand | — | ☐ |
+| **Services** | | |
+| `/` — Dashboard | ✓ e2e.sh (public route + Cache-Control: no-store) | ☐ |
+| `/setup` — Browser setup wizard | — | ☐ |
+| `/settings` — Runtime configuration | ✓ e2e.sh (protected route redirect + cookie access) | ☐ |
+| `/import` — Local media import wizard | ✓ playwright (import-play exercises full wizard) | ☐ |
+| `/api/pelicula/` — Go middleware | ✓ e2e.sh (health, status, auth, hooks/import) | ☐ |
+| `/api/procula/` — Procula pipeline | ✓ e2e.sh (settings + jobs polling) | ☐ |
+| `/api/vpn/` — Gluetun VPN telemetry | — | ☐ |
+| `/sonarr/` | ~ partial (auto-wire confirms reachable; UI not exercised) | ☐ |
+| `/radarr/` | ~ partial (same) | ☐ |
+| `/prowlarr/` | ~ partial (protected route redirect only) | ☐ |
+| `/qbt/` | ~ partial (protected route redirect only) | ☐ |
+| `/jellyfin/` | ✓ e2e.sh + ✓ playwright (library search + catalog sync) | ☐ |
+| **Download Management** | | |
+| Pause torrent | — | ☐ |
+| Resume paused torrent | — | ☐ |
+| Cancel (removes torrent + files, unmonitors in *arr) | — | ☐ |
+| Blocklist release with reason selection | — | ☐ |
+| Progress bar colours (green active / amber paused / blue seeding) | — | ☐ |
+| **Content Requests** | | |
+| Viewer submits request from search results | — | ☐ |
+| Admin approves / denies with reason | — | ☐ |
+| Approval auto-adds to Radarr or Sonarr with configured quality profile | — | ☐ |
+| Request flips to "available" on import + Apprise notifies requester | — | ☐ |
+| Admin generates shareable invite link | — | ☐ |
+| Invite redeem (username + password → Jellyfin viewer account) | — | ☐ |
+| **Optional Services** | | |
+| Apprise push notifications (phone, email, Telegram, ntfy, Gotify, 85+ services) | — | ☐ |
+| Bazarr auto subtitle acquisition (wired to Sonarr + Radarr on startup) | ✓ playwright (subtitle-acquisition spec: await_subs stage → completed → jellyfin_synced) | ☐ |
+| Dual subtitles (stacked ASS sidecar, base + learning language) | ~ partial (pipeline stage runs; output file not asserted) | ☐ |
+| **Auth** | | |
+| `PELICULA_AUTH=off` (no login required) | ~ partial (e2e toggles; only jellyfin-mode behaviour asserted end to end) | ☐ |
+| `PELICULA_AUTH=jellyfin` (credentials verified against Jellyfin) | ✓ e2e.sh (login 401/200, session cookie, protected routes, logout) | ☐ |
+| Jellyfin admins automatically get admin role in Pelicula | — | ☐ |
+| Role capabilities: viewer / manager / admin | — | ☐ |
+| **CLI** | | |
+| `pelicula up` | — (effects tested; wrapper not invoked by e2e) | ☐ |
+| `pelicula down` | — | ☐ |
+| `pelicula status` | — | ☐ |
+| `pelicula logs [svc]` | — | ☐ |
+| `pelicula check-vpn` | — | ☐ |
+| `pelicula update` | — | ☐ |
+| `pelicula restart [svc]` / `restart-acquire` | — | ☐ |
+| `pelicula rebuild` | — | ☐ |
+| `pelicula reset-config [svc]` | — | ☐ |
+| `pelicula import` | — | ☐ |
+| `pelicula export` / `import-backup` | — | ☐ |
+| `pelicula test` | ✓ e2e.sh (this command runs the suite) | ☐ |
+| **Security** | | |
+| Peligrosa remote access (Jellyfin-only, TLS) | — | ☐ |
+
+> **Claimed in other docs — candidates to promote or drop from README:**
+> - Open registration toggle (`PELICULA_OPEN_REGISTRATION`, LAN-only) — [PELIGROSA.md](PELIGROSA.md)
+> - Peligrosa cert modes: Let's Encrypt / BYO cert / self-signed — [PELIGROSA.md](PELIGROSA.md)
+> - Remote role capping (admin forced to viewer on remote vhost) — [PELIGROSA.md](PELIGROSA.md)
+> - Backup export/import v1→v2 auto-migration — [API.md](API.md)
+> - Now-playing Jellyfin sessions card — [API.md](API.md)
+> - Notifications feed merges Procula + *arr history — [API.md](API.md)
+> - Server-side folder browser + library scan/apply — [API.md](API.md) / [ARCHITECTURE.md](ARCHITECTURE.md)
+> - Storage warning/critical thresholds — [PROCULA.md](PROCULA.md)
+> - Jellyfin alternate-version sidecars from transcoding profiles — [PROCULA.md](PROCULA.md)
+
 ## Development
 
 ```
