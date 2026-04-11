@@ -18,8 +18,8 @@ import (
 // ProculaJobMin is the fields we parse from /api/procula/jobs for aggregation.
 type ProculaJobMin struct {
 	ID         string    `json:"id"`
-	State      string    `json:"state"`   // queued, processing, completed, failed, cancelled
-	Stage      string    `json:"stage"`   // validate, process, catalog, done
+	State      string    `json:"state"` // queued, processing, completed, failed, cancelled
+	Stage      string    `json:"stage"` // validate, process, catalog, done
 	Progress   float64   `json:"progress"`
 	Error      string    `json:"error,omitempty"`
 	RetryCount int       `json:"retry_count"`
@@ -64,25 +64,25 @@ type PipelineItemSource struct {
 
 // PipelineItem is a unified card for the pipeline board.
 type PipelineItem struct {
-	Key        string               `json:"key"`
-	Title      string               `json:"title"`
-	Year       int                  `json:"year,omitempty"`
-	MediaType  string               `json:"media_type,omitempty"`
-	Poster     string               `json:"poster,omitempty"`
-	Lane       string               `json:"lane"`
-	State      string               `json:"state"`   // active, paused, failed, done
-	Progress   float64              `json:"progress"`
-	ETASecs    int64                `json:"eta_seconds,omitempty"`
-	Detail     string               `json:"detail,omitempty"`
-	SpeedDown  int64                `json:"speed_down,omitempty"`
-	SpeedUp    int64                `json:"speed_up,omitempty"`
-	RetryCount int                  `json:"retry_count,omitempty"`
-	Error      string               `json:"error,omitempty"`
-	Source     PipelineItemSource   `json:"source"`
-	Actions    []string             `json:"actions"`
-	Checks     *ValidationChecksMin `json:"checks,omitempty"`
-	MissingSubs []string            `json:"missing_subs,omitempty"`
-	UpdatedAt  time.Time            `json:"updated_at"`
+	Key         string               `json:"key"`
+	Title       string               `json:"title"`
+	Year        int                  `json:"year,omitempty"`
+	MediaType   string               `json:"media_type,omitempty"`
+	Poster      string               `json:"poster,omitempty"`
+	Lane        string               `json:"lane"`
+	State       string               `json:"state"` // active, paused, failed, done
+	Progress    float64              `json:"progress"`
+	ETASecs     int64                `json:"eta_seconds,omitempty"`
+	Detail      string               `json:"detail,omitempty"`
+	SpeedDown   int64                `json:"speed_down,omitempty"`
+	SpeedUp     int64                `json:"speed_up,omitempty"`
+	RetryCount  int                  `json:"retry_count,omitempty"`
+	Error       string               `json:"error,omitempty"`
+	Source      PipelineItemSource   `json:"source"`
+	Actions     []string             `json:"actions"`
+	Checks      *ValidationChecksMin `json:"checks,omitempty"`
+	MissingSubs []string             `json:"missing_subs,omitempty"`
+	UpdatedAt   time.Time            `json:"updated_at"`
 }
 
 // PipelineStats is aggregated summary data for the board header.
@@ -240,9 +240,9 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pair each qBt torrent with its Procula job (if any).
-	matchedJobIDs := make(map[string]bool)   // job IDs that have a qBt partner
+	matchedJobIDs := make(map[string]bool)    // job IDs that have a qBt partner
 	matchedQbtHashes := make(map[string]bool) // qBt hashes that have a Procula job
-	qbtByHash := make(map[string]Torrent)    // for supplementing Procula cards
+	qbtByHash := make(map[string]Torrent)     // for supplementing Procula cards
 	if qbtRes.err == nil {
 		for _, t := range qbtRes.torrents {
 			h := strings.ToLower(t.Hash)

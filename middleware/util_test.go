@@ -10,8 +10,8 @@ func TestShortHash(t *testing.T) {
 		want  string
 	}{
 		{"abcdef1234567890", "abcdef12"},
-		{"abcdefgh", "abcdefgh"},        // exactly 8
-		{"abc", "abc"},                   // shorter than 8
+		{"abcdefgh", "abcdefgh"}, // exactly 8
+		{"abc", "abc"},           // shorter than 8
 		{"", ""},
 		{"12345678extra", "12345678"},
 	}

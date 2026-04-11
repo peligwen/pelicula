@@ -19,17 +19,17 @@ const speedTestURL = "https://speed.cloudflare.com/__down?bytes=10000000"
 const speedTestCooldown = 60 * time.Second
 
 var (
-	speedTestMu       sync.Mutex
-	speedTestLastRun  time.Time
+	speedTestMu         sync.Mutex
+	speedTestLastRun    time.Time
 	speedTestLastResult *speedTestResult
 )
 
 type speedTestResult struct {
-	DownloadMbps float64 `json:"download_mbps"`
-	DurationMs   int64   `json:"duration_ms"`
-	BytesReceived int64  `json:"bytes_received"`
-	Timestamp    int64   `json:"timestamp"`
-	Error        string  `json:"error,omitempty"`
+	DownloadMbps  float64 `json:"download_mbps"`
+	DurationMs    int64   `json:"duration_ms"`
+	BytesReceived int64   `json:"bytes_received"`
+	Timestamp     int64   `json:"timestamp"`
+	Error         string  `json:"error,omitempty"`
 }
 
 func handleSpeedTest(w http.ResponseWriter, r *http.Request) {

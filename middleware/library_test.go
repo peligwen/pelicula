@@ -569,7 +569,7 @@ func TestAssignGroupKeys(t *testing.T) {
 		{File: "/a.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 1}},
 		{File: "/b.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 1}}, // dup
 		{File: "/c.mkv", Match: &MediaMatch{Type: "series", TvdbID: 2, Season: 1, Episode: 1}},
-		{File: "/d.mkv"},                                                // unmatched
+		{File: "/d.mkv"}, // unmatched
 	}
 	assignGroupKeys(items)
 

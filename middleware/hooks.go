@@ -300,7 +300,7 @@ func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
 type dashNotif struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"`    // "content_ready", "download_failed", "validation_failed"
+	Type      string    `json:"type"` // "content_ready", "download_failed", "validation_failed"
 	Message   string    `json:"message"`
 }
 

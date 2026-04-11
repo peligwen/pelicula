@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -117,9 +120,27 @@ func main() {
 	mux.HandleFunc("GET /api/procula/actions/registry", srv.handleListActionRegistry)
 
 	slog.Info("listening", "component", "main", "addr", ":8282")
-	if err := http.ListenAndServe(":8282", mux); err != nil {
-		slog.Error("server exited", "component", "main", "error", err)
-		os.Exit(1)
+	serveWithShutdown(":8282", mux)
+}
+
+func serveWithShutdown(addr string, handler http.Handler) {
+	srv := &http.Server{Addr: addr, Handler: handler}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server exited", "component", "main", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("shutdown signal received", "component", "main")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("graceful shutdown failed", "component", "main", "error", err)
 	}
 }
 

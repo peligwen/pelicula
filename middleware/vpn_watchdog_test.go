@@ -7,8 +7,8 @@ import (
 )
 
 // Ensure test constants match the real ones defined in vpn_watchdog.go.
-const testGrace           = gracePolls
-const testCooldown        = restartCooldownPolls
+const testGrace = gracePolls
+const testCooldown = restartCooldownPolls
 const testPostRestartGrace = postRestartGrace
 
 func TestWdTick_FirstPortSync(t *testing.T) {

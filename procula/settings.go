@@ -12,17 +12,17 @@ import (
 // are sent. Persisted to the settings table in SQLite under key "pipeline".
 type PipelineSettings struct {
 	ValidationEnabled  bool     `json:"validation_enabled"`
-	DeleteOnFailure    bool     `json:"delete_on_failure"`    // delete file when validation fails (default: false)
-	DualSubEnabled     bool     `json:"dual_sub_enabled"`     // generate stacked dual-language ASS sidecar files
-	DualSubPairs       []string `json:"dual_sub_pairs"`       // e.g. ["en-es","en-de"]; first lang=bottom, second=top
-	DualSubTranslator  string   `json:"dual_sub_translator"`  // "argos" or "none"
+	DeleteOnFailure    bool     `json:"delete_on_failure"`   // delete file when validation fails (default: false)
+	DualSubEnabled     bool     `json:"dual_sub_enabled"`    // generate stacked dual-language ASS sidecar files
+	DualSubPairs       []string `json:"dual_sub_pairs"`      // e.g. ["en-es","en-de"]; first lang=bottom, second=top
+	DualSubTranslator  string   `json:"dual_sub_translator"` // "argos" or "none"
 	TranscodingEnabled bool     `json:"transcoding_enabled"`
 	CatalogEnabled     bool     `json:"catalog_enabled"`
 	NotifMode          string   `json:"notification_mode"` // "internal", "apprise", "direct"
 	AppriseURLs        []string `json:"apprise_urls,omitempty"`
 	DirectURL          string   `json:"direct_url,omitempty"`
-	StorageWarningPct  float64  `json:"storage_warning_pct"`  // emit warning notification above this % (default: 85)
-	StorageCriticalPct float64  `json:"storage_critical_pct"` // emit critical notification above this % (default: 95)
+	StorageWarningPct  float64  `json:"storage_warning_pct"`     // emit warning notification above this % (default: 85)
+	StorageCriticalPct float64  `json:"storage_critical_pct"`    // emit critical notification above this % (default: 95)
 	SubAcquireTimeout  int      `json:"sub_acquire_timeout_min"` // minutes to wait for Bazarr before proceeding (default: 30)
 }
 

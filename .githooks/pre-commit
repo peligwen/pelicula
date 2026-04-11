@@ -40,8 +40,17 @@ done <<< "$staged_files"
 
 if [[ -n "$touched_modules" ]]; then
   for mod in $touched_modules; do
-    echo "pre-commit: checking $mod (vet + build + test -short)..."
-    (cd "$REPO_ROOT/$mod" && go vet ./... && go build ./... && go test -short ./...)
+    echo "pre-commit: checking $mod (gofmt + vet + build + test -short)..."
+    (
+      cd "$REPO_ROOT/$mod"
+      unformatted=$(gofmt -l .)
+      if [[ -n "$unformatted" ]]; then
+        echo "pre-commit: gofmt needs to run on:" >&2
+        echo "$unformatted" >&2
+        exit 1
+      fi
+      go vet ./... && go build ./... && go test -short ./...
+    )
   done
 fi
 

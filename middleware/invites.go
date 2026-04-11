@@ -402,7 +402,7 @@ func handleInvites(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Label          string `json:"label"`
 			ExpiresInHours *int   `json:"expires_in_hours"` // nil = never
-			MaxUses        *int   `json:"max_uses"`          // nil = unlimited
+			MaxUses        *int   `json:"max_uses"`         // nil = unlimited
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, "invalid request body", http.StatusBadRequest)

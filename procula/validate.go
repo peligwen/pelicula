@@ -155,8 +155,8 @@ func extractCodecs(probe *ffprobeOutput) CodecInfo {
 // checkSample returns "pass", "warn", or "fail" based on file size heuristics.
 func checkSample(size int64, expectedMinutes int) string {
 	const (
-		minAbsolute  = 50 * 1024 * 1024  // 50 MB — definitely a sample
-		warnPerMin   = 3 * 1024 * 1024   // expect at least ~3 MB/min
+		minAbsolute = 50 * 1024 * 1024 // 50 MB — definitely a sample
+		warnPerMin  = 3 * 1024 * 1024  // expect at least ~3 MB/min
 	)
 
 	if size < minAbsolute {

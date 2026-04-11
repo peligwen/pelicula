@@ -377,10 +377,10 @@ func TestGuard_RoleMatrix(t *testing.T) {
 	})
 
 	cases := []struct {
-		name    string
-		role    UserRole
-		guard   func(http.Handler) http.Handler
-		wantOK  bool
+		name   string
+		role   UserRole
+		guard  func(http.Handler) http.Handler
+		wantOK bool
 	}{
 		{"viewer+Guard", RoleViewer, a.Guard, true},
 		{"viewer+GuardManager", RoleViewer, a.GuardManager, false},

@@ -19,7 +19,7 @@ var feedMu sync.Mutex
 type NotificationEvent struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"`       // "content_ready", "validation_failed"
+	Type      string    `json:"type"` // "content_ready", "validation_failed"
 	Title     string    `json:"title"`
 	Year      int       `json:"year,omitempty"`
 	MediaType string    `json:"media_type"` // "movie" or "episode"
