@@ -5,6 +5,7 @@
 Pelicula is the media stack I always wanted. Technology has advanced to the point that I can make software that I used to dream of. There are many ambitious features that will take time to flesh out properly, but the core functionality of multi-user search->download->verify->catalog->watch is there. Use at your risk, and keep it LAN only - see the testing coverage table.
 
 One command to set up, one command to run. Search for movies and TV shows by name, stream with Jellyfin.
+
 The rest is Pelicula.
 
 ## Quick Start
