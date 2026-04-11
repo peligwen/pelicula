@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -123,6 +125,60 @@ func detectTZ() string {
 		}
 	}
 	return "UTC"
+}
+
+// detectLANURL walks host interfaces and returns an http URL of the first
+// non-loopback IPv4 address in an RFC1918 range, formatted for the nginx
+// dashboard port. Returns empty string if no suitable interface is found
+// (no network, all loopback, or all public/APIPA addresses).
+//
+// Used to populate HOST_LAN_URL so the setup wizard can prefill a Jellyfin
+// PublishedServerUrl — what clients on the LAN should see when they discover
+// the server over UDP 7359 broadcast.
+func detectLANURL() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipnet.IP
+		if ip == nil || ip.IsLoopback() {
+			continue
+		}
+		ip4 := ip.To4()
+		if ip4 == nil {
+			continue
+		}
+		if isRFC1918(ip4) {
+			return fmt.Sprintf("http://%s:7354/jellyfin", ip4.String())
+		}
+	}
+	return ""
+}
+
+// isRFC1918 reports whether ip is in 10.0.0.0/8, 172.16.0.0/12, or
+// 192.168.0.0/16.
+func isRFC1918(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	switch {
+	case ip4[0] == 10:
+		return true
+	case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+		return true
+	case ip4[0] == 192 && ip4[1] == 168:
+		return true
+	}
+	return false
 }
 
 func detectSudo() bool {
