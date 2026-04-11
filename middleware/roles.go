@@ -1,6 +1,6 @@
 // Peligrosa: roles store for jellyfin auth mode.
 // Maps Jellyfin user ID → Pelicula role. No passwords stored — Jellyfin is
-// the authority. See ../PELIGROSA.md for the trust model.
+// the authority. See ../docs/PELIGROSA.md for the trust model.
 package main
 
 import (

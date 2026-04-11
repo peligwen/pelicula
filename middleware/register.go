@@ -1,7 +1,7 @@
 // Peligrosa: trust boundary layer.
 // Open LAN registration: optional public account creation without invite tokens.
 // LAN-only (requireLocalOriginStrict in route table), viewer role only.
-// See ../PELIGROSA.md.
+// See ../docs/PELIGROSA.md.
 package main
 
 import (

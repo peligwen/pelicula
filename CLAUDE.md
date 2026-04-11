@@ -52,7 +52,7 @@ nginx (:7354) ─── /                → dashboard (static HTML)
 
 **pelicula-api** auto-wires the *arr stack on startup and serves the dashboard API. **procula** handles post-import processing (validate → transcode → catalog). **qBittorrent and Prowlarr run on gluetun's network namespace** — reachable at `gluetun:8080` and `gluetun:9696` respectively, not their own container names.
 
-Remote Jellyfin access (Peligrosa) is opt-in — see PELIGROSA.md.
+Remote Jellyfin access (Peligrosa) is opt-in — see docs/PELIGROSA.md.
 
 ## Key Constraints
 
@@ -84,9 +84,9 @@ Remote Jellyfin access (Peligrosa) is opt-in — see PELIGROSA.md.
 
 ## More Detail In
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — compose overlays, middleware startup/auto-wiring, config seeding + `enforce_arr_auth()`, platform detection, nginx file map
-- [API.md](API.md) — full `/api/pelicula/*` endpoint catalog with auth levels
-- [PELIGROSA.md](PELIGROSA.md) — user interaction safety layer: threat model, auth, users, invites, request queue, webhook secret, CSRF, remote vhost hardening, known limitations
-- [PROCULA.md](PROCULA.md) — processing pipeline internals (queue, validate, transcode, catalog, storage)
-- [SECURITY.md](SECURITY.md) — vulnerability disclosure policy (threat model and known limitations are in PELIGROSA.md)
-- [ROADMAP.md](ROADMAP.md) — active work (Bazarr, invite flow, Go CLI) and deferred items
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — compose overlays, middleware startup/auto-wiring, config seeding + `enforce_arr_auth()`, platform detection, nginx file map
+- [API.md](docs/API.md) — full `/api/pelicula/*` endpoint catalog with auth levels
+- [PELIGROSA.md](docs/PELIGROSA.md) — user interaction safety layer: threat model, auth, users, invites, request queue, webhook secret, CSRF, remote vhost hardening, known limitations
+- [PROCULA.md](docs/PROCULA.md) — processing pipeline internals (queue, validate, transcode, catalog, storage)
+- [SECURITY.md](SECURITY.md) — vulnerability disclosure policy (threat model and known limitations are in docs/PELIGROSA.md)
+- [ROADMAP.md](docs/ROADMAP.md) — active work (Bazarr, invite flow, Go CLI) and deferred items

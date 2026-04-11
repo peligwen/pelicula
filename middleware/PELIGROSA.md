@@ -2,7 +2,7 @@
 
 These are the files in this directory that form the Peligrosa trust boundary: every place where input from outside the operator trust zone (remote users, invite redeemers, viewer requesters, external webhooks) crosses into the system.
 
-For the full narrative, threat model, and known limitations, see [../PELIGROSA.md](../PELIGROSA.md).
+For the full narrative, threat model, and known limitations, see [../docs/PELIGROSA.md](../docs/PELIGROSA.md).
 
 ## Files
 

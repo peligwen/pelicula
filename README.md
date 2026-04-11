@@ -149,7 +149,7 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 **Bazarr** — automatic subtitle acquisition from OpenSubtitles, Addic7ed, Podnapisi, and others. Wired to Sonarr and Radarr automatically on startup. Set which languages to acquire in the Settings page (`PELICULA_SUB_LANGS`).
 
-**Dual subtitles** — optional post-Bazarr pipeline stage that stacks two subtitle tracks into a single ASS sidecar file (e.g. `Movie.en-es.ass`) for language learners. Base language appears bottom-center; learning language appears top-center. Configure via `DUALSUB_ENABLED` / `DUALSUB_PAIRS` or the Procula settings UI. See [PROCULA.md](PROCULA.md) for details.
+**Dual subtitles** — optional post-Bazarr pipeline stage that stacks two subtitle tracks into a single ASS sidecar file (e.g. `Movie.en-es.ass`) for language learners. Base language appears bottom-center; learning language appears top-center. Configure via `DUALSUB_ENABLED` / `DUALSUB_PAIRS` or the Procula settings UI. See [PROCULA.md](docs/PROCULA.md) for details.
 
 ## Auth
 
@@ -250,15 +250,15 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | Peligrosa remote access (Jellyfin-only, TLS) | — | ☐ |
 
 > **Claimed in other docs — candidates to promote or drop from README:**
-> - Open registration toggle (`PELICULA_OPEN_REGISTRATION`, LAN-only) — [PELIGROSA.md](PELIGROSA.md)
-> - Peligrosa cert modes: Let's Encrypt / BYO cert / self-signed — [PELIGROSA.md](PELIGROSA.md)
-> - Remote role capping (admin forced to viewer on remote vhost) — [PELIGROSA.md](PELIGROSA.md)
-> - Backup export/import v1→v2 auto-migration — [API.md](API.md)
-> - Now-playing Jellyfin sessions card — [API.md](API.md)
-> - Notifications feed merges Procula + *arr history — [API.md](API.md)
-> - Server-side folder browser + library scan/apply — [API.md](API.md) / [ARCHITECTURE.md](ARCHITECTURE.md)
-> - Storage warning/critical thresholds — [PROCULA.md](PROCULA.md)
-> - Jellyfin alternate-version sidecars from transcoding profiles — [PROCULA.md](PROCULA.md)
+> - Open registration toggle (`PELICULA_OPEN_REGISTRATION`, LAN-only) — [PELIGROSA.md](docs/PELIGROSA.md)
+> - Peligrosa cert modes: Let's Encrypt / BYO cert / self-signed — [PELIGROSA.md](docs/PELIGROSA.md)
+> - Remote role capping (admin forced to viewer on remote vhost) — [PELIGROSA.md](docs/PELIGROSA.md)
+> - Backup export/import v1→v2 auto-migration — [API.md](docs/API.md)
+> - Now-playing Jellyfin sessions card — [API.md](docs/API.md)
+> - Notifications feed merges Procula + *arr history — [API.md](docs/API.md)
+> - Server-side folder browser + library scan/apply — [API.md](docs/API.md) / [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> - Storage warning/critical thresholds — [PROCULA.md](docs/PROCULA.md)
+> - Jellyfin alternate-version sidecars from transcoding profiles — [PROCULA.md](docs/PROCULA.md)
 
 ## Development
 

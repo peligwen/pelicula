@@ -3,7 +3,7 @@
 // The webhook secret (WEBHOOK_SECRET) uses constant-time comparison.
 // isAllowedWebhookPath/isUnderPrefixes guards payload paths before forwarding.
 // The /hooks/import endpoint is also restricted to Docker-internal networks in nginx.conf.
-// See ../PELIGROSA.md.
+// See ../docs/PELIGROSA.md.
 package main
 
 import (

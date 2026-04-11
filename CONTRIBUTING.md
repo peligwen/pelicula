@@ -6,7 +6,7 @@ Pelicula is a LAN-first, clone-and-run media stack for personal use. It is a hob
 
 The project accepts contributions that:
 - Fix bugs in the Go CLI, Go middleware, Go processing pipeline, or container configuration
-- Add features described in [ROADMAP.md](ROADMAP.md) (Active section)
+- Add features described in [ROADMAP.md](docs/ROADMAP.md) (Active section)
 - Improve documentation accuracy
 - Add or improve test coverage
 
@@ -48,7 +48,7 @@ Go modules are stdlib-only. Neither `middleware/go.mod` nor `procula/go.mod` has
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy. Pelicula is LAN-first — do not open issues or PRs that assume an internet-facing threat model unless that is explicitly described in PELIGROSA.md.
+See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy. Pelicula is LAN-first — do not open issues or PRs that assume an internet-facing threat model unless that is explicitly described in docs/PELIGROSA.md.
 
 ## License
 

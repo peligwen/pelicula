@@ -9,4 +9,4 @@ Do not file public issues for suspected vulnerabilities. I aim to acknowledge
 reports within a few days and will coordinate disclosure with you.
 
 For the threat model, known limitations, and the full user-interaction safety
-surface, see [PELIGROSA.md](PELIGROSA.md).
+surface, see [PELIGROSA.md](docs/PELIGROSA.md).

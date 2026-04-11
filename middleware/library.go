@@ -3,7 +3,7 @@
 // browse roots before listing — prevents path-traversal escape via symlinks.
 // Library scan/apply and transcoding enqueue are admin-only but do not touch
 // untrusted user input; they are not part of the Peligrosa surface.
-// See ../PELIGROSA.md.
+// See ../docs/PELIGROSA.md.
 package main
 
 import (

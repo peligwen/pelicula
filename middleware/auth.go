@@ -1,7 +1,7 @@
 // Peligrosa: trust boundary layer.
 // Sessions, login rate limiter, CSRF origin guard, and role-based access
 // guards (Guard/GuardManager/GuardAdmin). Changes here affect the core
-// authentication surface — see ../PELIGROSA.md.
+// authentication surface — see ../docs/PELIGROSA.md.
 package main
 
 import (

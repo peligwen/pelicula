@@ -1,7 +1,7 @@
 // Peligrosa: trust boundary layer.
 // Invite token lifecycle: creation, validation, redemption into Jellyfin user
 // accounts. Public endpoints are invite-gated; admin endpoints are admin-only.
-// See ../PELIGROSA.md.
+// See ../docs/PELIGROSA.md.
 package main
 
 import (
