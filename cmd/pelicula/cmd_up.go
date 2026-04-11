@@ -43,6 +43,7 @@ func cmdUp(_ []string) {
 			"HOST_CONFIG_DIR="+plat.DefaultConfigDir,
 			"HOST_LIBRARY_DIR="+plat.DefaultLibraryDir,
 			"HOST_WORK_DIR="+plat.DefaultWorkDir,
+			"HOST_LAN_URL="+detectLANURL(),
 		)
 
 		setupCmd := c.buildSetupCmd(setupCompose, setupEnv)

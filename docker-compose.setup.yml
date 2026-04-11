@@ -12,6 +12,7 @@ services:
       - HOST_CONFIG_DIR=${HOST_CONFIG_DIR:-./config}
       - HOST_LIBRARY_DIR=${HOST_LIBRARY_DIR:-~/media}
       - HOST_WORK_DIR=${HOST_WORK_DIR:-~/media}
+      - HOST_LAN_URL=${HOST_LAN_URL:-}
     volumes:
       - .:/project
     healthcheck:
