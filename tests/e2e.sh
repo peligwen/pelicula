@@ -906,12 +906,13 @@ except Exception:
             # job start; the sleep makes the race window negligibly small).
             if [[ -f "$pw_timeout_file" ]]; then
                 info "Temporarily enabling validation for Sub Timeout fixture..."
-                curl -sf --max-time 5 \
-                    -X POST "http://localhost:${test_port}/api/procula/settings" \
-                    -H "Content-Type: application/json" \
-                    -H "X-API-Key: ${test_api_key}" \
-                    -d '{"validation_enabled":true,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
-                    2>/dev/null || true
+                # POST directly to procula (port 8282) inside its container to bypass
+                # nginx auth_request, which is active after Stage 8 switches to jellyfin auth.
+                $NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+                    --post-data='{"validation_enabled":true,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
+                    --header='Content-Type: application/json' \
+                    --header="X-API-Key: ${test_api_key}" \
+                    'http://localhost:8282/api/procula/settings' 2>/dev/null || true
                 info "Pre-firing Sub Timeout import webhook..."
                 $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
@@ -920,12 +921,11 @@ except Exception:
                 # Brief wait so the worker has picked up the job and read validation=true.
                 sleep 5
                 # Restore standard test settings (validation off, transcoding on).
-                curl -sf --max-time 5 \
-                    -X POST "http://localhost:${test_port}/api/procula/settings" \
-                    -H "Content-Type: application/json" \
-                    -H "X-API-Key: ${test_api_key}" \
-                    -d '{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
-                    2>/dev/null || true
+                $NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+                    --post-data='{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
+                    --header='Content-Type: application/json' \
+                    --header="X-API-Key: ${test_api_key}" \
+                    'http://localhost:8282/api/procula/settings' 2>/dev/null || true
             fi
 
             # Pre-fire Dualsub Happy import webhook.

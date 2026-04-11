@@ -9,12 +9,15 @@
 // en SRT track. With dual_sub_pairs=["en-es"] and dual_sub_translator="none"
 // (set in Stage 3), GenerateDualSubs cannot produce es cues and returns an error.
 const { test, expect } = require('@playwright/test');
-const { waitForJobState } = require('../helpers/api');
+const { waitForJobState, ensureLoggedIn } = require('../helpers/api');
 
 const TITLE = 'Dualsub Failed';
 
 test.describe('Dualsub: failure path', () => {
     test('missing secondary cues + translator=none → dualsub_error set, job completes', async ({ page }) => {
+
+        // ── 0. Authenticate so page.request carries session cookies ──
+        await ensureLoggedIn(page);
 
         // ── 1. Wait for job to complete ────────────────────────────
         const job = await waitForJobState(page.request, TITLE, 'completed', 120_000);

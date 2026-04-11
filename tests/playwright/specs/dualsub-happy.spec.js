@@ -8,12 +8,15 @@
 // The fixture (Dualsub.Happy.2024.mkv) has embedded en+es SRT tracks; no Bazarr
 // dependency — await_subs is skipped because MissingSubs is empty.
 const { test, expect } = require('@playwright/test');
-const { waitForJobState } = require('../helpers/api');
+const { waitForJobState, ensureLoggedIn } = require('../helpers/api');
 
 const TITLE = 'Dualsub Happy';
 
 test.describe('Dualsub: stacked ASS sidecar generation', () => {
     test('embedded en+es SRT → en-es.ass sidecar written, job completes', async ({ page }) => {
+
+        // ── 0. Authenticate so page.request carries session cookies ──
+        await ensureLoggedIn(page);
 
         // ── 1. Wait for job to complete ────────────────────────────
         const job = await waitForJobState(page.request, TITLE, 'completed', 120_000);
@@ -36,7 +39,6 @@ test.describe('Dualsub: stacked ASS sidecar generation', () => {
         expect(job.catalog?.jellyfin_synced).toBe(true);
 
         // ── 3. Verify completed card in UI ─────────────────────────
-        await page.goto('/');
         await page.click('[data-tab="coming"]');
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
         const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');

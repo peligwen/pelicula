@@ -11,7 +11,7 @@
 //   • sub_acquire_timeout_min=1 (set in Stage 3) limits the Bazarr wait to 1 minute.
 //   • Bazarr has no configured providers in the test stack → search always fails.
 const { test, expect } = require('@playwright/test');
-const { waitForJobState } = require('../helpers/api');
+const { waitForJobState, ensureLoggedIn } = require('../helpers/api');
 
 const TITLE = 'Pelicula Timeout Fixture';
 
@@ -19,6 +19,10 @@ test.describe('Subtitle acquisition: timeout path', () => {
     test('await_subs times out → missing_subs retained, job completes', async ({ page }) => {
         // Allow 3 minutes: 1 min await_subs timeout + 2 min buffer for CI variance.
         test.setTimeout(200_000);
+
+        // ── 0. Authenticate so page.request carries session cookies ──
+        await ensureLoggedIn(page);
+
         const job = await waitForJobState(page.request, TITLE, 'completed', 190_000);
 
         // Subtitles were never delivered — missing_subs must still contain 'en'

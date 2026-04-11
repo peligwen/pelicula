@@ -96,4 +96,23 @@ async function fireImportWebhook(request, { title, year, filePath, fileSize, run
     return res.json();
 }
 
-module.exports = { jellyfinAuth, searchJellyfin, waitForJobState, fireImportWebhook };
+/**
+ * Navigate to the dashboard and log in if the login overlay is visible.
+ * Call this before any page.request API calls that require auth.
+ */
+async function ensureLoggedIn(page) {
+    await page.goto('/');
+    const loginOverlay = page.locator('[data-testid="login-overlay"]');
+    const authCheckDone = page.waitForResponse(
+        r => r.url().includes('/api/pelicula/auth/check'), { timeout: 8_000 }
+    ).catch(() => null);
+    await authCheckDone;
+    if (await loginOverlay.isVisible()) {
+        await page.fill('[data-testid="login-username"]', 'admin');
+        await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
+        await page.click('[data-testid="login-form"] [type=submit]');
+        await loginOverlay.waitFor({ state: 'hidden', timeout: 15_000 });
+    }
+}
+
+module.exports = { jellyfinAuth, searchJellyfin, waitForJobState, fireImportWebhook, ensureLoggedIn };
