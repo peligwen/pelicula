@@ -527,6 +527,10 @@ func runActionJob(ctx context.Context, q *Queue, job *Job) {
 	})
 	result, err := def.Handler(ctx, q, job)
 	_ = q.Update(job.ID, func(j *Job) {
+		if ctx.Err() != nil && (j.State == StateProcessing || j.State == StateQueued) {
+			j.State = StateCancelled
+			return
+		}
 		if err != nil {
 			j.State = StateFailed
 			j.Error = err.Error()

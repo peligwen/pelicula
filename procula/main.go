@@ -82,6 +82,7 @@ func main() {
 	SeedDefaultProfiles(configDir)
 
 	// Single worker processes jobs sequentially
+	registerBuiltinActions()
 	go RunWorker(q, configDir, peliculaAPI)
 	go RunStorageMonitor(configDir)
 	go RunUpdateChecker(configDir)
