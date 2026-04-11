@@ -276,12 +276,20 @@ Session\DefaultSavePath=/downloads/'
     info "Waiting for auto-wire to complete (Jellyfin wizard + library setup)..."
     wait=0
     local wired=false
+    local stage2_cookies="$test_dir/stage2-cookies.txt"
+    local status_resp=""
     while [[ $wait -lt 60 ]]; do
-        local status_resp
-        status_resp="$(curl -sf --max-time 5 "http://localhost:${test_port}/api/pelicula/status" 2>/dev/null || echo "")"
-        if echo "$status_resp" | grep -q '"wired":true'; then
-            wired=true
-            break
+        # /api/pelicula/status is auth-gated, and the admin operator account
+        # is created mid-autowire (~15s in). Login fails until then, succeeds
+        # afterward; once it succeeds, the authed status call exposes
+        # "wired":true when autowire is fully complete.
+        if pelicula_login "http://localhost:${test_port}" admin test-jellyfin-pw "$stage2_cookies" 2>/dev/null; then
+            status_resp="$(curl -sf --max-time 5 -b "$stage2_cookies" \
+                "http://localhost:${test_port}/api/pelicula/status" 2>/dev/null || echo "")"
+            if echo "$status_resp" | grep -q '"wired":true'; then
+                wired=true
+                break
+            fi
         fi
         sleep 3
         wait=$((wait + 1))
@@ -304,13 +312,14 @@ Session\DefaultSavePath=/downloads/'
 
     # Disable validation (tiny test file fails the 50MB sample floor).
     # Enable transcoding with a test profile that downscales to 180p.
+    # POST directly to procula (port 8282) inside its container to bypass
+    # nginx auth_request, which gates /api/procula/ with the session cookie.
     local settings_resp
-    settings_resp="$(curl -sf --max-time 5 \
-        -X POST "http://localhost:${test_port}/api/procula/settings" \
-        -H "Content-Type: application/json" \
-        -H "X-API-Key: ${test_api_key}" \
-        -d '{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
-        2>/dev/null || echo "error")"
+    settings_resp="$($NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+        --header='Content-Type: application/json' \
+        --header="X-API-Key: ${test_api_key}" \
+        --post-data='{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
+        'http://localhost:8282/api/procula/settings' 2>/dev/null || echo "error")"
     if [[ "$settings_resp" == "error" ]]; then
         warn "Could not configure Procula settings (non-fatal, defaults will apply)"
     fi
@@ -423,8 +432,11 @@ EOPROFILE
     wait=0
     local job_state="" job_json=""
     while [[ $wait -lt 60 ]]; do
+        # GET directly from procula inside its container to bypass nginx
+        # auth_request, which gates /api/procula/ with the session cookie.
         local jobs_resp
-        jobs_resp="$(curl -sf --max-time 5 "http://localhost:${test_port}/api/procula/jobs" 2>/dev/null || echo "[]")"
+        jobs_resp="$($NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+            'http://localhost:8282/api/procula/jobs' 2>/dev/null || echo "[]")"
         job_state="$(echo "$jobs_resp" | python3 -c "
 import json, sys
 try:
@@ -898,7 +910,7 @@ except Exception:
             if [[ -f "$pw_timeout_file" ]]; then
                 info "Temporarily enabling validation for Sub Timeout fixture..."
                 # POST directly to procula (port 8282) inside its container to bypass
-                # nginx auth_request, which is active after Stage 8 switches to jellyfin auth.
+                # nginx auth_request, which gates /api/procula/ with the session cookie.
                 $NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
                     --post-data='{"validation_enabled":true,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
                     --header='Content-Type: application/json' \
