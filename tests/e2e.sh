@@ -189,6 +189,7 @@ PELICULA_PORT="${test_port}"
 PELICULA_AUTH="off"
 JELLYFIN_ADMIN_USER="admin"
 JELLYFIN_PASSWORD="test-jellyfin-pw"
+JELLYFIN_PUBLISHED_URL="http://127.0.0.1:${test_port}/jellyfin"
 PROCULA_API_KEY="${test_api_key}"
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
@@ -206,7 +207,7 @@ EOF
     seed_config "$test_config_dir/prowlarr/config.xml" \
         '<Config><UrlBase>/prowlarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
     seed_config "$test_config_dir/jellyfin/network.xml" \
-        '<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>'
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?><NetworkConfiguration xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\"><BaseUrl>/jellyfin</BaseUrl><PublishedServerUrl>http://127.0.0.1:${test_port}/jellyfin</PublishedServerUrl></NetworkConfiguration>"
     mkdir -p "$test_config_dir/bazarr/config"
     seed_config "$test_config_dir/bazarr/config/config.ini" \
 '[general]
