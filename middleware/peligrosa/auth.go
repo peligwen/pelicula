@@ -378,6 +378,7 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 	sess, ok := a.getSession(r)
 	if !ok {
+		// No cookie — try host-machine auto-session before declining.
 		if loopbackAutoSession(r) {
 			httputil.WriteJSON(w, map[string]any{
 				"auth":     true,
@@ -410,8 +411,8 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // SessionFor returns the authenticated username and role for the request.
-// Returns ("", "", false) if not authenticated.
-// Loopback callers (host-machine via nginx) get ("(loopback)", RoleAdmin, true).
+// Order: (1) valid cookie → the session's identity; (2) loopback auto-session →
+// ("(loopback)", RoleAdmin, true); (3) otherwise ("", "", false).
 func (a *Auth) SessionFor(r *http.Request) (username string, role UserRole, ok bool) {
 	if sess, sOk := a.getSession(r); sOk {
 		return sess.username, effectiveRole(sess, r), true

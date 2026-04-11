@@ -1,6 +1,6 @@
 // tests/playwright/specs/subtitle-acquisition.spec.js
 const { test, expect } = require('@playwright/test');
-const { jellyfinAuth, searchJellyfin, waitForJobState } = require('../helpers/api');
+const { jellyfinAuth, searchJellyfin, waitForJobState, ensureLoggedIn } = require('../helpers/api');
 
 const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:7399';
 
@@ -12,24 +12,8 @@ const YEAR = 1968;
 test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
     test('import → await_subs stage fires → job completes → appears in Jellyfin', async ({ page, request }) => {
 
-        // ── 1. Open dashboard, log in if auth is on ───────────────
-        await page.goto('/');
-
-        // Wait for checkAuth() to finish before checking overlay visibility.
-        const loginOverlay = page.locator('[data-testid="login-overlay"]');
-        const authCheckDone = page.waitForResponse(
-            r => r.url().includes('/api/pelicula/auth/check'), { timeout: 8_000 }
-        ).catch(() => null);
-        await authCheckDone;
-
-        if (await loginOverlay.isVisible()) {
-            await page.fill('[data-testid="login-username"]', 'admin');
-            await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
-            await page.click('[data-testid="login-form"] [type=submit]');
-            // If login fails the overlay stays visible and this throws, failing the test.
-            await loginOverlay.waitFor({ state: 'hidden', timeout: 15_000 });
-        }
-        // Auth is off or already logged in — no action needed
+        // ── 1. Open dashboard, log in ─────────────────────────────
+        await ensureLoggedIn(page);
 
         // ── 2. Switch to pipeline tab and confirm job appears ──────
         await page.click('[data-tab="coming"]');

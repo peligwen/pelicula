@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"pelicula-api/httputil"
 )
 
 // newRequestStore returns a RequestStore backed by a test database.
@@ -260,5 +262,182 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 when not authenticated in users mode", w.Code)
+	}
+}
+
+// TestHandleRequestCreate_LoopbackRequester verifies that a loopback auto-session
+// caller (no cookie, but trusted CIDR + loopback X-Real-IP + localhost Host) can
+// create a request and that requested_by == "(loopback)".
+func TestHandleRequestCreate_LoopbackRequester(t *testing.T) {
+	old := httputil.TrustedUpstreamCIDR
+	httputil.TrustedUpstreamCIDR = "172.17.0.0/16"
+	t.Cleanup(func() { httputil.TrustedUpstreamCIDR = old })
+
+	s := newRequestStore(t)
+	auth := newTestAuth() // no sessions — loopback path must supply identity
+	deps := newTestRequestDeps(auth, s)
+
+	body, _ := json.Marshal(map[string]any{
+		"type":    "movie",
+		"tmdb_id": 42,
+		"title":   "A Loopback Film",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "172.17.0.1:55123"
+	req.Header.Set("X-Real-IP", "127.0.0.1")
+	req.Host = "localhost"
+
+	w := httptest.NewRecorder()
+	deps.HandleRequestCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+
+	all := s.All()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 request in store, got %d", len(all))
+	}
+	if all[0].RequestedBy != "(loopback)" {
+		t.Errorf("requested_by = %q, want (loopback)", all[0].RequestedBy)
+	}
+}
+
+// TestHandleRequestCreate_DedupeReturnsExisting verifies that a duplicate request
+// for an active tmdb_id returns the existing record rather than creating a new one.
+func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	deps := newTestRequestDeps(auth, s)
+
+	// Pre-insert an existing pending request for tmdb_id=42.
+	existing := &MediaRequest{
+		ID:     "req_existing_aabbcc",
+		Type:   "movie",
+		TmdbID: 42,
+		Title:  "Duplicate Film",
+		State:  RequestPending,
+	}
+	insertRequest(t, s, existing)
+
+	// POST a create for the same tmdb_id.
+	body, _ := json.Marshal(map[string]any{
+		"type":    "movie",
+		"tmdb_id": 42,
+		"title":   "Duplicate Film",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req, token)
+
+	w := httptest.NewRecorder()
+	deps.HandleRequestCreate(w, req)
+
+	// Should return the existing request (200, not 201).
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (existing returned)", w.Code)
+	}
+
+	var resp MediaRequest
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if resp.ID != "req_existing_aabbcc" {
+		t.Errorf("id = %q, want req_existing_aabbcc (existing record)", resp.ID)
+	}
+
+	// Store must still have exactly one request.
+	if got := len(s.All()); got != 1 {
+		t.Errorf("store has %d requests, want 1", got)
+	}
+}
+
+// TestHandleRequestCreate_RejectsBadType verifies that an invalid type returns 400.
+func TestHandleRequestCreate_RejectsBadType(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	deps := newTestRequestDeps(auth, s)
+
+	body, _ := json.Marshal(map[string]any{
+		"type":    "invalid",
+		"tmdb_id": 1,
+		"title":   "Bad Type Film",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req, token)
+
+	w := httptest.NewRecorder()
+	deps.HandleRequestCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for invalid type", w.Code)
+	}
+}
+
+// TestHandleRequestList_ViewerSeesOnlyOwn verifies that viewers see only their own
+// requests while managers/admins see all requests.
+func TestHandleRequestList_ViewerSeesOnlyOwn(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	deps := newTestRequestDeps(auth, s)
+
+	// Insert two requests with different owners.
+	insertRequest(t, s, &MediaRequest{
+		ID:          "req_alice_001",
+		Type:        "movie",
+		TmdbID:      10,
+		Title:       "Alice's Film",
+		State:       RequestPending,
+		RequestedBy: "alice",
+	})
+	insertRequest(t, s, &MediaRequest{
+		ID:          "req_bob_001",
+		Type:        "movie",
+		TmdbID:      20,
+		Title:       "Bob's Film",
+		State:       RequestPending,
+		RequestedBy: "bob",
+	})
+
+	// Viewer alice should see only her own request.
+	aliceTok := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests", nil)
+	addSessionCookie(req, aliceTok)
+	w := httptest.NewRecorder()
+	deps.HandleRequestList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("alice list: status = %d, want 200", w.Code)
+	}
+	var aliceList []*MediaRequest
+	if err := json.Unmarshal(w.Body.Bytes(), &aliceList); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if len(aliceList) != 1 {
+		t.Errorf("alice sees %d requests, want 1", len(aliceList))
+	} else if aliceList[0].ID != "req_alice_001" {
+		t.Errorf("alice sees request %q, want req_alice_001", aliceList[0].ID)
+	}
+
+	// Admin sees both (admins see all requests regardless of owner).
+	adminTok := insertSession(auth, "admin", RoleAdmin, time.Now().Add(time.Hour))
+	req2 := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests", nil)
+	addSessionCookie(req2, adminTok)
+	w2 := httptest.NewRecorder()
+	deps.HandleRequestList(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("admin list: status = %d, want 200", w2.Code)
+	}
+	var adminList []*MediaRequest
+	if err := json.Unmarshal(w2.Body.Bytes(), &adminList); err != nil {
+		t.Fatalf("parse admin response: %v", err)
+	}
+	if len(adminList) != 2 {
+		t.Errorf("admin sees %d requests, want 2", len(adminList))
 	}
 }

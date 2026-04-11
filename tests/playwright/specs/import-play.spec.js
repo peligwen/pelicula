@@ -1,6 +1,6 @@
 // tests/playwright/specs/import-play.spec.js
 const { test, expect } = require('@playwright/test');
-const { jellyfinAuth, searchJellyfin, waitForJobState } = require('../helpers/api');
+const { jellyfinAuth, searchJellyfin, waitForJobState, ensureLoggedIn } = require('../helpers/api');
 
 // File placed in the library by e2e.sh before Playwright runs.
 // Path is as seen by the middleware container (/movies = $LIBRARY_DIR/movies).
@@ -11,19 +11,8 @@ const TEST_YEAR = 2010;
 test.describe('Import wizard → pipeline → Jellyfin', () => {
     test('happy path: drive import wizard, watch pipeline, verify Jellyfin', async ({ page, request }) => {
 
-        // ── 1. Open dashboard, log in if auth is on ───────────────
-        await page.goto('/');
-
-        const loginOverlay = page.locator('[data-testid="login-overlay"]');
-        try {
-            await loginOverlay.waitFor({ state: 'visible', timeout: 5_000 });
-            await page.fill('[data-testid="login-username"]', 'admin');
-            await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
-            await page.click('[data-testid="login-form"] [type=submit]');
-            await loginOverlay.waitFor({ state: 'hidden', timeout: 15_000 });
-        } catch {
-            // Auth is off or already logged in — no action needed
-        }
+        // ── 1. Open dashboard, log in ─────────────────────────────
+        await ensureLoggedIn(page);
 
         // ── 2. Open storage explorer ───────────────────────────────
         // Use evaluate instead of hash navigation — hash change doesn't reload

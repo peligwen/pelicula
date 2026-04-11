@@ -794,6 +794,171 @@ func TestLogin_JellyfinMode_JellyfinDown_Returns503(t *testing.T) {
 	}
 }
 
+// ── Loopback auto-session: SessionFor, HandleCheck, Guard ────────────────────
+
+// withTrustedCIDR overrides httputil.TrustedUpstreamCIDR for the duration of
+// the test and restores it via t.Cleanup. Required for loopback tests that need
+// the docker-bridge address to be "trusted" without depending on the runtime
+// default CIDR.
+func withTrustedCIDR(t *testing.T, cidr string) {
+	t.Helper()
+	old := httputil.TrustedUpstreamCIDR
+	httputil.TrustedUpstreamCIDR = cidr
+	t.Cleanup(func() { httputil.TrustedUpstreamCIDR = old })
+}
+
+// loopbackTriple wires the three gates required for loopbackAutoSession to pass:
+// RemoteAddr within the trusted CIDR, X-Real-IP = 127.0.0.1, Host = localhost.
+func loopbackTriple(r *http.Request) {
+	r.RemoteAddr = "172.17.0.1:55123"
+	r.Header.Set("X-Real-IP", "127.0.0.1")
+	r.Host = "localhost"
+}
+
+func TestSessionFor_LoopbackGrantsAdmin(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	loopbackTriple(r)
+
+	u, role, ok := a.SessionFor(r)
+	if !ok {
+		t.Fatal("SessionFor returned false, want true for loopback triple")
+	}
+	if u != "(loopback)" {
+		t.Errorf("username = %q, want (loopback)", u)
+	}
+	if role != RoleAdmin {
+		t.Errorf("role = %q, want admin", role)
+	}
+}
+
+func TestSessionFor_LANDeniedWithoutCookie(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+	// LAN peer: RemoteAddr is not in the trusted CIDR — gate 1 fails.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "192.168.1.7:33000"
+	r.Header.Set("X-Real-IP", "127.0.0.1")
+	r.Host = "localhost"
+
+	_, _, ok := a.SessionFor(r)
+	if ok {
+		t.Error("SessionFor returned true for LAN peer, want false")
+	}
+}
+
+func TestSessionFor_LoopbackRejectsLANHost(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "172.17.0.1:55123"
+	r.Header.Set("X-Real-IP", "127.0.0.1")
+	r.Host = "192.168.1.5:7354" // LAN IP in Host — gate 3 fails
+
+	_, _, ok := a.SessionFor(r)
+	if ok {
+		t.Error("SessionFor returned true with LAN Host, want false (gate 3 must reject)")
+	}
+}
+
+func TestHandleCheck_LoopbackReturnsAdminJSON(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+	r := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
+	loopbackTriple(r)
+
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["valid"] != true {
+		t.Errorf("valid = %v, want true", m["valid"])
+	}
+	if m["username"] != "(loopback)" {
+		t.Errorf("username = %v, want (loopback)", m["username"])
+	}
+	if m["role"] != "admin" {
+		t.Errorf("role = %v, want admin", m["role"])
+	}
+	if m["remote"] != false {
+		t.Errorf("remote = %v, want false", m["remote"])
+	}
+	if _, has := m["mode"]; has {
+		t.Error("response must not contain a 'mode' field")
+	}
+}
+
+func TestHandleCheck_LoopbackNginxSubrequest(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+	// Loopback path wins — nginx=1 only triggers the 401 branch when !ok && !loopback.
+	r := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check?nginx=1", nil)
+	loopbackTriple(r)
+
+	w := httptest.NewRecorder()
+	a.HandleCheck(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (loopback path wins over nginx=1 branch)", w.Code)
+	}
+	m := parseJSONBody(t, w)
+	if m["valid"] != true {
+		t.Errorf("valid = %v, want true", m["valid"])
+	}
+}
+
+func TestGuard_LoopbackBypass(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+
+	innerCalled := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := a.Guard(inner)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	loopbackTriple(r)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if !innerCalled {
+		t.Error("inner handler was not called — Guard must pass through loopback callers")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestGuard_LANUnauthenticatedRejected(t *testing.T) {
+	withTrustedCIDR(t, "172.17.0.0/16")
+	a := newTestAuth()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := a.Guard(inner)
+	// LAN peer with no cookie — should get 401
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "192.168.1.7:33000"
+	r.Header.Set("X-Real-IP", "192.168.1.7")
+	r.Host = "192.168.1.5:7354"
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 for unauthenticated LAN peer", w.Code)
+	}
+}
+
 // ── Session persistence round-trip ───────────────────────────────────────────
 
 // TestSessionPersistence_RoundTrip verifies that a session created by one Auth

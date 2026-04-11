@@ -131,6 +131,16 @@ cmd_test() {
             "$@"
     }
 
+    # pelicula_login logs in to the pelicula-api and stores the session cookie.
+    # Usage: pelicula_login <base_url> [user] [pass] [cookie_jar]
+    pelicula_login() {
+        local base="$1" user="${2:-admin}" pass="${3:-test-jellyfin-pw}" jar="${4:-/tmp/pelicula-e2e-cookies.txt}"
+        curl -sf --max-time 5 -c "$jar" -b "$jar" \
+            -X POST "$base/api/pelicula/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$user\",\"password\":\"$pass\"}" >/dev/null
+    }
+
     cleanup_test() {
         # Always restore the original .env — the test containers have env vars baked in
         # from the initial `up -d` and are unaffected by the file on disk. Leaving the
@@ -188,7 +198,6 @@ TZ="${test_tz}"
 WIREGUARD_PRIVATE_KEY="dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE="
 SERVER_COUNTRIES="Netherlands"
 PELICULA_PORT="${test_port}"
-PELICULA_AUTH="off"
 JELLYFIN_ADMIN_USER="admin"
 JELLYFIN_PASSWORD="test-jellyfin-pw"
 JELLYFIN_PUBLISHED_URL="http://127.0.0.1:${test_port}/jellyfin"
@@ -549,25 +558,7 @@ except Exception:
 
     # ── Stage 8: Auth & Nginx Routing ────────────────
 
-    info "Enabling jellyfin auth and testing routing..."
-
-    # Update .env to enable jellyfin auth and recreate pelicula-api to pick up new env vars.
-    # "restart" does not re-read env changes; "up -d" recreates the container when config changes.
-    sed -i.bak 's/PELICULA_AUTH="off"/PELICULA_AUTH="jellyfin"/' "$test_env"
-    test_compose up -d pelicula-api >/dev/null 2>&1
-
-    # Wait for pelicula-api to come back up
-    local auth_ready=false
-    for i in $(seq 1 30); do
-        if curl -sf --max-time 2 "http://localhost:${test_port}/api/pelicula/health" >/dev/null 2>&1; then
-            auth_ready=true
-            break
-        fi
-        sleep 1
-    done
-    if [[ "$auth_ready" != "true" ]]; then
-        t_fail "pelicula-api did not restart after auth change"
-    fi
+    info "Testing auth routing..."
 
     # Helper: check HTTP status code
     assert_http() {

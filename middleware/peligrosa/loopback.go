@@ -26,9 +26,8 @@ import (
 //     LAN clients hitting http://<lan-ip>:7354/ would have <lan-ip>
 //     in Host, not loopback.
 //
-// Task 7 only introduces this helper and its tests. Wiring it into
-// (*Auth).SessionFor / HandleCheck happens in Task 8 when off-mode is
-// deleted.
+// Called by SessionFor and HandleCheck to grant a transient admin session
+// when the three gates pass.
 func loopbackAutoSession(r *http.Request) bool {
 	if !httputil.RemoteAddrTrusted(r.RemoteAddr) {
 		return false

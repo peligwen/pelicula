@@ -43,6 +43,9 @@ func (rl *adminRateLimiter) allow(key string) bool {
 
 // adminRateLimitKey extracts a per-user key for rate limiting.
 // Uses the session username when authenticated, else client IP.
+// Loopback host-machine callers bucket as "user:(loopback)"; they share a
+// single rate-limit token — fine since the host-machine admin isn't the
+// attacker we're worried about.
 func adminRateLimitKey(r *http.Request) string {
 	if authMiddleware != nil {
 		if username, _, ok := authMiddleware.SessionFor(r); ok && username != "" {

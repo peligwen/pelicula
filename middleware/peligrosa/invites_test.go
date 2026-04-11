@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"pelicula-api/clients"
+	"pelicula-api/httputil"
 )
 
 // newTestInviteStore creates an InviteStore backed by a test database.
@@ -332,6 +333,47 @@ func TestHandleInviteCheck(t *testing.T) {
 	deps.HandleInviteOp(w3, r3)
 	if w3.Code != http.StatusBadRequest {
 		t.Errorf("bad token: expected 400, got %d", w3.Code)
+	}
+}
+
+// TestHandleInvites_LoopbackCreator verifies that the loopback auto-session path
+// (gate 1+2+3 triple) sets created_by = "(loopback)" when creating an invite.
+// This exercises the Task 8 migration from a.getSession → a.SessionFor in HandleInvites.
+func TestHandleInvites_LoopbackCreator(t *testing.T) {
+	// Override trusted CIDR so the docker-bridge address is accepted.
+	old := httputil.TrustedUpstreamCIDR
+	httputil.TrustedUpstreamCIDR = "172.17.0.0/16"
+	t.Cleanup(func() { httputil.TrustedUpstreamCIDR = old })
+
+	s := newTestInviteStore(t)
+	// Auth with no session — loopback path must supply the identity.
+	a := newTestAuth()
+	deps := newTestDeps(a, s)
+
+	body, _ := json.Marshal(map[string]any{"label": "loopback-test", "max_uses": 1})
+	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	// Wire the loopback triple: trusted upstream + loopback X-Real-IP + localhost Host.
+	r.RemoteAddr = "172.17.0.1:55123"
+	r.Header.Set("X-Real-IP", "127.0.0.1")
+	r.Host = "localhost"
+
+	w := httptest.NewRecorder()
+	deps.HandleInvites(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created Invite
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if created.CreatedBy != "(loopback)" {
+		t.Errorf("created_by = %q, want (loopback)", created.CreatedBy)
+	}
+	if !validInviteToken(created.Token) {
+		t.Errorf("token is invalid: %q", created.Token)
 	}
 }
 

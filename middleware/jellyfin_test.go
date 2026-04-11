@@ -495,7 +495,7 @@ func TestHandleUsers_NilAuthMiddlewareDoesNotPanic(t *testing.T) {
 	authMiddleware = nil
 	t.Cleanup(func() { authMiddleware = orig })
 
-	// Should not panic — nil guard is in the off-mode check.
+	// Should not panic — handleUsers guards against nil authMiddleware before any auth check.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("handleUsers panicked with nil authMiddleware: %v", r)
