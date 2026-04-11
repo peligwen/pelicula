@@ -11,7 +11,6 @@ const state = {
     scanResults: [],        // from /library/scan
     dismissed: new Set(),
     groupSelections: {},    // groupKey → chosen file path (for dup groups)
-    profile: null,          // selected transcode profile name
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -293,18 +292,6 @@ function updateActionBar() {
     btnImport.disabled = !anyOutside;
     btnImport.title = anyOutside ? '' : 'Select files outside /movies and /tv to import';
 
-    // Transcode: enabled only if every selected path is inside library roots
-    const btnTranscode = document.getElementById('btn-transcode');
-    btnTranscode.disabled = !allInLibrary;
-    btnTranscode.title = allInLibrary ? '' : 'Select only files inside /movies or /tv to transcode';
-
-    // Re-search Subs: enabled for single file selections inside library roots
-    const btnResub = document.getElementById('btn-resub');
-    if (btnResub) {
-        const singleFile = state.selected.length === 1 && !state.selected[0].isDir;
-        btnResub.disabled = !(singleFile && allInLibrary);
-        btnResub.title = singleFile && allInLibrary ? '' : 'Select a single media file inside /movies or /tv';
-    }
 }
 
 function clearSelection() {
@@ -693,148 +680,6 @@ function renderApplyResult(result, validate) {
     }
 
     content.innerHTML = html;
-}
-
-// ── Transcode action ─────────────────────────────────────────────────────────
-
-function openTranscodeModal() {
-    const modal = document.getElementById('transcode-modal');
-    modal.classList.remove('hidden');
-    document.getElementById('transcode-configure').classList.remove('hidden');
-    document.getElementById('transcode-apply').classList.add('hidden');
-    document.getElementById('rt-btn-apply').disabled = true;
-    document.getElementById('rt-apply-content').innerHTML =
-        '<div class="apply-progress"><div class="apply-spinner"></div><span>Queuing transcode jobs...</span></div>';
-    document.getElementById('rt-apply-nav').classList.add('hidden');
-    state.profile = null;
-    loadRTProfiles();
-}
-
-function closeTranscodeModal() {
-    document.getElementById('transcode-modal').classList.add('hidden');
-    clearSelection();
-}
-
-function onTranscodeClick() {
-    openTranscodeModal();
-}
-
-async function loadRTProfiles() {
-    const container = document.getElementById('rt-profiles-container');
-    container.innerHTML = '<div class="no-items">Loading profiles\u2026</div>';
-    try {
-        const res = await apiFetch('/api/pelicula/transcode/profiles');
-        if (!res.ok) { container.innerHTML = '<div class="no-items">Could not load profiles</div>'; return; }
-        const profiles = await res.json();
-        if (!profiles || !profiles.length) {
-            const msg = document.createElement('div');
-            msg.className = 'no-items';
-            msg.textContent = 'No transcode profiles installed. ';
-            const btn = document.createElement('button');
-            btn.className = 'sm-btn sm-btn-primary';
-            btn.textContent = 'Install defaults';
-            btn.addEventListener('click', async () => {
-                btn.disabled = true;
-                btn.textContent = 'Installing\u2026';
-                await apiFetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Compatibility 1080p',enabled:true,description:'Re-encode HEVC/AV1 to H.264 for broad device compatibility, capped at 1080p.',conditions:{codecs_include:['hevc','h265','av1']},output:{video_codec:'libx264',video_preset:'medium',video_crf:20,max_height:1080,audio_codec:'aac',audio_channels:2,suffix:'-compat'}})});
-                await apiFetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Compatibility 720p',enabled:true,description:'Re-encode HEVC/AV1 to H.264 at 720p for mobile and older devices.',conditions:{codecs_include:['hevc','h265','av1']},output:{video_codec:'libx264',video_preset:'medium',video_crf:22,max_height:720,audio_codec:'aac',audio_channels:2,suffix:'-mobile'}})});
-                await apiFetch('/api/pelicula/transcode/profiles', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Downscale 4K to 1080p',enabled:true,description:'Downscale 4K (2160p+) content to 1080p H.264 to save storage.',conditions:{min_height:2160},output:{video_codec:'libx264',video_preset:'medium',video_crf:20,max_height:1080,audio_codec:'copy',suffix:'-1080p'}})});
-                loadRTProfiles();
-            });
-            container.replaceChildren(msg, btn);
-            return;
-        }
-        let html = '<div class="strategy-options">';
-        profiles.forEach(p => {
-            const conds = [];
-            if (p.conditions) {
-                if (p.conditions.codecs_include && p.conditions.codecs_include.length)
-                    conds.push('Codecs: ' + p.conditions.codecs_include.join(', ').toUpperCase());
-                if (p.conditions.min_height)
-                    conds.push('Min height: ' + p.conditions.min_height + 'p');
-            }
-            const condStr = conds.length ? '<div class="strategy-desc" style="color:#666;font-size:0.72rem;margin-top:0.2rem">' + esc(conds.join(' \u00b7 ')) + '</div>' : '';
-            const enabledBadge = p.enabled ? '' : ' <span style="color:#666;font-size:0.7rem">(disabled)</span>';
-            html += `<label class="strategy-option">
-                <input type="radio" name="rt-profile" value="${esc(p.name)}" onchange="rtProfileSelected('${esc(p.name)}')">
-                <div class="strategy-card">
-                    <div class="strategy-name">${esc(p.name)}${enabledBadge}</div>
-                    <div class="strategy-desc">${esc(p.description || '')}</div>
-                    ${condStr}
-                </div>
-            </label>`;
-        });
-        html += '</div>';
-        container.innerHTML = html;
-    } catch (err) {
-        container.innerHTML = '<div class="no-items">Error: ' + esc(err.message) + '</div>';
-    }
-}
-
-function rtProfileSelected(name) {
-    state.profile = name;
-    document.getElementById('rt-btn-apply').disabled = false;
-}
-
-async function doRetranscode() {
-    if (!state.profile || !state.selected.length) return;
-    document.getElementById('transcode-configure').classList.add('hidden');
-    document.getElementById('transcode-apply').classList.remove('hidden');
-
-    try {
-        const files = state.selected.filter(s => !s.isDir).map(s => s.path);
-        const res = await apiFetch('/api/pelicula/library/retranscode', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files, profile: state.profile }),
-        });
-        const result = await res.json();
-        renderRTResult(result);
-    } catch (err) {
-        renderRTResult({ queued: 0, failed: state.selected.filter(s => !s.isDir).length, errors: [err.message] });
-    }
-}
-
-function renderRTResult(result) {
-    const content = document.getElementById('rt-apply-content');
-    let html = '<div class="apply-result">';
-    html += '<div class="apply-stat"><span class="apply-stat-label">Queued</span><span class="apply-stat-value added">' + (result.queued || 0) + '</span></div>';
-    html += '<div class="apply-stat"><span class="apply-stat-label">Failed</span><span class="apply-stat-value failed">' + (result.failed || 0) + '</span></div>';
-    html += '</div>';
-    if (result.errors && result.errors.length) {
-        html += '<div class="apply-errors">';
-        result.errors.forEach(e => { html += '<div class="apply-error-item">' + esc(e) + '</div>'; });
-        html += '</div>';
-    }
-    if (result.queued > 0) {
-        html += '<div class="apply-success">Jobs queued. Track progress in the <a href="/" style="color:#7dda93">dashboard</a> Processing section.</div>';
-    }
-    content.innerHTML = html;
-    document.getElementById('rt-apply-nav').classList.remove('hidden');
-}
-
-// ── Re-search Subtitles action ────────────────────────────────────────────────
-
-async function onResubClick() {
-    const file = state.selected.find(s => !s.isDir);
-    if (!file) return;
-    const btn = document.getElementById('btn-resub');
-    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
-    try {
-        const res = await apiFetch('/api/pelicula/library/resub', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({path: file.path}),
-        });
-        if (res.ok) {
-            if (btn) { btn.textContent = 'CC Triggered \u2713'; setTimeout(() => { btn.textContent = 'CC Re-search Subs'; btn.disabled = false; }, 3000); }
-        } else {
-            const err = await res.json().catch(() => ({}));
-            if (btn) { btn.textContent = 'CC ' + (err.error || 'Not found'); setTimeout(() => { btn.textContent = 'CC Re-search Subs'; btn.disabled = false; }, 3000); }
-        }
-    } catch (e) {
-        if (btn) { btn.textContent = 'CC Error'; setTimeout(() => { btn.textContent = 'CC Re-search Subs'; btn.disabled = false; }, 3000); }
-    }
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
