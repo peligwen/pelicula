@@ -38,11 +38,11 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         await page.waitForFunction(
             (title) => {
                 const allCards = document.querySelectorAll(
-                    '[data-testid="pipeline-lane-validating"] .pl-card, ' +
-                    '[data-testid="pipeline-lane-processing"] .pl-card, ' +
-                    '[data-testid="pipeline-lane-cataloging"] .pl-card, ' +
-                    '[data-testid="pipeline-lane-imported"] .pl-card, ' +
-                    '[data-testid="pipeline-cards-completed"] .pl-card'
+                    '[data-testid="pipeline-lane-validating"] .download-item, ' +
+                    '[data-testid="pipeline-lane-processing"] .download-item, ' +
+                    '[data-testid="pipeline-lane-cataloging"] .download-item, ' +
+                    '[data-testid="pipeline-lane-imported"] .download-item, ' +
+                    '[data-testid="pipeline-cards-completed"] .download-item'
                 );
                 return Array.from(allCards).some(c => c.textContent.includes(title));
             },

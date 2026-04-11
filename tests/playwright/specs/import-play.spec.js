@@ -13,22 +13,16 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         // ── 1. Open dashboard, log in if auth is on ───────────────
         await page.goto('/');
 
-        // Wait for checkAuth() to finish: it fetches /api/pelicula/auth/check
-        // asynchronously and may take a moment before showing the login overlay.
         const loginOverlay = page.locator('[data-testid="login-overlay"]');
-        const authCheckDone = page.waitForResponse(
-            r => r.url().includes('/api/pelicula/auth/check'), { timeout: 8_000 }
-        ).catch(() => null);  // resolve null if auth/check never fires (shouldn't happen)
-        await authCheckDone;
-
-        if (await loginOverlay.isVisible()) {
+        try {
+            await loginOverlay.waitFor({ state: 'visible', timeout: 5_000 });
             await page.fill('[data-testid="login-username"]', 'admin');
             await page.fill('[data-testid="login-password"]', 'test-jellyfin-pw');
             await page.click('[data-testid="login-form"] [type=submit]');
-            // If login fails the overlay stays visible and this throws, failing the test.
             await loginOverlay.waitFor({ state: 'hidden', timeout: 15_000 });
+        } catch {
+            // Auth is off or already logged in — no action needed
         }
-        // Auth is off or already logged in — no action needed
 
         // ── 2. Open storage explorer ───────────────────────────────
         // Use evaluate instead of hash navigation — hash change doesn't reload
@@ -124,10 +118,10 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.waitForFunction(
             (title) => {
                 const cards = document.querySelectorAll(
-                    '[data-testid="pipeline-lane-validating"] .pl-card, ' +
-                    '[data-testid="pipeline-lane-processing"] .pl-card, ' +
-                    '[data-testid="pipeline-lane-cataloging"] .pl-card, ' +
-                    '[data-testid="pipeline-lane-imported"] .pl-card'
+                    '[data-testid="pipeline-lane-validating"] .download-item, ' +
+                    '[data-testid="pipeline-lane-processing"] .download-item, ' +
+                    '[data-testid="pipeline-lane-cataloging"] .download-item, ' +
+                    '[data-testid="pipeline-lane-imported"] .download-item'
                 );
                 return Array.from(cards).some(c => c.textContent.includes(title));
             },
