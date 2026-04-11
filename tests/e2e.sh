@@ -732,22 +732,24 @@ except Exception:
             info "Running Playwright UI tests..."
 
             local pw_exit=0
-            PLAYWRIGHT_BASE_URL="http://localhost:${test_port}" \
-                npx playwright test \
-                    --config tests/playwright/playwright.config.js \
-                    --reporter list \
-                2>&1 || pw_exit=$?
+            (
+                cd "$SCRIPT_DIR/tests/playwright"
+                PLAYWRIGHT_BASE_URL="http://localhost:${test_port}" \
+                    npx playwright test \
+                        --config playwright.config.js \
+                        --reporter list
+            ) 2>&1 || pw_exit=$?
 
             if [[ $pw_exit -eq 0 ]]; then
                 t_pass "Playwright UI tests passed"
             else
                 t_fail "Playwright UI tests failed (exit code ${pw_exit})"
-                warn "Re-run with: npm run test:ui:headed"
-                warn "Or: npx playwright show-report tests/playwright/report"
+                warn "Re-run with: (cd tests/playwright && npm run test:ui:headed)"
+                warn "Or: (cd tests/playwright && npx playwright show-report report)"
             fi
         fi
     else
-        warn "Node/Playwright not found — skipping UI tests (run: npm install && npx playwright install chromium)"
+        warn "Node/Playwright not found — skipping UI tests (run: cd tests/playwright && npm install && npx playwright install chromium)"
     fi
 
     # ── Summary ───────────────────────────────────────
