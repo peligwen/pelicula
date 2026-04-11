@@ -27,6 +27,7 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         // ── 2. Open storage explorer ───────────────────────────────
         // Use evaluate instead of hash navigation — hash change doesn't reload
         // the page, so window.location.hash check at startup won't fire again.
+
         await page.evaluate(() => openStorageExplorer());
         await page.waitForSelector('[data-testid="storage-explorer-section"]:not(.hidden)', { timeout: 10_000 });
         await page.waitForSelector('[data-testid="browse-tree"] .browse-entry', { timeout: 10_000 });

@@ -223,12 +223,11 @@ func wireJellyfin(s *ServiceClients) {
 							slog.Info("operator admin account created", "component", "autowire", "username", adminUser)
 							// Promote to Jellyfin admin so Pelicula grants them RoleAdmin.
 							// jellyfinAuth(s) uses the API key stored above.
+							// GET the full current policy first, then merge IsAdministrator:true
+							// before POSTing back — Jellyfin replaces the entire policy object,
+							// so a partial body would zero-out all other fields.
 							if adminToken, authErr := jellyfinAuth(s); authErr == nil {
-								if _, polErr := jellyfinPost(s, "/Users/"+userID+"/Policy", adminToken, map[string]any{"IsAdministrator": true}); polErr != nil {
-									slog.Warn("could not promote operator admin to Jellyfin admin", "component", "autowire", "username", adminUser, "error", polErr)
-								} else {
-									slog.Info("operator admin promoted to Jellyfin administrator", "component", "autowire", "username", adminUser)
-								}
+								promoteJellyfinAdmin(s, adminToken, userID, adminUser)
 							}
 						}
 					}
@@ -255,6 +254,34 @@ func wireJellyfin(s *ServiceClients) {
 
 	wireJellyfinLibrary(s, token, "Movies", "movies", "/data/movies")
 	wireJellyfinLibrary(s, token, "TV Shows", "tvshows", "/data/tv")
+}
+
+// promoteJellyfinAdmin promotes userID to Jellyfin administrator.
+// It GETs the user's current policy first, sets IsAdministrator:true, then POSTs
+// the full policy back. Sending only {"IsAdministrator":true} would zero-out all
+// other policy fields (EnableMediaPlayback, EnableAllFolders, etc.) which breaks
+// user access even though the admin flag is technically set.
+func promoteJellyfinAdmin(s *ServiceClients, token, userID, username string) {
+	userData, getErr := jellyfinGet(s, "/Users/"+userID, token)
+	if getErr != nil {
+		slog.Warn("could not fetch user for admin promotion", "component", "autowire", "username", username, "error", getErr)
+		return
+	}
+	var user map[string]any
+	if jsonErr := json.Unmarshal(userData, &user); jsonErr != nil {
+		slog.Warn("could not parse user data for admin promotion", "component", "autowire", "username", username, "error", jsonErr)
+		return
+	}
+	policy, _ := user["Policy"].(map[string]any)
+	if policy == nil {
+		policy = map[string]any{}
+	}
+	policy["IsAdministrator"] = true
+	if _, polErr := jellyfinPost(s, "/Users/"+userID+"/Policy", token, policy); polErr != nil {
+		slog.Warn("could not promote operator admin to Jellyfin admin", "component", "autowire", "username", username, "error", polErr)
+		return
+	}
+	slog.Info("operator admin promoted to Jellyfin administrator", "component", "autowire", "username", username)
 }
 
 // completeJellyfinWizard runs the Jellyfin startup wizard and returns a session
