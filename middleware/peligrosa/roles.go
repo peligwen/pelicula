@@ -1,7 +1,7 @@
 // Peligrosa: roles store for jellyfin auth mode.
 // Maps Jellyfin user ID → Pelicula role. No passwords stored — Jellyfin is
-// the authority. See ../docs/PELIGROSA.md for the trust model.
-package main
+// the authority. See ../../docs/PELIGROSA.md for the trust model.
+package peligrosa
 
 import (
 	"database/sql"
@@ -15,8 +15,9 @@ type RolesEntry struct {
 	Role       UserRole `json:"role"`
 }
 
-// rolesFile is kept for JSON migration compatibility.
-type rolesFile struct {
+// RolesFile is kept for JSON migration compatibility.
+// Used by migrate_json.go in the main package to deserialize the legacy roles.json.
+type RolesFile struct {
 	Version int          `json:"version"`
 	Users   []RolesEntry `json:"users"`
 }

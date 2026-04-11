@@ -1,8 +1,8 @@
 // Peligrosa: trust boundary layer.
 // Invite token lifecycle: creation, validation, redemption into Jellyfin user
 // accounts. Public endpoints are invite-gated; admin endpoints are admin-only.
-// See ../docs/PELIGROSA.md.
-package main
+// See ../../docs/PELIGROSA.md.
+package peligrosa
 
 import (
 	"crypto/rand"
@@ -17,9 +17,6 @@ import (
 	"strings"
 	"time"
 )
-
-// inviteStore is the package-level invite store, initialised in main.
-var inviteStore *InviteStore
 
 // Redemption records a single successful use of an invite.
 type Redemption struct {
@@ -391,7 +388,7 @@ func (s *InviteStore) Delete(token string) error {
 
 // HandleInvites serves GET /api/pelicula/invites (list) and
 // POST /api/pelicula/invites (create). Both require admin.
-func (p *peligrosaDeps) HandleInvites(w http.ResponseWriter, r *http.Request) {
+func (p *Deps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 	// Block mutations in auth=off mode (same guard as handleUsers).
 	if p.Auth != nil && p.Auth.IsOffMode() {
 		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
@@ -456,7 +453,7 @@ func (p *peligrosaDeps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 
 // HandleInviteOp dispatches requests to /api/pelicula/invites/{token}/...
 // check and redeem are public; revoke and delete require admin.
-func (p *peligrosaDeps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
+func (p *Deps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
 	tail := strings.TrimPrefix(r.URL.Path, "/api/pelicula/invites/")
 	parts := strings.SplitN(tail, "/", 2)
 	token := parts[0]
@@ -495,7 +492,7 @@ func (p *peligrosaDeps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
 // checkInviteAdmin verifies admin auth for invite management operations.
 // CSRF is enforced at the route level via httputil.RequireLocalOriginSoft in main.go.
 // Returns false and writes the error if the check fails.
-func (p *peligrosaDeps) checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
+func (p *Deps) checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if p.Auth != nil && p.Auth.IsOffMode() {
 		httputil.WriteError(w, "invite management requires PELICULA_AUTH to be enabled", http.StatusForbidden)
 		return false
@@ -532,7 +529,7 @@ func (s *InviteStore) HandleInviteCheck(w http.ResponseWriter, r *http.Request, 
 }
 
 // HandleInviteRedeem redeems an invite token to create a new Jellyfin account.
-func (p *peligrosaDeps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
+func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 	// Rate-limit by IP — reuse the auth limiter to prevent brute-force token abuse.
 	ip := httputil.ClientIP(r)
 	if p.Auth != nil && p.Auth.isRateLimited(ip) {
@@ -549,7 +546,7 @@ func (p *peligrosaDeps) HandleInviteRedeem(w http.ResponseWriter, r *http.Reques
 		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if !validUsername(req.Username) {
+	if !clients.IsValidUsername(req.Username) {
 		if req.Username == "" {
 			httputil.WriteError(w, "username is required", http.StatusBadRequest)
 		} else {
@@ -574,12 +571,12 @@ func (p *peligrosaDeps) HandleInviteRedeem(w http.ResponseWriter, r *http.Reques
 			json.NewEncoder(w).Encode(map[string]string{"error": "this invite is no longer active"})
 			return
 		}
-		if errors.Is(err, ErrPasswordRequired) {
+		if errors.Is(err, clients.ErrPasswordRequired) {
 			httputil.WriteError(w, "password is required", http.StatusBadRequest)
 			return
 		}
 		// Detect username-already-taken (Jellyfin returns 400)
-		var jErr *jellyfinHTTPError
+		var jErr *clients.JellyfinHTTPError
 		if errors.As(err, &jErr) && jErr.StatusCode == http.StatusBadRequest {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)

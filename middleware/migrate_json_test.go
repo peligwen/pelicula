@@ -6,7 +6,19 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"pelicula-api/peligrosa"
 )
+
+// migrateTestFulfiller is a no-op Fulfiller for migrate tests.
+type migrateTestFulfiller struct{}
+
+func (f *migrateTestFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
+	return 0, nil
+}
+func (f *migrateTestFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
+	return 0, nil
+}
 
 // ── migrateRolesJSON ──────────────────────────────────────────────────────────
 
@@ -27,11 +39,11 @@ func TestMigrateRolesJSON_Inserts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "roles.json")
 
-	f := rolesFile{
+	f := peligrosa.RolesFile{
 		Version: 1,
-		Users: []RolesEntry{
-			{JellyfinID: "jf-001", Username: "alice", Role: RoleAdmin},
-			{JellyfinID: "jf-002", Username: "bob", Role: RoleViewer},
+		Users: []peligrosa.RolesEntry{
+			{JellyfinID: "jf-001", Username: "alice", Role: peligrosa.RoleAdmin},
+			{JellyfinID: "jf-002", Username: "bob", Role: peligrosa.RoleViewer},
 		},
 	}
 	data, _ := json.Marshal(f)
@@ -50,13 +62,13 @@ func TestMigrateRolesJSON_Inserts(t *testing.T) {
 	}
 
 	// Verify rows in DB.
-	store := NewRolesStore(db)
+	store := peligrosa.NewRolesStore(db)
 	role, ok := store.Lookup("jf-001")
-	if !ok || role != RoleAdmin {
+	if !ok || role != peligrosa.RoleAdmin {
 		t.Errorf("Lookup jf-001: role=%q ok=%v, want admin/true", role, ok)
 	}
 	role, ok = store.Lookup("jf-002")
-	if !ok || role != RoleViewer {
+	if !ok || role != peligrosa.RoleViewer {
 		t.Errorf("Lookup jf-002: role=%q ok=%v, want viewer/true", role, ok)
 	}
 }
@@ -98,8 +110,9 @@ func TestMigrateInvitesJSON_Inserts(t *testing.T) {
 
 	exp := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	maxUses := 3
-	tok := generateInviteToken()
-	invites := []Invite{
+	// 43-char URL-safe base64 token (same format as generateInviteToken).
+	tok := "aaaabbbbccccddddeeeeffffgggghhhhiiijjjkklll"[:43]
+	invites := []peligrosa.Invite{
 		{
 			Token:     tok,
 			Label:     "Test label",
@@ -109,7 +122,7 @@ func TestMigrateInvitesJSON_Inserts(t *testing.T) {
 			MaxUses:   &maxUses,
 			Uses:      1,
 			Revoked:   false,
-			RedeemedBy: []Redemption{
+			RedeemedBy: []peligrosa.Redemption{
 				{Username: "alice", JellyfinID: "jf-abc", RedeemedAt: time.Now().UTC()},
 			},
 		},
@@ -125,7 +138,7 @@ func TestMigrateInvitesJSON_Inserts(t *testing.T) {
 	}
 
 	// Verify invite in DB.
-	store := NewInviteStore(db, nil)
+	store := peligrosa.NewInviteStore(db, nil)
 	list := store.ListInvites()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 invite, got %d", len(list))
@@ -163,7 +176,7 @@ func TestMigrateRequestsJSON_Inserts(t *testing.T) {
 	path := filepath.Join(dir, "requests.json")
 
 	now := time.Now().UTC()
-	requests := []*MediaRequest{
+	requests := []*peligrosa.MediaRequest{
 		{
 			ID:          "req_migrate_001",
 			Type:        "movie",
@@ -171,11 +184,11 @@ func TestMigrateRequestsJSON_Inserts(t *testing.T) {
 			Title:       "Test Film",
 			Year:        2024,
 			RequestedBy: "bob",
-			State:       RequestPending,
+			State:       peligrosa.RequestPending,
 			CreatedAt:   now,
 			UpdatedAt:   now,
-			History: []RequestEvent{
-				{At: now, State: RequestPending, Actor: "bob"},
+			History: []peligrosa.RequestEvent{
+				{At: now, State: peligrosa.RequestPending, Actor: "bob"},
 			},
 		},
 	}
@@ -188,8 +201,8 @@ func TestMigrateRequestsJSON_Inserts(t *testing.T) {
 		t.Error("expected requests.json to be renamed")
 	}
 
-	store := NewRequestStore(db, &fakeFulfiller{})
-	all := store.all()
+	store := peligrosa.NewRequestStore(db, &migrateTestFulfiller{})
+	all := store.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(all))
 	}

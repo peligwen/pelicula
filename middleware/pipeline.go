@@ -109,8 +109,6 @@ type DismissedStore struct {
 	db *sql.DB
 }
 
-var dismissedStore *DismissedStore
-
 // NewDismissedStore creates a DismissedStore backed by db.
 func NewDismissedStore(db *sql.DB) *DismissedStore {
 	return &DismissedStore{db: db}

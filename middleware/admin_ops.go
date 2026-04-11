@@ -45,8 +45,8 @@ func (rl *adminRateLimiter) allow(key string) bool {
 // Uses the session username when auth is on, else client IP.
 func adminRateLimitKey(r *http.Request) string {
 	if authMiddleware != nil && !authMiddleware.IsOffMode() {
-		if sess, ok := authMiddleware.getSession(r); ok && sess.username != "" {
-			return "user:" + sess.username
+		if username, _, ok := authMiddleware.SessionFor(r); ok && username != "" {
+			return "user:" + username
 		}
 	}
 	return "ip:" + httputil.ClientIP(r)

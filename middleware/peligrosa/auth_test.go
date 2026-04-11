@@ -1,20 +1,21 @@
-package main
+package peligrosa
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"pelicula-api/httputil"
 	"strings"
 	"testing"
 	"time"
+
+	"pelicula-api/httputil"
 )
 
 // fakeJellyfinAuthServer starts an httptest.Server with a /Users/AuthenticateByName
 // handler. succeed controls whether it returns 200 (with isAdmin payload) or 401.
-// The caller is responsible for closing the server.
-func fakeJellyfinAuthServer(t *testing.T, succeed bool, isAdmin bool) *httptest.Server {
+// Returns the server and a JellyfinClient wired to it.
+func fakeJellyfinAuthServer(t *testing.T, succeed bool, isAdmin bool) (*httptest.Server, *fakeJellyfinHTTPClient) {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/Users/AuthenticateByName", func(w http.ResponseWriter, r *http.Request) {
@@ -27,13 +28,8 @@ func fakeJellyfinAuthServer(t *testing.T, succeed bool, isAdmin bool) *httptest.
 			boolStr(isAdmin) + `}},"AccessToken":"test-jf-token","ServerId":"srv1"}`))
 	})
 	srv := httptest.NewServer(mux)
-	orig := jellyfinURL
-	jellyfinURL = srv.URL
-	t.Cleanup(func() {
-		srv.Close()
-		jellyfinURL = orig
-	})
-	return srv
+	t.Cleanup(srv.Close)
+	return srv, &fakeJellyfinHTTPClient{srv: srv}
 }
 
 func boolStr(b bool) string {
@@ -46,7 +42,7 @@ func boolStr(b bool) string {
 // newTestAuth creates an Auth for testing without touching the filesystem.
 // The cleanup goroutine is harmless in tests (sleeps 10 min, then GC'd).
 // jellyfin is nil — tests that exercise HandleLogin or any CreateUser path must
-// use newTestJellyfinAuth (or newTestJellyfinAuthWithServices) instead.
+// use newTestJellyfinAuth instead.
 func newTestAuth(mode string) *Auth {
 	return &Auth{
 		mode:     mode,
@@ -57,32 +53,26 @@ func newTestAuth(mode string) *Auth {
 
 // newTestJellyfinAuth creates an Auth in "jellyfin" mode for testing.
 // store may be nil — a fresh RolesStore backed by a test DB is used.
-// httpClient should point at an httptest.Server serving the Jellyfin API.
-// services is nil — tests that exercise CreateUser must use newTestJellyfinAuthWithServices.
-func newTestJellyfinAuth(t *testing.T, store *RolesStore, httpClient *http.Client) *Auth {
-	t.Helper()
-	return newTestJellyfinAuthWithServices(t, store, httpClient, nil)
-}
-
-// newTestJellyfinAuthWithServices creates an Auth in "jellyfin" mode for testing,
-// wiring the given ServiceClients so that CreateUser calls (via HandleOpenRegister)
-// reach the fake Jellyfin server. store may be nil; httpClient may be nil (defaults
-// to http.DefaultClient).
-func newTestJellyfinAuthWithServices(t *testing.T, store *RolesStore, httpClient *http.Client, svcs *ServiceClients) *Auth {
+// jfClient should point at an httptest.Server serving the Jellyfin API.
+func newTestJellyfinAuth(t *testing.T, store *RolesStore, jfClient *fakeJellyfinHTTPClient) *Auth {
 	t.Helper()
 	if store == nil {
 		store = NewRolesStore(testDB(t))
 	}
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	var jc *fakeJellyfinHTTPClient
+	if jfClient != nil {
+		jc = jfClient
 	}
-	return &Auth{
+	a := &Auth{
 		mode:       "jellyfin",
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
-		jellyfin:   NewJellyfinHTTPClient(httpClient, svcs),
 	}
+	if jc != nil {
+		a.jellyfin = jc
+	}
+	return a
 }
 
 // insertSession adds a session directly for testing and returns the token.
@@ -172,8 +162,8 @@ func TestLogin_BadJSON(t *testing.T) {
 }
 
 func TestLogin_RateLimited(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, true)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, jc)
 	ip := "1.2.3.4"
 	for i := 0; i < 5; i++ {
 		a.recordFailure(ip)
@@ -584,8 +574,8 @@ func TestSessionFor_RemoteAdminReturnsViewer(t *testing.T) {
 // ── Session details ─────────────────────────────────────────────────────
 
 func TestSession_TokenFormat(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, true)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, jc)
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
@@ -606,8 +596,8 @@ func TestSession_TokenFormat(t *testing.T) {
 }
 
 func TestSession_CookieAttributes(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, true)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, jc)
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
 	w := httptest.NewRecorder()
@@ -758,8 +748,8 @@ func TestRequireLocalOriginSoft_DELETE_ForeignOrigin_Rejected(t *testing.T) {
 // ── HandleLogin: jellyfin mode ────────────────────────────────────────────────
 
 func TestLogin_JellyfinMode_ValidCreds_DefaultsToViewer(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, false)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, true, false)
+	a := newTestJellyfinAuth(t, nil, jc)
 
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
@@ -783,8 +773,8 @@ func TestLogin_JellyfinMode_ValidCreds_DefaultsToViewer(t *testing.T) {
 }
 
 func TestLogin_JellyfinMode_JellyfinAdmin_GetsAdminRole(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, true)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, true, true)
+	a := newTestJellyfinAuth(t, nil, jc)
 
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
@@ -801,11 +791,11 @@ func TestLogin_JellyfinMode_JellyfinAdmin_GetsAdminRole(t *testing.T) {
 }
 
 func TestLogin_JellyfinMode_StoredRolePreserved(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, false)
+	_, jc := fakeJellyfinAuthServer(t, true, false)
 	store := NewRolesStore(testDB(t))
 	// Pre-seed a manager role for this user.
 	_ = store.Upsert("jf-user-001", "alice", RoleManager)
-	a := newTestJellyfinAuth(t, store, srv.Client())
+	a := newTestJellyfinAuth(t, store, jc)
 
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
@@ -822,8 +812,8 @@ func TestLogin_JellyfinMode_StoredRolePreserved(t *testing.T) {
 }
 
 func TestLogin_JellyfinMode_InvalidCreds_Returns401(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, false, false)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, false, false)
+	a := newTestJellyfinAuth(t, nil, jc)
 
 	body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
@@ -836,8 +826,8 @@ func TestLogin_JellyfinMode_InvalidCreds_Returns401(t *testing.T) {
 }
 
 func TestLogin_JellyfinMode_InvalidCreds_RecordsFailure(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, false, false)
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	_, jc := fakeJellyfinAuthServer(t, false, false)
+	a := newTestJellyfinAuth(t, nil, jc)
 	ip := "10.0.0.1"
 
 	for i := 0; i < 5; i++ {
@@ -859,15 +849,10 @@ func TestLogin_JellyfinMode_InvalidCreds_RecordsFailure(t *testing.T) {
 
 func TestLogin_JellyfinMode_JellyfinDown_Returns503(t *testing.T) {
 	// Start a server then close it immediately to simulate unreachable Jellyfin.
-	mux := http.NewServeMux()
-	srv := httptest.NewServer(mux)
-	srv.Close() // force connection refused
+	srv, jc := newFakeJellyfinServer(t, nil)
+	srv.Close()
 
-	orig := jellyfinURL
-	jellyfinURL = srv.URL
-	t.Cleanup(func() { jellyfinURL = orig })
-
-	a := newTestJellyfinAuth(t, nil, srv.Client())
+	a := newTestJellyfinAuth(t, nil, jc.(*fakeJellyfinHTTPClient))
 
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
@@ -885,14 +870,14 @@ func TestLogin_JellyfinMode_JellyfinDown_Returns503(t *testing.T) {
 // instance is visible to a second Auth instance opened on the same DB, simulating
 // a process restart where sessions must survive.
 func TestSessionPersistence_RoundTrip(t *testing.T) {
-	srv := fakeJellyfinAuthServer(t, true, true)
+	_, jc := fakeJellyfinAuthServer(t, true, true)
 	db := testDB(t)
 
 	// Auth1: perform a login — this writes the session to SQLite.
 	a1 := NewAuth(AuthConfig{
 		Mode:     "jellyfin",
 		DB:       db,
-		Jellyfin: NewJellyfinHTTPClient(srv.Client(), nil),
+		Jellyfin: jc,
 	})
 
 	loginBody := strings.NewReader(`{"username":"alice","password":"pass"}`)
@@ -919,7 +904,7 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 	a2 := NewAuth(AuthConfig{
 		Mode:     "jellyfin",
 		DB:       db,
-		Jellyfin: NewJellyfinHTTPClient(srv.Client(), nil),
+		Jellyfin: jc,
 	})
 
 	// Verify the session is available via HandleCheck.

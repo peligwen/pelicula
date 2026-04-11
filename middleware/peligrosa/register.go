@@ -1,25 +1,32 @@
 // Peligrosa: trust boundary layer.
 // Open LAN registration: optional public account creation without invite tokens.
 // LAN-only (httputil.RequireLocalOriginStrict in route table), viewer role only.
-// See ../docs/PELIGROSA.md.
-package main
+// See ../../docs/PELIGROSA.md.
+package peligrosa
 
 import (
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"sync"
 	"time"
 )
 
-// openRegistration is set in main.go from PELICULA_OPEN_REGISTRATION.
-var openRegistration bool
+// OpenRegistration controls whether new accounts can be created without an invite.
+// Set from main via the package-level accessor SetOpenRegistration.
+var OpenRegistration bool
 
 // initialSetupMu serialises the initial-setup registration so that only one
 // request can observe IsEmpty()==true and claim the admin role.
 var initialSetupMu sync.Mutex
+
+// SetOpenRegistration sets the open-registration flag from main.
+func SetOpenRegistration(v bool) {
+	OpenRegistration = v
+}
 
 // HandleGeneratePassword returns a fresh passphrase suggestion.
 // Public endpoint — no auth required; used by the registration UI.
@@ -34,7 +41,36 @@ func (a *Auth) HandleGeneratePassword(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
-	httputil.WriteJSON(w, map[string]string{"password": generateReadablePassword()})
+	// Password generation is delegated to the Deps.GenPassword injection if
+	// this method is reached through a Deps. When called directly on *Auth
+	// (which has no Deps reference), fall back to a random token.
+	httputil.WriteJSON(w, map[string]string{"password": generatePasswordFallback()})
+}
+
+// HandleGeneratePasswordWithDeps serves the generate-password endpoint using
+// the configured GenPassword function. Called from routes.go when Deps.GenPassword
+// is set; falls back to HandleGeneratePassword when it is nil.
+func (d *Deps) HandleGeneratePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ip := httputil.ClientIP(r)
+	if d.Auth != nil && d.Auth.isRateLimited(ip) {
+		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		return
+	}
+	httputil.WriteJSON(w, map[string]string{"password": d.genPassword()})
+}
+
+// generatePasswordFallback returns a random 16-byte hex string when no
+// GenPassword function is injected.
+func generatePasswordFallback() string {
+	t, err := generateToken()
+	if err != nil || len(t) < 16 {
+		return "changeme"
+	}
+	return t[:16]
 }
 
 func (a *Auth) HandleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +87,7 @@ func (a *Auth) HandleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
 		initialSetup = a.rolesStore.IsEmpty()
 	}
 	httputil.WriteJSON(w, map[string]any{
-		"open_registration": openRegistration,
+		"open_registration": OpenRegistration,
 		"initial_setup":     initialSetup,
 	})
 }
@@ -67,7 +103,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	// Jellyfin service user is never inserted there, so it doesn't affect this.
 	initialSetupMu.Lock()
 	initialSetup := a != nil && a.rolesStore != nil && a.rolesStore.IsEmpty()
-	if !openRegistration && !initialSetup {
+	if !OpenRegistration && !initialSetup {
 		initialSetupMu.Unlock()
 		httputil.WriteError(w, "open registration is not enabled", http.StatusForbidden)
 		return
@@ -98,7 +134,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !validUsername(req.Username) {
+	if !clients.IsValidUsername(req.Username) {
 		initialSetupMu.Unlock()
 		if req.Username == "" {
 			httputil.WriteError(w, "username is required", http.StatusBadRequest)
@@ -116,7 +152,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	jellyfinID, err := a.jellyfin.CreateUser(req.Username, req.Password)
 	if err != nil {
 		// Detect username-already-taken (Jellyfin returns 400) before retrying.
-		var jErr *jellyfinHTTPError
+		var jErr *clients.JellyfinHTTPError
 		if errors.As(err, &jErr) && jErr.StatusCode == http.StatusBadRequest {
 			initialSetupMu.Unlock()
 			w.Header().Set("Content-Type", "application/json")

@@ -1,4 +1,4 @@
-package main
+package peligrosa
 
 import (
 	"bytes"
@@ -11,24 +11,29 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"pelicula-api/clients"
 )
 
 // newTestInviteStore creates an InviteStore backed by a test database.
-// A JellyfinClient is built from the global services so that tests using
-// newFakeJellyfin + resetServices get a correctly-wired client.
 func newTestInviteStore(t *testing.T) *InviteStore {
 	t.Helper()
 	db := testDB(t)
-	jc := NewJellyfinHTTPClient(http.DefaultClient, services)
+	return NewInviteStore(db, nil)
+}
+
+// newTestInviteStoreWithClient creates an InviteStore backed by a test database,
+// wired to the given JellyfinClient (for tests that exercise Redeem / CreateUser).
+func newTestInviteStoreWithClient(t *testing.T, jc clients.JellyfinClient) *InviteStore {
+	t.Helper()
+	db := testDB(t)
 	return NewInviteStore(db, jc)
 }
 
-// setInviteStore replaces the package-level inviteStore for the duration of a test.
-func setInviteStore(t *testing.T, s *InviteStore) {
-	t.Helper()
-	orig := inviteStore
-	inviteStore = s
-	t.Cleanup(func() { inviteStore = orig })
+// newTestDeps builds a Deps from a given auth and invite store,
+// using a nil RequestStore (sufficient for invite-only tests).
+func newTestDeps(auth *Auth, invites *InviteStore) *Deps {
+	return &Deps{Auth: auth, Invites: invites}
 }
 
 // ── Token helpers ────────────────────────────────────────────────────────────
@@ -176,7 +181,7 @@ func TestRevokeAndDelete(t *testing.T) {
 
 func TestRedeemRace(t *testing.T) {
 	// Wire a fake Jellyfin that accepts any user creation with a unique ID per call.
-	_ = newFakeJellyfin(t, func(mux *http.ServeMux) {
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
 		var counter sync.Mutex
 		n := 0
 		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
@@ -191,10 +196,8 @@ func TestRedeemRace(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		})
 	})
-	resetServices(t)
 
-	s := newTestInviteStore(t)
-	setInviteStore(t, s)
+	s := newTestInviteStoreWithClient(t, jc)
 
 	maxUses := 1
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
@@ -242,36 +245,8 @@ func TestRedeemRace(t *testing.T) {
 
 // ── HTTP handler tests ───────────────────────────────────────────────────────
 
-func inviteAdminRequest(t *testing.T, method, path string, body any) *http.Request {
-	t.Helper()
-	var rb *bytes.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		rb = bytes.NewReader(b)
-	} else {
-		rb = bytes.NewReader(nil)
-	}
-	r := httptest.NewRequest(method, path, rb)
-	r.Header.Set("Content-Type", "application/json")
-	// Inject admin session
-	a := newTestAuth("jellyfin")
-	tok := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
-	orig := authMiddleware
-	authMiddleware = a
-	t.Cleanup(func() { authMiddleware = orig })
-	addSessionCookie(r, tok)
-	return r
-}
-
-// newTestDeps builds a peligrosaDeps from a given auth and invite store,
-// using a nil RequestStore (sufficient for invite-only tests).
-func newTestDeps(auth *Auth, invites *InviteStore) *peligrosaDeps {
-	return &peligrosaDeps{Auth: auth, Invites: invites}
-}
-
 func TestHandleInvitesCreateAndList(t *testing.T) {
 	s := newTestInviteStore(t)
-	setInviteStore(t, s)
 
 	// Build a shared auth instance with an admin session.
 	a := newTestAuth("jellyfin")
@@ -325,7 +300,6 @@ func TestHandleInvitesCreateAndList(t *testing.T) {
 
 func TestHandleInviteCheck(t *testing.T) {
 	s := newTestInviteStore(t)
-	setInviteStore(t, s)
 	maxUses := 1
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
 	deps := newTestDeps(newTestAuth("jellyfin"), s)
@@ -362,7 +336,7 @@ func TestHandleInviteCheck(t *testing.T) {
 }
 
 func TestHandleInviteRedeem(t *testing.T) {
-	_ = newFakeJellyfin(t, func(mux *http.ServeMux) {
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
 		var mu sync.Mutex
 		names := map[string]bool{}
 		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
@@ -384,10 +358,8 @@ func TestHandleInviteRedeem(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		})
 	})
-	resetServices(t)
 
-	s := newTestInviteStore(t)
-	setInviteStore(t, s)
+	s := newTestInviteStoreWithClient(t, jc)
 
 	maxUses := 2
 	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
@@ -441,7 +413,6 @@ func TestHandleInviteRedeem(t *testing.T) {
 
 func TestHandleInviteOffMode(t *testing.T) {
 	s := newTestInviteStore(t)
-	setInviteStore(t, s)
 	deps := newTestDeps(newTestAuth("off"), s)
 
 	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", strings.NewReader(`{}`))

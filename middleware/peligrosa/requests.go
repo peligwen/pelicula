@@ -1,8 +1,8 @@
 // Peligrosa: trust boundary layer.
 // Viewer-created media request queue. Viewers submit; admins approve or deny.
 // The viewer/admin split is structural: Guard vs GuardAdmin in main.go.
-// See ../docs/PELIGROSA.md.
-package main
+// See ../../docs/PELIGROSA.md.
+package peligrosa
 
 import (
 	"database/sql"
@@ -16,9 +16,6 @@ import (
 	"strings"
 	"time"
 )
-
-// requestStore is the package-level request store, initialised in main.
-var requestStore *RequestStore
 
 // RequestState represents the lifecycle state of a media request.
 type RequestState string
@@ -60,6 +57,38 @@ type MediaRequest struct {
 // isTerminal returns true for states that are end-of-lifecycle.
 func (r *MediaRequest) isTerminal() bool {
 	return r.State == RequestDenied || r.State == RequestAvailable
+}
+
+// InviteExport captures the full state of an invite for backup/restore.
+// Defined here so peligrosa's InsertFull method can use it, and export.go can
+// reference it via peligrosa.InviteExport.
+type InviteExport struct {
+	Token     string     `json:"token"`
+	Label     string     `json:"label,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	CreatedBy string     `json:"created_by"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	MaxUses   *int       `json:"max_uses,omitempty"`
+	Uses      int        `json:"uses"`
+	Revoked   bool       `json:"revoked"`
+}
+
+// RequestExport captures the full state of a media request for backup/restore.
+type RequestExport struct {
+	ID          string         `json:"id"`
+	Type        string         `json:"type"`
+	TmdbID      int            `json:"tmdb_id"`
+	TvdbID      int            `json:"tvdb_id"`
+	Title       string         `json:"title"`
+	Year        int            `json:"year"`
+	Poster      string         `json:"poster,omitempty"`
+	RequestedBy string         `json:"requested_by"`
+	State       RequestState   `json:"state"`
+	Reason      string         `json:"reason,omitempty"`
+	ArrID       int            `json:"arr_id,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	History     []RequestEvent `json:"history"`
 }
 
 // RequestStore persists media requests in SQLite.
@@ -209,6 +238,11 @@ func (s *RequestStore) all() []*MediaRequest {
 	return result
 }
 
+// All returns all media requests. Used by export.go in the main package.
+func (s *RequestStore) All() []*MediaRequest {
+	return s.all()
+}
+
 // findActive returns the first non-terminal request matching type + tmdbID or tvdbID.
 // Must be called without holding any lock.
 func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequest {
@@ -259,7 +293,13 @@ func (s *RequestStore) updateRequest(req *MediaRequest) error {
 }
 
 func generateRequestID() string {
-	return fmt.Sprintf("req_%d_%s", time.Now().UnixMilli(), generateAPIKey()[:6])
+	// Use a random token suffix; no dependency on main-package generateAPIKey.
+	t, _ := generateToken()
+	suffix := t
+	if len(suffix) > 6 {
+		suffix = suffix[:6]
+	}
+	return fmt.Sprintf("req_%d_%s", time.Now().UnixMilli(), suffix)
 }
 
 // InsertFull inserts a media request from a backup export, preserving all
@@ -287,10 +327,100 @@ func (s *RequestStore) InsertFull(req RequestExport) error {
 	return nil
 }
 
+// MarkAvailable transitions a request to "available" when its content has been imported.
+// Matched by tmdbID (movies) or tvdbID (series). Non-fatal if no matching request exists.
+// Called from hooks.go in the main package via the package-level requestStore global.
+func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title string) {
+	all := s.all()
+	var matched *MediaRequest
+	for _, req := range all {
+		if req.isTerminal() || req.State == RequestAvailable {
+			continue
+		}
+		if reqType == "movie" && tmdbID != 0 && req.TmdbID == tmdbID {
+			matched = req
+			break
+		}
+		if reqType == "series" && tvdbID != 0 && req.TvdbID == tvdbID {
+			matched = req
+			break
+		}
+	}
+	if matched == nil {
+		return
+	}
+
+	requester := matched.RequestedBy
+	matched.State = RequestAvailable
+	matched.UpdatedAt = time.Now().UTC()
+	if err := s.updateRequest(matched); err != nil {
+		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
+		return
+	}
+	ev := RequestEvent{
+		At:    matched.UpdatedAt,
+		State: RequestAvailable,
+		Note:  "content imported",
+	}
+	if err := s.insertEvent(matched.ID, ev); err != nil {
+		slog.Warn("failed to insert available event", "component", "requests", "error", err)
+	}
+
+	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
+	// Notification is not sent here: hooks.go in main calls notify via
+	// notifyApprise after MarkAvailable returns, or callers inject via Deps.Notify.
+	_ = requester // used by callers that want to notify; keep for future use
+}
+
+// MarkAvailableWithNotify is like MarkAvailable but also sends an Apprise
+// notification via the provided callback. Used by hooks.go when a notify
+// function is available.
+func (s *RequestStore) MarkAvailableWithNotify(reqType string, tmdbID, tvdbID int, title string, notify func(title, body string)) {
+	all := s.all()
+	var matched *MediaRequest
+	for _, req := range all {
+		if req.isTerminal() || req.State == RequestAvailable {
+			continue
+		}
+		if reqType == "movie" && tmdbID != 0 && req.TmdbID == tmdbID {
+			matched = req
+			break
+		}
+		if reqType == "series" && tvdbID != 0 && req.TvdbID == tvdbID {
+			matched = req
+			break
+		}
+	}
+	if matched == nil {
+		return
+	}
+
+	requester := matched.RequestedBy
+	matched.State = RequestAvailable
+	matched.UpdatedAt = time.Now().UTC()
+	if err := s.updateRequest(matched); err != nil {
+		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
+		return
+	}
+	ev := RequestEvent{
+		At:    matched.UpdatedAt,
+		State: RequestAvailable,
+		Note:  "content imported",
+	}
+	if err := s.insertEvent(matched.ID, ev); err != nil {
+		slog.Warn("failed to insert available event", "component", "requests", "error", err)
+	}
+
+	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
+	if notify != nil {
+		notify(title+" is now available", fmt.Sprintf("Hey %s — %q has been imported and is ready to watch.", requester, title))
+	}
+}
+
 // --- HTTP handlers ---
 
 // HandleRequests dispatches GET (list) and POST (create) on /api/pelicula/requests.
-func (p *peligrosaDeps) HandleRequests(w http.ResponseWriter, r *http.Request) {
+func (p *Deps) HandleRequests(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		p.HandleRequestList(w, r)
@@ -302,7 +432,7 @@ func (p *peligrosaDeps) HandleRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRequestList returns all requests. Admins see all; viewers see only their own.
-func (p *peligrosaDeps) HandleRequestList(w http.ResponseWriter, r *http.Request) {
+func (p *Deps) HandleRequestList(w http.ResponseWriter, r *http.Request) {
 	username, role, _ := p.Auth.SessionFor(r)
 
 	all := p.Requests.all()
@@ -319,7 +449,7 @@ func (p *peligrosaDeps) HandleRequestList(w http.ResponseWriter, r *http.Request
 }
 
 // HandleRequestCreate creates a new request from a viewer.
-func (p *peligrosaDeps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
+func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	username, _, ok := p.Auth.SessionFor(r)
 	if !ok && p.Auth.mode != "off" {
 		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
@@ -405,7 +535,7 @@ func (p *peligrosaDeps) HandleRequestCreate(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleRequestOp dispatches approve/deny/delete on /api/pelicula/requests/{id}[/action].
-func (p *peligrosaDeps) HandleRequestOp(w http.ResponseWriter, r *http.Request) {
+func (p *Deps) HandleRequestOp(w http.ResponseWriter, r *http.Request) {
 	// Path: /api/pelicula/requests/{id} or /api/pelicula/requests/{id}/approve|deny
 	path := strings.TrimPrefix(r.URL.Path, "/api/pelicula/requests/")
 	path = strings.TrimSuffix(path, "/")
@@ -429,7 +559,7 @@ func (p *peligrosaDeps) HandleRequestOp(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		actorUsername, _, _ := p.Auth.SessionFor(r)
-		p.Requests.handleRequestApprove(w, r, id, actorUsername)
+		p.Requests.handleRequestApprove(w, r, id, actorUsername, p.notify)
 	case "deny":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -447,7 +577,7 @@ func (p *peligrosaDeps) HandleRequestOp(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id, actorUsername string) {
+func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id, actorUsername string, notify func(string, string)) {
 	// Read profile/root from settings env vars (set at container start from .env)
 	radarrProfileID := envIntOr("REQUESTS_RADARR_PROFILE_ID", 0)
 	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
@@ -515,13 +645,15 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	req.History = append(req.History, ev)
 
 	slog.Info("request approved", "component", "requests", "id", id, "title", title, "arr_id", arrID)
-	go notifyApprise("Request approved: "+title, fmt.Sprintf("%s requested %q — it's been added to the download queue.", requester, title))
+	if notify != nil {
+		go notify("Request approved: "+title, fmt.Sprintf("%s requested %q — it's been added to the download queue.", requester, title))
+	}
 
 	httputil.WriteJSON(w, req)
 }
 
 // HandleRequestDeny denies a pending media request.
-func (p *peligrosaDeps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
+func (p *Deps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id string) {
 	actorUsername, _, _ := p.Auth.SessionFor(r)
 
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
@@ -563,11 +695,13 @@ func (p *peligrosaDeps) HandleRequestDeny(w http.ResponseWriter, r *http.Request
 	req.History = append(req.History, ev)
 
 	slog.Info("request denied", "component", "requests", "id", id, "title", title)
-	msg := fmt.Sprintf("Your request for %q was not approved.", title)
-	if body.Reason != "" {
-		msg += " Reason: " + body.Reason
+	if p.Notify != nil {
+		msg := fmt.Sprintf("Your request for %q was not approved.", title)
+		if body.Reason != "" {
+			msg += " Reason: " + body.Reason
+		}
+		go p.Notify("Request denied: "+title, requester+" — "+msg)
 	}
-	go notifyApprise("Request denied: "+title, requester+" — "+msg)
 
 	httputil.WriteJSON(w, req)
 }
@@ -586,48 +720,6 @@ func (rs *RequestStore) HandleRequestDelete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	httputil.WriteJSON(w, map[string]string{"status": "deleted"})
-}
-
-// MarkRequestAvailable transitions a request to "available" when its content has been imported.
-// Matched by tmdbID (movies) or tvdbID (series). Non-fatal if no matching request exists.
-func MarkRequestAvailable(reqType string, tmdbID, tvdbID int, title string) {
-	all := requestStore.all()
-	var matched *MediaRequest
-	for _, req := range all {
-		if req.isTerminal() || req.State == RequestAvailable {
-			continue
-		}
-		if reqType == "movie" && tmdbID != 0 && req.TmdbID == tmdbID {
-			matched = req
-			break
-		}
-		if reqType == "series" && tvdbID != 0 && req.TvdbID == tvdbID {
-			matched = req
-			break
-		}
-	}
-	if matched == nil {
-		return
-	}
-
-	requester := matched.RequestedBy
-	matched.State = RequestAvailable
-	matched.UpdatedAt = time.Now().UTC()
-	if err := requestStore.updateRequest(matched); err != nil {
-		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
-		return
-	}
-	ev := RequestEvent{
-		At:    matched.UpdatedAt,
-		State: RequestAvailable,
-		Note:  "content imported",
-	}
-	if err := requestStore.insertEvent(matched.ID, ev); err != nil {
-		slog.Warn("failed to insert available event", "component", "requests", "error", err)
-	}
-
-	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
-	go notifyApprise(title+" is now available", fmt.Sprintf("Hey %s — %q has been imported and is ready to watch.", requester, title))
 }
 
 // envIntOr reads an env var as an integer, returning fallback on parse error or if unset.

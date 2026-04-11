@@ -7,7 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"pelicula-api/peligrosa"
 )
+
+// exportTestFulfiller is a no-op Fulfiller for export tests.
+type exportTestFulfiller struct{}
+
+func (f *exportTestFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
+	return 0, nil
+}
+func (f *exportTestFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
+	return 0, nil
+}
 
 func TestResolveProfileID(t *testing.T) {
 	t.Run("name found in map", func(t *testing.T) {
@@ -211,12 +223,12 @@ func TestBackupVersionBoundaries(t *testing.T) {
 
 func TestInviteStoreInsertFull(t *testing.T) {
 	db := testDB(t)
-	store := NewInviteStore(db, nil)
+	store := peligrosa.NewInviteStore(db, nil)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	maxUses := 5
 
-	inv := InviteExport{
+	inv := peligrosa.InviteExport{
 		Token:     "aaaabbbbccccddddeeeeffffgggghhhh123", // 43 chars
 		Label:     "test-invite",
 		CreatedAt: now,
@@ -261,21 +273,21 @@ func TestInviteStoreInsertFull(t *testing.T) {
 
 func TestRequestStoreInsertFull(t *testing.T) {
 	db := testDB(t)
-	store := NewRequestStore(db, &fakeFulfiller{})
+	store := peligrosa.NewRequestStore(db, &exportTestFulfiller{})
 
 	now := time.Now().UTC().Truncate(time.Second)
-	req := RequestExport{
+	req := peligrosa.RequestExport{
 		ID:          "req_backup_001",
 		Type:        "movie",
 		TmdbID:      12345,
 		Title:       "Test Movie",
 		Year:        2024,
 		RequestedBy: "viewer1",
-		State:       RequestPending,
+		State:       peligrosa.RequestPending,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		History: []RequestEvent{
-			{At: now, State: RequestPending, Actor: "viewer1"},
+		History: []peligrosa.RequestEvent{
+			{At: now, State: peligrosa.RequestPending, Actor: "viewer1"},
 		},
 	}
 
@@ -284,7 +296,7 @@ func TestRequestStoreInsertFull(t *testing.T) {
 	}
 
 	// Verify it's in the store.
-	all := store.all()
+	all := store.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(all))
 	}
@@ -303,7 +315,7 @@ func TestRequestStoreInsertFull(t *testing.T) {
 		if err := store.InsertFull(req); err != nil {
 			t.Errorf("second InsertFull: %v", err)
 		}
-		if len(store.all()) != 1 {
+		if len(store.All()) != 1 {
 			t.Error("expected still 1 request after duplicate insert")
 		}
 	})
@@ -336,10 +348,10 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 		Exported: now.Format(time.RFC3339),
 		Movies:   []MovieExport{},
 		Series:   []SeriesExport{},
-		Roles: []RolesEntry{
-			{JellyfinID: "jf-001", Username: "alice", Role: RoleAdmin},
+		Roles: []peligrosa.RolesEntry{
+			{JellyfinID: "jf-001", Username: "alice", Role: peligrosa.RoleAdmin},
 		},
-		Invites: []InviteExport{
+		Invites: []peligrosa.InviteExport{
 			{
 				Token:     "aaaabbbbccccddddeeeeffffgggghhhh123",
 				Label:     "family",
@@ -349,7 +361,7 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 				Uses:      0,
 			},
 		},
-		Requests: []RequestExport{
+		Requests: []peligrosa.RequestExport{
 			{
 				ID:          "req_test_001",
 				Type:        "movie",
@@ -357,10 +369,10 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 				Title:       "Some Film",
 				Year:        2025,
 				RequestedBy: "alice",
-				State:       RequestPending,
+				State:       peligrosa.RequestPending,
 				CreatedAt:   now,
 				UpdatedAt:   now,
-				History:     []RequestEvent{{At: now, State: RequestPending, Actor: "alice"}},
+				History:     []peligrosa.RequestEvent{{At: now, State: peligrosa.RequestPending, Actor: "alice"}},
 			},
 		},
 	}

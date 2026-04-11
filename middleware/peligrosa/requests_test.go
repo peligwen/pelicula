@@ -1,4 +1,4 @@
-package main
+package peligrosa
 
 import (
 	"bytes"
@@ -188,7 +188,6 @@ func TestRequestStore_DenyTransition(t *testing.T) {
 
 func TestMarkRequestAvailable_FlipsGrabbedByTmdb(t *testing.T) {
 	s := newRequestStore(t)
-	requestStore = s
 
 	insertRequest(t, s, &MediaRequest{
 		ID:     "req_avail_movie",
@@ -198,20 +197,19 @@ func TestMarkRequestAvailable_FlipsGrabbedByTmdb(t *testing.T) {
 		State:  RequestGrabbed,
 	})
 
-	MarkRequestAvailable("movie", 999, 0, "Ready Film")
+	s.MarkAvailable("movie", 999, 0, "Ready Film")
 
 	all := s.all()
 	if all[0].State != RequestAvailable {
-		t.Errorf("State = %q after MarkRequestAvailable, want available", all[0].State)
+		t.Errorf("State = %q after MarkAvailable, want available", all[0].State)
 	}
 }
 
 func TestMarkRequestAvailable_NoOpOnMiss(t *testing.T) {
 	s := newRequestStore(t)
-	requestStore = s
 
 	// No requests — should not panic or error.
-	MarkRequestAvailable("movie", 12345, 0, "Not In Queue")
+	s.MarkAvailable("movie", 12345, 0, "Not In Queue")
 
 	if got := s.all(); len(got) != 0 {
 		t.Errorf("expected 0 requests, got %d", len(got))
@@ -220,7 +218,6 @@ func TestMarkRequestAvailable_NoOpOnMiss(t *testing.T) {
 
 func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 	s := newRequestStore(t)
-	requestStore = s
 
 	insertRequest(t, s, &MediaRequest{
 		ID:     "req_avail_series",
@@ -230,19 +227,19 @@ func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 		State:  RequestGrabbed,
 	})
 
-	MarkRequestAvailable("series", 0, 888, "Ready Show")
+	s.MarkAvailable("series", 0, 888, "Ready Show")
 
 	all := s.all()
 	if all[0].State != RequestAvailable {
-		t.Errorf("State = %q after MarkRequestAvailable, want available", all[0].State)
+		t.Errorf("State = %q after MarkAvailable, want available", all[0].State)
 	}
 }
 
 // ── HTTP handler tests ───────────────────────────────────────────────────────
 
-// newTestRequestDeps builds a peligrosaDeps for request handler tests.
-func newTestRequestDeps(auth *Auth, rs *RequestStore) *peligrosaDeps {
-	return &peligrosaDeps{Auth: auth, Requests: rs}
+// newTestRequestDeps builds a Deps for request handler tests.
+func newTestRequestDeps(auth *Auth, rs *RequestStore) *Deps {
+	return &Deps{Auth: auth, Requests: rs}
 }
 
 func TestHandleRequestCreate_RequiresAuth(t *testing.T) {

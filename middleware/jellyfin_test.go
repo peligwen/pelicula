@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"pelicula-api/httputil"
+	"pelicula-api/peligrosa"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -51,12 +52,10 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) *httptest.Ser
 	testSvcs := NewServiceClients(t.TempDir())
 	testSvcs.JellyfinAPIKey = "test-token"
 	origAuth := authMiddleware
-	authMiddleware = &Auth{
-		mode:     "jellyfin",
-		sessions: make(map[string]session),
-		failures: make(map[string]*loginAttempts),
-		jellyfin: NewJellyfinHTTPClient(srv.Client(), testSvcs),
-	}
+	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{
+		Mode:     "jellyfin",
+		Jellyfin: NewJellyfinHTTPClient(srv.Client(), testSvcs),
+	})
 	t.Cleanup(func() { authMiddleware = origAuth })
 	return srv
 }
@@ -250,7 +249,7 @@ func TestHandleUsers_PostForeignOrigin(t *testing.T) {
 func TestHandleUsers_OffMode(t *testing.T) {
 	// Restore global after test.
 	orig := authMiddleware
-	authMiddleware = newTestAuth("off")
+	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{Mode: "off"})
 	t.Cleanup(func() { authMiddleware = orig })
 
 	body := strings.NewReader(`{"username":"bob","password":"hunter2"}`)
@@ -518,7 +517,7 @@ func TestHandleUsers_OffMode_GetIsAllowed(t *testing.T) {
 	resetServices(t)
 
 	// Switch authMiddleware to off mode.
-	authMiddleware = newTestAuth("off")
+	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{Mode: "off"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/users", nil)
 	w := httptest.NewRecorder()
@@ -807,7 +806,7 @@ func TestHandleUserPassword_EmptyPassword(t *testing.T) {
 
 func TestHandleUsersWithID_OffMode(t *testing.T) {
 	orig := authMiddleware
-	authMiddleware = newTestAuth("off")
+	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{Mode: "off"})
 	t.Cleanup(func() { authMiddleware = orig })
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/users/3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", nil)

@@ -1,8 +1,8 @@
 // Peligrosa: trust boundary layer.
 // Sessions, login rate limiter, CSRF origin guard, and role-based access
 // guards (Guard/GuardManager/GuardAdmin). Changes here affect the core
-// authentication surface — see ../docs/PELIGROSA.md.
-package main
+// authentication surface — see ../../docs/PELIGROSA.md.
+package peligrosa
 
 import (
 	"crypto/rand"
@@ -88,6 +88,15 @@ func NewAuth(cfg AuthConfig) *Auth {
 	}
 	go a.cleanupSessions()
 	return a
+}
+
+// Roles returns the roles store, or nil when auth runs in off mode.
+// Used by the main-package export/import backup codepath.
+func (a *Auth) Roles() *RolesStore {
+	if a == nil {
+		return nil
+	}
+	return a.rolesStore
 }
 
 // loadSessionsFromDB reads non-expired sessions from SQLite into the in-memory map.
@@ -287,7 +296,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.jellyfin.AuthenticateByName(req.Username, req.Password)
 	if err != nil {
-		var httpErr *jellyfinHTTPError
+		var httpErr *clients.JellyfinHTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
 			a.recordFailure(ip)
 			httputil.WriteError(w, "invalid credentials", http.StatusUnauthorized)

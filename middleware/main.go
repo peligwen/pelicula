@@ -11,13 +11,16 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/peligrosa"
 )
 
-var services *ServiceClients
-
-// authMiddleware is the package-level Auth instance, used by handlers that
-// need to inspect auth state (e.g. handleUsers off-mode guard).
-var authMiddleware *Auth
+var (
+	services       *ServiceClients
+	authMiddleware *peligrosa.Auth
+	inviteStore    *peligrosa.InviteStore
+	requestStore   *peligrosa.RequestStore
+	dismissedStore *DismissedStore
+)
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -51,9 +54,9 @@ func main() {
 
 	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, services)
 
-	inviteStore = NewInviteStore(db, jellyfinClient)
+	inviteStore = peligrosa.NewInviteStore(db, jellyfinClient)
 	dismissedStore = NewDismissedStore(db)
-	requestStore = NewRequestStore(db, NewArrFulfiller())
+	requestStore = peligrosa.NewRequestStore(db, NewArrFulfiller())
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -88,23 +91,25 @@ func main() {
 	default:
 		authMode = "off"
 	}
-	openRegistration = os.Getenv("PELICULA_OPEN_REGISTRATION") == "true"
+	peligrosa.SetOpenRegistration(os.Getenv("PELICULA_OPEN_REGISTRATION") == "true")
 
-	authMiddleware = NewAuth(AuthConfig{
+	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{
 		Mode:     authMode,
 		DB:       db,
 		Jellyfin: jellyfinClient,
 	})
 	auth := authMiddleware
-	deps := newPeligrosaDeps(db, authMiddleware, inviteStore, requestStore, jellyfinClient)
+	deps := peligrosa.NewDeps(db, authMiddleware, inviteStore, requestStore, jellyfinClient)
+	deps.Notify = notifyApprise
+	deps.GenPassword = generateReadablePassword
 
 	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
 	mux.HandleFunc("/api/pelicula/health", handleHealth)
 
-	// Auth endpoints (always accessible)
-	mux.HandleFunc("/api/pelicula/auth/login", auth.HandleLogin)
-	mux.HandleFunc("/api/pelicula/auth/logout", auth.HandleLogout)
-	mux.HandleFunc("/api/pelicula/auth/check", auth.HandleCheck)
+	// Peligrosa routes: auth, invites, requests, open registration.
+	// Webhook routes stay below (handlers live in hooks.go).
+	peligrosa.RegisterRoutes(mux, deps)
+
 	// Webhook receiver must be accessible without session auth — *arr services
 	// call this endpoint and cannot send a session cookie.
 	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
@@ -129,10 +134,7 @@ func main() {
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(handleUpdatesProxy)))
 	mux.Handle("/api/pelicula/events", auth.Guard(http.HandlerFunc(handleEventsProxy)))
 
-	// viewer+: request queue (list own requests + create)
-	mux.Handle("/api/pelicula/requests", auth.Guard(http.HandlerFunc(deps.HandleRequests)))
-	// admin only: per-request approve/deny/delete and *arr metadata for settings dropdowns
-	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(http.HandlerFunc(deps.HandleRequestOp)))
+	// admin only: *arr metadata for settings dropdowns
 	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(handleArrMeta)))
 
 	// manager+: search and add content, pause/resume downloads
@@ -157,17 +159,6 @@ func main() {
 	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsers))))
 	// admin only: per-user operations (delete + password reset)
 	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
-
-	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
-	// Peligrosa: httputil.RequireLocalOriginSoft on both routes — redeem is public but invite-gated.
-	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(deps.HandleInvites))))
-	mux.HandleFunc("/api/pelicula/invites/", httputil.RequireLocalOriginSoft(http.HandlerFunc(deps.HandleInviteOp)).ServeHTTP)
-
-	// Open registration (LAN-only, optional): public account creation without invite tokens.
-	// Peligrosa: httputil.RequireLocalOriginStrict ensures only LAN browsers can POST.
-	mux.HandleFunc("/api/pelicula/register/check", auth.HandleOpenRegCheck)
-	mux.HandleFunc("/api/pelicula/generate-password", auth.HandleGeneratePassword)
-	mux.Handle("/api/pelicula/register", httputil.RequireLocalOriginStrict(http.HandlerFunc(auth.HandleOpenRegister)))
 
 	// read: active Jellyfin sessions for the now-playing card.
 	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.

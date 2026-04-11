@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"pelicula-api/httputil"
+	"pelicula-api/peligrosa"
 	"sync"
 	"time"
 )
@@ -15,44 +16,14 @@ import (
 const currentBackupVersion = 2
 
 type BackupExport struct {
-	Version         int             `json:"version"`
-	PeliculaVersion string          `json:"pelicula_version,omitempty"`
-	Exported        string          `json:"exported"`
-	Movies          []MovieExport   `json:"movies"`
-	Series          []SeriesExport  `json:"series"`
-	Roles           []RolesEntry    `json:"roles,omitempty"`
-	Invites         []InviteExport  `json:"invites,omitempty"`
-	Requests        []RequestExport `json:"requests,omitempty"`
-}
-
-// InviteExport captures the full state of an invite for backup/restore.
-type InviteExport struct {
-	Token     string     `json:"token"`
-	Label     string     `json:"label,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	CreatedBy string     `json:"created_by"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	MaxUses   *int       `json:"max_uses,omitempty"`
-	Uses      int        `json:"uses"`
-	Revoked   bool       `json:"revoked"`
-}
-
-// RequestExport captures the full state of a media request for backup/restore.
-type RequestExport struct {
-	ID          string         `json:"id"`
-	Type        string         `json:"type"`
-	TmdbID      int            `json:"tmdb_id"`
-	TvdbID      int            `json:"tvdb_id"`
-	Title       string         `json:"title"`
-	Year        int            `json:"year"`
-	Poster      string         `json:"poster,omitempty"`
-	RequestedBy string         `json:"requested_by"`
-	State       RequestState   `json:"state"`
-	Reason      string         `json:"reason,omitempty"`
-	ArrID       int            `json:"arr_id,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	History     []RequestEvent `json:"history"`
+	Version         int                       `json:"version"`
+	PeliculaVersion string                    `json:"pelicula_version,omitempty"`
+	Exported        string                    `json:"exported"`
+	Movies          []MovieExport             `json:"movies"`
+	Series          []SeriesExport            `json:"series"`
+	Roles           []peligrosa.RolesEntry    `json:"roles,omitempty"`
+	Invites         []peligrosa.InviteExport  `json:"invites,omitempty"`
+	Requests        []peligrosa.RequestExport `json:"requests,omitempty"`
 }
 
 type MovieExport struct {
@@ -163,16 +134,16 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Export roles (from auth middleware's rolesStore, may be nil if auth is off)
-	var roles []RolesEntry
-	if authMiddleware != nil && authMiddleware.rolesStore != nil {
-		roles = authMiddleware.rolesStore.All()
+	var roles []peligrosa.RolesEntry
+	if authMiddleware != nil && authMiddleware.Roles() != nil {
+		roles = authMiddleware.Roles().All()
 	}
 
 	// Export invites
-	var invites []InviteExport
+	var invites []peligrosa.InviteExport
 	if inviteStore != nil {
 		for _, iws := range inviteStore.ListInvites() {
-			invites = append(invites, InviteExport{
+			invites = append(invites, peligrosa.InviteExport{
 				Token:     iws.Token,
 				Label:     iws.Label,
 				CreatedAt: iws.CreatedAt,
@@ -186,10 +157,10 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Export requests
-	var requests []RequestExport
+	var requests []peligrosa.RequestExport
 	if requestStore != nil {
-		for _, req := range requestStore.all() {
-			requests = append(requests, RequestExport{
+		for _, req := range requestStore.All() {
+			requests = append(requests, peligrosa.RequestExport{
 				ID:          req.ID,
 				Type:        req.Type,
 				TmdbID:      req.TmdbID,
@@ -286,16 +257,16 @@ func handleImportBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // importRoles upserts roles from a v2 backup into the roles store.
-func importRoles(roles []RolesEntry, result *ImportResult) {
+func importRoles(roles []peligrosa.RolesEntry, result *ImportResult) {
 	if len(roles) == 0 {
 		return
 	}
-	if authMiddleware == nil || authMiddleware.rolesStore == nil {
+	if authMiddleware == nil || authMiddleware.Roles() == nil {
 		slog.Warn("roles import skipped: rolesStore not available (auth mode is not jellyfin)", "component", "export")
 		return
 	}
 	for _, entry := range roles {
-		if err := authMiddleware.rolesStore.Upsert(entry.JellyfinID, entry.Username, entry.Role); err != nil {
+		if err := authMiddleware.Roles().Upsert(entry.JellyfinID, entry.Username, entry.Role); err != nil {
 			slog.Warn("failed to upsert role from backup", "component", "export",
 				"jellyfin_id", entry.JellyfinID, "error", err)
 			result.Errors = append(result.Errors, fmt.Sprintf("role %q (id:%s): %v", entry.Username, entry.JellyfinID, err))
@@ -304,7 +275,7 @@ func importRoles(roles []RolesEntry, result *ImportResult) {
 }
 
 // importInvites inserts invites from a v2 backup, skipping tokens that already exist.
-func importInvites(invites []InviteExport, result *ImportResult) {
+func importInvites(invites []peligrosa.InviteExport, result *ImportResult) {
 	if len(invites) == 0 || inviteStore == nil {
 		return
 	}
@@ -318,7 +289,7 @@ func importInvites(invites []InviteExport, result *ImportResult) {
 }
 
 // importRequests inserts requests from a v2 backup, skipping IDs that already exist.
-func importRequests(requests []RequestExport, result *ImportResult) {
+func importRequests(requests []peligrosa.RequestExport, result *ImportResult) {
 	if len(requests) == 0 || requestStore == nil {
 		return
 	}

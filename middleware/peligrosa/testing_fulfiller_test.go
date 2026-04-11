@@ -1,6 +1,6 @@
-package main
+package peligrosa
 
-// fakeFulfiller is a test double for Fulfiller.
+// fakeFulfiller is a test double for clients.Fulfiller.
 // Set addMovieFn/addSeriesFn to assert on calls; leave nil for a no-op.
 type fakeFulfiller struct {
 	addMovieFn  func(tmdbID, profileID int, rootPath string) (int, error)

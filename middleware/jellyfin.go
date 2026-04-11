@@ -25,7 +25,8 @@ const embyAuthHeader = `MediaBrowser Client="Pelicula", Device="pelicula-api", D
 const jellyfinServiceUser = "pelicula-internal"
 
 // ErrPasswordRequired is returned by CreateJellyfinUser when password is empty.
-var ErrPasswordRequired = errors.New("password is required")
+// Aliased from clients package so peligrosa and main both reference the same sentinel.
+var ErrPasswordRequired = clients.ErrPasswordRequired
 
 // jellyfinHTTPClient is the production implementation of clients.JellyfinClient.
 // It forwards to the existing package-level helpers which already handle
@@ -74,7 +75,7 @@ func jellyfinAuthenticateByName(client *http.Client, username, password string) 
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &jellyfinHTTPError{resp.StatusCode}
+		return nil, &jellyfinHTTPError{StatusCode: resp.StatusCode}
 	}
 
 	var result struct {
@@ -101,12 +102,10 @@ func jellyfinAuthenticateByName(client *http.Client, username, password string) 
 	}, nil
 }
 
-// jellyfinHTTPError captures the HTTP status code from a Jellyfin API response.
-type jellyfinHTTPError struct {
-	StatusCode int
-}
-
-func (e *jellyfinHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.StatusCode) }
+// jellyfinHTTPError is a package-level alias for clients.JellyfinHTTPError.
+// Using the clients type ensures errors.As checks in peligrosa and in this
+// package both match the same concrete type.
+type jellyfinHTTPError = clients.JellyfinHTTPError
 
 // validJellyfinID returns true when id looks like a Jellyfin user ID.
 // Jellyfin returns IDs as 32-char dashless hex strings over the API, but also
@@ -756,7 +755,7 @@ func jellyfinDo(s *ServiceClients, method, path, token string, payload any) ([]b
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, &jellyfinHTTPError{resp.StatusCode}
+		return body, &jellyfinHTTPError{StatusCode: resp.StatusCode}
 	}
 	return body, nil
 }

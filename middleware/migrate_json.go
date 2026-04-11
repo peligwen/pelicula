@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"pelicula-api/peligrosa"
 	"time"
 )
 
@@ -50,7 +51,7 @@ func migrateRolesJSON(db *sql.DB, jsonPath string) {
 		return
 	}
 
-	var f rolesFile
+	var f peligrosa.RolesFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		slog.Warn("roles migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
 		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
@@ -87,7 +88,7 @@ func migrateInvitesJSON(db *sql.DB, jsonPath string) {
 		return
 	}
 
-	var invites []Invite
+	var invites []peligrosa.Invite
 	if err := json.Unmarshal(data, &invites); err != nil {
 		slog.Warn("invites migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
 		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
@@ -151,7 +152,7 @@ func migrateRequestsJSON(db *sql.DB, jsonPath string) {
 		return
 	}
 
-	var requests []*MediaRequest
+	var requests []*peligrosa.MediaRequest
 	if err := json.Unmarshal(data, &requests); err != nil {
 		slog.Warn("requests migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
 		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
