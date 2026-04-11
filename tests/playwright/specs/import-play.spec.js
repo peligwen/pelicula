@@ -113,14 +113,16 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.click('[data-tab="coming"]');
         await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
 
-        // Wait for a job card to appear in any active pipeline lane
+        // Wait for a job card to appear in any pipeline lane (including completed —
+        // the job may finish before Playwright starts polling).
         await page.waitForFunction(
             (title) => {
                 const cards = document.querySelectorAll(
                     '[data-testid="pipeline-lane-validating"] .download-item, ' +
                     '[data-testid="pipeline-lane-processing"] .download-item, ' +
                     '[data-testid="pipeline-lane-cataloging"] .download-item, ' +
-                    '[data-testid="pipeline-lane-imported"] .download-item'
+                    '[data-testid="pipeline-lane-imported"] .download-item, ' +
+                    '[data-testid="pipeline-cards-completed"] .download-item'
                 );
                 return Array.from(cards).some(c => c.textContent.includes(title));
             },
