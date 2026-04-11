@@ -1,9 +1,15 @@
-.PHONY: build test test-procula test-middleware test-cli test-race test-cover e2e install-hooks verify
+.PHONY: build test test-procula test-middleware test-cli test-race test-cover e2e install-hooks check-hooks verify
 
 build:
 	cd cmd/pelicula && go build -ldflags "-X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o ../../bin/pelicula .
 
-test: test-procula test-middleware test-cli
+check-hooks:
+	@if [ "$$(git config core.hooksPath)" != ".githooks" ]; then \
+		echo "hooks not installed; running make install-hooks..."; \
+		$(MAKE) install-hooks; \
+	fi
+
+test: check-hooks test-procula test-middleware test-cli
 
 test-procula:
 	cd procula && go test -v ./...
