@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# pre-commit: fast per-module checks on staged Go/shell files.
+# Mirrors the .claude/settings.json PostToolUse hook so editing locally and
+# editing via Claude Code give the same fast-feedback shape.
+# Bypass: git commit --no-verify
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+GO_MODULES=("middleware" "procula" "cmd/pelicula")
+
+# Collect staged files (Added, Copied, Modified only — not deletions)
+staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+if [[ -z "$staged_files" ]]; then
+  exit 0
+fi
+
+# ── Go checks ──────────────────────────────────────────────────────────────────
+
+# Determine which modules have staged .go files (bash 3.2-compatible dedup)
+touched_modules=""
+while IFS= read -r f; do
+  [[ "$f" == *.go ]] || continue
+  abs="$REPO_ROOT/$f"
+  # Walk up to find go.mod
+  d="$(dirname "$abs")"
+  while [[ "$d" != "$REPO_ROOT" && "$d" != "/" ]]; do
+    if [[ -f "$d/go.mod" ]]; then
+      # Store the module path relative to repo root
+      rel="${d#"$REPO_ROOT"/}"
+      # Dedup: only add if not already present
+      case " $touched_modules " in
+        *" $rel "*) ;;
+        *) touched_modules="$touched_modules $rel" ;;
+      esac
+      break
+    fi
+    d="$(dirname "$d")"
+  done
+done <<< "$staged_files"
+
+if [[ -n "$touched_modules" ]]; then
+  for mod in $touched_modules; do
+    echo "pre-commit: checking $mod (vet + build + test -short)..."
+    (cd "$REPO_ROOT/$mod" && go vet ./... && go build ./... && go test -short ./...)
+  done
+fi
+
+# ── Shell checks ───────────────────────────────────────────────────────────────
+
+if ! command -v shellcheck &>/dev/null; then
+  echo "pre-commit: shellcheck not installed, skipping shell checks" >&2
+else
+  shell_files=()
+  while IFS= read -r f; do
+    case "$f" in
+      *.sh|pelicula) shell_files+=("$REPO_ROOT/$f") ;;
+    esac
+  done <<< "$staged_files"
+
+  if [[ ${#shell_files[@]} -gt 0 ]]; then
+    echo "pre-commit: shellcheck ${shell_files[*]##"$REPO_ROOT"/}..."
+    shellcheck -S warning "${shell_files[@]}"
+  fi
+fi
+
+echo "pre-commit: ok"

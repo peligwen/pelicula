@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# pre-push: full unit suite + shellcheck before code leaves the laptop.
+# Bypass: git push --no-verify
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+echo "pre-push: running make test (all modules)..."
+(cd "$REPO_ROOT" && make test)
+
+if ! command -v shellcheck &>/dev/null; then
+  echo "pre-push: shellcheck not installed, skipping shell checks" >&2
+else
+  echo "pre-push: shellcheck tests/e2e.sh pelicula..."
+  (cd "$REPO_ROOT" && shellcheck -S warning tests/e2e.sh pelicula)
+fi
+
+echo "pre-push: ok"

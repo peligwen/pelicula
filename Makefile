@@ -1,4 +1,4 @@
-.PHONY: build test test-procula test-middleware test-cli test-race test-cover e2e
+.PHONY: build test test-procula test-middleware test-cli test-race test-cover e2e install-hooks verify
 
 build:
 	cd cmd/pelicula && go build -ldflags "-X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o ../../bin/pelicula .
@@ -25,3 +25,12 @@ test-cover:
 
 e2e:
 	bash tests/e2e.sh
+
+install-hooks:
+	git config core.hooksPath .githooks
+	git config merge.ff false
+	@echo "hooks installed — pre-commit, pre-push, pre-merge-commit active"
+	@echo "merges into main will run the full suite (unit + e2e, ~10 min)"
+	@echo "bypass any hook with --no-verify"
+
+verify: test e2e

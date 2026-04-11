@@ -169,6 +169,14 @@ the threat model, known limitations, and how to report a vulnerability
 privately. The opt-in Peligrosa remote access feature exposes **only
 Jellyfin** over TLS — never the admin stack.
 
+## Development
+
+```
+make install-hooks   # one-time: sets up pre-commit, pre-push, and pre-merge-commit hooks
+make test            # unit tests (all 3 modules)
+make verify          # unit tests + e2e integration suite (~10 min)
+```
+
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE). If you run a modified version of Pelicula

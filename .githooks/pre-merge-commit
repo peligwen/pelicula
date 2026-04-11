@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# pre-merge-commit: gates feature→main merges with the full verification suite.
+# Only enforces when HEAD is main (doesn't block git merge main into a feature branch).
+# Fires only for non-FF merges — combine with `git config merge.ff false`
+# (set by `make install-hooks`) so every feature merge triggers this hook.
+# Bypass: git merge --no-verify
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+if [[ "$current_branch" != "main" ]]; then
+  exit 0
+fi
+
+echo "pre-merge-commit: on main — running full verification before merge..."
+echo ""
+
+echo "pre-merge-commit: [1/2] unit tests (make test)..."
+(cd "$REPO_ROOT" && make test)
+echo ""
+
+echo "pre-merge-commit: [2/2] integration tests (tests/e2e.sh, ~10 min)..."
+(cd "$REPO_ROOT" && bash tests/e2e.sh)
+echo ""
+
+echo "pre-merge-commit: verification passed — merge proceeding"
