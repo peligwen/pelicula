@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -32,10 +35,7 @@ func main() {
 		// Peligrosa: requireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
 		mux.Handle("/api/pelicula/setup", requireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
-		if err := http.ListenAndServe(":8181", mux); err != nil {
-			slog.Error("server exited", "component", "main", "error", err)
-			os.Exit(1)
-		}
+		serveWithShutdown(":8181", mux)
 		return
 	}
 
@@ -202,9 +202,27 @@ func main() {
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
-	if err := http.ListenAndServe(":8181", mux); err != nil {
-		slog.Error("server exited", "component", "main", "error", err)
-		os.Exit(1)
+	serveWithShutdown(":8181", mux)
+}
+
+func serveWithShutdown(addr string, handler http.Handler) {
+	srv := &http.Server{Addr: addr, Handler: handler}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server exited", "component", "main", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("shutdown signal received", "component", "main")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("graceful shutdown failed", "component", "main", "error", err)
 	}
 }
 
