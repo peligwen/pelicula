@@ -172,6 +172,7 @@ func TestLogin_RateLimited(t *testing.T) {
 	t.Run("blocked IP", func(t *testing.T) {
 		body := strings.NewReader(`{"username":"admin","password":"secret"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		req.RemoteAddr = "172.17.0.1:12345" // trusted upstream — nginx docker bridge
 		req.Header.Set("X-Real-IP", ip)
 		w := httptest.NewRecorder()
 		a.HandleLogin(w, req)
@@ -183,6 +184,7 @@ func TestLogin_RateLimited(t *testing.T) {
 	t.Run("different IP not affected", func(t *testing.T) {
 		body := strings.NewReader(`{"username":"admin","password":"secret"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		req.RemoteAddr = "172.17.0.1:12345" // trusted upstream — nginx docker bridge
 		req.Header.Set("X-Real-IP", "5.6.7.8")
 		w := httptest.NewRecorder()
 		a.HandleLogin(w, req)
@@ -833,12 +835,14 @@ func TestLogin_JellyfinMode_InvalidCreds_RecordsFailure(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+		req.RemoteAddr = "172.17.0.1:12345" // trusted upstream — nginx docker bridge
 		req.Header.Set("X-Real-IP", ip)
 		a.HandleLogin(httptest.NewRecorder(), req)
 	}
 	// 6th attempt should be rate-limited (no Jellyfin call)
 	body := strings.NewReader(`{"username":"alice","password":"wrong"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	req.RemoteAddr = "172.17.0.1:12345" // trusted upstream — nginx docker bridge
 	req.Header.Set("X-Real-IP", ip)
 	w := httptest.NewRecorder()
 	a.HandleLogin(w, req)

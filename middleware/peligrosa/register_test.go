@@ -287,6 +287,7 @@ func TestOpenRegister_RateLimited_Returns429(t *testing.T) {
 
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/register", body)
+	req.RemoteAddr = "172.17.0.1:12345" // trusted upstream — nginx docker bridge
 	req.Header.Set("X-Real-IP", ip)
 	w := httptest.NewRecorder()
 	auth.HandleOpenRegister(w, req)
