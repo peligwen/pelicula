@@ -12,7 +12,7 @@ Pelicula is **LAN-first**. The design baseline assumes:
 
 - The admin dashboard (`:7354`) is reachable only from a trusted local network. It is not hardened for public internet exposure.
 - Service-to-service communication between containers relies on Docker's private networks and an IP-based auth bypass inside each *arr app (`AuthenticationRequired=DisabledForLocalAddresses`). This is intentional — ``pelicula up`` enforces it on every start.
-- `PELICULA_AUTH` is an optional convenience layer for shared households, not a defense against a determined network attacker.
+- Auth is always on. The only unauthenticated path is the loopback auto-session for requests from the host machine — not a defense against a determined network attacker, but not an open door either.
 
 **Peligrosa remote vhost (opt-in):** When `REMOTE_ACCESS_ENABLED=true`, a second nginx vhost exposes **only Jellyfin** on a separate hardened port. No admin routes (`/sonarr`, `/radarr`, `/api/pelicula`, etc.) are reachable from the remote vhost. The admin port 7354 is never exposed.
 
@@ -25,14 +25,9 @@ Pelicula is **LAN-first**. The design baseline assumes:
 
 ## The Safety Surface
 
-### Authentication (`middleware/auth.go`)
+### Authentication (`middleware/peligrosa/`)
 
-Two modes via `PELICULA_AUTH`:
-
-| Mode | Behavior |
-|------|----------|
-| `off` | All requests pass through. No session required. |
-| `jellyfin` (default) | Credentials verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `/config/pelicula/roles.json`. Jellyfin admins automatically get `admin` role. No passwords stored by Pelicula — Jellyfin is the authority. |
+Auth is always on. Credentials are verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `/config/pelicula/roles.json`. Jellyfin admins automatically get `admin` role. No passwords stored by Pelicula — Jellyfin is the authority.
 
 **Sessions:** In-memory `map[token]session`, `pelicula_session` HttpOnly cookie, `SameSite=Lax`. 24-hour session lifetime; 10-minute cleanup goroutine removes expired sessions and stale rate-limit entries.
 
@@ -40,13 +35,29 @@ Two modes via `PELICULA_AUTH`:
 
 **Guards:** `Guard` (viewer+), `GuardManager` (manager+), `GuardAdmin` (admin). Wired per-route in `main.go`.
 
+### Loopback Auto-Session (`middleware/peligrosa/loopback.go`)
+
+Requests from the host machine are granted a transient admin session without a cookie — no login required from the box running the stack. This is the host-machine convenience path; LAN and remote clients must authenticate normally.
+
+The grant is **transient**: no session cookie is set. Every request from the host re-runs the check.
+
+Three gates must all pass:
+
+1. **Trusted upstream CIDR** — `r.RemoteAddr` must fall within `httputil.TrustedUpstreamCIDR` (default `172.16.0.0/12`, the Docker bridge range). A direct connection to `middleware:8181` bypassing nginx would fail here.
+2. **Loopback `X-Real-IP`** — nginx sets `X-Real-IP` from `$remote_addr` on every request, overwriting any client-supplied value. Only a client that connected to nginx on `127.0.0.1` / `::1` has a loopback `X-Real-IP`.
+3. **Loopback `Host`** — the `Host` header must be `localhost`, `127.0.0.1`, or `::1`. LAN clients connecting via `http://<lan-ip>:7354/` have the LAN IP in `Host`, not loopback.
+
+**Why it's safe:** nginx rewrites `X-Real-IP` from `$remote_addr` unconditionally — a spoofed header from a LAN client is overwritten before it reaches middleware. `Host` must be loopback, which LAN clients never send. Gate 1 ensures the request came through nginx (docker bridge peer), not a direct socket connection to middleware.
+
+**Override the upstream CIDR:** set `PELICULA_UPSTREAM_CIDR` in `.env` if your Docker bridge is outside `172.16.0.0/12` (uncommon).
+
 **Remote role capping (defense-in-depth):** The remote nginx vhost injects `X-Pelicula-Remote: true` on all proxy blocks. The middleware's `effectiveRole()` caps any session to `viewer` when this header is present, regardless of the stored role. This prevents a compromised admin credential from escalating via the remote vhost. The LAN vhost strips the header (`proxy_set_header X-Pelicula-Remote ""`) to prevent spoofing. `HandleCheck` returns `"remote": true/false` so the dashboard can adapt.
 
 ### Open Registration (`middleware/register.go`)
 
 Optional LAN-only public registration without invite tokens. Controlled by `PELICULA_OPEN_REGISTRATION` in `.env` (default `false`), toggleable via settings UI.
 
-When enabled, `/register` without a `?t=` token shows a registration form. `POST /api/pelicula/register` creates a Jellyfin user and assigns `viewer` role. Requires `PELICULA_AUTH=jellyfin` (no-op when auth is off). Rate-limited by IP (reuses auth limiter). LAN-only via `requireLocalOriginStrict` — not exposed on the remote vhost.
+When enabled, `/register` without a `?t=` token shows a registration form. `POST /api/pelicula/register` creates a Jellyfin user and assigns `viewer` role. Rate-limited by IP (reuses auth limiter). LAN-only via `requireLocalOriginStrict` — not exposed on the remote vhost.
 
 ### CSRF Origin Guard (`middleware/auth.go`)
 
@@ -56,7 +67,7 @@ Two middleware wrappers enforce the policy per-route in `main.go`:
 - **`requireLocalOriginStrict`** — rejects state-mutating requests (POST/PUT/PATCH/DELETE) with empty or non-local Origin. Used for admin-only endpoints where only a LAN browser should ever mutate state: `/settings`, `/settings/reset`, `/setup`.
 - **`requireLocalOriginSoft`** — allows empty Origin (API/curl callers) but rejects non-empty non-local Origins. Used for endpoints where programmatic callers are valid: `/users`, `/users/`, `/invites`, `/invites/`.
 
-Safe methods (GET/HEAD) always pass through. `admin_ops.go` uses a separate auth-conditional variant (`requireAuthOrLocalOrigin`) that only enforces origin checks in off-mode — the `GuardAdmin` session check provides protection when auth is enabled.
+Safe methods (GET/HEAD) always pass through. `admin_ops.go` uses `requireLocalOriginStrict` for all state-mutating requests — these paths require both a valid admin session and a local Origin.
 
 ### Users and User Management (`middleware/jellyfin.go`)
 
@@ -145,10 +156,12 @@ Enable via `the Settings UI → 8) Remote access`.
 
 | File | What it owns |
 |------|-------------|
-| `middleware/auth.go` | Sessions, login rate limiter, `isLocalOrigin` CSRF guard, `Guard`/`GuardManager`/`GuardAdmin`, remote role capping (`effectiveRole`) |
-| `middleware/register.go` | Open LAN registration (optional, `PELICULA_OPEN_REGISTRATION`) |
-| `middleware/invites.go` | Invite token lifecycle, redemption |
-| `middleware/requests.go` | Viewer request queue, approval/denial flow |
+| `middleware/peligrosa/auth.go` | Sessions, login rate limiter, `isLocalOrigin` CSRF guard, `Guard`/`GuardManager`/`GuardAdmin`, remote role capping (`effectiveRole`) |
+| `middleware/peligrosa/loopback.go` | Loopback auto-session (3-gate check: trusted CIDR + loopback X-Real-IP + loopback Host) |
+| `middleware/peligrosa/register.go` | Open LAN registration (optional, `PELICULA_OPEN_REGISTRATION`) |
+| `middleware/peligrosa/invites.go` | Invite token lifecycle, redemption |
+| `middleware/peligrosa/requests.go` | Viewer request queue, approval/denial flow |
+| `middleware/peligrosa/routes.go` | `peligrosa.RegisterRoutes` — the subpackage's public API surface |
 | `middleware/jellyfin.go` | `handleUsers`, `handleUsersWithID`, `CreateJellyfinUser` |
 | `middleware/pipeline.go` | Unified pipeline aggregation (downloads + procula jobs + monitoring requests) |
 | `middleware/hooks.go` | Webhook secret validation, path allowlist |
@@ -168,4 +181,4 @@ See [ROADMAP.md — Peligrosa initiative](ROADMAP.md#peligrosa-initiative) for t
 
 - **HMAC invite tokens** — sign tokens so validity is verifiable without a DB read
 - ~~**Central CSRF middleware**~~ — shipped: `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`
-- **`middleware/peligrosa/` subpackage** — extract the trust boundary into its own Go package with an explicit API surface
+- ~~**`middleware/peligrosa/` subpackage**~~ — shipped: auth, invites, requests, and webhook validation extracted into `middleware/peligrosa/` with an explicit API surface (`peligrosa.RegisterRoutes`)

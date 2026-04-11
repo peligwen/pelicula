@@ -161,12 +161,11 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 **Dual subtitles** — optional post-Bazarr pipeline stage that stacks two subtitle tracks into a single ASS sidecar file (e.g. `Movie.en-es.ass`) for language learners. Base language appears bottom-center; learning language appears top-center. Configure via `DUALSUB_ENABLED` / `DUALSUB_PAIRS` or the Procula settings UI. See [PROCULA.md](docs/PROCULA.md) for details.
 
-## Auth
+## Authentication
 
-Pelicula supports two modes via `PELICULA_AUTH` in `.env`:
+Pelicula requires a login after first use. The first POST to `/api/pelicula/register` on an empty install claims the admin account. Credentials are verified against Jellyfin; roles are stored locally in `roles.json`; Jellyfin admins automatically get admin in Pelicula.
 
-- `off` — no login required. Fine on a trusted LAN.
-- `jellyfin` (default) — credentials verified against Jellyfin. Roles stored locally in `roles.json`; Jellyfin admins automatically get admin in Pelicula.
+For convenience, requests originating on the host machine are granted an admin session automatically — no login required from the box running the stack. This is a per-request transient grant (no cookie is set); LAN and remote clients must authenticate normally.
 
 Role capabilities: **viewer** sees the dashboard and can submit content requests; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
 
@@ -239,8 +238,8 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | Bazarr auto subtitle acquisition (wired to Sonarr + Radarr on startup) | ✓ playwright (subtitle-acquisition spec: await_subs stage → completed → jellyfin_synced) | ☐ |
 | Dual subtitles (stacked ASS sidecar, base + learning language) | ~ partial (pipeline stage runs; output file not asserted) | ☐ |
 | **Auth** | | |
-| `PELICULA_AUTH=off` (no login required) | ~ partial (e2e toggles; only jellyfin-mode behaviour asserted end to end) | ☐ |
-| `PELICULA_AUTH=jellyfin` (credentials verified against Jellyfin) | ✓ e2e.sh (login 401/200, session cookie, protected routes, logout) | ☐ |
+| Login required (Jellyfin-backed, always on) | ✓ e2e.sh (login 401/200, session cookie, protected routes, logout) | ☐ |
+| Loopback auto-session (host-machine requests, transient) | — | ☐ |
 | Jellyfin admins automatically get admin role in Pelicula | — | ☐ |
 | Role capabilities: viewer / manager / admin | — | ☐ |
 | **CLI** | | |
