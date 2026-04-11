@@ -86,39 +86,6 @@ func TestParseEnvFile_NotExist(t *testing.T) {
 	}
 }
 
-// ── httputil.IsLocalOrigin truth table ─────────────────────────────────────────────────
-
-func TestIsLocalOrigin(t *testing.T) {
-	cases := []struct {
-		origin string
-		want   bool
-	}{
-		// Empty origin must return false (prevents unauthenticated curl CSRF)
-		{"", false},
-		// Localhost variants
-		{"http://localhost:7354", true},
-		{"http://127.0.0.1:7354", true},
-		{"http://[::1]:7354", true},
-		// RFC1918 ranges
-		{"http://192.168.1.100:7354", true},
-		{"http://10.0.0.1:7354", true},
-		{"http://172.20.0.5:7354", true},
-		// External addresses
-		{"https://evil.example.com", false},
-		{"http://8.8.8.8:7354", false},
-		// Malformed
-		{"not-a-url", false},
-	}
-	for _, c := range cases {
-		t.Run(c.origin, func(t *testing.T) {
-			got := httputil.IsLocalOrigin(c.origin)
-			if got != c.want {
-				t.Errorf("httputil.IsLocalOrigin(%q) = %v, want %v", c.origin, got, c.want)
-			}
-		})
-	}
-}
-
 // ── handleSettingsUpdate input validation ─────────────────────────────────────
 
 func newSettingsEnv(t *testing.T) string {

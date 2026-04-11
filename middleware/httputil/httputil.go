@@ -31,6 +31,9 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 // as the pre-extraction main.clientIP. Tightening to only trust the header
 // when r.RemoteAddr is the known nginx upstream is deferred to the
 // loopbackAutoSession work (fixes MEDIUM-3).
+//
+// Uses strings.LastIndex rather than net.SplitHostPort to preserve bracketed
+// IPv6 forms (e.g. "[::1]") byte-for-byte with the original helper.
 func ClientIP(r *http.Request) string {
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip

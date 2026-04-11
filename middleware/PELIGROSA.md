@@ -8,15 +8,15 @@ For the full narrative, threat model, and known limitations, see [../docs/PELIGR
 
 | File | Surface |
 |------|---------|
-| `auth.go` | Sessions, password hashing, login rate limiter, `isLocalOrigin` CSRF guard, `Guard`/`GuardManager`/`GuardAdmin` |
+| `auth.go` | Sessions, password hashing, login rate limiter, `httputil.IsLocalOrigin` CSRF guard, `Guard`/`GuardManager`/`GuardAdmin` |
 | `invites.go` | Invite token lifecycle, redemption → Jellyfin user creation |
 | `requests.go` | Viewer request queue; viewer/admin trust split |
 | `jellyfin.go` | `handleUsers`, `handleUsersWithID`, `CreateJellyfinUser` dual-write bridge (user CRUD only — library/setup-wizard code in the same file is not part of this surface) |
 | `hooks.go` | Webhook secret validation (`WEBHOOK_SECRET`), payload path allowlist |
 | `library.go` | `handleBrowse` — symlink resolve + prefix re-check for folder browser |
-| `settings.go` | Uses `isLocalOrigin` (strict pattern) for admin settings POSTs |
-| `setup.go` | Uses `isLocalOrigin` (strict pattern) for setup wizard POST |
-| `admin_ops.go` | Uses `isLocalOrigin` (strict pattern) for container restart/rebuild ops |
+| `settings.go` | Uses `httputil.IsLocalOrigin` (strict pattern) for admin settings POSTs |
+| `setup.go` | Uses `httputil.IsLocalOrigin` (strict pattern) for setup wizard POST |
+| `admin_ops.go` | Uses `httputil.IsLocalOrigin` (strict pattern) for container restart/rebuild ops |
 | `main.go` | Route table — trust level wired per endpoint via `Guard*` |
 
 ## What is NOT part of this surface

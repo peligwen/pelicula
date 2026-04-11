@@ -33,7 +33,7 @@ func main() {
 			w.Write([]byte(`{"status":"setup"}`))
 		})
 		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
-		// Peligrosa: requireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
+		// Peligrosa: httputil.RequireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
 		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
 		serveWithShutdown(":8181", mux)
@@ -140,7 +140,7 @@ func main() {
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
 
 	// admin only: settings (read and update .env)
-	// Peligrosa: requireLocalOriginStrict guards the POST paths against cross-origin mutations.
+	// Peligrosa: httputil.RequireLocalOriginStrict guards the POST paths against cross-origin mutations.
 	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettings))))
 	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
 
@@ -149,18 +149,18 @@ func main() {
 	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))
 
 	// admin only: Jellyfin user management (list + create)
-	// Peligrosa: requireLocalOriginSoft allows API callers, blocks browser cross-origin.
+	// Peligrosa: httputil.RequireLocalOriginSoft allows API callers, blocks browser cross-origin.
 	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsers))))
 	// admin only: per-user operations (delete + password reset)
 	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
 
 	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
-	// Peligrosa: requireLocalOriginSoft on both routes — redeem is public but invite-gated.
+	// Peligrosa: httputil.RequireLocalOriginSoft on both routes — redeem is public but invite-gated.
 	mux.Handle("/api/pelicula/invites", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleInvites))))
 	mux.HandleFunc("/api/pelicula/invites/", httputil.RequireLocalOriginSoft(http.HandlerFunc(handleInviteOp)).ServeHTTP)
 
 	// Open registration (LAN-only, optional): public account creation without invite tokens.
-	// Peligrosa: requireLocalOriginStrict ensures only LAN browsers can POST.
+	// Peligrosa: httputil.RequireLocalOriginStrict ensures only LAN browsers can POST.
 	mux.HandleFunc("/api/pelicula/register/check", handleOpenRegCheck)
 	mux.HandleFunc("/api/pelicula/generate-password", handleGeneratePassword)
 	mux.Handle("/api/pelicula/register", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleOpenRegister)))
