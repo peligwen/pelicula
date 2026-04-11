@@ -86,12 +86,9 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
 
         // Select "migrate" strategy
         await page.locator('input[name="strategy"][value="migrate"]').check();
-
-        // Disable FFprobe validation (synthetic file is too small to pass sample check)
-        const validateToggle = page.locator('#validate-toggle');
-        if (await validateToggle.isChecked()) {
-            await validateToggle.uncheck();
-        }
+        // Leave validate-toggle checked (default) — Procula's validation_enabled=false
+        // setting (set by e2e.sh Stage 3) prevents FFprobe from running on the
+        // synthetic file, but the toggle must stay on to queue a Procula job.
 
         // ── 8. Apply import ────────────────────────────────────────
         await page.locator('#step-configure button.import-btn.primary').click();
