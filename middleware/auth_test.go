@@ -45,6 +45,8 @@ func boolStr(b bool) string {
 
 // newTestAuth creates an Auth for testing without touching the filesystem.
 // The cleanup goroutine is harmless in tests (sleeps 10 min, then GC'd).
+// jellyfin is nil — tests that exercise HandleLogin or any CreateUser path must
+// use newTestJellyfinAuth (or newTestJellyfinAuthWithServices) instead.
 func newTestAuth(mode string) *Auth {
 	return &Auth{
 		mode:     mode,
@@ -56,7 +58,17 @@ func newTestAuth(mode string) *Auth {
 // newTestJellyfinAuth creates an Auth in "jellyfin" mode for testing.
 // store may be nil — a fresh RolesStore backed by a test DB is used.
 // httpClient should point at an httptest.Server serving the Jellyfin API.
+// services is nil — tests that exercise CreateUser must use newTestJellyfinAuthWithServices.
 func newTestJellyfinAuth(t *testing.T, store *RolesStore, httpClient *http.Client) *Auth {
+	t.Helper()
+	return newTestJellyfinAuthWithServices(t, store, httpClient, nil)
+}
+
+// newTestJellyfinAuthWithServices creates an Auth in "jellyfin" mode for testing,
+// wiring the given ServiceClients so that CreateUser calls (via HandleOpenRegister)
+// reach the fake Jellyfin server. store may be nil; httpClient may be nil (defaults
+// to http.DefaultClient).
+func newTestJellyfinAuthWithServices(t *testing.T, store *RolesStore, httpClient *http.Client, svcs *ServiceClients) *Auth {
 	t.Helper()
 	if store == nil {
 		store = NewRolesStore(testDB(t))
@@ -69,8 +81,7 @@ func newTestJellyfinAuth(t *testing.T, store *RolesStore, httpClient *http.Clien
 		sessions:   make(map[string]session),
 		failures:   make(map[string]*loginAttempts),
 		rolesStore: store,
-		httpClient: httpClient,
-		jellyfin:   NewJellyfinHTTPClient(httpClient, nil),
+		jellyfin:   NewJellyfinHTTPClient(httpClient, svcs),
 	}
 }
 
@@ -879,9 +890,9 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 
 	// Auth1: perform a login — this writes the session to SQLite.
 	a1 := NewAuth(AuthConfig{
-		Mode:       "jellyfin",
-		DB:         db,
-		HTTPClient: srv.Client(),
+		Mode:     "jellyfin",
+		DB:       db,
+		Jellyfin: NewJellyfinHTTPClient(srv.Client(), nil),
 	})
 
 	loginBody := strings.NewReader(`{"username":"alice","password":"pass"}`)
@@ -906,9 +917,9 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 
 	// Auth2: new instance on the same DB — must restore sessions from SQLite.
 	a2 := NewAuth(AuthConfig{
-		Mode:       "jellyfin",
-		DB:         db,
-		HTTPClient: srv.Client(),
+		Mode:     "jellyfin",
+		DB:       db,
+		Jellyfin: NewJellyfinHTTPClient(srv.Client(), nil),
 	})
 
 	// Verify the session is available via HandleCheck.

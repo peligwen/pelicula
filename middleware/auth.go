@@ -54,7 +54,6 @@ type Auth struct {
 	mode       string
 	db         *sql.DB        // non-nil in production; nil in tests that don't need persistence
 	rolesStore *RolesStore    // non-nil in "jellyfin" mode
-	httpClient *http.Client   // kept for non-Jellyfin HTTP calls
 	jellyfin   JellyfinClient // used for Jellyfin auth calls
 	sessions   map[string]session
 	failures   map[string]*loginAttempts // IP → recent failure timestamps
@@ -63,30 +62,18 @@ type Auth struct {
 
 // AuthConfig holds parameters for NewAuth.
 type AuthConfig struct {
-	Mode       string
-	DB         *sql.DB        // for session + rate-limit persistence (nil = in-memory only)
-	HTTPClient *http.Client   // for "jellyfin" mode; nil → 10-second default client
-	Jellyfin   JellyfinClient // for "jellyfin" mode; nil → production client built from HTTPClient
+	Mode     string
+	DB       *sql.DB        // for session + rate-limit persistence (nil = in-memory only)
+	Jellyfin JellyfinClient // for "jellyfin" mode; must be non-nil when Mode == "jellyfin"
 }
 
 func NewAuth(cfg AuthConfig) *Auth {
-	hc := cfg.HTTPClient
-	if hc == nil {
-		hc = &http.Client{Timeout: 10 * time.Second}
-	}
-	jc := cfg.Jellyfin
-	if jc == nil && cfg.Mode == "jellyfin" {
-		// Build a minimal production client using only the http.Client.
-		// Auth only needs AuthenticateByName; CreateUser is unused by Auth.
-		jc = NewJellyfinHTTPClient(hc, nil)
-	}
 	a := &Auth{
-		mode:       cfg.Mode,
-		db:         cfg.DB,
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		httpClient: hc,
-		jellyfin:   jc,
+		mode:     cfg.Mode,
+		db:       cfg.DB,
+		sessions: make(map[string]session),
+		failures: make(map[string]*loginAttempts),
+		jellyfin: cfg.Jellyfin,
 	}
 	if cfg.Mode == "jellyfin" {
 		if cfg.DB != nil {

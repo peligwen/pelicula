@@ -178,13 +178,7 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 	// Seed an existing admin so IsEmpty() returns false — this test verifies
 	// that subsequent registrants get viewer, not admin.
 	_ = store.Upsert("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
-	auth := &Auth{
-		mode:       "jellyfin",
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
-		jellyfin:   NewJellyfinHTTPClient(http.DefaultClient, services),
-	}
+	auth := newTestJellyfinAuthWithServices(t, store, nil, services)
 	origAuth := authMiddleware
 	authMiddleware = auth
 	t.Cleanup(func() { authMiddleware = origAuth })
@@ -226,13 +220,7 @@ func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
 	// Fresh roles store — IsEmpty() returns true.
 	// Use the global services (set by resetServices above) so CreateUser works.
 	store := NewRolesStore(testDB(t))
-	auth := &Auth{
-		mode:       "jellyfin",
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
-		jellyfin:   NewJellyfinHTTPClient(http.DefaultClient, services),
-	}
+	auth := newTestJellyfinAuthWithServices(t, store, nil, services)
 	origAuth := authMiddleware
 	authMiddleware = auth
 	t.Cleanup(func() { authMiddleware = origAuth })
