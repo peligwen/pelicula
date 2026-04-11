@@ -10,7 +10,7 @@ import (
 )
 
 type SearchResult struct {
-	Type     string `json:"type"`     // "movie" or "series"
+	Type     string `json:"type"` // "movie" or "series"
 	Title    string `json:"title"`
 	Year     int    `json:"year"`
 	Overview string `json:"overview"`
@@ -21,9 +21,9 @@ type SearchResult struct {
 	// Enriched metadata
 	Genres        []string `json:"genres,omitempty"`
 	Certification string   `json:"certification,omitempty"`
-	Runtime       int      `json:"runtime,omitempty"` // minutes
-	Rating        float64  `json:"rating,omitempty"`  // IMDb preferred, falls back to TMDB
-	Network       string   `json:"network,omitempty"` // series only
+	Runtime       int      `json:"runtime,omitempty"`     // minutes
+	Rating        float64  `json:"rating,omitempty"`      // IMDb preferred, falls back to TMDB
+	Network       string   `json:"network,omitempty"`     // series only
 	SeasonCount   int      `json:"seasonCount,omitempty"` // series only
 }
 
@@ -50,159 +50,159 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Search Radarr (movies)
 	if typeFilter != "series" {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
-		if err != nil {
-			slog.Error("radarr search error", "component", "search", "error", err)
-			return
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
+			if err != nil {
+				slog.Error("radarr search error", "component", "search", "error", err)
+				return
+			}
 
-		// Get existing movies to check "added" status
-		existingData, _ := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
-		existingIDs := make(map[int]bool)
-		var existing []map[string]any
-		if json.Unmarshal(existingData, &existing) == nil {
-			for _, m := range existing {
-				if id, ok := m["tmdbId"].(float64); ok {
-					existingIDs[int(id)] = true
+			// Get existing movies to check "added" status
+			existingData, _ := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
+			existingIDs := make(map[int]bool)
+			var existing []map[string]any
+			if json.Unmarshal(existingData, &existing) == nil {
+				for _, m := range existing {
+					if id, ok := m["tmdbId"].(float64); ok {
+						existingIDs[int(id)] = true
+					}
 				}
 			}
-		}
 
-		var rawMovies []map[string]any
-		if json.Unmarshal(data, &rawMovies) != nil {
-			return
-		}
+			var rawMovies []map[string]any
+			if json.Unmarshal(data, &rawMovies) != nil {
+				return
+			}
 
-		mu.Lock()
-		for _, m := range rawMovies {
-			tmdbID := int(floatVal(m, "tmdbId"))
-			poster := ""
-			if images, ok := m["images"].([]any); ok {
-				for _, img := range images {
-					if imgMap, ok := img.(map[string]any); ok {
-						if imgMap["coverType"] == "poster" {
-							poster = strVal(imgMap, "remoteUrl")
-							break
+			mu.Lock()
+			for _, m := range rawMovies {
+				tmdbID := int(floatVal(m, "tmdbId"))
+				poster := ""
+				if images, ok := m["images"].([]any); ok {
+					for _, img := range images {
+						if imgMap, ok := img.(map[string]any); ok {
+							if imgMap["coverType"] == "poster" {
+								poster = strVal(imgMap, "remoteUrl")
+								break
+							}
 						}
 					}
 				}
-			}
-			sr := SearchResult{
-				Type:          "movie",
-				Title:         strVal(m, "title"),
-				Year:          int(floatVal(m, "year")),
-				Overview:      strVal(m, "overview"),
-				Poster:        poster,
-				TmdbID:        tmdbID,
-				Added:         existingIDs[tmdbID],
-				Certification: strVal(m, "certification"),
-				Runtime:       int(floatVal(m, "runtime")),
-			}
-			if genres, ok := m["genres"].([]any); ok {
-				for _, g := range genres {
-					if s, ok := g.(string); ok {
-						sr.Genres = append(sr.Genres, s)
+				sr := SearchResult{
+					Type:          "movie",
+					Title:         strVal(m, "title"),
+					Year:          int(floatVal(m, "year")),
+					Overview:      strVal(m, "overview"),
+					Poster:        poster,
+					TmdbID:        tmdbID,
+					Added:         existingIDs[tmdbID],
+					Certification: strVal(m, "certification"),
+					Runtime:       int(floatVal(m, "runtime")),
+				}
+				if genres, ok := m["genres"].([]any); ok {
+					for _, g := range genres {
+						if s, ok := g.(string); ok {
+							sr.Genres = append(sr.Genres, s)
+						}
 					}
 				}
-			}
-			if ratings, ok := m["ratings"].(map[string]any); ok {
-				if imdb, ok := ratings["imdb"].(map[string]any); ok {
-					sr.Rating = floatVal(imdb, "value")
-				}
-				if sr.Rating == 0 {
-					if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
-						sr.Rating = floatVal(tmdbR, "value")
+				if ratings, ok := m["ratings"].(map[string]any); ok {
+					if imdb, ok := ratings["imdb"].(map[string]any); ok {
+						sr.Rating = floatVal(imdb, "value")
+					}
+					if sr.Rating == 0 {
+						if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
+							sr.Rating = floatVal(tmdbR, "value")
+						}
 					}
 				}
+				movies = append(movies, sr)
 			}
-			movies = append(movies, sr)
-		}
-		mu.Unlock()
-	}()
+			mu.Unlock()
+		}()
 	}
 
 	// Search Sonarr (series)
 	if typeFilter != "movie" {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
-		if err != nil {
-			slog.Error("sonarr search error", "component", "search", "error", err)
-			return
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
+			if err != nil {
+				slog.Error("sonarr search error", "component", "search", "error", err)
+				return
+			}
 
-		existingData, _ := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series")
-		existingIDs := make(map[int]bool)
-		var existing []map[string]any
-		if json.Unmarshal(existingData, &existing) == nil {
-			for _, s := range existing {
-				if id, ok := s["tvdbId"].(float64); ok {
-					existingIDs[int(id)] = true
+			existingData, _ := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series")
+			existingIDs := make(map[int]bool)
+			var existing []map[string]any
+			if json.Unmarshal(existingData, &existing) == nil {
+				for _, s := range existing {
+					if id, ok := s["tvdbId"].(float64); ok {
+						existingIDs[int(id)] = true
+					}
 				}
 			}
-		}
 
-		var shows []map[string]any
-		if json.Unmarshal(data, &shows) != nil {
-			return
-		}
+			var shows []map[string]any
+			if json.Unmarshal(data, &shows) != nil {
+				return
+			}
 
-		mu.Lock()
-		for _, s := range shows {
-			tvdbID := int(floatVal(s, "tvdbId"))
-			tmdbID := int(floatVal(s, "tmdbId")) // present in Sonarr for many shows
-			poster := ""
-			if images, ok := s["images"].([]any); ok {
-				for _, img := range images {
-					if imgMap, ok := img.(map[string]any); ok {
-						if imgMap["coverType"] == "poster" {
-							poster = strVal(imgMap, "remoteUrl")
-							break
+			mu.Lock()
+			for _, s := range shows {
+				tvdbID := int(floatVal(s, "tvdbId"))
+				tmdbID := int(floatVal(s, "tmdbId")) // present in Sonarr for many shows
+				poster := ""
+				if images, ok := s["images"].([]any); ok {
+					for _, img := range images {
+						if imgMap, ok := img.(map[string]any); ok {
+							if imgMap["coverType"] == "poster" {
+								poster = strVal(imgMap, "remoteUrl")
+								break
+							}
 						}
 					}
 				}
-			}
-			sr := SearchResult{
-				Type:          "series",
-				Title:         strVal(s, "title"),
-				Year:          int(floatVal(s, "year")),
-				Overview:      strVal(s, "overview"),
-				Poster:        poster,
-				TvdbID:        tvdbID,
-				TmdbID:        tmdbID,
-				Added:         existingIDs[tvdbID],
-				Certification: strVal(s, "certification"),
-				Runtime:       int(floatVal(s, "runtime")),
-				Network:       strVal(s, "network"),
-			}
-			if genres, ok := s["genres"].([]any); ok {
-				for _, g := range genres {
-					if gs, ok := g.(string); ok {
-						sr.Genres = append(sr.Genres, gs)
+				sr := SearchResult{
+					Type:          "series",
+					Title:         strVal(s, "title"),
+					Year:          int(floatVal(s, "year")),
+					Overview:      strVal(s, "overview"),
+					Poster:        poster,
+					TvdbID:        tvdbID,
+					TmdbID:        tmdbID,
+					Added:         existingIDs[tvdbID],
+					Certification: strVal(s, "certification"),
+					Runtime:       int(floatVal(s, "runtime")),
+					Network:       strVal(s, "network"),
+				}
+				if genres, ok := s["genres"].([]any); ok {
+					for _, g := range genres {
+						if gs, ok := g.(string); ok {
+							sr.Genres = append(sr.Genres, gs)
+						}
 					}
 				}
-			}
-			if ratings, ok := s["ratings"].(map[string]any); ok {
-				if imdb, ok := ratings["imdb"].(map[string]any); ok {
-					sr.Rating = floatVal(imdb, "value")
-				}
-				if sr.Rating == 0 {
-					if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
-						sr.Rating = floatVal(tmdbR, "value")
+				if ratings, ok := s["ratings"].(map[string]any); ok {
+					if imdb, ok := ratings["imdb"].(map[string]any); ok {
+						sr.Rating = floatVal(imdb, "value")
+					}
+					if sr.Rating == 0 {
+						if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
+							sr.Rating = floatVal(tmdbR, "value")
+						}
 					}
 				}
+				if stats, ok := s["statistics"].(map[string]any); ok {
+					sr.SeasonCount = int(floatVal(stats, "seasonCount"))
+				}
+				series = append(series, sr)
 			}
-			if stats, ok := s["statistics"].(map[string]any); ok {
-				sr.SeasonCount = int(floatVal(stats, "seasonCount"))
-			}
-			series = append(series, sr)
-		}
-		mu.Unlock()
-	}()
+			mu.Unlock()
+		}()
 	}
 
 	wg.Wait()

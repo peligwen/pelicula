@@ -341,8 +341,8 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 		},
 		Invites: []InviteExport{
 			{
-				Token: "aaaabbbbccccddddeeeeffffgggghhhh123",
-				Label: "family",
+				Token:     "aaaabbbbccccddddeeeeffffgggghhhh123",
+				Label:     "family",
 				CreatedAt: now,
 				CreatedBy: "admin",
 				MaxUses:   &maxUses,

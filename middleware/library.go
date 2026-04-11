@@ -91,11 +91,11 @@ type LibraryApplyResult struct {
 }
 
 type ApplyItemResult struct {
-	Title  string `json:"title"`
-	Src    string `json:"src,omitempty"`
-	Dest   string `json:"dest,omitempty"`
-	FSOp   string `json:"fsOp,omitempty"` // "moved", "symlinked", "kept", "skipped", "failed"
-	Error  string `json:"error,omitempty"`
+	Title string `json:"title"`
+	Src   string `json:"src,omitempty"`
+	Dest  string `json:"dest,omitempty"`
+	FSOp  string `json:"fsOp,omitempty"` // "moved", "symlinked", "kept", "skipped", "failed"
+	Error string `json:"error,omitempty"`
 }
 
 // ── Browse types ─────────────────────────────────────────────────────────────
@@ -1423,4 +1423,3 @@ func sendSubSearch(w http.ResponseWriter, r *http.Request, arrType string, arrID
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body) //nolint:errcheck
 }
-

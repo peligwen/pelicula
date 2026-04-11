@@ -265,7 +265,7 @@ func completeJellyfinWizard(s *ServiceClients) (string, error) {
 
 	// Step 1: initial config
 	_, err := jellyfinPost(s, "/Startup/Configuration", "", map[string]any{
-		"UICulture":          "en-US",
+		"UICulture":           "en-US",
 		"MetadataCountryCode": "US",
 	})
 	if err != nil {

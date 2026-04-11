@@ -206,4 +206,3 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 	slog.Info("torrent cancelled", "component", "downloads", "action", action, "hash", shortHash(req.Hash), "category", req.Category, "blocklist", req.Blocklist, "reason", req.Reason)
 	writeJSON(w, map[string]string{"status": "removed"})
 }
-

@@ -17,7 +17,6 @@ var (
 	bazarrURL   = envOr("BAZARR_URL", "http://bazarr:6767/bazarr")
 )
 
-
 func AutoWire(s *ServiceClients) error {
 	slog.Info("waiting for services to be ready", "component", "autowire")
 
@@ -246,10 +245,10 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 			{"name": "username", "value": ""},
 			{"name": "password", "value": ""},
 		},
-		"onGrab":       false,
-		"onDownload":   true,
-		"onUpgrade":    true,
-		"onHealthIssue": false,
+		"onGrab":              false,
+		"onDownload":          true,
+		"onUpgrade":           true,
+		"onHealthIssue":       false,
 		"onApplicationUpdate": false,
 	}
 
@@ -438,7 +437,6 @@ func bzPost(s *ServiceClients, path string, payload any) ([]byte, error) {
 	s.mu.RUnlock()
 	return s.arrDo("POST", bazarrURL, key, path, payload)
 }
-
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
 	// Check existing applications

@@ -44,12 +44,12 @@ func TestCheckDuration(t *testing.T) {
 		{"empty duration", "", 90, "skip"},
 		{"zero expected minutes", "5400.0", 0, "skip"},
 		{"both empty", "", 0, "skip"},
-		{"exact match", "5400.0", 90, "pass"},       // 90*60=5400
-		{"within 10%", "5800.0", 90, "pass"},        // dev ~7.4% — under the 10% warn threshold
-		{"just over 10%", "5941.0", 90, "warn"},     // dev ~10.02% — just over warn threshold
-		{"just under 50%", "2701.0", 90, "warn"},    // dev ~49.98%
-		{"exactly 50%", "2700.0", 90, "warn"},       // dev = 0.5, not > 0.5, so warn
-		{"over 50%", "2699.0", 90, "fail"},          // dev >50%
+		{"exact match", "5400.0", 90, "pass"},    // 90*60=5400
+		{"within 10%", "5800.0", 90, "pass"},     // dev ~7.4% — under the 10% warn threshold
+		{"just over 10%", "5941.0", 90, "warn"},  // dev ~10.02% — just over warn threshold
+		{"just under 50%", "2701.0", 90, "warn"}, // dev ~49.98%
+		{"exactly 50%", "2700.0", 90, "warn"},    // dev = 0.5, not > 0.5, so warn
+		{"over 50%", "2699.0", 90, "fail"},       // dev >50%
 		{"unparseable", "abc", 90, "skip"},
 		{"zero duration string", "0", 90, "skip"},
 		{"negative-like", "-100", 90, "skip"},
@@ -183,7 +183,7 @@ func TestIsAllowedPath(t *testing.T) {
 	}{
 		{"/downloads/movie.mkv", true},
 		{"/processing/out.mkv", true},
-		{"/downloads", true},            // exact prefix match via filepath.Clean
+		{"/downloads", true},               // exact prefix match via filepath.Clean
 		{"/movies/Alien/alien.mkv", false}, // imported media — never delete
 		{"/tv/show/s01e01.mkv", false},     // imported media — never delete
 		{"/etc/passwd", false},

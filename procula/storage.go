@@ -187,7 +187,7 @@ func RunStorageMonitor(configDir string) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	lastStatus := make(map[string]string)    // fsID → last alerted status
+	lastStatus := make(map[string]string)       // fsID → last alerted status
 	lastAlertTime := make(map[string]time.Time) // fsID → last alert time
 
 	check := func() {

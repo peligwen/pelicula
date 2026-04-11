@@ -220,4 +220,3 @@ func TestStorageNotificationMessage(t *testing.T) {
 		t.Errorf("message contains duplicate label pattern: %q", events[0].Message)
 	}
 }
-

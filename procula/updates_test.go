@@ -15,10 +15,10 @@ func TestIsNewerVersion(t *testing.T) {
 		want            bool
 	}{
 		{"v1.2.0", "v1.1.0", true},
-		{"v1.1.0", "v1.1.0", false},  // same version
-		{"v1.0.0", "v1.1.0", false},  // older
-		{"", "v1.0.0", false},         // no latest (no release yet)
-		{"v1.0.0", "dev", false},      // dev build — never show update
+		{"v1.1.0", "v1.1.0", false}, // same version
+		{"v1.0.0", "v1.1.0", false}, // older
+		{"", "v1.0.0", false},       // no latest (no release yet)
+		{"v1.0.0", "dev", false},    // dev build — never show update
 		{"v2.0.0", "v1.9.9", true},
 		{"v1.10.0", "v1.9.0", true},  // multi-digit minor version
 		{"v1.9.0", "v1.10.0", false}, // older multi-digit

@@ -26,14 +26,14 @@ type BackupExport struct {
 
 // InviteExport captures the full state of an invite for backup/restore.
 type InviteExport struct {
-	Token     string       `json:"token"`
-	Label     string       `json:"label,omitempty"`
-	CreatedAt time.Time    `json:"created_at"`
-	CreatedBy string       `json:"created_by"`
-	ExpiresAt *time.Time   `json:"expires_at,omitempty"`
-	MaxUses   *int         `json:"max_uses,omitempty"`
-	Uses      int          `json:"uses"`
-	Revoked   bool         `json:"revoked"`
+	Token     string     `json:"token"`
+	Label     string     `json:"label,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	CreatedBy string     `json:"created_by"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	MaxUses   *int       `json:"max_uses,omitempty"`
+	Uses      int        `json:"uses"`
+	Revoked   bool       `json:"revoked"`
 }
 
 // RequestExport captures the full state of a media request for backup/restore.
@@ -426,8 +426,8 @@ func exportSeries(apiKey string) ([]SeriesExport, error) {
 				}
 				return false
 			}(),
-			Tags:           resolveTagLabels(s, tagMap),
-			Seasons:        extractSeasons(s),
+			Tags:    resolveTagLabels(s, tagMap),
+			Seasons: extractSeasons(s),
 		}
 		out = append(out, se)
 	}

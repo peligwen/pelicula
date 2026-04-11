@@ -9,19 +9,19 @@ import (
 )
 
 type VPNStatus struct {
-	Status     string `json:"status"`                // "healthy", "unhealthy", "unknown"
-	IP         string `json:"ip,omitempty"`          // public IP via gluetun
+	Status     string `json:"status"`       // "healthy", "unhealthy", "unknown"
+	IP         string `json:"ip,omitempty"` // public IP via gluetun
 	Country    string `json:"country,omitempty"`
 	Port       int    `json:"port,omitempty"`        // forwarded port, 0 if not active
 	PortStatus string `json:"port_status,omitempty"` // "ok" or "degraded"
 }
 
 type HealthResponse struct {
-	VPN           VPNStatus         `json:"vpn"`
-	Services      map[string]string `json:"services"`
-	Wired         bool              `json:"wired"`
-	ChecksPassed  int               `json:"checks_passed"`
-	ChecksTotal   int               `json:"checks_total"`
+	VPN          VPNStatus         `json:"vpn"`
+	Services     map[string]string `json:"services"`
+	Wired        bool              `json:"wired"`
+	ChecksPassed int               `json:"checks_passed"`
+	ChecksTotal  int               `json:"checks_total"`
 }
 
 // handleHealth performs a comprehensive health check of the stack.

@@ -295,9 +295,9 @@ func TestParseSRTTime_ShortFraction(t *testing.T) {
 		in   string
 		want time.Duration
 	}{
-		{"00:00:01,5", 1*time.Second + 500*time.Millisecond},   // 1 digit → ×100
-		{"00:00:01,50", 1*time.Second + 500*time.Millisecond},  // 2 digits → ×10
-		{"00:00:01,500", 1*time.Second + 500*time.Millisecond}, // 3 digits → exact
+		{"00:00:01,5", 1*time.Second + 500*time.Millisecond},    // 1 digit → ×100
+		{"00:00:01,50", 1*time.Second + 500*time.Millisecond},   // 2 digits → ×10
+		{"00:00:01,500", 1*time.Second + 500*time.Millisecond},  // 3 digits → exact
 		{"00:00:01,5000", 1*time.Second + 500*time.Millisecond}, // 4 digits → truncate
 	}
 	for _, tc := range cases {

@@ -184,4 +184,3 @@ func migrate1(tx *sql.Tx) error {
 	}
 	return nil
 }
-

@@ -52,8 +52,8 @@ func TestHandleSetupSubmit_RejectsEmptyOrigin(t *testing.T) {
 
 func TestHandleSetupSubmit_RejectsMissingVPNKey(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
-		"config_dir":  "./config",
-		"media_dir":   "~/media",
+		"config_dir": "./config",
+		"media_dir":  "~/media",
 		// vpn_skipped omitted — defaults to false, so key is required
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))

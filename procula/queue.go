@@ -26,14 +26,14 @@ type JobStage string
 const (
 	StageValidate  JobStage = "validate"
 	StageCatalog   JobStage = "catalog"
-	StageAwaitSubs JobStage = "await_subs"  // NEW: inserted between catalog and dualsub
+	StageAwaitSubs JobStage = "await_subs" // NEW: inserted between catalog and dualsub
 	StageDualSub   JobStage = "dualsub"
 	StageProcess   JobStage = "process"
 	StageDone      JobStage = "done"
 )
 
 type JobSource struct {
-	Type                   string `json:"type"`      // "movie" or "episode"
+	Type                   string `json:"type"` // "movie" or "episode"
 	Title                  string `json:"title"`
 	Year                   int    `json:"year"`
 	Path                   string `json:"path"`
@@ -56,7 +56,7 @@ type CodecInfo struct {
 }
 
 type ValidationChecks struct {
-	Integrity string     `json:"integrity"`        // "pass", "fail", "pending"
+	Integrity string     `json:"integrity"` // "pass", "fail", "pending"
 	Duration  string     `json:"duration"`
 	Sample    string     `json:"sample"`
 	Codecs    *CodecInfo `json:"codecs,omitempty"`
@@ -68,18 +68,18 @@ type ValidationResult struct {
 }
 
 type Job struct {
-	ID          string            `json:"id"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
-	State       JobState          `json:"state"`
-	Stage       JobStage          `json:"stage"`
-	Progress    float64           `json:"progress"`
-	Source      JobSource         `json:"source"`
-	Validation  *ValidationResult `json:"validation,omitempty"`
+	ID           string            `json:"id"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+	State        JobState          `json:"state"`
+	Stage        JobStage          `json:"stage"`
+	Progress     float64           `json:"progress"`
+	Source       JobSource         `json:"source"`
+	Validation   *ValidationResult `json:"validation,omitempty"`
 	MissingSubs  []string          `json:"missing_subs,omitempty"`
-	SubsAcquired []string          `json:"subs_acquired,omitempty"`  // NEW: langs Bazarr has delivered
+	SubsAcquired []string          `json:"subs_acquired,omitempty"` // NEW: langs Bazarr has delivered
 	Error        string            `json:"error,omitempty"`
-	RetryCount  int               `json:"retry_count"`
+	RetryCount   int               `json:"retry_count"`
 
 	// ManualProfile, when non-empty, causes the pipeline to skip Validate and
 	// CatalogEarly and run a targeted transcode using the named profile.

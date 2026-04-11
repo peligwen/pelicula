@@ -7,7 +7,6 @@ func shortHash(hash string) string {
 	return hash
 }
 
-
 func strVal(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
