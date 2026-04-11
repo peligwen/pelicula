@@ -233,6 +233,63 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	return job, nil
 }
 
+// createActionJob inserts a new action-bus job directly, bypassing the
+// path-dedup logic that Create uses for pipeline jobs. Each action call
+// always gets a fresh job row — dedup would corrupt in-flight pipeline jobs
+// that happen to share the same source path.
+func (q *Queue) createActionJob(source JobSource, actionType string, params map[string]any) (*Job, error) {
+	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
+	now := time.Now().UTC()
+
+	sourceJSON, err := json.Marshal(source)
+	if err != nil {
+		return nil, fmt.Errorf("marshal source: %w", err)
+	}
+	var paramsJSON *string
+	if params != nil {
+		b, _ := json.Marshal(params)
+		s := string(b)
+		paramsJSON = &s
+	}
+
+	_, err = q.db.Exec(
+		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
+		                   action_type, params, result)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL)`,
+		id,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		string(StateQueued),
+		string(StageValidate),
+		string(sourceJSON),
+		actionType,
+		paramsJSON,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert action job: %w", err)
+	}
+
+	job := &Job{
+		ID:         id,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		State:      StateQueued,
+		Stage:      StageValidate,
+		Source:     source,
+		ActionType: actionType,
+		Params:     params,
+	}
+
+	select {
+	case q.pending <- id:
+	default:
+		slog.Warn("pending channel full, action job will not run until restart", "component", "queue", "job_id", id)
+	}
+
+	return job, nil
+}
+
 func (q *Queue) Get(id string) (*Job, bool) {
 	row := q.db.QueryRow(
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,

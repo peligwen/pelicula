@@ -496,29 +496,22 @@ func (s *Server) handleCreateAction(w http.ResponseWriter, r *http.Request) {
 		params["episode_id"] = float64(req.Target.EpisodeID)
 	}
 
+	title := ""
+	if req.Target.Path != "" {
+		title = filepath.Base(req.Target.Path)
+	}
 	source := JobSource{
 		Path:    req.Target.Path,
 		ArrType: req.Target.ArrType,
 		ArrID:   req.Target.ArrID,
 		Type:    mediaTypeFromPath(req.Target.Path),
-		Title:   filepath.Base(req.Target.Path),
+		Title:   title,
 	}
 
-	job, err := s.queue.Create(source)
+	job, err := s.queue.createActionJob(source, req.Action, params)
 	if err != nil {
 		writeError(w, "create job: "+err.Error(), http.StatusInternalServerError)
 		return
-	}
-	if err := s.queue.Update(job.ID, func(j *Job) {
-		j.ActionType = req.Action
-		j.Params = params
-	}); err != nil {
-		writeError(w, "update job: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	select {
-	case s.queue.pending <- job.ID:
-	default:
 	}
 
 	waitSecs := 0
