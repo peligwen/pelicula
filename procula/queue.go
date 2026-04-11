@@ -102,6 +102,15 @@ type Job struct {
 	ActionType string         `json:"action_type,omitempty"`
 	Params     map[string]any `json:"params,omitempty"`
 	Result     map[string]any `json:"result,omitempty"`
+
+	// Catalog tracks outcomes from the catalog stage.
+	Catalog *CatalogInfo `json:"catalog,omitempty"`
+}
+
+// CatalogInfo records what happened during the catalog stage of a pipeline job.
+type CatalogInfo struct {
+	JellyfinSynced   bool `json:"jellyfin_synced"`
+	NotificationSent bool `json:"notification_sent"`
 }
 
 type Queue struct {
@@ -296,7 +305,7 @@ func (q *Queue) Get(id string) (*Job, bool) {
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result
+		        action_type, params, result, catalog
 		 FROM jobs WHERE id=?`, id,
 	)
 	job, err := scanJob(row)
@@ -312,7 +321,7 @@ func (q *Queue) List() []Job {
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result
+		        action_type, params, result, catalog
 		 FROM jobs ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -407,6 +416,12 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		s := string(b)
 		resultJSON = &s
 	}
+	var catalogJSON *string
+	if job.Catalog != nil {
+		b, _ := json.Marshal(job.Catalog)
+		s := string(b)
+		catalogJSON = &s
+	}
 
 	_, err := q.db.Exec(
 		`UPDATE jobs SET
@@ -414,7 +429,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 			subs_acquired=?,
 			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
 			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?,
-			action_type=?, params=?, result=?
+			action_type=?, params=?, result=?, catalog=?
 		 WHERE id=?`,
 		job.UpdatedAt.Format(time.RFC3339Nano),
 		string(job.State), string(job.Stage), job.Progress,
@@ -422,7 +437,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		subsAcquiredJSON,
 		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
-		job.ActionType, paramsJSON, resultJSON,
+		job.ActionType, paramsJSON, resultJSON, catalogJSON,
 		id,
 	)
 	if err != nil {
@@ -574,6 +589,7 @@ func scanJob(s scanner) (*Job, error) {
 		actionType           string
 		paramsJSON           *string
 		resultJSON           *string
+		catalogJSON          *string
 	)
 
 	err := s.Scan(
@@ -585,7 +601,7 @@ func scanJob(s scanner) (*Job, error) {
 		&dualSubOutputsJSON, &job.DualSubError,
 		&job.TranscodeProfile, &job.TranscodeDecision,
 		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,
-		&actionType, &paramsJSON, &resultJSON,
+		&actionType, &paramsJSON, &resultJSON, &catalogJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -633,6 +649,12 @@ func scanJob(s scanner) (*Job, error) {
 	}
 	if resultJSON != nil {
 		json.Unmarshal([]byte(*resultJSON), &job.Result) //nolint:errcheck
+	}
+	if catalogJSON != nil {
+		var c CatalogInfo
+		if err := json.Unmarshal([]byte(*catalogJSON), &c); err == nil {
+			job.Catalog = &c
+		}
 	}
 
 	return &job, nil

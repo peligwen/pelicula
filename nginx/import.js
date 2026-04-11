@@ -1,11 +1,5 @@
 // ── Media browser state ──────────────────────────────────────────────────────
 
-const LIBRARY_ROOTS = ['/movies', '/tv'];
-
-function isInLibrary(path) {
-    return LIBRARY_ROOTS.some(r => path === r || path.startsWith(r + '/'));
-}
-
 const state = {
     selected: [],           // [{path, name, size, isDir}]
     scanResults: [],        // from /library/scan
@@ -282,14 +276,10 @@ function updateActionBar() {
     if (files) parts.push(files + ' file' + (files > 1 ? 's' : ''));
     document.getElementById('action-bar-count').textContent = parts.join(', ') + ' selected';
 
-    // Classify paths (folders count as their root path for library detection)
-    const paths = state.selected.map(s => s.path);
-    const anyOutside = paths.some(p => !isInLibrary(p));
-
-    // Import: enabled if at least one selected path is outside library roots
+    // Import: enabled whenever anything is selected
     const btnImport = document.getElementById('btn-import');
-    btnImport.disabled = !anyOutside;
-    btnImport.title = anyOutside ? '' : 'Select files outside /movies and /tv to import';
+    btnImport.disabled = false;
+    btnImport.title = '';
 
 }
 

@@ -182,6 +182,9 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	job, _ = q.Get(id)
 	if settings.CatalogEnabled {
 		CatalogEarly(job, configDir, peliculaAPI)
+		_ = q.Update(id, func(j *Job) {
+			j.Catalog = &CatalogInfo{JellyfinSynced: true, NotificationSent: true}
+		})
 	} else {
 		slog.Info("catalog skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 	}

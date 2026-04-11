@@ -60,6 +60,7 @@ var migrations = []migration{
 	{version: 1, up: migrate1},
 	{version: 2, up: migrate2},
 	{version: 3, up: migrate3},
+	{version: 4, up: migrate4},
 }
 
 // runMigrations reads the current schema version and applies all pending
@@ -119,6 +120,12 @@ func migrate3(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// migrate4 adds the catalog column to persist CatalogInfo (jellyfin_synced, notification_sent).
+func migrate4(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN catalog TEXT`)
+	return err
 }
 
 // migrate1 creates the initial schema (version 1).

@@ -26,8 +26,8 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if ver != 3 {
-		t.Errorf("user_version = %d, want 3", ver)
+	if ver != 4 {
+		t.Errorf("user_version = %d, want 4", ver)
 	}
 
 	tables := []string{"jobs", "settings"}
@@ -103,7 +103,7 @@ func TestOpenDB_IdempotentOnSecondOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if ver != 3 {
-		t.Errorf("user_version = %d after second open, want 3", ver)
+	if ver != 4 {
+		t.Errorf("user_version = %d after second open, want 4", ver)
 	}
 }
