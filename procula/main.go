@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // configDir is the global config directory.
@@ -111,6 +113,8 @@ func main() {
 	mux.HandleFunc("POST /api/procula/subtitles/search", requireAPIKey(srv.handleSubSearch))
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
+	mux.HandleFunc("POST /api/procula/actions", requireAPIKey(srv.handleCreateAction))
+	mux.HandleFunc("GET /api/procula/actions/registry", srv.handleListActionRegistry)
 
 	slog.Info("listening", "component", "main", "addr", ":8282")
 	if err := http.ListenAndServe(":8282", mux); err != nil {
@@ -454,6 +458,93 @@ func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
 	slog.Info("manual transcode job created", "component", "api", "job_id", job.ID, "profile", req.Profile, "title", title)
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, job)
+}
+
+// handleCreateAction creates an action-bus job from an ActionRequest.
+// When ?wait=N is set (max 10 seconds) the handler blocks until the job
+// reaches a terminal state and returns the result inline.
+func (s *Server) handleCreateAction(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req ActionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	def := Lookup(req.Action)
+	if def == nil {
+		writeError(w, "unknown action: "+req.Action, http.StatusBadRequest)
+		return
+	}
+
+	params := map[string]any{}
+	for k, v := range req.Params {
+		params[k] = v
+	}
+	if req.Target.Path != "" {
+		params["path"] = req.Target.Path
+	}
+	if req.Target.ArrType != "" {
+		params["arr_type"] = req.Target.ArrType
+	}
+	if req.Target.ArrID != 0 {
+		params["arr_id"] = float64(req.Target.ArrID)
+	}
+	if req.Target.EpisodeID != 0 {
+		params["episode_id"] = float64(req.Target.EpisodeID)
+	}
+
+	source := JobSource{
+		Path:    req.Target.Path,
+		ArrType: req.Target.ArrType,
+		ArrID:   req.Target.ArrID,
+		Type:    mediaTypeFromPath(req.Target.Path),
+		Title:   filepath.Base(req.Target.Path),
+	}
+
+	job, err := s.queue.Create(source)
+	if err != nil {
+		writeError(w, "create job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.queue.Update(job.ID, func(j *Job) {
+		j.ActionType = req.Action
+		j.Params = params
+	}); err != nil {
+		writeError(w, "update job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	select {
+	case s.queue.pending <- job.ID:
+	default:
+	}
+
+	waitSecs := 0
+	if v := r.URL.Query().Get("wait"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			waitSecs = n
+		}
+	}
+	if waitSecs > 10 {
+		waitSecs = 10
+	}
+	if waitSecs > 0 {
+		final, err := s.queue.Wait(job.ID, time.Duration(waitSecs)*time.Second)
+		if err != nil && final == nil {
+			writeError(w, err.Error(), http.StatusGatewayTimeout)
+			return
+		}
+		res := ActionResult{JobID: final.ID, State: string(final.State), Error: final.Error, Result: final.Result}
+		writeJSON(w, res)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, ActionResult{JobID: job.ID, State: string(StateQueued)})
+}
+
+// handleListActionRegistry returns all registered actions as JSON.
+func (s *Server) handleListActionRegistry(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, List())
 }
 
 // isLibraryPath returns true only for paths under /movies or /tv.

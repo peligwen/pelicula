@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -86,6 +90,48 @@ func TestSubtitleRefreshRegistered(t *testing.T) {
 	registerBuiltinActions()
 	if Lookup("subtitle_refresh") == nil {
 		t.Fatal("subtitle_refresh not registered")
+	}
+}
+
+func TestHandleCreateActionSync(t *testing.T) {
+	actionRegistry = map[string]*ActionDef{}
+	registerBuiltinActions()
+
+	q := newTestQueue(t)
+	srv := &Server{queue: q, db: q.db, configDir: t.TempDir()}
+
+	// Need a background worker so the action actually runs.
+	go RunWorker(q, t.TempDir(), "http://localhost:0")
+
+	body := `{"action":"subtitle_refresh","target":{"arr_type":"radarr","arr_id":1}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/procula/actions?wait=3", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleCreateAction(w, req)
+
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	var resp ActionResult
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
+	}
+	if resp.JobID == "" {
+		t.Error("JobID empty")
+	}
+}
+
+func TestHandleCreateActionUnknown(t *testing.T) {
+	actionRegistry = map[string]*ActionDef{}
+	q := newTestQueue(t)
+	srv := &Server{queue: q, db: q.db, configDir: t.TempDir()}
+
+	body := `{"action":"bogus","target":{}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/procula/actions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleCreateAction(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
 	}
 }
 
