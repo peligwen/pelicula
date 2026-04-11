@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"pelicula-api/httputil"
 )
 
 // newRequestStore returns a RequestStore backed by a test database.
@@ -269,9 +267,7 @@ func TestHandleRequestCreate_RequiresAuth(t *testing.T) {
 // caller (no cookie, but trusted CIDR + loopback X-Real-IP + localhost Host) can
 // create a request and that requested_by == "(loopback)".
 func TestHandleRequestCreate_LoopbackRequester(t *testing.T) {
-	old := httputil.TrustedUpstreamCIDR
-	httputil.TrustedUpstreamCIDR = "172.17.0.0/16"
-	t.Cleanup(func() { httputil.TrustedUpstreamCIDR = old })
+	withTrustedCIDR(t, "172.17.0.0/16")
 
 	s := newRequestStore(t)
 	auth := newTestAuth() // no sessions — loopback path must supply identity
@@ -284,9 +280,7 @@ func TestHandleRequestCreate_LoopbackRequester(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "172.17.0.1:55123"
-	req.Header.Set("X-Real-IP", "127.0.0.1")
-	req.Host = "localhost"
+	loopbackTriple(req)
 
 	w := httptest.NewRecorder()
 	deps.HandleRequestCreate(w, req)

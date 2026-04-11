@@ -16,8 +16,9 @@ import (
 //
 // Returns true only when ALL three gates pass:
 //  1. r.RemoteAddr falls within httputil.TrustedUpstreamCIDR — the
-//     request must have come through nginx. LAN clients hit the
-//     middleware directly at a LAN IP and fail here.
+//     request must have come through nginx. A direct connection to
+//     middleware:8181 (bypassing the reverse proxy) would have a
+//     non-trusted RemoteAddr and fail here.
 //  2. X-Real-IP is a loopback address — nginx sets X-Real-IP from
 //     $remote_addr on every request, overwriting any client-supplied
 //     header. Only a client that connected to nginx on 127.0.0.1 / ::1

@@ -890,6 +890,10 @@ func TestHandleCheck_LoopbackReturnsAdminJSON(t *testing.T) {
 	if _, has := m["mode"]; has {
 		t.Error("response must not contain a 'mode' field")
 	}
+	// Loopback is a transient grant — it must not mint a persistent session cookie.
+	if cookies := w.Result().Cookies(); len(cookies) > 0 {
+		t.Errorf("loopback path must not set cookies, got %d", len(cookies))
+	}
 }
 
 func TestHandleCheck_LoopbackNginxSubrequest(t *testing.T) {

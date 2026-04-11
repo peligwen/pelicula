@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"pelicula-api/clients"
-	"pelicula-api/httputil"
 )
 
 // newTestInviteStore creates an InviteStore backed by a test database.
@@ -340,10 +339,7 @@ func TestHandleInviteCheck(t *testing.T) {
 // (gate 1+2+3 triple) sets created_by = "(loopback)" when creating an invite.
 // This exercises the Task 8 migration from a.getSession → a.SessionFor in HandleInvites.
 func TestHandleInvites_LoopbackCreator(t *testing.T) {
-	// Override trusted CIDR so the docker-bridge address is accepted.
-	old := httputil.TrustedUpstreamCIDR
-	httputil.TrustedUpstreamCIDR = "172.17.0.0/16"
-	t.Cleanup(func() { httputil.TrustedUpstreamCIDR = old })
+	withTrustedCIDR(t, "172.17.0.0/16")
 
 	s := newTestInviteStore(t)
 	// Auth with no session — loopback path must supply the identity.
@@ -353,10 +349,7 @@ func TestHandleInvites_LoopbackCreator(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"label": "loopback-test", "max_uses": 1})
 	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
-	// Wire the loopback triple: trusted upstream + loopback X-Real-IP + localhost Host.
-	r.RemoteAddr = "172.17.0.1:55123"
-	r.Header.Set("X-Real-IP", "127.0.0.1")
-	r.Host = "localhost"
+	loopbackTriple(r)
 
 	w := httptest.NewRecorder()
 	deps.HandleInvites(w, r)
