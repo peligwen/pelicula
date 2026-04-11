@@ -202,7 +202,7 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .main {
     display: grid;
     grid-template-columns: 1fr 300px;
-    min-height: calc(100vh - 94px - 36px);
+    min-height: calc(100vh - 94px - 54px);
     position: relative; z-index: 1;
 }
 
@@ -796,7 +796,7 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .footer {
     background: var(--gradient-foot, linear-gradient(90deg, #f060a8, #7080e8));
     color: rgba(255,255,255,0.9);
-    height: 36px; display: flex; align-items: center;
+    height: 54px; display: flex; align-items: center;
     padding: 0 2rem; gap: 2rem;
     position: relative; overflow: hidden;
     font-family: var(--font-display, 'Nunito', sans-serif); font-size: 0.72rem; font-weight: 700;
