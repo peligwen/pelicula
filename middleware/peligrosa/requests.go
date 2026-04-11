@@ -174,7 +174,7 @@ func (s *RequestStore) scanRequest(row *sql.Row) (*MediaRequest, error) {
 	return &req, nil
 }
 
-func (s *RequestStore) all() []*MediaRequest {
+func (s *RequestStore) All() []*MediaRequest {
 	rows, err := s.db.Query(
 		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
 		        requested_by, state, reason, arr_id, created_at, updated_at
@@ -238,15 +238,10 @@ func (s *RequestStore) all() []*MediaRequest {
 	return result
 }
 
-// All returns all media requests. Used by export.go in the main package.
-func (s *RequestStore) All() []*MediaRequest {
-	return s.all()
-}
-
 // findActive returns the first non-terminal request matching type + tmdbID or tvdbID.
 // Must be called without holding any lock.
 func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequest {
-	all := s.all()
+	all := s.All()
 	for _, r := range all {
 		if r.Type != reqType || r.isTerminal() {
 			continue
@@ -329,54 +324,9 @@ func (s *RequestStore) InsertFull(req RequestExport) error {
 
 // MarkAvailable transitions a request to "available" when its content has been imported.
 // Matched by tmdbID (movies) or tvdbID (series). Non-fatal if no matching request exists.
-// Called from hooks.go in the main package via the package-level requestStore global.
-func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title string) {
-	all := s.all()
-	var matched *MediaRequest
-	for _, req := range all {
-		if req.isTerminal() || req.State == RequestAvailable {
-			continue
-		}
-		if reqType == "movie" && tmdbID != 0 && req.TmdbID == tmdbID {
-			matched = req
-			break
-		}
-		if reqType == "series" && tvdbID != 0 && req.TvdbID == tvdbID {
-			matched = req
-			break
-		}
-	}
-	if matched == nil {
-		return
-	}
-
-	requester := matched.RequestedBy
-	matched.State = RequestAvailable
-	matched.UpdatedAt = time.Now().UTC()
-	if err := s.updateRequest(matched); err != nil {
-		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
-		return
-	}
-	ev := RequestEvent{
-		At:    matched.UpdatedAt,
-		State: RequestAvailable,
-		Note:  "content imported",
-	}
-	if err := s.insertEvent(matched.ID, ev); err != nil {
-		slog.Warn("failed to insert available event", "component", "requests", "error", err)
-	}
-
-	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
-	// Notification is not sent here: hooks.go in main calls notify via
-	// notifyApprise after MarkAvailable returns, or callers inject via Deps.Notify.
-	_ = requester // used by callers that want to notify; keep for future use
-}
-
-// MarkAvailableWithNotify is like MarkAvailable but also sends an Apprise
-// notification via the provided callback. Used by hooks.go when a notify
-// function is available.
-func (s *RequestStore) MarkAvailableWithNotify(reqType string, tmdbID, tvdbID int, title string, notify func(title, body string)) {
-	all := s.all()
+// If notify is non-nil, it's invoked after the state transition to dispatch a notification.
+func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title string, notify func(subject, body string)) {
+	all := s.All()
 	var matched *MediaRequest
 	for _, req := range all {
 		if req.isTerminal() || req.State == RequestAvailable {
@@ -435,7 +385,7 @@ func (p *Deps) HandleRequests(w http.ResponseWriter, r *http.Request) {
 func (p *Deps) HandleRequestList(w http.ResponseWriter, r *http.Request) {
 	username, role, _ := p.Auth.SessionFor(r)
 
-	all := p.Requests.all()
+	all := p.Requests.All()
 	var out []*MediaRequest
 	for _, req := range all {
 		if role.atLeast(RoleAdmin) || req.RequestedBy == username {

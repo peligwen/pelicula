@@ -47,7 +47,7 @@ func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
 
 func TestNewRequestStore_Empty(t *testing.T) {
 	s := newRequestStore(t)
-	if got := s.all(); len(got) != 0 {
+	if got := s.All(); len(got) != 0 {
 		t.Errorf("expected empty store, got %d requests", len(got))
 	}
 }
@@ -69,7 +69,7 @@ func TestNewRequestStore_LoadsExistingData(t *testing.T) {
 	insertRequest(t, s1, req)
 
 	s2 := NewRequestStore(db, &fakeFulfiller{})
-	all := s2.all()
+	all := s2.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request after load, got %d", len(all))
 	}
@@ -93,7 +93,7 @@ func TestRequestStore_CreateAssignsID(t *testing.T) {
 	}
 	insertRequest(t, s, req)
 
-	all := s.all()
+	all := s.All()
 	if len(all) != 1 {
 		t.Fatalf("want 1 request, got %d", len(all))
 	}
@@ -174,7 +174,7 @@ func TestRequestStore_DenyTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	all := s.all()
+	all := s.All()
 	if all[0].State != RequestDenied {
 		t.Errorf("State = %q, want denied", all[0].State)
 	}
@@ -197,9 +197,9 @@ func TestMarkRequestAvailable_FlipsGrabbedByTmdb(t *testing.T) {
 		State:  RequestGrabbed,
 	})
 
-	s.MarkAvailable("movie", 999, 0, "Ready Film")
+	s.MarkAvailable("movie", 999, 0, "Ready Film", nil)
 
-	all := s.all()
+	all := s.All()
 	if all[0].State != RequestAvailable {
 		t.Errorf("State = %q after MarkAvailable, want available", all[0].State)
 	}
@@ -209,9 +209,9 @@ func TestMarkRequestAvailable_NoOpOnMiss(t *testing.T) {
 	s := newRequestStore(t)
 
 	// No requests — should not panic or error.
-	s.MarkAvailable("movie", 12345, 0, "Not In Queue")
+	s.MarkAvailable("movie", 12345, 0, "Not In Queue", nil)
 
-	if got := s.all(); len(got) != 0 {
+	if got := s.All(); len(got) != 0 {
 		t.Errorf("expected 0 requests, got %d", len(got))
 	}
 }
@@ -227,9 +227,9 @@ func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 		State:  RequestGrabbed,
 	})
 
-	s.MarkAvailable("series", 0, 888, "Ready Show")
+	s.MarkAvailable("series", 0, 888, "Ready Show", nil)
 
-	all := s.all()
+	all := s.All()
 	if all[0].State != RequestAvailable {
 		t.Errorf("State = %q after MarkAvailable, want available", all[0].State)
 	}
@@ -280,7 +280,7 @@ func TestHandleRequestCreate_OffModeAccepted(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Errorf("status = %d, want 201 in off mode", w.Code)
 	}
-	all := s.all()
+	all := s.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request created, got %d", len(all))
 	}
@@ -316,7 +316,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 	if w.Code == http.StatusCreated {
 		t.Error("expected non-201 (deduped): should return existing request")
 	}
-	all := s.all()
+	all := s.All()
 	if len(all) != 1 {
 		t.Errorf("expected 1 request (deduped), got %d", len(all))
 	}

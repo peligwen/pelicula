@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"pelicula-api/clients"
@@ -144,7 +144,7 @@ func (c *fakeJellyfinHTTPClient) CreateUser(username, password string) (string, 
 	}
 	payload := fmt.Sprintf(`{"Name":%q,"Password":%q}`, username, password)
 	resp, err := c.srv.Client().Post(c.srv.URL+"/Users/New", "application/json",
-		stringReader(payload))
+		strings.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
@@ -197,24 +197,3 @@ func newFakeJellyfinServer(t *testing.T, setup func(mux *http.ServeMux)) (*httpt
 	t.Cleanup(srv.Close)
 	return srv, &fakeJellyfinHTTPClient{srv: srv}
 }
-
-// stringReader wraps a string as an io.Reader for HTTP bodies.
-func stringReader(s string) *stringReadCloser {
-	return &stringReadCloser{s: s, pos: 0}
-}
-
-type stringReadCloser struct {
-	s   string
-	pos int
-}
-
-func (r *stringReadCloser) Read(p []byte) (int, error) {
-	if r.pos >= len(r.s) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.s[r.pos:])
-	r.pos += n
-	return n, nil
-}
-
-func (r *stringReadCloser) Close() error { return nil }

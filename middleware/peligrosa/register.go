@@ -31,25 +31,6 @@ func SetOpenRegistration(v bool) {
 // HandleGeneratePassword returns a fresh passphrase suggestion.
 // Public endpoint — no auth required; used by the registration UI.
 // Rate-limited per IP via the auth limiter.
-func (a *Auth) HandleGeneratePassword(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	ip := httputil.ClientIP(r)
-	if a != nil && a.isRateLimited(ip) {
-		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
-		return
-	}
-	// Password generation is delegated to the Deps.GenPassword injection if
-	// this method is reached through a Deps. When called directly on *Auth
-	// (which has no Deps reference), fall back to a random token.
-	httputil.WriteJSON(w, map[string]string{"password": generatePasswordFallback()})
-}
-
-// HandleGeneratePasswordWithDeps serves the generate-password endpoint using
-// the configured GenPassword function. Called from routes.go when Deps.GenPassword
-// is set; falls back to HandleGeneratePassword when it is nil.
 func (d *Deps) HandleGeneratePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -61,16 +42,6 @@ func (d *Deps) HandleGeneratePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, map[string]string{"password": d.genPassword()})
-}
-
-// generatePasswordFallback returns a random 16-byte hex string when no
-// GenPassword function is injected.
-func generatePasswordFallback() string {
-	t, err := generateToken()
-	if err != nil || len(t) < 16 {
-		return "changeme"
-	}
-	return t[:16]
 }
 
 func (a *Auth) HandleOpenRegCheck(w http.ResponseWriter, r *http.Request) {

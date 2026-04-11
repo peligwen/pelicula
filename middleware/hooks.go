@@ -92,7 +92,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	if reqType == "episode" {
 		reqType = "series"
 	}
-	go requestStore.MarkAvailableWithNotify(reqType, source.TmdbID, source.TvdbID, source.Title, notifyApprise)
+	go requestStore.MarkAvailable(reqType, source.TmdbID, source.TvdbID, source.Title, notifyApprise)
 
 	// When SEEDING_REMOVE_ON_COMPLETE is set, delete the torrent from qBittorrent
 	// immediately after *arr has imported (and hardlinked) the file. The file itself

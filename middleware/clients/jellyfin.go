@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // JellyfinLoginResult holds the fields Peligrosa needs after authenticating a
@@ -48,7 +49,7 @@ func IsValidUsername(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if r < 0x20 || r == 0x7F || r == '/' || r == '\\' {
+		if unicode.IsControl(r) || r == '/' || r == '\\' {
 			return false
 		}
 	}
