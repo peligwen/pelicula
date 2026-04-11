@@ -247,7 +247,6 @@ services:
     container_name: pelicula-api
     environment:
       - TZ=${TZ}
-      - PELICULA_AUTH=${PELICULA_AUTH:-jellyfin}
       - DOCKER_HOST=http://docker-proxy:2375
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
       - PROCULA_API_KEY=${PROCULA_API_KEY:-}

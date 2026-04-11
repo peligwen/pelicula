@@ -18,7 +18,6 @@ PUID="1000"
 PGID="1000"
 TZ="America/New_York"
 PELICULA_PORT="7354"
-PELICULA_AUTH="jellyfin"
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_MODE=internal
 `
@@ -75,7 +74,6 @@ func TestWriteEnv(t *testing.T) {
 		"WIREGUARD_PRIVATE_KEY": "abc123",
 		"SERVER_COUNTRIES":      "Netherlands",
 		"PELICULA_PORT":         "7354",
-		"PELICULA_AUTH":         "jellyfin",
 		"JELLYFIN_PASSWORD":     "pass-word-123",
 		"PROCULA_API_KEY":       "key123",
 		"TRANSCODING_ENABLED":   "false",
@@ -120,7 +118,6 @@ PUID="1000"
 PGID="1000"
 TZ="UTC"
 PELICULA_PORT="7354"
-PELICULA_AUTH="off"
 `
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
@@ -158,7 +155,6 @@ PUID="1000"
 PGID="1000"
 TZ="UTC"
 PELICULA_PORT="7354"
-PELICULA_AUTH="off"
 JELLYFIN_ADMIN_USER="admin"
 TRANSCODING_ENABLED="false"
 NOTIFICATIONS_ENABLED="false"
@@ -270,7 +266,6 @@ PUID="1000"
 PGID="1000"
 TZ="UTC"
 PELICULA_PORT="7354"
-PELICULA_AUTH="jellyfin"
 JELLYFIN_PASSWORD="old-pass-123"
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false

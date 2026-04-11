@@ -149,7 +149,6 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		"WIREGUARD_PRIVATE_KEY": wgKey,
 		"SERVER_COUNTRIES":      "Netherlands",
 		"PELICULA_PORT":         "7354",
-		"PELICULA_AUTH":         "jellyfin",
 		"PROCULA_API_KEY":       proculaKey,
 		"WEBHOOK_SECRET":        webhookSecret,
 		"TRANSCODING_ENABLED":   "false",

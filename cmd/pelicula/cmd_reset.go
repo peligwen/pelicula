@@ -249,7 +249,7 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 		env["PUID"], env["PGID"], env["TZ"],
 		savedWGKey, savedCountries,
 		envDefault(env, "PELICULA_PORT", "7354"),
-		"jellyfin", "", newProculaKey, "",
+		"", newProculaKey, "",
 	); err != nil {
 		fatal("Failed to write .env: " + err.Error())
 	}

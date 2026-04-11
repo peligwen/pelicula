@@ -3,7 +3,6 @@
 const store = PeliculaFW.initStore({
     role: 'admin',        // 'admin' | 'manager' | 'viewer'
     username: '',
-    authEnabled: false,
 });
 // ── Resilient fetch (auto-abort after ms) ──
 function tfetch(url, opts, ms) {
@@ -19,11 +18,6 @@ async function checkAuth() {
     try {
         const res = await tfetch('/api/pelicula/auth/check');
         const data = await res.json();
-        if (!data.auth) {
-            // Auth is off — no login needed, full access
-            applyRole('admin', '');
-            return;
-        }
         if (!data.valid) {
             document.getElementById('login-overlay').classList.remove('hidden');
         } else {
