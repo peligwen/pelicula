@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -262,6 +264,14 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 
 // ── Bazarr ─────────────────────────────────────────────────────────────────
 
+// wireBazarr configures Bazarr with Sonarr+Radarr credentials and installs a
+// "Pelicula" language profile built from PELICULA_SUB_LANGS. Bazarr's REST API
+// is Flask-RESTx and reads request.form, so every mutation must be
+// form-encoded — settings keys follow the `settings-<section>-<field>` shape
+// and language profiles are written via the `languages-profiles` form field
+// (a JSON-encoded list, not a separate endpoint). Bazarr only schedules its
+// background missing-subtitle searches when `use_sonarr`/`use_radarr` are
+// true, so this wiring is load-bearing for the whole subtitle pipeline.
 func wireBazarr(s *ServiceClients) {
 	slog.Info("checking Bazarr", "component", "autowire")
 
@@ -270,158 +280,223 @@ func wireBazarr(s *ServiceClients) {
 		slog.Warn("Bazarr API key not available yet", "component", "autowire", "error", err)
 		return
 	}
-
 	s.mu.Lock()
 	s.BazarrKey = apiKey
 	s.mu.Unlock()
-
-	// Check current settings to avoid duplicate wiring
-	data, err := bzGet(s, "/api/system/settings")
-	if err != nil {
-		slog.Warn("Bazarr settings not reachable", "component", "autowire", "error", err)
-		return
-	}
-
-	var current map[string]any
-	if json.Unmarshal(data, &current) != nil {
-		slog.Warn("Bazarr settings unreadable", "component", "autowire")
-		return
-	}
 
 	s.mu.RLock()
 	sonarrKey := s.SonarrKey
 	radarrKey := s.RadarrKey
 	s.mu.RUnlock()
-
-	// Wire Sonarr into Bazarr if not already configured
-	if sonarrSec, ok := current["sonarr"].(map[string]any); !ok || sonarrSec["enabled"] != true {
-		_, err = bzPost(s, "/api/system/settings", map[string]any{
-			"sonarr": map[string]any{
-				"enabled":        true,
-				"ip":             "sonarr",
-				"port":           8989,
-				"apikey":         sonarrKey,
-				"base_url":       "/sonarr",
-				"ssl":            false,
-				"only_monitored": false,
-				"series_sync":    60,
-				"full_update":    "Startup",
-			},
-		})
-		if err != nil {
-			slog.Error("failed to wire Sonarr into Bazarr", "component", "autowire", "error", err)
-		} else {
-			slog.Info("wired Sonarr into Bazarr", "component", "autowire")
-		}
-	} else {
-		slog.Info("Bazarr Sonarr already configured, skipping", "component", "autowire")
+	if sonarrKey == "" || radarrKey == "" {
+		slog.Warn("Bazarr wiring skipped, sonarr/radarr keys not ready", "component", "autowire")
+		return
 	}
 
-	// Wire Radarr into Bazarr if not already configured
-	if radarrSec, ok := current["radarr"].(map[string]any); !ok || radarrSec["enabled"] != true {
-		_, err = bzPost(s, "/api/system/settings", map[string]any{
-			"radarr": map[string]any{
-				"enabled":        true,
-				"ip":             "radarr",
-				"port":           7878,
-				"apikey":         radarrKey,
-				"base_url":       "/radarr",
-				"ssl":            false,
-				"only_monitored": false,
-				"movies_sync":    60,
-				"full_update":    "Startup",
-			},
-		})
-		if err != nil {
-			slog.Error("failed to wire Radarr into Bazarr", "component", "autowire", "error", err)
-		} else {
-			slog.Info("wired Radarr into Bazarr", "component", "autowire")
-		}
-	} else {
-		slog.Info("Bazarr Radarr already configured, skipping", "component", "autowire")
+	subLangs := parseSubLangs(os.Getenv("PELICULA_SUB_LANGS"))
+	if len(subLangs) == 0 {
+		subLangs = []string{"en"}
 	}
 
-	// Create language profile from PELICULA_SUB_LANGS if any configured
-	wireBazarrLanguageProfile(s)
+	if bazarrAlreadyWired(s, sonarrKey, radarrKey) {
+		slog.Info("Bazarr already wired, skipping", "component", "autowire")
+		return
+	}
 
-	slog.Info("Bazarr wired", "component", "autowire")
+	profileJSON, _ := json.Marshal([]any{buildPeliculaProfile(subLangs)})
+
+	form := url.Values{}
+	for _, c := range subLangs {
+		form.Add("languages-enabled", c)
+	}
+	form.Set("languages-profiles", string(profileJSON))
+
+	// Bazarr's save_settings coerces "true"/"false" (lowercase) to Python bools;
+	// any other casing stays as a string and fails dynaconf type validation.
+	form.Set("settings-general-use_sonarr", "true")
+	form.Set("settings-general-use_radarr", "true")
+	form.Set("settings-general-serie_default_enabled", "true")
+	form.Set("settings-general-serie_default_profile", "1")
+	form.Set("settings-general-movie_default_enabled", "true")
+	form.Set("settings-general-movie_default_profile", "1")
+
+	form.Set("settings-sonarr-ip", "sonarr")
+	form.Set("settings-sonarr-port", "8989")
+	form.Set("settings-sonarr-base_url", "/sonarr")
+	form.Set("settings-sonarr-ssl", "false")
+	form.Set("settings-sonarr-apikey", sonarrKey)
+	form.Set("settings-sonarr-only_monitored", "false")
+	form.Set("settings-sonarr-series_sync", "60")
+	form.Set("settings-sonarr-full_update", "Daily")
+
+	form.Set("settings-radarr-ip", "radarr")
+	form.Set("settings-radarr-port", "7878")
+	form.Set("settings-radarr-base_url", "/radarr")
+	form.Set("settings-radarr-ssl", "false")
+	form.Set("settings-radarr-apikey", radarrKey)
+	form.Set("settings-radarr-only_monitored", "false")
+	form.Set("settings-radarr-movies_sync", "60")
+	form.Set("settings-radarr-full_update", "Daily")
+
+	// Enable free, credential-less subtitle providers. Bazarr ships with
+	// enabled_providers = [] out of the box, which makes every search
+	// immediately return "All providers are throttled" — the same symptom
+	// as real throttling, but the root cause is that nothing is configured.
+	// podnapisi covers movies + TV, yifysubtitles is movies-only but
+	// reliable. Users can add/remove from Bazarr's UI later; our idempotency
+	// check only runs wireBazarr once, so we won't clobber their edits.
+	for _, p := range []string{"podnapisi", "yifysubtitles"} {
+		form.Add("settings-general-enabled_providers", p)
+	}
+
+	if err := bzPostForm(s, "/api/system/settings", form); err != nil {
+		slog.Error("failed to wire Bazarr", "component", "autowire", "error", err)
+		return
+	}
+	slog.Info("Bazarr wired", "component", "autowire", "langs", subLangs)
 }
 
-func wireBazarrLanguageProfile(s *ServiceClients) {
-	subLangs := strings.TrimSpace(os.Getenv("PELICULA_SUB_LANGS"))
-	if subLangs == "" {
-		return
-	}
-
-	// Check existing profiles
-	data, err := bzGet(s, "/api/languagesprofiles")
-	if err != nil {
-		slog.Warn("can't check Bazarr language profiles", "component", "autowire", "error", err)
-		return
-	}
-
-	var profiles []map[string]any
-	if json.Unmarshal(data, &profiles) == nil {
-		for _, p := range profiles {
-			if name, _ := p["name"].(string); name == "Pelicula" {
-				slog.Info("Bazarr language profile already exists, skipping", "component", "autowire")
-				return
-			}
+func parseSubLangs(raw string) []string {
+	var out []string
+	for _, s := range strings.Split(raw, ",") {
+		if c := strings.ToLower(strings.TrimSpace(s)); c != "" {
+			out = append(out, c)
 		}
 	}
+	return out
+}
 
-	// Build language list for the profile
-	langs := []map[string]any{}
-	for _, code := range strings.Split(subLangs, ",") {
-		code = strings.ToLower(strings.TrimSpace(code))
-		if code == "" {
+func buildPeliculaProfile(langs []string) map[string]any {
+	items := make([]map[string]any, 0, len(langs))
+	for i, code := range langs {
+		items = append(items, map[string]any{
+			"id":                 i + 1,
+			"language":           code,
+			"audio_exclude":      "False",
+			"audio_only_include": "False",
+			"hi":                 "False",
+			"forced":             "False",
+		})
+	}
+	// originalFormat must be int-parseable (Bazarr calls int(item['originalFormat']))
+	// or one of ['null', 'undefined', '', None]. 0 means "keep original-format off".
+	// items: hi/forced/audio_exclude/audio_only_include are strings "True"/"False"
+	// per Bazarr's subtitles/indexer code, not JSON booleans. audio_only_include
+	// is load-bearing: Bazarr's startup migration backfills it on profiles
+	// loaded from disk, but profiles written via the API go straight to the DB,
+	// so omitting it makes list_missing_subtitles_movies crash with KeyError.
+	return map[string]any{
+		"profileId":      1,
+		"name":           "Pelicula",
+		"cutoff":         nil,
+		"items":          items,
+		"mustContain":    []string{},
+		"mustNotContain": []string{},
+		"originalFormat": 0,
+		"tag":            nil,
+	}
+}
+
+func bazarrAlreadyWired(s *ServiceClients, sonarrKey, radarrKey string) bool {
+	data, err := bzGet(s, "/api/system/settings")
+	if err != nil {
+		return false
+	}
+	var cur struct {
+		General struct {
+			UseSonarr        bool     `json:"use_sonarr"`
+			UseRadarr        bool     `json:"use_radarr"`
+			EnabledProviders []string `json:"enabled_providers"`
+		} `json:"general"`
+		Sonarr struct {
+			Apikey string `json:"apikey"`
+		} `json:"sonarr"`
+		Radarr struct {
+			Apikey string `json:"apikey"`
+		} `json:"radarr"`
+	}
+	if json.Unmarshal(data, &cur) != nil {
+		return false
+	}
+	if !cur.General.UseSonarr || !cur.General.UseRadarr {
+		return false
+	}
+	if cur.Sonarr.Apikey != sonarrKey || cur.Radarr.Apikey != radarrKey {
+		return false
+	}
+	// Empty enabled_providers is Bazarr's ship-default and makes every
+	// search return "All providers are throttled". Treat it as unwired so
+	// we install our credential-less defaults. Once the user edits the
+	// provider list in Bazarr's UI (even to remove one), it'll stay
+	// non-empty and we'll leave it alone.
+	if len(cur.General.EnabledProviders) == 0 {
+		return false
+	}
+	pdata, err := bzGet(s, "/api/system/languages/profiles")
+	if err != nil {
+		return false
+	}
+	var profiles []struct {
+		Name  string `json:"name"`
+		Items []struct {
+			AudioOnlyInclude string `json:"audio_only_include"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(pdata, &profiles) != nil {
+		return false
+	}
+	for _, p := range profiles {
+		if p.Name != "Pelicula" {
 			continue
 		}
-		langs = append(langs, map[string]any{
-			"language": code,
-			"hi":       "False",
-			"forced":   "False",
-		})
-	}
-	if len(langs) == 0 {
-		return
-	}
-
-	_, err = bzPost(s, "/api/languagesprofiles", map[string]any{
-		"name":           "Pelicula",
-		"languages":      langs,
-		"originalFormat": false,
-		"cutoff":         nil,
-	})
-	if err != nil {
-		slog.Error("failed to create Bazarr language profile", "component", "autowire", "error", err)
-		return
-	}
-	slog.Info("created Bazarr language profile", "component", "autowire", "langs", subLangs)
-}
-
-// readBazarrAPIKey reads the API key from Bazarr's config.ini.
-// Bazarr generates this key on first startup. The file is mounted read-only
-// at /config/bazarr/config/config.ini inside the middleware container.
-func readBazarrAPIKey(configDir string) (string, error) {
-	path := configDir + "/bazarr/config/config.ini"
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read bazarr config.ini: %w", err)
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "apikey") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[1])
-				if key != "" {
-					return key, nil
-				}
+		// Require every item to carry audio_only_include — older wirings
+		// omitted it, which makes Bazarr's subtitle indexer crash with
+		// KeyError and silently disables missing-sub detection. Treat
+		// that as "not wired" so we overwrite the broken profile.
+		for _, it := range p.Items {
+			if it.AudioOnlyInclude == "" {
+				return false
 			}
 		}
+		return true
 	}
-	return "", fmt.Errorf("no apikey found in bazarr config.ini")
+	return false
+}
+
+// readBazarrAPIKey reads the API key from Bazarr's config.yaml.
+// Bazarr generates this key on first startup and stores it under auth.apikey.
+// The file is mounted read-only at /config/bazarr/config/config.yaml inside
+// the middleware container.
+func readBazarrAPIKey(configDir string) (string, error) {
+	path := configDir + "/bazarr/config/config.yaml"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read bazarr config.yaml: %w", err)
+	}
+	inAuth := false
+	for _, raw := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// Top-level key (no leading whitespace) starts a new section.
+		if raw[0] != ' ' && raw[0] != '\t' {
+			inAuth = strings.HasPrefix(raw, "auth:")
+			continue
+		}
+		if !inAuth {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "apikey:") {
+			key := strings.TrimSpace(strings.TrimPrefix(trimmed, "apikey:"))
+			key = strings.Trim(key, `"'`)
+			if key == "" || key == "null" {
+				return "", fmt.Errorf("auth.apikey empty in bazarr config.yaml")
+			}
+			return key, nil
+		}
+	}
+	return "", fmt.Errorf("no auth.apikey found in bazarr config.yaml")
 }
 
 func bzGet(s *ServiceClients, path string) ([]byte, error) {
@@ -431,11 +506,29 @@ func bzGet(s *ServiceClients, path string) ([]byte, error) {
 	return s.arrDo("GET", bazarrURL, key, path, nil)
 }
 
-func bzPost(s *ServiceClients, path string, payload any) ([]byte, error) {
+// bzPostForm sends a form-encoded POST to Bazarr. Bazarr is the only
+// form-consuming service in the stack (Flask-RESTx reads request.form), so
+// this helper lives here rather than on ServiceClients.
+func bzPostForm(s *ServiceClients, path string, form url.Values) error {
 	s.mu.RLock()
 	key := s.BazarrKey
 	s.mu.RUnlock()
-	return s.arrDo("POST", bazarrURL, key, path, payload)
+	req, err := http.NewRequest("POST", bazarrURL+path, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-API-KEY", key)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("bazarr HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
