@@ -442,3 +442,27 @@ func handleArrMeta(w http.ResponseWriter, r *http.Request) {
 func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
 }
+
+// Fulfiller handles the "*arr add" side of a request approval.
+// middleware/requests.go depends on this interface instead of calling
+// addMovieInternal/addSeriesInternal directly, so the peligrosa subpackage
+// (where requests.go moves in a later task) avoids a main-package cycle.
+type Fulfiller interface {
+	AddMovie(tmdbID, profileID int, rootPath string) (int, error)
+	AddSeries(tvdbID, profileID int, rootPath string) (int, error)
+}
+
+// arrFulfiller is the production Fulfiller backed by Sonarr/Radarr.
+type arrFulfiller struct{}
+
+// NewArrFulfiller returns a Fulfiller that delegates to the existing
+// package-level addMovieInternal/addSeriesInternal helpers.
+func NewArrFulfiller() Fulfiller { return &arrFulfiller{} }
+
+func (f *arrFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
+	return addMovieInternal(tmdbID, profileID, rootPath)
+}
+
+func (f *arrFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
+	return addSeriesInternal(tvdbID, profileID, rootPath)
+}

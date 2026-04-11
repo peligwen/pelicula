@@ -64,11 +64,12 @@ func (r *MediaRequest) isTerminal() bool {
 // RequestStore persists media requests in SQLite.
 // SQLite handles concurrency; no additional mutex is needed.
 type RequestStore struct {
-	db *sql.DB
+	db        *sql.DB
+	fulfiller Fulfiller
 }
 
-func NewRequestStore(db *sql.DB) *RequestStore {
-	return &RequestStore{db: db}
+func NewRequestStore(db *sql.DB, fulfiller Fulfiller) *RequestStore {
+	return &RequestStore{db: db, fulfiller: fulfiller}
 }
 
 // loadHistory fetches the event history for a request from request_events.
@@ -426,7 +427,7 @@ func handleRequestOp(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handleRequestApprove(w, r, id)
+		requestStore.handleRequestApprove(w, r, id)
 	case "deny":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -444,7 +445,7 @@ func handleRequestOp(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
+func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	actorUsername, _, _ := authMiddleware.SessionFor(r)
 
 	// Read profile/root from settings env vars (set at container start from .env)
@@ -453,7 +454,7 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	sonarrProfileID := envIntOr("REQUESTS_SONARR_PROFILE_ID", 0)
 	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
 
-	req := requestStore.get(id)
+	req := rs.get(id)
 	if req == nil {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
@@ -475,9 +476,9 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	var addErr error
 	switch reqType {
 	case "movie":
-		arrID, addErr = addMovieInternal(tmdbID, radarrProfileID, radarrRoot)
+		arrID, addErr = rs.fulfiller.AddMovie(tmdbID, radarrProfileID, radarrRoot)
 	case "series":
-		arrID, addErr = addSeriesInternal(tvdbID, sonarrProfileID, sonarrRoot)
+		arrID, addErr = rs.fulfiller.AddSeries(tvdbID, sonarrProfileID, sonarrRoot)
 	default:
 		httputil.WriteError(w, "unknown request type", http.StatusInternalServerError)
 		return
@@ -489,7 +490,7 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	}
 
 	// Re-fetch to ensure it still exists, then update state.
-	req = requestStore.get(id)
+	req = rs.get(id)
 	if req == nil {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
@@ -497,7 +498,7 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 	req.State = RequestGrabbed
 	req.ArrID = arrID
 	req.UpdatedAt = time.Now().UTC()
-	if err := requestStore.updateRequest(req); err != nil {
+	if err := rs.updateRequest(req); err != nil {
 		slog.Error("failed to save request after approve", "component", "requests", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -508,7 +509,7 @@ func handleRequestApprove(w http.ResponseWriter, r *http.Request, id string) {
 		Actor: actorUsername,
 		Note:  "approved and added to *arr",
 	}
-	if err := requestStore.insertEvent(req.ID, ev); err != nil {
+	if err := rs.insertEvent(req.ID, ev); err != nil {
 		slog.Warn("failed to insert approve event", "component", "requests", "error", err)
 	}
 	req.History = append(req.History, ev)

@@ -188,7 +188,7 @@ func TestMigrateRequestsJSON_Inserts(t *testing.T) {
 		t.Error("expected requests.json to be renamed")
 	}
 
-	store := NewRequestStore(db)
+	store := NewRequestStore(db, &fakeFulfiller{})
 	all := store.all()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(all))

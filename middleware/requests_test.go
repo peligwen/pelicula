@@ -13,7 +13,7 @@ import (
 func newRequestStore(t *testing.T) *RequestStore {
 	t.Helper()
 	db := testDB(t)
-	return NewRequestStore(db)
+	return NewRequestStore(db, &fakeFulfiller{})
 }
 
 // insertRequest is a test helper that inserts a MediaRequest directly into the DB.
@@ -55,7 +55,7 @@ func TestNewRequestStore_Empty(t *testing.T) {
 func TestNewRequestStore_LoadsExistingData(t *testing.T) {
 	// Use a shared DB so data is visible across two store instances.
 	db := testDB(t)
-	s1 := NewRequestStore(db)
+	s1 := NewRequestStore(db, &fakeFulfiller{})
 
 	req := &MediaRequest{
 		ID:        "req_123_abc",
@@ -68,7 +68,7 @@ func TestNewRequestStore_LoadsExistingData(t *testing.T) {
 	}
 	insertRequest(t, s1, req)
 
-	s2 := NewRequestStore(db)
+	s2 := NewRequestStore(db, &fakeFulfiller{})
 	all := s2.all()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request after load, got %d", len(all))

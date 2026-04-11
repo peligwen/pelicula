@@ -53,7 +53,7 @@ func main() {
 
 	inviteStore = NewInviteStore(db, jellyfinClient)
 	dismissedStore = NewDismissedStore(db)
-	requestStore = NewRequestStore(db)
+	requestStore = NewRequestStore(db, NewArrFulfiller())
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {

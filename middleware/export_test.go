@@ -261,7 +261,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 
 func TestRequestStoreInsertFull(t *testing.T) {
 	db := testDB(t)
-	store := NewRequestStore(db)
+	store := NewRequestStore(db, &fakeFulfiller{})
 
 	now := time.Now().UTC().Truncate(time.Second)
 	req := RequestExport{
