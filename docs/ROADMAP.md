@@ -21,7 +21,6 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 - [x] **[Peligrosa] Open LAN registration** — optional `PELICULA_OPEN_REGISTRATION` setting: `/register` without a token creates a Jellyfin viewer account. LAN-only, rate-limited, always viewer role.
 - [x] **[Peligrosa] First-admin password** — setup wizard generates `JELLYFIN_PASSWORD` and prints admin credentials after ``pelicula up``.
 - [x] **[Peligrosa] HMAC invite tokens** — closed. 256-bit random token + SQLite lookup is already secure; HMAC signing adds no practical security and can't eliminate DB lookups (revocation still requires one).
-- [ ] **[Peligrosa] Plex SSO** — deferred; different API shape (plex.tv OAuth dance).
 
 ---
 
@@ -29,8 +28,6 @@ Security and user-interaction safety hardening. See [PELIGROSA.md](PELIGROSA.md)
 
 - **Invite Apprise notification**: notify admin via Apprise/internal feed when an invite is claimed. Deferred; low priority since the dashboard shows active invites and redemption history.
 
-- **Plex SSO**: moved to Peligrosa initiative above (Jellyfin SSO shipped).
-- **Jellyfin as optional service**: acquisition-only mode for users who have their own media server (Plex, Emby, external Jellyfin). Jellyfin stays always-on until this is needed.
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
 - **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `compose/docker-compose.nfs.yml` + `compose/docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; ``pelicula up`` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
 
