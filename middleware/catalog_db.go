@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -149,4 +150,227 @@ func newCatalogID() string {
 	b := make([]byte, 6)
 	rand.Read(b)
 	return fmt.Sprintf("cat_%d_%x", time.Now().UnixNano(), b)
+}
+
+// catalogTierRank returns a numeric rank (higher = more advanced).
+// Tier is never downgraded — use this to compare.
+func catalogTierRank(tier string) int {
+	switch tier {
+	case "queue":
+		return 0
+	case "pipeline":
+		return 1
+	case "library":
+		return 2
+	default:
+		return -1
+	}
+}
+
+const selectCatalogItem = `
+	SELECT id, type, parent_id, tmdb_id, tvdb_id, arr_id, arr_type,
+	       jellyfin_id, episode_id, season_number, episode_number,
+	       title, year, tier, artwork_url, synopsis,
+	       metadata_synced_at, procula_job_id, file_path, created_at, updated_at
+	FROM catalog_items
+`
+
+// scanner is satisfied by both *sql.Row and *sql.Rows.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanCatalogRow(s scanner) (*CatalogItem, error) {
+	var it CatalogItem
+	err := s.Scan(
+		&it.ID, &it.Type, &it.ParentID, &it.TmdbID, &it.TvdbID,
+		&it.ArrID, &it.ArrType, &it.JellyfinID, &it.EpisodeID,
+		&it.SeasonNumber, &it.EpisodeNumber, &it.Title, &it.Year,
+		&it.Tier, &it.ArtworkURL, &it.Synopsis, &it.MetadataSyncedAt,
+		&it.ProculaJobID, &it.FilePath, &it.CreatedAt, &it.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &it, err
+}
+
+// findExistingCatalogItem looks up a catalog item by its natural key.
+// Returns nil, nil if not found.
+func findExistingCatalogItem(db *sql.DB, item CatalogItem) (*CatalogItem, error) {
+	var row *sql.Row
+	switch item.Type {
+	case "movie":
+		if item.TmdbID != 0 {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='movie' AND tmdb_id=?`, item.TmdbID)
+		} else if item.ArrID != 0 {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='movie' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
+		}
+	case "series":
+		if item.TvdbID != 0 {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='series' AND tvdb_id=?`, item.TvdbID)
+		} else if item.TmdbID != 0 {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='series' AND tmdb_id=?`, item.TmdbID)
+		} else if item.ArrID != 0 {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='series' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
+		}
+	case "season":
+		if item.ParentID != "" {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='season' AND parent_id=? AND season_number=?`, item.ParentID, item.SeasonNumber)
+		}
+	case "episode":
+		if item.EpisodeID != 0 {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='episode' AND episode_id=?`, item.EpisodeID)
+		} else if item.ParentID != "" {
+			row = db.QueryRow(selectCatalogItem+` WHERE type='episode' AND parent_id=? AND episode_number=?`, item.ParentID, item.EpisodeNumber)
+		}
+	}
+	if row == nil {
+		return nil, nil
+	}
+	return scanCatalogRow(row)
+}
+
+// coalesce returns a if non-empty, otherwise b.
+func coalesce(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// UpsertCatalogItem finds an existing item by natural key and updates it,
+// or inserts a new record. Tier is never downgraded.
+// Returns the ID of the upserted item.
+func UpsertCatalogItem(db *sql.DB, item CatalogItem) (string, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	existing, err := findExistingCatalogItem(db, item)
+	if err != nil {
+		return "", fmt.Errorf("find catalog item: %w", err)
+	}
+
+	if existing != nil {
+		tier := item.Tier
+		if catalogTierRank(existing.Tier) > catalogTierRank(tier) {
+			tier = existing.Tier
+		}
+		artworkURL := coalesce(item.ArtworkURL, existing.ArtworkURL)
+		synopsis := coalesce(item.Synopsis, existing.Synopsis)
+		metadataSyncedAt := coalesce(item.MetadataSyncedAt, existing.MetadataSyncedAt)
+		jellyfinID := coalesce(item.JellyfinID, existing.JellyfinID)
+		proculaJobID := coalesce(item.ProculaJobID, existing.ProculaJobID)
+		filePath := coalesce(item.FilePath, existing.FilePath)
+		arrID := existing.ArrID
+		if item.ArrID != 0 {
+			arrID = item.ArrID
+		}
+		arrType := coalesce(item.ArrType, existing.ArrType)
+		episodeID := existing.EpisodeID
+		if item.EpisodeID != 0 {
+			episodeID = item.EpisodeID
+		}
+
+		_, err = db.Exec(`
+			UPDATE catalog_items SET
+				tier=?, artwork_url=?, synopsis=?,
+				metadata_synced_at=?, jellyfin_id=?,
+				procula_job_id=?, file_path=?,
+				arr_id=?, arr_type=?, episode_id=?,
+				updated_at=?
+			WHERE id=?
+		`, tier, artworkURL, synopsis, metadataSyncedAt, jellyfinID,
+			proculaJobID, filePath, arrID, arrType, episodeID,
+			now, existing.ID)
+		if err != nil {
+			return "", fmt.Errorf("update catalog item %s: %w", existing.ID, err)
+		}
+		return existing.ID, nil
+	}
+
+	if item.ID == "" {
+		item.ID = newCatalogID()
+	}
+	_, err = db.Exec(`
+		INSERT INTO catalog_items (
+			id, type, parent_id, tmdb_id, tvdb_id, arr_id, arr_type,
+			jellyfin_id, episode_id, season_number, episode_number,
+			title, year, tier, artwork_url, synopsis,
+			metadata_synced_at, procula_job_id, file_path, created_at, updated_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	`, item.ID, item.Type, item.ParentID, item.TmdbID, item.TvdbID,
+		item.ArrID, item.ArrType, item.JellyfinID, item.EpisodeID,
+		item.SeasonNumber, item.EpisodeNumber, item.Title, item.Year,
+		item.Tier, item.ArtworkURL, item.Synopsis, item.MetadataSyncedAt,
+		item.ProculaJobID, item.FilePath, now, now)
+	if err != nil {
+		return "", fmt.Errorf("insert catalog item: %w", err)
+	}
+	return item.ID, nil
+}
+
+// GetCatalogItemByID fetches a catalog item by its internal ID.
+// Returns nil, nil if not found.
+func GetCatalogItemByID(db *sql.DB, id string) (*CatalogItem, error) {
+	row := db.QueryRow(selectCatalogItem+` WHERE id=?`, id)
+	return scanCatalogRow(row)
+}
+
+// CatalogFilter controls which items ListCatalogItems returns.
+type CatalogFilter struct {
+	Type  string // "" = all types
+	Tier  string // "" = all tiers
+	Query string // case-insensitive substring match on title
+	Limit int    // 0 = default 100
+}
+
+// ListCatalogItems returns catalog items matching the filter, ordered by updated_at DESC.
+func ListCatalogItems(db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	query := selectCatalogItem + ` WHERE 1=1`
+	args := []any{}
+	if f.Type != "" {
+		query += ` AND type=?`
+		args = append(args, f.Type)
+	}
+	if f.Tier != "" {
+		query += ` AND tier=?`
+		args = append(args, f.Tier)
+	}
+	if f.Query != "" {
+		query += ` AND lower(title) LIKE ?`
+		args = append(args, "%"+strings.ToLower(f.Query)+"%")
+	}
+	query += ` ORDER BY updated_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []CatalogItem
+	for rows.Next() {
+		it, err := scanCatalogRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *it)
+	}
+	return items, rows.Err()
+}
+
+// UpdateCatalogMetadata sets Jellyfin-sourced fields on a catalog item.
+func UpdateCatalogMetadata(db *sql.DB, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
+	_, err := db.Exec(`
+		UPDATE catalog_items
+		SET jellyfin_id=?, artwork_url=?, synopsis=?, metadata_synced_at=?, updated_at=?
+		WHERE id=?
+	`, jellyfinID, artworkURL, synopsis, syncedAt,
+		time.Now().UTC().Format(time.RFC3339), id)
+	return err
 }
