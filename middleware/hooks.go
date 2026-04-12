@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -110,7 +111,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 
 	httputil.WriteJSON(w, map[string]string{"status": "queued"})
 	if ssePoller != nil {
-		go ssePoller.TriggerImmediate(r.Context(), "pipeline")
+		go ssePoller.TriggerImmediate(context.Background(), "pipeline")
 	}
 }
 
