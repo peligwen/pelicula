@@ -185,6 +185,14 @@
                         <button class="cat-chip" data-type="show" onclick="catSetType(this,'show')">TV</button>
                     </div>
                 </div>
+                <!-- Needs Attention (flagged items) -->
+                <details class="cat-attention" id="cat-attention" open>
+                    <summary class="cat-attention-header">
+                        <span class="cat-attention-title">Needs Attention</span>
+                        <span class="cat-attention-count" id="cat-attention-count">0</span>
+                    </summary>
+                    <div id="cat-attention-list" class="cat-attention-list"></div>
+                </details>
                 <div id="cat-list" class="cat-list">
                     <div class="no-items">Loading…</div>
                 </div>

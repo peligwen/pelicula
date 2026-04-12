@@ -11,6 +11,8 @@ const catState = {
     loading: false,
     registry: null,
     registryExpires: 0,
+    flagsByPath: {},
+    flaggedRows: [],
 };
 const REGISTRY_TTL = 60_000;
 
@@ -75,6 +77,70 @@ async function loadCatalog() {
         catState.loading = false;
     }
 }
+
+// ── Flags / Needs Attention ──────────────────────────────────────────────────
+async function loadFlags() {
+    try {
+        const res = await catFetch('/api/pelicula/catalog/flags');
+        if (!res.ok) return;
+        const data = await res.json();
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        const byPath = {};
+        for (const r of rows) byPath[r.path] = r;
+        catState.flagsByPath = byPath;
+        catState.flaggedRows = rows;
+        renderAttention();
+    } catch (e) {
+        console.warn('[catalog] flag fetch failed', e);
+    }
+}
+
+function renderAttention() {
+    const wrap = document.getElementById('cat-attention');
+    const list = document.getElementById('cat-attention-list');
+    const count = document.getElementById('cat-attention-count');
+    if (!wrap || !list) return;
+    // Only error-severity rows promote to the attention section.
+    const rows = catState.flaggedRows.filter(r => r.severity === 'error');
+    if (!rows.length) {
+        wrap.style.display = 'none';
+        return;
+    }
+    wrap.style.display = '';
+    if (count) count.textContent = String(rows.length);
+    const frag = document.createDocumentFragment();
+    for (const row of rows) {
+        frag.appendChild(renderAttentionRow(row));
+    }
+    list.replaceChildren(frag);
+}
+
+function renderAttentionRow(row) {
+    const div = document.createElement('div');
+    div.className = 'cat-attention-row';
+    div.addEventListener('click', () => openDetail(row.path));
+
+    const title = document.createElement('span');
+    title.className = 'cat-row-title';
+    title.textContent = row.path.split('/').slice(-1)[0] || row.path;
+    title.title = row.path;
+
+    const pills = document.createElement('span');
+    for (const f of (row.flags || [])) {
+        const pill = document.createElement('span');
+        pill.className = 'cat-pill cat-pill-' + (f.severity || 'info');
+        pill.textContent = f.code;
+        if (f.detail) pill.title = f.detail;
+        pills.appendChild(pill);
+    }
+
+    div.appendChild(title);
+    div.appendChild(pills);
+    return div;
+}
+
+// Stub — replaced in Task 1.9
+function openDetail(path) {} // eslint-disable-line no-unused-vars
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderCatalog() {
@@ -500,6 +566,7 @@ window.catSetType = function (btn, type) {
 function initCatalog() {
     if (catState.loaded || catState.loading) return;
     loadCatalog();
+    loadFlags();
     loadActionRegistry(); // warm cache early
 }
 
