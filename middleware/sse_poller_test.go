@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // TestSSEPollerBroadcastsOnChange verifies that:
@@ -15,6 +15,7 @@ import (
 //  2. The second pollOnce with identical data broadcasts nothing.
 //  3. After data changes on the server, the next pollOnce broadcasts again.
 func TestSSEPollerBroadcastsOnChange(t *testing.T) {
+	// NOTE: mutates package globals (proculaURL, qbtBaseURL) — cannot use t.Parallel()
 	// Use an atomic so the HTTP handler can read an updated value.
 	var storageUsed atomic.Int64
 
@@ -60,7 +61,7 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 
 	hub := NewSSEHub()
 	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc)
+	poller := NewSSEPoller(hub, svc, nil)
 
 	// Register a buffered client so we can inspect received messages.
 	c := &sseClient{
@@ -90,19 +91,12 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 
 	secondCount := len(c.events)
 	if secondCount != 0 {
-		// Pipeline contains a GeneratedAt timestamp that changes every call;
-		// that event may fire again. All others must be silent.
+		got := make([]string, 0, secondCount)
 		for len(c.events) > 0 {
 			msg := <-c.events
-			if msg.Event != "pipeline" {
-				t.Errorf("unexpected broadcast on second pollOnce for unchanged data: event=%q", msg.Event)
-			}
+			got = append(got, msg.Event)
 		}
-	}
-
-	// Drain again.
-	for len(c.events) > 0 {
-		<-c.events
+		t.Errorf("unexpected broadcast(s) on second pollOnce for unchanged data: events=%v", got)
 	}
 
 	// ── Third poll: storage changed → at least one broadcast ─────────────────
@@ -134,6 +128,7 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 // TestSSEPollerTriggerImmediate verifies that TriggerImmediate always broadcasts
 // even when the data has not changed (bypasses hash check).
 func TestSSEPollerTriggerImmediate(t *testing.T) {
+	// NOTE: mutates package globals (proculaURL, qbtBaseURL) — cannot use t.Parallel()
 	const fixedStorage = `{"used":0,"total":100}`
 
 	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +147,7 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 
 	hub := NewSSEHub()
 	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc)
+	poller := NewSSEPoller(hub, svc, nil)
 
 	// Register a test client.
 	c := &sseClient{
@@ -165,19 +160,14 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-seed the hash so a regular poll would suppress this event.
-	seededHash := computeSHA256([]byte(fixedStorage))
+	seededHash := sha256.Sum256([]byte(fixedStorage))
 	poller.mu.Lock()
 	poller.hashes["storage"] = seededHash
 	poller.mu.Unlock()
 
 	// TriggerImmediate must broadcast regardless of stored hash.
+	// Both sends are synchronous via buffered channel; check immediately.
 	poller.TriggerImmediate(ctx, "storage")
-
-	// Give the hub time to deliver.
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for len(c.events) == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
 
 	if len(c.events) == 0 {
 		t.Fatal("TriggerImmediate should broadcast unconditionally, got 0 events")
@@ -195,11 +185,8 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 	}
 
 	// Second call — must still broadcast even though hash is now current.
+	// Both sends are synchronous via buffered channel; check immediately.
 	poller.TriggerImmediate(ctx, "storage")
-	deadline = time.Now().Add(200 * time.Millisecond)
-	for len(c.events) == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
 
 	if len(c.events) == 0 {
 		t.Error("second TriggerImmediate should also broadcast, got 0 events")
@@ -211,7 +198,7 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 func TestSSEPollerUnknownEventType(t *testing.T) {
 	hub := NewSSEHub()
 	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc)
+	poller := NewSSEPoller(hub, svc, nil)
 
 	c := &sseClient{
 		events: make(chan SSEMessage, 4),

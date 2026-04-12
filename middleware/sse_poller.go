@@ -17,18 +17,20 @@ const pollInterval = 5 * time.Second
 // SSEPoller polls backend data sources every pollInterval and broadcasts SSE
 // events on change (detected via SHA-256 hash comparison).
 type SSEPoller struct {
-	hub    *SSEHub
-	svc    *ServiceClients
-	hashes map[string][32]byte
-	mu     sync.Mutex
+	hub       *SSEHub
+	svc       *ServiceClients
+	dismissed *DismissedStore
+	hashes    map[string][32]byte
+	mu        sync.Mutex
 }
 
 // NewSSEPoller creates an SSEPoller that will broadcast to hub using svc.
-func NewSSEPoller(hub *SSEHub, svc *ServiceClients) *SSEPoller {
+func NewSSEPoller(hub *SSEHub, svc *ServiceClients, dismissed *DismissedStore) *SSEPoller {
 	return &SSEPoller{
-		hub:    hub,
-		svc:    svc,
-		hashes: make(map[string][32]byte),
+		hub:       hub,
+		svc:       svc,
+		dismissed: dismissed,
+		hashes:    make(map[string][32]byte),
 	}
 }
 
@@ -49,25 +51,26 @@ func (p *SSEPoller) Run(ctx context.Context) {
 // pollOnce fetches all 5 event types in parallel, hashes each response, and
 // broadcasts any that have changed since the last poll.
 func (p *SSEPoller) pollOnce(ctx context.Context) {
-	type fetchFunc func(context.Context) ([]byte, error)
+	type fetchResult struct {
+		event         string
+		hashData      []byte // stable bytes used for change detection
+		broadcastData []byte // bytes sent to clients (may include timestamps)
+		err           error
+	}
+
 	type namedFetch struct {
 		event string
-		fn    fetchFunc
+		fn    func(context.Context) (hashData []byte, broadcastData []byte, err error)
 	}
 
 	fetches := []namedFetch{
 		{"pipeline", p.fetchPipeline},
-		{"services", p.fetchServices},
-		{"downloads", p.fetchDownloads},
-		{"storage", p.fetchStorage},
-		{"notifications", p.fetchNotifications},
+		{"services", wrapFetch(p.fetchServices)},
+		{"downloads", wrapFetch(p.fetchDownloads)},
+		{"storage", wrapFetch(p.fetchStorage)},
+		{"notifications", wrapFetch(p.fetchNotifications)},
 	}
 
-	type fetchResult struct {
-		event string
-		data  []byte
-		err   error
-	}
 	results := make(chan fetchResult, len(fetches))
 	var wg sync.WaitGroup
 
@@ -75,8 +78,8 @@ func (p *SSEPoller) pollOnce(ctx context.Context) {
 		wg.Add(1)
 		go func(nf namedFetch) {
 			defer wg.Done()
-			data, err := nf.fn(ctx)
-			results <- fetchResult{event: nf.event, data: data, err: err}
+			hashData, broadcastData, err := nf.fn(ctx)
+			results <- fetchResult{event: nf.event, hashData: hashData, broadcastData: broadcastData, err: err}
 		}(nf)
 	}
 
@@ -88,7 +91,7 @@ func (p *SSEPoller) pollOnce(ctx context.Context) {
 			slog.Debug("sse poller fetch failed", "component", "sse_poller", "event", res.event, "error", res.err)
 			continue
 		}
-		hash := sha256.Sum256(res.data)
+		hash := sha256.Sum256(res.hashData)
 		p.mu.Lock()
 		prev, seen := p.hashes[res.event]
 		changed := !seen || prev != hash
@@ -100,9 +103,18 @@ func (p *SSEPoller) pollOnce(ctx context.Context) {
 		if changed {
 			p.hub.Broadcast(SSEMessage{
 				Event: res.event,
-				Data:  res.data,
+				Data:  res.broadcastData,
 			})
 		}
+	}
+}
+
+// wrapFetch adapts a simple (ctx) ([]byte, error) fetch function into the
+// two-return-value form expected by pollOnce (hashData == broadcastData).
+func wrapFetch(fn func(context.Context) ([]byte, error)) func(context.Context) ([]byte, []byte, error) {
+	return func(ctx context.Context) ([]byte, []byte, error) {
+		data, err := fn(ctx)
+		return data, data, err
 	}
 }
 
@@ -110,48 +122,60 @@ func (p *SSEPoller) pollOnce(ctx context.Context) {
 // check). Intended for hooks that know data has changed and want instant
 // feedback to connected clients.
 func (p *SSEPoller) TriggerImmediate(ctx context.Context, eventType string) {
-	var fn func(context.Context) ([]byte, error)
+	var fn func(context.Context) ([]byte, []byte, error)
 	switch eventType {
 	case "pipeline":
 		fn = p.fetchPipeline
 	case "services":
-		fn = p.fetchServices
+		fn = wrapFetch(p.fetchServices)
 	case "downloads":
-		fn = p.fetchDownloads
+		fn = wrapFetch(p.fetchDownloads)
 	case "storage":
-		fn = p.fetchStorage
+		fn = wrapFetch(p.fetchStorage)
 	case "notifications":
-		fn = p.fetchNotifications
+		fn = wrapFetch(p.fetchNotifications)
 	default:
 		slog.Warn("sse poller: unknown event type for TriggerImmediate", "component", "sse_poller", "event", eventType)
 		return
 	}
 
-	data, err := fn(ctx)
+	hashData, broadcastData, err := fn(ctx)
 	if err != nil {
 		slog.Warn("sse poller TriggerImmediate fetch failed", "component", "sse_poller", "event", eventType, "error", err)
 		return
 	}
 
 	// Update stored hash so the next regular poll doesn't re-broadcast.
-	hash := sha256.Sum256(data)
+	hash := sha256.Sum256(hashData)
 	p.mu.Lock()
 	p.hashes[eventType] = hash
 	p.mu.Unlock()
 
 	p.hub.Broadcast(SSEMessage{
 		Event: eventType,
-		Data:  data,
+		Data:  broadcastData,
 	})
 }
 
-// fetchPipeline builds the pipeline response and marshals it to JSON.
-func (p *SSEPoller) fetchPipeline(ctx context.Context) ([]byte, error) {
-	resp, err := BuildPipelineResponse(p.svc, dismissedStore)
+// fetchPipeline builds the pipeline response and returns two byte slices:
+// hashBytes has a zeroed GeneratedAt so the hash is stable across polls,
+// broadcastBytes carries a real timestamp for clients.
+func (p *SSEPoller) fetchPipeline(ctx context.Context) (hashBytes []byte, broadcastBytes []byte, err error) {
+	resp, err := BuildPipelineResponse(p.svc, p.dismissed)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return json.Marshal(resp)
+	// For hash: zero out the timestamp to avoid spurious change detection.
+	hashResp := resp
+	hashResp.GeneratedAt = time.Time{}
+	hashBytes, err = json.Marshal(hashResp)
+	if err != nil {
+		return nil, nil, err
+	}
+	// For broadcast: real timestamp.
+	resp.GeneratedAt = time.Now().UTC()
+	broadcastBytes, err = json.Marshal(resp)
+	return hashBytes, broadcastBytes, err
 }
 
 // fetchServices builds a lightweight service-status map and marshals it to JSON.
@@ -168,8 +192,9 @@ func (p *SSEPoller) fetchServices(ctx context.Context) ([]byte, error) {
 	return json.Marshal(status)
 }
 
-// fetchDownloads fetches torrent list and transfer stats from qBittorrent,
-// returns a combined JSON object.
+// fetchDownloads fetches raw torrent list and transfer stats from qBittorrent.
+// The SSE "downloads" event drives the Downloads tab in the dashboard (downloads.js),
+// distinct from the pipeline board which normalizes this data into PipelineItem cards.
 func (p *SSEPoller) fetchDownloads(ctx context.Context) ([]byte, error) {
 	torrentData, err := p.svc.QbtGet("/api/v2/torrents/info")
 	if err != nil {
@@ -220,9 +245,4 @@ type httpStatusError struct {
 
 func (e *httpStatusError) Error() string {
 	return "HTTP " + http.StatusText(e.Code) + " from " + e.URL
-}
-
-// computeSHA256 returns the SHA-256 digest of b.
-func computeSHA256(b []byte) [32]byte {
-	return sha256.Sum256(b)
 }
