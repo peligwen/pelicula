@@ -2,8 +2,10 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"pelicula-api/httputil"
@@ -264,3 +266,65 @@ func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, matching)
 }
+
+func handleCatalogItems(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	f := CatalogFilter{
+		Type:  r.URL.Query().Get("type"),
+		Tier:  r.URL.Query().Get("tier"),
+		Query: r.URL.Query().Get("q"),
+	}
+	items, err := ListCatalogItems(catalogDB, f)
+	if err != nil {
+		slog.Error("list catalog items", "component", "catalog", "error", err)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	httputil.WriteJSON(w, items)
+}
+
+func handleCatalogItemDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		httputil.WriteError(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	item, err := GetCatalogItemByID(catalogDB, id)
+	if err != nil {
+		slog.Error("get catalog item", "component", "catalog", "id", id, "error", err)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if item == nil {
+		httputil.WriteError(w, "not found", http.StatusNotFound)
+		return
+	}
+	go maybeSyncJellyfinMetadata(item)
+	httputil.WriteJSON(w, item)
+}
+
+func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	go func() {
+		if err := BackfillFromArr(catalogDB, services); err != nil {
+			slog.Error("catalog backfill failed", "component", "catalog", "error", err)
+		}
+	}()
+	httputil.WriteJSON(w, map[string]string{"status": "started"})
+}
+
+// TODO: replaced by catalog_sync.go Task 7
+func maybeSyncJellyfinMetadata(_ *CatalogItem) {}
+
+// TODO: replaced by catalog_sync.go Task 6
+func BackfillFromArr(_ *sql.DB, _ *ServiceClients) error { return nil }

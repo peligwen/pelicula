@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,7 @@ var (
 	dismissedStore *DismissedStore
 	sseHub         *SSEHub
 	ssePoller      *SSEPoller
+	catalogDB      *sql.DB
 )
 
 func main() {
@@ -52,6 +54,11 @@ func main() {
 	db, err := OpenDB("/config/pelicula/pelicula.db")
 	if err != nil {
 		slog.Error("failed to open database", "component", "main", "error", err)
+		os.Exit(1)
+	}
+	catalogDB, err = OpenCatalogDB("/config/pelicula/catalog.db")
+	if err != nil {
+		slog.Error("failed to open catalog database", "component", "main", "error", err)
 		os.Exit(1)
 	}
 	migrateAllJSON(db, "/config/pelicula")
@@ -184,6 +191,11 @@ func main() {
 	mux.Handle("/api/pelicula/catalog/item/history", auth.Guard(http.HandlerFunc(handleCatalogItemHistory)))
 	mux.Handle("/api/pelicula/catalog/flags", auth.Guard(http.HandlerFunc(handleCatalogFlags)))
 	mux.Handle("/api/pelicula/catalog/detail", auth.Guard(http.HandlerFunc(handleCatalogDetail)))
+	// viewer+: pelicula catalog item registry
+	mux.Handle("/api/pelicula/catalog/items", auth.Guard(http.HandlerFunc(handleCatalogItems)))
+	mux.Handle("/api/pelicula/catalog/items/{id}", auth.Guard(http.HandlerFunc(handleCatalogItemDetail)))
+	// admin only: backfill catalog from existing Radarr/Sonarr library
+	mux.Handle("/api/pelicula/catalog/backfill", auth.GuardAdmin(http.HandlerFunc(handleCatalogBackfill)))
 	mux.Handle("/api/pelicula/jobs", auth.Guard(http.HandlerFunc(handleJobsList)))
 
 	// admin only: action bus (mutating) — proxy to procula
