@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 )
 
@@ -247,5 +248,37 @@ func TestHandleCancelJob_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleCatalogFlagsReturnsAll(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := OpenDB(filepath.Join(tmp, "test.db"))
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+
+	flags := []Flag{{Code: "validation_failed", Severity: FlagSeverityError}}
+	if err := UpsertFlagsForPath(db, "/movies/A/A.mkv", "job_a", flags); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	s := &Server{db: db, configDir: tmp}
+	req := httptest.NewRequest(http.MethodGet, "/api/procula/catalog/flags", nil)
+	w := httptest.NewRecorder()
+	s.handleCatalogFlags(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Rows []CatalogFlagRow `json:"rows"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Rows) != 1 || resp.Rows[0].Path != "/movies/A/A.mkv" {
+		t.Fatalf("rows = %+v", resp.Rows)
 	}
 }
