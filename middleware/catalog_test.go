@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,74 @@ func TestHandleCatalogSeasonMergesFiles(t *testing.T) {
 	}
 	if eps[1]["file"] != nil {
 		t.Errorf("ep2 should not have file")
+	}
+}
+
+func TestHandleCatalogFlagsProxies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/procula/catalog/flags" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"rows":[{"path":"/movies/A/A.mkv","severity":"error","flags":[{"code":"validation_failed","severity":"error"}],"job_id":"job_a","updated_at":"2026-04-11T00:00:00Z"}]}`))
+	}))
+	defer upstream.Close()
+
+	orig := proculaURL
+	proculaURL = upstream.URL
+	services = &ServiceClients{}
+	services.client = &http.Client{}
+	t.Cleanup(func() { proculaURL = orig })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/flags", nil)
+	w := httptest.NewRecorder()
+	handleCatalogFlags(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"validation_failed"`) {
+		t.Fatalf("body missing flag code: %s", w.Body.String())
+	}
+}
+
+func TestHandleCatalogDetailMergesFlagsAndJob(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/procula/catalog/flags":
+			w.Write([]byte(`{"rows":[{"path":"/movies/A/A.mkv","severity":"warn","flags":[{"code":"missing_subtitles","severity":"warn","fields":{"langs":["es"]}}],"job_id":"job_a","updated_at":"2026-04-11T00:00:00Z"}]}`))
+		case "/api/procula/jobs":
+			w.Write([]byte(`[{"id":"job_a","state":"completed","stage":"done","source":{"path":"/movies/A/A.mkv","title":"A"},"validation":{"passed":true,"checks":{"integrity":"pass","duration":"pass","sample":"pass","codecs":{"video":"h264","audio":"aac","subtitles":["eng"],"width":1920,"height":1080}}}}]`))
+		}
+	}))
+	defer upstream.Close()
+
+	orig := proculaURL
+	proculaURL = upstream.URL
+	services = &ServiceClients{}
+	services.client = &http.Client{}
+	t.Cleanup(func() { proculaURL = orig })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/detail?path=%2Fmovies%2FA%2FA.mkv", nil)
+	w := httptest.NewRecorder()
+	handleCatalogDetail(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Path  string           `json:"path"`
+		Flags []map[string]any `json:"flags"`
+		Job   map[string]any   `json:"job"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Flags) != 1 || resp.Flags[0]["code"] != "missing_subtitles" {
+		t.Fatalf("flags = %+v", resp.Flags)
+	}
+	if resp.Job == nil || resp.Job["id"] != "job_a" {
+		t.Fatalf("job = %+v", resp.Job)
 	}
 }
 

@@ -168,6 +168,8 @@ func main() {
 	mux.Handle("/api/pelicula/catalog/series/{id}", auth.Guard(http.HandlerFunc(handleCatalogSeriesDetail)))
 	mux.Handle("/api/pelicula/catalog/series/{id}/season/{n}", auth.Guard(http.HandlerFunc(handleCatalogSeason)))
 	mux.Handle("/api/pelicula/catalog/item/history", auth.Guard(http.HandlerFunc(handleCatalogItemHistory)))
+	mux.Handle("/api/pelicula/catalog/flags", auth.Guard(http.HandlerFunc(handleCatalogFlags)))
+	mux.Handle("/api/pelicula/catalog/detail", auth.Guard(http.HandlerFunc(handleCatalogDetail)))
 
 	// admin only: action bus (mutating) — proxy to procula
 	mux.Handle("/api/pelicula/actions", auth.GuardAdmin(http.HandlerFunc(handleActionsCreate)))
