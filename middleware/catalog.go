@@ -193,7 +193,7 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(body, &fw)
 	}
 
-	var flags []map[string]any
+	flags := []map[string]any{}
 	for _, row := range fw.Rows {
 		if p, _ := row["path"].(string); p == path {
 			if f, ok := row["flags"].([]any); ok {
