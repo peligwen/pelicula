@@ -62,6 +62,7 @@ var migrations = []migration{
 	{version: 3, up: migrate3},
 	{version: 4, up: migrate4},
 	{version: 5, up: migrate5},
+	{version: 6, up: migrate6},
 }
 
 // runMigrations reads the current schema version and applies all pending
@@ -150,6 +151,16 @@ func migrate5(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// migrate6 creates the dualsub_profiles table for storing named dual-subtitle
+// render profiles (JSON blobs keyed by profile name).
+func migrate6(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS dualsub_profiles (
+		name TEXT PRIMARY KEY,
+		data TEXT NOT NULL
+	)`)
+	return err
 }
 
 // migrate1 creates the initial schema (version 1).
