@@ -107,6 +107,12 @@ function applyRole(role, username) {
 
     // Store role on body for use by dynamically rendered download/pipeline cards
     document.body.dataset.role = role;
+
+    // Start SSE connection once (guarded against repeated applyRole calls)
+    if (window.connectSSE && !window._sseConnected) {
+        window._sseConnected = true;
+        window.connectSSE();
+    }
 }
 
 document.getElementById('login-form').addEventListener('submit', e => { e.preventDefault(); doLogin(); });
@@ -686,7 +692,7 @@ setTimeout(loadStorageSettings, 600);
 // Update check runs once on load — backend caches for 24h so no need to poll.
 setTimeout(checkUpdates, 1000);
 // Services auto-refresh is started by services.js loadOnce (PeliculaFW component).
-setInterval(refresh, 15000);
+window._refreshInterval = setInterval(refresh, 15000);
 setInterval(updateStaleBanner, 5000);
 
 // loadUsers, startResetPassword, cancelResetPassword, submitResetPassword,
@@ -695,6 +701,10 @@ setInterval(updateStaleBanner, 5000);
 // loadInvites, copyInviteItemLink, revokeInvite, deleteInvite,
 // openInviteModal, closeInviteModal, submitCreateInvite, showInviteShareStep,
 // copyInviteLink — moved to users.js.
+
+// ── Window exports ────────────────────────
+window.refresh       = refresh;
+window.checkStorage  = checkStorage;
 
 // ── Job drawer ────────────────────────────
 window.openJobDrawer = async function(jobId) {
