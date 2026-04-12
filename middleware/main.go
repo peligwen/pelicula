@@ -75,6 +75,7 @@ func main() {
 	sseHub = NewSSEHub()
 	ssePoller = NewSSEPoller(sseHub, services, dismissedStore)
 	go ssePoller.Run(ctx)
+	go RunQueuePoller(ctx, catalogDB, services)
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
