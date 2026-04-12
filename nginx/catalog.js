@@ -169,7 +169,7 @@ component('catalog', function (el, store, _props) {
         });
         div.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            openSubRequest({ label: item.title || 'Movie', arrType: 'radarr', arrID: item.id, episodeID: 0 });
+            openSubSearchDialog({ label: item.title || 'Movie', arrType: 'radarr', arrID: item.id, episodeID: 0 });
         });
         div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => { e.stopPropagation(); openContextMenu(e, item, 'movie'); });
         return div;
@@ -290,7 +290,7 @@ component('catalog', function (el, store, _props) {
         div.addEventListener('contextmenu', (e) => {
             if (!hasFile) return;
             e.preventDefault();
-            openSubRequest({ label: series.title + ' ' + epNum, arrType: 'sonarr', arrID: series.id, episodeID: ep.id });
+            openSubSearchDialog({ label: series.title + ' ' + epNum, arrType: 'sonarr', arrID: series.id, episodeID: ep.id });
         });
         return div;
     }
@@ -467,9 +467,6 @@ component('catalog', function (el, store, _props) {
     function buildParams(def, item, level) {
         if (def.name === 'validate' || def.name === 'transcode') {
             return { path: level === 'movie' ? (item.movieFile ? item.movieFile.path : '') : (item.path || '') };
-        }
-        if (def.name === 'subtitle_refresh') {
-            return { arr_type: level === 'movie' ? 'radarr' : 'sonarr', arr_id: item.id, episode_id: item.episodeId || 0 };
         }
         return {};
     }
