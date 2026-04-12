@@ -50,35 +50,29 @@ func readBazarrAPIKey(configDir string) (string, error) {
 	return "", fmt.Errorf("no auth.apikey found in bazarr config.yaml")
 }
 
-// bazarrSearchSubtitles asks Bazarr to search for missing subtitle languages
-// for the given job, one PATCH per language. Fire-and-forget: errors are
-// logged and do not block the pipeline.
+// BazarrSearchOpts controls which subtitle variants bazarrSearchSubtitlesWithOpts requests.
+type BazarrSearchOpts struct {
+	Languages []string
+	HI        bool // hearing-impaired subtitles
+	Forced    bool // forced (foreign-only) subtitles
+}
+
+// bazarrSearchSubtitlesWithOpts asks Bazarr to search for the given languages
+// with explicit HI and Forced flags, one PATCH per language. Fire-and-forget:
+// errors are logged and do not block the pipeline. No-op if Languages is empty.
 //
 // Bazarr's REST API is Flask-RESTx and reads request.form, so payloads must
 // be form-encoded. PATCH /api/{movies,episodes}/subtitles is the per-item
 // search trigger (POST on the same path is the subtitle-file upload
 // endpoint). One call per language is required.
-//
-// If job.MissingSubs is empty (e.g. a synthetic job created by the library
-// resub button), this falls back to every language in PELICULA_SUB_LANGS.
-// Bazarr de-dupes any language that's already present on disk.
-func bazarrSearchSubtitles(ctx context.Context, configDir string, job *Job) {
-	apiKey, err := readBazarrAPIKey(configDir)
-	if err != nil {
-		slog.Warn("bazarr: cannot read API key, skipping subtitle search", "component", "bazarr", "error", err)
+func bazarrSearchSubtitlesWithOpts(ctx context.Context, configDir string, job *Job, opts BazarrSearchOpts) {
+	if len(opts.Languages) == 0 {
 		return
 	}
 
-	langs := job.MissingSubs
-	if len(langs) == 0 {
-		for _, c := range strings.Split(os.Getenv("PELICULA_SUB_LANGS"), ",") {
-			if c = strings.ToLower(strings.TrimSpace(c)); c != "" {
-				langs = append(langs, c)
-			}
-		}
-	}
-	if len(langs) == 0 {
-		slog.Warn("bazarr: no languages to request, skipping", "component", "bazarr", "job_id", job.ID)
+	apiKey, err := readBazarrAPIKey(configDir)
+	if err != nil {
+		slog.Warn("bazarr: cannot read API key, skipping subtitle search", "component", "bazarr", "error", err)
 		return
 	}
 
@@ -101,14 +95,23 @@ func bazarrSearchSubtitles(ctx context.Context, configDir string, job *Job) {
 		return
 	}
 
-	for _, code := range langs {
+	hiBool := "False"
+	if opts.HI {
+		hiBool = "True"
+	}
+	forcedBool := "False"
+	if opts.Forced {
+		forcedBool = "True"
+	}
+
+	for _, code := range opts.Languages {
 		form := url.Values{}
 		for k, v := range base {
 			form[k] = v
 		}
 		form.Set("language", code)
-		form.Set("hi", "False")
-		form.Set("forced", "False")
+		form.Set("hi", hiBool)
+		form.Set("forced", forcedBool)
 
 		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPatch, bazarrURL+path, strings.NewReader(form.Encode()))
@@ -136,4 +139,27 @@ func bazarrSearchSubtitles(ctx context.Context, configDir string, job *Job) {
 		resp.Body.Close()
 		slog.Info("bazarr: subtitle search triggered", "component", "bazarr", "arr_type", job.Source.ArrType, "job_id", job.ID, "lang", code)
 	}
+}
+
+// bazarrSearchSubtitles asks Bazarr to search for missing subtitle languages
+// for the given job, one PATCH per language. Fire-and-forget: errors are
+// logged and do not block the pipeline.
+//
+// If job.MissingSubs is empty (e.g. a synthetic job created by the library
+// resub button), this falls back to every language in PELICULA_SUB_LANGS.
+// Bazarr de-dupes any language that's already present on disk.
+func bazarrSearchSubtitles(ctx context.Context, configDir string, job *Job) {
+	langs := job.MissingSubs
+	if len(langs) == 0 {
+		for _, c := range strings.Split(os.Getenv("PELICULA_SUB_LANGS"), ",") {
+			if c = strings.ToLower(strings.TrimSpace(c)); c != "" {
+				langs = append(langs, c)
+			}
+		}
+	}
+	if len(langs) == 0 {
+		slog.Warn("bazarr: no languages to request, skipping", "component", "bazarr", "job_id", job.ID)
+		return
+	}
+	bazarrSearchSubtitlesWithOpts(ctx, configDir, job, BazarrSearchOpts{Languages: langs, HI: false, Forced: false})
 }
