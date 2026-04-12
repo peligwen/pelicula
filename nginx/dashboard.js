@@ -784,7 +784,9 @@ window.switchTab = function(tab, fromHash) {
     if (tab === _currentTab) return;
     _currentTab = tab;
     document.querySelectorAll('.tab[data-tab]').forEach(function(btn) {
-        btn.classList.toggle('active', btn.dataset.tab === tab);
+        var isActive = btn.dataset.tab === tab;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
     document.body.dataset.tab = tab;
     // Sync hash: pushState for user clicks (enables back button), replaceState for
@@ -803,6 +805,18 @@ window.switchTab = function(tab, fromHash) {
 PeliculaFW.router.listen(function(route) {
     var tab = route.tab || 'search';
     if (_validTabs.has(tab)) window.switchTab(tab, true);
+});
+
+// Arrow key navigation within the tabbar (WAI-ARIA tabs pattern)
+document.getElementById('tabbar').addEventListener('keydown', function(e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    var tabs = Array.from(this.querySelectorAll('.tab:not(.hidden):not([style*="display: none"])'));
+    var idx = tabs.indexOf(document.activeElement);
+    if (idx === -1) return;
+    e.preventDefault();
+    var next = e.key === 'ArrowRight' ? (idx + 1) % tabs.length : (idx - 1 + tabs.length) % tabs.length;
+    tabs[next].focus();
+    tabs[next].click();
 });
 
 // Settings functions are in settings.js (PeliculaFW component 'settings').

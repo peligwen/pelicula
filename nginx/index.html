@@ -20,7 +20,9 @@
             <h2>P<span class="accent">E</span>LICULA</h2>
             <form id="login-form" data-testid="login-form">
                 <div class="login-error" id="login-error">Invalid credentials</div>
+                <label for="login-username" class="sr-only">Username</label>
                 <input type="text" id="login-username" data-testid="login-username" placeholder="Username" autocomplete="username">
+                <label for="login-password" class="sr-only">Password</label>
                 <input type="password" id="login-password" data-testid="login-password" placeholder="Password" autocomplete="current-password" autofocus>
                 <button type="submit">Sign in</button>
             </form>
@@ -29,7 +31,7 @@
 
     <!-- Blocklist modal -->
     <div class="modal-overlay hidden" id="blocklist-modal">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Remove and blocklist">
             <h3>Remove &amp; Blocklist</h3>
             <div class="modal-sub" id="blocklist-name"></div>
             <label for="blocklist-reason">Reason</label>
@@ -59,12 +61,12 @@
                 <span class="titlebar-chip titlebar-chip-ok hidden" id="chip-health-ok" data-testid="chip-health-ok"><span class="pip"></span><span id="chip-health-ok-text">all good!</span></span>
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
                 <span class="titlebar-chip titlebar-chip-err hidden" id="chip-health-err"><span class="pip"></span><span id="chip-health-err-text"></span></span>
-                <button class="theme-toggle" id="theme-toggle" title="Toggle theme" onclick="toggleTheme()"></button>
+                <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme" onclick="toggleTheme()"></button>
                 <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">&#9654; Watch</a>
                 <a href="/register" class="register-btn" title="Register a new user">+ Register</a>
                 <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users" onclick="switchTab('users')"></button>
                 <div class="bell-wrap" id="bell-wrap">
-                    <button class="bell-btn" id="bell-btn" title="Notifications" onclick="toggleNotifications()">
+                    <button class="bell-btn" id="bell-btn" title="Notifications" aria-label="Notifications" onclick="toggleNotifications()">
                         &#9679;
                         <span class="bell-badge hidden" id="bell-badge"></span>
                     </button>
@@ -75,15 +77,15 @@
     </div>
 
     <!-- Tabbar -->
-    <nav class="tabbar" id="tabbar">
-        <button class="tab active" data-tab="search" onclick="switchTab('search')">search</button>
-        <button class="tab" data-tab="coming" onclick="switchTab('coming')">pipeline</button>
-        <button class="tab" data-tab="catalog" onclick="switchTab('catalog')">catalog</button>
-        <button class="tab" data-tab="jobs" onclick="switchTab('jobs')">jobs</button>
-        <button class="tab admin-only" data-tab="logs" onclick="switchTab('logs')">logs</button>
-        <button class="tab" data-tab="storage" onclick="switchTab('storage')">storage</button>
-        <button class="tab" data-tab="users" onclick="switchTab('users')">users</button>
-        <button class="tab" data-tab="settings" onclick="switchTab('settings')">settings</button>
+    <nav class="tabbar" id="tabbar" role="tablist" aria-label="Dashboard sections">
+        <button class="tab active" data-tab="search" role="tab" aria-selected="true" onclick="switchTab('search')">search</button>
+        <button class="tab" data-tab="coming" role="tab" aria-selected="false" onclick="switchTab('coming')">pipeline</button>
+        <button class="tab" data-tab="catalog" role="tab" aria-selected="false" onclick="switchTab('catalog')">catalog</button>
+        <button class="tab" data-tab="jobs" role="tab" aria-selected="false" onclick="switchTab('jobs')">jobs</button>
+        <button class="tab admin-only" data-tab="logs" role="tab" aria-selected="false" onclick="switchTab('logs')">logs</button>
+        <button class="tab" data-tab="storage" role="tab" aria-selected="false" onclick="switchTab('storage')">storage</button>
+        <button class="tab" data-tab="users" role="tab" aria-selected="false" onclick="switchTab('users')">users</button>
+        <button class="tab" data-tab="settings" role="tab" aria-selected="false" onclick="switchTab('settings')">settings</button>
     </nav>
 
     <!-- Two-pane grid -->
@@ -918,7 +920,7 @@
     </script>
     <!-- Job detail drawer -->
     <div class="drawer-backdrop hidden" id="drawer-backdrop" onclick="closeJobDrawer()"></div>
-    <div class="drawer hidden" id="job-drawer">
+    <div class="drawer hidden" id="job-drawer" role="dialog" aria-modal="true" aria-label="Job details">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title" id="drawer-title">Job Details</div>
@@ -932,7 +934,7 @@
 
     <!-- Catalog detail drawer -->
     <div class="drawer-backdrop hidden" id="cat-drawer-backdrop" onclick="catCloseDetail()"></div>
-    <div class="drawer hidden" id="cat-drawer">
+    <div class="drawer hidden" id="cat-drawer" role="dialog" aria-modal="true" aria-label="Catalog item details">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title" id="cat-drawer-title">Details</div>
