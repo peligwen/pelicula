@@ -642,3 +642,40 @@ func TestDetectSubVariant(t *testing.T) {
 		}
 	}
 }
+
+// ── DeleteDualSubSidecars ─────────────────────────────────────────────────────
+
+func TestDeleteDualSubSidecars(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "Movie.mkv")
+
+	// dual-sub sidecars — should be deleted
+	dualSubs := []string{"Movie.en-es.ass", "Movie.en-fr.ass"}
+	// regular sidecar — must NOT be deleted
+	regular := []string{"Movie.en.srt", "Movie.es.ass"}
+
+	for _, f := range append(dualSubs, regular...) {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	count := DeleteDualSubSidecars(base)
+	if count != len(dualSubs) {
+		t.Errorf("DeleteDualSubSidecars returned %d, want %d", count, len(dualSubs))
+	}
+
+	// verify dual-sub sidecars are gone
+	for _, f := range dualSubs {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Errorf("%s should have been deleted", f)
+		}
+	}
+
+	// verify regular sidecars still exist
+	for _, f := range regular {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s should still exist: %v", f, err)
+		}
+	}
+}
