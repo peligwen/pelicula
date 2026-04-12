@@ -109,6 +109,9 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, map[string]string{"status": "queued"})
+	if ssePoller != nil {
+		go ssePoller.TriggerImmediate(r.Context(), "pipeline")
+	}
 }
 
 // normalizeHookPayload converts a Radarr or Sonarr webhook body into a JobSource.

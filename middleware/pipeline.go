@@ -415,6 +415,9 @@ func handlePipelineDismiss(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("dismissed job", "component", "pipeline", "job_id", req.JobID)
+	if ssePoller != nil {
+		ssePoller.TriggerImmediate(r.Context(), "pipeline")
+	}
 	httputil.WriteJSON(w, map[string]string{"status": "dismissed"})
 }
 

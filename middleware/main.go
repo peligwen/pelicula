@@ -20,6 +20,8 @@ var (
 	inviteStore    *peligrosa.InviteStore
 	requestStore   *peligrosa.RequestStore
 	dismissedStore *DismissedStore
+	sseHub         *SSEHub
+	ssePoller      *SSEPoller
 )
 
 func main() {
@@ -39,7 +41,9 @@ func main() {
 		// Peligrosa: httputil.RequireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
 		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
-		serveWithShutdown(":8181", mux)
+		setupCtx, setupStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer setupStop()
+		serveWithShutdown(setupCtx, ":8181", mux)
 		return
 	}
 
@@ -57,6 +61,13 @@ func main() {
 	inviteStore = peligrosa.NewInviteStore(db, jellyfinClient)
 	dismissedStore = NewDismissedStore(db)
 	requestStore = peligrosa.NewRequestStore(db, NewArrFulfiller())
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	sseHub = NewSSEHub()
+	ssePoller = NewSSEPoller(sseHub, services, dismissedStore)
+	go ssePoller.Run(ctx)
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
@@ -104,6 +115,9 @@ func main() {
 	mux.Handle("/api/pelicula/pipeline", auth.Guard(http.HandlerFunc(handlePipelineGet)))
 	// admin only: dismiss a failed job from the needs-attention lane
 	mux.Handle("/api/pelicula/pipeline/dismiss", auth.GuardAdmin(http.HandlerFunc(handlePipelineDismiss)))
+
+	// viewer+: SSE stream for real-time dashboard updates
+	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(sseHub.HandleSSE)))
 
 	// viewer+: read-only dashboard data
 	mux.Handle("/api/pelicula/host", auth.Guard(http.HandlerFunc(handleHost)))
@@ -186,13 +200,11 @@ func main() {
 	mux.Handle("/api/pelicula/logs/aggregate", auth.GuardAdmin(http.HandlerFunc(handleLogsAggregate)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
-	serveWithShutdown(":8181", mux)
+	serveWithShutdown(ctx, ":8181", mux)
 }
 
-func serveWithShutdown(addr string, handler http.Handler) {
+func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {
 	srv := &http.Server{Addr: addr, Handler: handler}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
