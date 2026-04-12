@@ -2,7 +2,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -325,6 +324,3 @@ func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 
 // TODO: replaced by catalog_sync.go Task 7
 func maybeSyncJellyfinMetadata(_ *CatalogItem) {}
-
-// TODO: replaced by catalog_sync.go Task 6
-func BackfillFromArr(_ *sql.DB, _ *ServiceClients) error { return nil }
