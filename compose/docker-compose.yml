@@ -318,6 +318,9 @@ services:
       - ./nginx/jobs.js:/usr/share/nginx/html/jobs.js:ro
       - ./nginx/logs.js:/usr/share/nginx/html/logs.js:ro
       - ./nginx/search.js:/usr/share/nginx/html/search.js:ro
+      - ./nginx/downloads.js:/usr/share/nginx/html/downloads.js:ro
+      - ./nginx/notifications.js:/usr/share/nginx/html/notifications.js:ro
+      - ./nginx/pipeline.js:/usr/share/nginx/html/pipeline.js:ro
       - ./nginx/register.html:/usr/share/nginx/html/register.html:ro
       - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
       - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
