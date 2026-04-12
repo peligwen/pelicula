@@ -1,5 +1,6 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 .hidden { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 html { font-size: 18px; }
 body {
@@ -453,6 +454,35 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     padding: 0.65rem 1rem; background: var(--panel2);
     border: 1.5px solid var(--border); border-radius: 12px;
     color: var(--faint); font-size: 0.82rem; text-align: center;
+}
+
+/* ── Skeleton loading ─────────────────────────────────────────────────── */
+@keyframes skeleton-pulse {
+    0%   { opacity: 0.6; }
+    50%  { opacity: 0.3; }
+    100% { opacity: 0.6; }
+}
+.skeleton {
+    background: var(--panel2); border: 1.5px solid var(--border);
+    border-radius: 12px; min-height: 3rem;
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; opacity: 0.4; }
+}
+
+/* ── Inline error state ───────────────────────────────────────────────── */
+.inline-error {
+    padding: 0.65rem 1rem; background: var(--danger-bg, #fde8e8);
+    border: 1.5px solid var(--danger-border, rgba(220,53,69,0.4));
+    border-radius: 12px; color: var(--danger-text, #991b1b);
+    font-size: 0.82rem; text-align: center;
+}
+.inline-error .retry-btn {
+    display: inline-block; margin-top: 0.4rem; padding: 0.25rem 0.75rem;
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 8px; font-size: 0.75rem; cursor: pointer;
+    color: var(--ink); font-family: inherit;
 }
 
 /* ── Proc badges ───────────────────────────────────────────────────────── */
