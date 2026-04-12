@@ -91,8 +91,8 @@ function makeMsg(text, isError) {
 
 window.jobsRefresh = function () { jobsState.loaded = false; loadJobs(); };
 
-document.addEventListener('pelicula:tab-changed', function (e) {
-    if (e.detail && e.detail.tab === 'jobs' && !jobsState.loaded) loadJobs();
+PeliculaFW.onTab('jobs', function () {
+    if (!jobsState.loaded) loadJobs();
 });
 
 if (document.body && document.body.dataset.tab === 'jobs') loadJobs();

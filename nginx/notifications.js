@@ -1,11 +1,11 @@
 // nginx/notifications.js
 // Notifications component — registered with PeliculaFW; mounted by dashboard.js.
-// Depends on: framework.js (PeliculaFW), dashboard.js (tfetch, showAdminToast).
+// Depends on: framework.js (PeliculaFW), dashboard.js (tfetch).
 
 'use strict';
 
 (function () {
-    const { component, html, raw } = PeliculaFW;
+    const { component, html, raw, toast } = PeliculaFW;
 
     // ── Module-level state ────────────────────────────────────────────────────
     let lastSeenTs = localStorage.getItem('peliculaLastSeen') || '1970-01-01T00:00:00Z';
@@ -42,11 +42,11 @@
         try {
             const res = await tfetch('/api/pelicula/notifications/' + id, { method: 'DELETE' });
             if (!res.ok) {
-                showAdminToast('Could not dismiss notification', true);
+                toast('Could not dismiss notification', { error: true });
                 return;
             }
         } catch (e) {
-            showAdminToast('Could not dismiss notification', true);
+            toast('Could not dismiss notification', { error: true });
             return;
         }
         // Re-fetch so the dropdown and badge both update correctly.
@@ -63,11 +63,11 @@
         try {
             const res = await tfetch('/api/pelicula/notifications', { method: 'DELETE' });
             if (!res.ok) {
-                showAdminToast('Could not clear notifications', true);
+                toast('Could not clear notifications', { error: true });
                 return;
             }
         } catch (e) {
-            showAdminToast('Could not clear notifications', true);
+            toast('Could not clear notifications', { error: true });
             return;
         }
         renderNotifications([]);

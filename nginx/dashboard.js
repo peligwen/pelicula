@@ -86,10 +86,8 @@ function applyRole(role, username) {
             if (window.loadRequests) window.loadRequests();
             if (window._users_setRequestsLoaded) window._users_setRequestsLoaded(true);
         }
-        if (isAdmin && window._users_getArrMetaLoaded && !window._users_getArrMetaLoaded()) {
-            if (window.loadArrMeta) window.loadArrMeta();
-            if (window._users_setArrMetaLoaded) window._users_setArrMetaLoaded(true);
-        }
+        // loadArrMeta's own guard (in settings.js) prevents duplicate loads
+        if (isAdmin && window.loadArrMeta) window.loadArrMeta();
     }
 
     // Users section: visible to admins
@@ -198,8 +196,8 @@ document.addEventListener('click', (e) => {
     setSidePanelCollapsed(true);
 });
 
-// checkServices, checkVPN, checkHost, updateTimestamp, startServicesAutoRefresh,
-// manualRefreshServices, toggleStackMenu, stackRestart, showServiceLogs, closeLogModal,
+// checkServices, checkVPN, checkHost, updateTimestamp, manualRefreshServices,
+// toggleStackMenu, stackRestart, showServiceLogs, closeLogModal,
 // refreshServiceLogs, copyServiceLogs, runSpeedTest — moved to services.js.
 // ── Notifications bell ────────────────────
 // renderNotifications, toggleNotifications, notifIcon, notifClass, formatNotifTime,
@@ -707,8 +705,7 @@ window.openJobDrawer = async function(jobId) {
     const body = document.getElementById('drawer-body');
     const actions = document.getElementById('drawer-actions');
     if (!drawer) return;
-    backdrop.classList.remove('hidden');
-    drawer.classList.remove('hidden');
+    PeliculaFW.openDrawer(drawer, backdrop);
     title.textContent = 'Job Details';
     sub.textContent = jobId;
     body.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">Loading\u2026</div>';
@@ -770,8 +767,10 @@ window.openJobDrawer = async function(jobId) {
 };
 
 window.closeJobDrawer = function() {
-    document.getElementById('drawer-backdrop').classList.add('hidden');
-    document.getElementById('job-drawer').classList.add('hidden');
+    PeliculaFW.closeDrawer(
+        document.getElementById('job-drawer'),
+        document.getElementById('drawer-backdrop')
+    );
 };
 
 // ── Tab routing ───────────────────────────

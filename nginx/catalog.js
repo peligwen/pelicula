@@ -13,8 +13,7 @@ function catFetch(url, opts) {
 }
 
 function catToast(msg, isError) {
-    if (typeof showAdminToast === 'function') { showAdminToast(msg, isError); return; }
-    console.info('[catalog]', isError ? 'error' : 'info', msg);
+    PeliculaFW.toast(msg, isError ? { error: true } : undefined);
 }
 
 function fmtSize(bytes) {
@@ -360,8 +359,7 @@ component('catalog', function (el, store, _props) {
         const sub = document.getElementById('cat-drawer-sub');
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
-        backdrop.classList.remove('hidden');
-        drawer.classList.remove('hidden');
+        PeliculaFW.openDrawer(drawer, backdrop);
         titleEl.textContent = path.split('/').slice(-1)[0] || 'Details';
         sub.textContent = path;
         setHTML(body, html`<div style="color:var(--muted);padding:1rem 0">Loading\u2026</div>`);
@@ -548,8 +546,10 @@ component('catalog', function (el, store, _props) {
         document.getElementById('sub-req-forced').checked = false;
         document.getElementById('sub-req-status').textContent = '';
         renderSubReqLangs();
-        document.getElementById('sub-req-backdrop').classList.remove('hidden');
-        document.getElementById('sub-req-dialog').classList.remove('hidden');
+        PeliculaFW.openDrawer(
+            document.getElementById('sub-req-dialog'),
+            document.getElementById('sub-req-backdrop')
+        );
     }
 
     function renderSubReqLangs() {
@@ -592,8 +592,10 @@ component('catalog', function (el, store, _props) {
     window.catOpenDetail = function (path) { openDetail(path); };
 
     window.catCloseDetail = function () {
-        document.getElementById('cat-drawer-backdrop').classList.add('hidden');
-        document.getElementById('cat-drawer').classList.add('hidden');
+        PeliculaFW.closeDrawer(
+            document.getElementById('cat-drawer'),
+            document.getElementById('cat-drawer-backdrop')
+        );
     };
 
     window.catAction = function (action, itemJson) {
@@ -606,8 +608,10 @@ component('catalog', function (el, store, _props) {
     window.subReqOpen = function (target) { openSubRequest(target); };
 
     window.subReqClose = function () {
-        document.getElementById('sub-req-backdrop').classList.add('hidden');
-        document.getElementById('sub-req-dialog').classList.add('hidden');
+        PeliculaFW.closeDrawer(
+            document.getElementById('sub-req-dialog'),
+            document.getElementById('sub-req-backdrop')
+        );
     };
 
     window.subReqSubmit = async function () {
@@ -661,8 +665,7 @@ component('catalog', function (el, store, _props) {
 
 // ── Tab activation ────────────────────────────────────────────────────────────
 // dashboard.js dispatches pelicula:tab-changed; we mount on first activation.
-document.addEventListener('pelicula:tab-changed', function (e) {
-    if (!e.detail || e.detail.tab !== 'catalog') return;
+PeliculaFW.onTab('catalog', function () {
     const el = document.getElementById('catalog-section');
     if (el && !el.dataset.mounted) {
         el.dataset.mounted = '1';

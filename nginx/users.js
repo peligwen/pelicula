@@ -10,8 +10,8 @@
     // ── Module-level state ────────────────────────────────────────────────────
     let usersLoaded = false;
     let requestsLoaded = false;
-    let arrMetaLoaded = false;
-    let _arrMeta = null;
+    // arrMetaLoaded / _arrMeta / populateRequestsSettings / saveRequestsSettings
+    // live in settings.js (canonical owner). users.js calls them via window.*.
 
     // ── Users ─────────────────────────────────────────────────────────────────
 
@@ -271,62 +271,7 @@
     }
 
     // ── Arr-meta for admin request settings dropdowns ──────────────────────────
-
-    async function loadArrMeta() {
-        try {
-            const resp = await fetch('/api/pelicula/arr-meta');
-            if (!resp.ok) return;
-            _arrMeta = await resp.json();
-            populateRequestsSettings(_arrMeta);
-        } catch (e) { console.warn('[pelicula] loadArrMeta error', e); }
-    }
-
-    function populateRequestsSettings(meta) {
-        const fillProfiles = (selectId, profiles) => {
-            const el = document.getElementById(selectId);
-            if (!el || !profiles) return;
-            el.innerHTML = html`<option value="">&#8212; use default &#8212;</option>`.str +
-                profiles.map(p => html`<option value="${p.id}">${p.name}</option>`.str).join('');
-        };
-        const fillRoots = (selectId, roots) => {
-            const el = document.getElementById(selectId);
-            if (!el || !roots) return;
-            el.innerHTML = html`<option value="">&#8212; use default &#8212;</option>`.str +
-                roots.map(r => html`<option value="${r.path}">${r.path}</option>`.str).join('');
-        };
-        fillProfiles('req-radarr-profile', meta && meta.radarr && meta.radarr.qualityProfiles);
-        fillRoots('req-radarr-root', meta && meta.radarr && meta.radarr.rootFolders);
-        fillProfiles('req-sonarr-profile', meta && meta.sonarr && meta.sonarr.qualityProfiles);
-        fillRoots('req-sonarr-root', meta && meta.sonarr && meta.sonarr.rootFolders);
-    }
-
-    async function saveRequestsSettings() {
-        const profileEl = id => document.getElementById(id);
-        const body = {};
-        const radarrProfile = profileEl('req-radarr-profile') && profileEl('req-radarr-profile').value;
-        const radarrRoot = profileEl('req-radarr-root') && profileEl('req-radarr-root').value;
-        const sonarrProfile = profileEl('req-sonarr-profile') && profileEl('req-sonarr-profile').value;
-        const sonarrRoot = profileEl('req-sonarr-root') && profileEl('req-sonarr-root').value;
-        if (radarrProfile) body.requests_radarr_profile_id = radarrProfile;
-        if (radarrRoot) body.requests_radarr_root = radarrRoot;
-        if (sonarrProfile) body.requests_sonarr_profile_id = sonarrProfile;
-        if (sonarrRoot) body.requests_sonarr_root = sonarrRoot;
-        try {
-            const resp = await fetch('/api/pelicula/settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'Origin': window.location.origin},
-                body: JSON.stringify(body)
-            });
-            const data = await resp.json();
-            if (!resp.ok) {
-                const statusEl = document.getElementById('requests-settings-save-status');
-                if (statusEl) statusEl.textContent = 'Save failed: ' + (data.error || resp.status);
-                return;
-            }
-            const statusEl = document.getElementById('requests-settings-save-status');
-            if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
-        } catch (e) { alert('Network error'); }
-    }
+    // Canonical implementations live in settings.js — called here via window.*.
 
     // ── Invites ───────────────────────────────────────────────────────────────
 
@@ -538,8 +483,6 @@
     function setUsersLoaded(v) { usersLoaded = v; }
     function getRequestsLoaded() { return requestsLoaded; }
     function setRequestsLoaded(v) { requestsLoaded = v; }
-    function getArrMetaLoaded() { return arrMetaLoaded; }
-    function setArrMetaLoaded(v) { arrMetaLoaded = v; }
 
     // ── Component registration ────────────────────────────────────────────────
 
@@ -595,8 +538,7 @@
     window.loadSessions          = loadSessions;
     window.loadRequests          = loadRequests;
     window.loadInvites           = loadInvites;
-    window.loadArrMeta           = loadArrMeta;
-    window.saveRequestsSettings  = saveRequestsSettings;
+    // loadArrMeta + saveRequestsSettings exported by settings.js (canonical owner)
     window.approveRequest        = approveRequest;
     window.denyRequest           = denyRequest;
     window.startResetPassword    = startResetPassword;
@@ -615,6 +557,5 @@
     window._users_setUsersLoaded    = setUsersLoaded;
     window._users_getRequestsLoaded = getRequestsLoaded;
     window._users_setRequestsLoaded = setRequestsLoaded;
-    window._users_getArrMetaLoaded  = getArrMetaLoaded;
-    window._users_setArrMetaLoaded  = setArrMetaLoaded;
+    // arrMeta load-once guard lives in settings.js's window.loadArrMeta wrapper
 }());

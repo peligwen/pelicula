@@ -7,14 +7,13 @@
 'use strict';
 
 (function () {
-    const { component, html, raw } = PeliculaFW;
+    const { component, html, raw, createPoller } = PeliculaFW;
 
     // ── Module-level state ────────────────────────────────────────────────────
 
-    // Pipeline auto-refresh timer (timers don't need store reactivity)
-    let _plRefreshTimer = null;
-    let _plCountdown = 0;
     const PL_INTERVAL = 30;
+    // Poller is initialised lazily in loadOnce (needs checkPipeline defined first)
+    let plPoller = null;
 
     // Event log state
     let _eventLogLoaded = false;
@@ -267,31 +266,6 @@
         } catch (e) { console.warn('[pelicula] dismiss error:', e); }
     }
 
-    // ── Pipeline auto-refresh countdown ───────────────────────────────────────
-
-    function startPipelineAutoRefresh() {
-        _plCountdown = PL_INTERVAL;
-        updatePlCountdown();
-        if (_plRefreshTimer) clearInterval(_plRefreshTimer);
-        _plRefreshTimer = setInterval(() => {
-            if (document.hidden) return;
-            _plCountdown--;
-            if (_plCountdown <= 0) {
-                _plCountdown = PL_INTERVAL;
-                checkPipeline();
-            }
-            updatePlCountdown();
-        }, 1000);
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) { _plCountdown = PL_INTERVAL; updatePlCountdown(); }
-        }, { once: false });
-    }
-
-    function updatePlCountdown() {
-        const el = document.getElementById('pl-refresh-status');
-        if (el) el.textContent = _plCountdown > 0 ? 'next in ' + _plCountdown + 's' : '';
-    }
-
     // ── Event log ─────────────────────────────────────────────────────────────
 
     function onEventLogToggle(details) {
@@ -355,7 +329,8 @@
             render: function() {},  // operates on existing DOM
             loadOnce: function() {
                 checkPipeline();
-                setTimeout(startPipelineAutoRefresh, 1200);
+                plPoller = createPoller(checkPipeline, PL_INTERVAL, 'pl-refresh-status');
+                setTimeout(function() { plPoller.start(); }, 1200);
             },
         };
     });
@@ -364,9 +339,7 @@
     // checkPipeline is called by dashboard.js refresh() and by dlPause/dlCancel callbacks.
     window.checkPipeline         = checkPipeline;
     window.manualRefreshPipeline = function() {
-        _plCountdown = PL_INTERVAL;
-        updatePlCountdown();
-        checkPipeline();
+        if (plPoller) plPoller.refresh(); else checkPipeline();
     };
     window.dismissJobFromBtn     = dismissJobFromBtn;
     window.onEventLogToggle      = onEventLogToggle;

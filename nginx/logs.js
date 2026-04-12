@@ -73,11 +73,9 @@ function renderFilters() {
 
 window.logsRefresh = function () { loadLogs(); };
 
-document.addEventListener('pelicula:tab-changed', function (e) {
-    if (e.detail && e.detail.tab === 'logs') {
-        renderFilters();
-        loadLogs();
-    }
+PeliculaFW.onTab('logs', function () {
+    renderFilters();
+    loadLogs();
 });
 
 })();

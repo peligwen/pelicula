@@ -342,19 +342,18 @@
     // ── Component registration ────────────────────────────────────────────────
 
     component('settings', function (el) {
-        function onTabChanged(e) {
-            if (e.detail.tab !== 'settings') return;
+        function onTabChanged() {
             if (!_settingsLoaded) loadSettingsTab();
             loadProfilesPanel();
             if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
         }
 
         function init() {
-            document.addEventListener('pelicula:tab-changed', onTabChanged);
+            PeliculaFW.onTab('settings', onTabChanged);
         }
 
         function destroy() {
-            document.removeEventListener('pelicula:tab-changed', onTabChanged);
+            // onTab listeners are lightweight — no cleanup needed
         }
 
         return {

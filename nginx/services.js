@@ -7,16 +7,16 @@
 'use strict';
 
 (function () {
-    const { component, html, raw } = PeliculaFW;
+    const { component, html, raw, toast, createPoller } = PeliculaFW;
 
     // ── Module-level state ────────────────────────────────────────────────────
     let _panelVPNDegraded = false;
     let _vpnBannerDismissed = false;
-    let _svcRefreshTimer = null;
-    let _svcCountdown = 0;
     let _logCurrentSvc = '';
 
     const SVC_INTERVAL = 30; // seconds
+    // Poller is initialised lazily in loadOnce (needs checkServices defined first)
+    let svcPoller = null;
 
     // ── Panel alert signal ────────────────────────────────────────────────────
     // Derives body.panel-alert from service health + VPN degraded flag.
@@ -85,36 +85,10 @@
 
     // ── Services auto-refresh + totals ────────────────────────────────────────
 
-    function startServicesAutoRefresh() {
-        _svcCountdown = SVC_INTERVAL;
-        updateSvcCountdown();
-        if (_svcRefreshTimer) clearInterval(_svcRefreshTimer);
-        _svcRefreshTimer = setInterval(() => {
-            if (document.hidden) return;
-            _svcCountdown--;
-            if (_svcCountdown <= 0) {
-                _svcCountdown = SVC_INTERVAL;
-                checkServices().then(updateSvcTotals);
-            }
-            updateSvcCountdown();
-        }, 1000);
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                _svcCountdown = SVC_INTERVAL;
-                updateSvcCountdown();
-            }
-        }, { once: false });
-    }
-
-    function updateSvcCountdown() {
-        const el = document.getElementById('svc-refresh-status');
-        if (el) el.textContent = _svcCountdown > 0 ? 'next in ' + _svcCountdown + 's' : '';
-    }
+    // Auto-refresh timer managed by framework's createPoller (see loadOnce below)
 
     function manualRefreshServices() {
-        _svcCountdown = SVC_INTERVAL;
-        updateSvcCountdown();
-        checkServices().then(updateSvcTotals);
+        if (svcPoller) svcPoller.refresh(); else checkServices().then(updateSvcTotals);
     }
 
     function updateSvcTotals() {
@@ -162,28 +136,16 @@
         try {
             const res = await fetch('/api/pelicula/admin/stack/restart', { method: 'POST' });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) { showAdminToast(data.error || 'Restart failed', true); return; }
-            showAdminToast('Stack restarting\u2026');
+            if (!res.ok) { toast(data.error || 'Restart failed', { error: true }); return; }
+            toast('Stack restarting\u2026');
             setTimeout(() => checkServices().then(updateSvcTotals), 5000);
         } catch (e) {
             // pelicula-api restarted — response was lost. That's fine.
-            showAdminToast('Stack restarting\u2026');
+            toast('Stack restarting\u2026');
             setTimeout(() => checkServices().then(updateSvcTotals), 5000);
         } finally {
             if (btn) btn.disabled = false;
         }
-    }
-
-    function showAdminToast(msg, isError) {
-        // Reuse the existing index toast element for one-liners,
-        // else fall back to alert for errors.
-        if (isError) { alert(msg); return; }
-        const el = document.getElementById('toast');
-        if (!el) return;
-        const prev = el.innerHTML;
-        el.innerHTML = html`<span class="toast-icon">&#10003;</span><span>${msg}</span>`.str;
-        el.classList.add('visible');
-        setTimeout(() => { el.classList.remove('visible'); el.innerHTML = prev; }, 3000);
     }
 
     // ── Log viewer modal ──────────────────────────────────────────────────────
@@ -446,9 +408,14 @@
             render: function() {},  // no template rendering — operates on existing DOM
             loadOnce: function() {
                 init();
-                // Start the 30-second auto-refresh timer.
+                // Start the 30-second auto-refresh timer via framework poller.
                 // The first actual check fires from refresh() in dashboard.js.
-                startServicesAutoRefresh();
+                svcPoller = createPoller(
+                    function() { checkServices().then(updateSvcTotals); },
+                    SVC_INTERVAL,
+                    'svc-refresh-status'
+                );
+                svcPoller.start();
             },
         };
     });
