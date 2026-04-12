@@ -321,6 +321,3 @@ func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 	}()
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
-
-// TODO: replaced by catalog_sync.go Task 7
-func maybeSyncJellyfinMetadata(_ *CatalogItem) {}

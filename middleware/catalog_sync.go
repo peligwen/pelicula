@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 )
 
 // UpsertFromHook creates or updates catalog records when a download completes.
@@ -226,4 +227,92 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 	}
 	slog.Info("backfill sonarr complete", "component", "catalog_sync", "count", len(seriesList))
 	return nil
+}
+
+// maybeSyncJellyfinMetadata syncs Jellyfin metadata for an item if stale (>24h) or never synced.
+// Only syncs movies and series (they carry the artwork/synopsis for their subtree).
+// Safe to call in a goroutine — logs errors, never panics.
+func maybeSyncJellyfinMetadata(item *CatalogItem) {
+	if item == nil {
+		return
+	}
+	// Only root-level items carry metadata
+	if item.Type != "movie" && item.Type != "series" {
+		return
+	}
+	if item.MetadataSyncedAt != "" {
+		t, err := time.Parse(time.RFC3339, item.MetadataSyncedAt)
+		if err == nil && time.Since(t) < 24*time.Hour {
+			return // still fresh
+		}
+	}
+	if err := SyncJellyfinMetadata(catalogDB, services, item); err != nil {
+		slog.Error("jellyfin metadata sync", "component", "catalog_sync", "id", item.ID, "error", err)
+	}
+}
+
+// SyncJellyfinMetadata fetches artwork and synopsis from Jellyfin and persists them.
+// If the item is not yet in Jellyfin, it records the attempt (MetadataSyncedAt is set)
+// so we don't hammer Jellyfin on every request.
+func SyncJellyfinMetadata(db *sql.DB, svc *ServiceClients, item *CatalogItem) error {
+	jellyfinID, artworkURL, synopsis, err := fetchJellyfinItemMeta(svc, item)
+	if err != nil {
+		return err
+	}
+	syncedAt := time.Now().UTC().Format(time.RFC3339)
+	if err := UpdateCatalogMetadata(db, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
+		return fmt.Errorf("persist metadata: %w", err)
+	}
+	if jellyfinID != "" {
+		slog.Info("jellyfin metadata synced", "component", "catalog_sync", "id", item.ID, "jellyfin_id", jellyfinID)
+	}
+	return nil
+}
+
+// fetchJellyfinItemMeta queries Jellyfin for an item by TMDB/TVDB provider ID.
+// Returns (jellyfinID, artworkURL, synopsis, error). Returns empty strings if not found.
+func fetchJellyfinItemMeta(svc *ServiceClients, item *CatalogItem) (string, string, string, error) {
+	var providerParam string
+	switch item.Type {
+	case "movie":
+		if item.TmdbID != 0 {
+			providerParam = fmt.Sprintf("Tmdb.%d", item.TmdbID)
+		}
+	case "series":
+		if item.TvdbID != 0 {
+			providerParam = fmt.Sprintf("Tvdb.%d", item.TvdbID)
+		} else if item.TmdbID != 0 {
+			providerParam = fmt.Sprintf("Tmdb.%d", item.TmdbID)
+		}
+	}
+	if providerParam == "" {
+		return "", "", "", nil // no provider ID to search by
+	}
+
+	path := fmt.Sprintf("/Items?AnyProviderIdEquals=%s&Fields=Overview,ImageTags&Limit=1", providerParam)
+	body, err := jellyfinDo(svc, "GET", path, svc.JellyfinAPIKey, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("jellyfin items query: %w", err)
+	}
+
+	var resp struct {
+		Items []struct {
+			ID        string            `json:"Id"`
+			Overview  string            `json:"Overview"`
+			ImageTags map[string]string `json:"ImageTags"`
+		} `json:"Items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", "", "", fmt.Errorf("jellyfin items parse: %w", err)
+	}
+	if len(resp.Items) == 0 {
+		return "", "", "", nil // not yet in Jellyfin
+	}
+
+	jf := resp.Items[0]
+	artworkURL := ""
+	if _, ok := jf.ImageTags["Primary"]; ok {
+		artworkURL = fmt.Sprintf("%s/Items/%s/Images/Primary", jellyfinURL, jf.ID)
+	}
+	return jf.ID, artworkURL, jf.Overview, nil
 }
