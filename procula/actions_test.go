@@ -213,6 +213,7 @@ func TestLangTagFromBase(t *testing.T) {
 		{"Movie.en.hi", "en"},
 		{"Movie.es.forced", "es"},
 		{"Movie.en.sdh", "en"},
+		{"forced.hi", "und"},
 	}
 	for _, c := range cases {
 		if got := langTagFromBase(c.base); got != c.want {

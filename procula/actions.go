@@ -318,7 +318,7 @@ func langTagFromBase(base string) string {
 			return normalizeLangCode(seg)
 		}
 	}
-	return base
+	return "und" // undetermined — all segments were variant suffixes
 }
 
 // parseSidecarFile reads SubtitleCues from a .srt or .ass file.
