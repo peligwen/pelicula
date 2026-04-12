@@ -780,7 +780,7 @@ func TestProcessJob_DualSub_SidecarSource(t *testing.T) {
 	if !strings.Contains(content, `{\an2}Hello`) {
 		t.Errorf("expected English bottom cue in ASS output")
 	}
-	if !strings.Contains(content, `{\an8}Hola`) {
+	if !strings.Contains(content, `{\an2}Hola`) {
 		t.Errorf("expected Spanish top cue in ASS output")
 	}
 	if job.DualSubError != "" {

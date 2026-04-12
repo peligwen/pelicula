@@ -248,7 +248,7 @@ func TestWriteASS_BasicOutput(t *testing.T) {
 		"Style: Bottom",
 		"Style: Top",
 		"Bottom,,0,0,0,,{\\an2}Hello world",
-		"Top,,0,0,0,,{\\an8}Hola mundo",
+		"Top,,0,0,0,,{\\an2}Hola mundo",
 		"0:00:01.00",
 		"0:00:03.00",
 	}
@@ -386,7 +386,7 @@ func TestWriteASSLayout_StackedBottom(t *testing.T) {
 		t.Error("missing Bottom style with Arial,52")
 	}
 	// Top style: MarginV = margin_v + font_size + gap = 40+52+10 = 102
-	if !strings.Contains(content, ",8,10,10,102,") {
+	if !strings.Contains(content, ",2,10,10,102,") {
 		t.Errorf("Top style MarginV should be 102 (40+52+10); content:\n%s", content)
 	}
 }

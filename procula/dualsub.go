@@ -548,7 +548,7 @@ func writeASSContent(path string, prof DualSubProfile, topCues []SubtitleCue, bo
 		topStyle = styleParams{8, prof.MarginV}
 		bottomStyle = styleParams{2, prof.MarginV}
 	default: // "stacked_bottom"
-		topStyle = styleParams{8, prof.MarginV + prof.FontSize + prof.Gap}
+		topStyle = styleParams{2, prof.MarginV + prof.FontSize + prof.Gap}
 		bottomStyle = styleParams{2, prof.MarginV}
 	}
 
