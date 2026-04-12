@@ -113,6 +113,11 @@ func main() {
 	mux.HandleFunc("GET /api/procula/profiles", srv.handleListProfiles)
 	mux.HandleFunc("POST /api/procula/profiles", requireAPIKey(srv.handleSaveProfile))
 	mux.HandleFunc("DELETE /api/procula/profiles/{name}", requireAPIKey(srv.handleDeleteProfile))
+	mux.HandleFunc("GET /api/procula/dualsub-profiles", srv.handleListDualSubProfiles)
+	mux.HandleFunc("POST /api/procula/dualsub-profiles", requireAPIKey(srv.handleSaveDualSubProfile))
+	mux.HandleFunc("PUT /api/procula/dualsub-profiles/{name}", requireAPIKey(srv.handleSaveDualSubProfile))
+	mux.HandleFunc("DELETE /api/procula/dualsub-profiles/{name}", requireAPIKey(srv.handleDeleteDualSubProfile))
+	mux.HandleFunc("GET /api/procula/subtitle-tracks", srv.handleSubtitleTracks)
 	mux.HandleFunc("POST /api/procula/subtitles/search", requireAPIKey(srv.handleSubSearch))
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
@@ -577,6 +582,60 @@ func (s *Server) handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 		rows = []CatalogFlagRow{}
 	}
 	writeJSON(w, map[string]any{"rows": rows})
+}
+
+func (s *Server) handleListDualSubProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles, err := ListDualSubProfiles(s.db)
+	if err != nil {
+		writeError(w, "failed to list profiles: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, profiles)
+}
+
+func (s *Server) handleSaveDualSubProfile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var p DualSubProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if p.Name == "" {
+		writeError(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if err := SaveDualSubProfile(s.db, p); err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, p)
+}
+
+func (s *Server) handleDeleteDualSubProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := DeleteDualSubProfile(s.db, name); err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeError(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	clean := filepath.Clean(path)
+	if !isLibraryPath(clean) {
+		writeError(w, "path must be under /movies or /tv", http.StatusBadRequest)
+		return
+	}
+	tracks := subtitleTracksForPath(clean)
+	if tracks == nil {
+		tracks = []SubtitleTrack{}
+	}
+	writeJSON(w, map[string]any{"tracks": tracks})
 }
 
 // isLibraryPath returns true only for paths under /movies or /tv.
