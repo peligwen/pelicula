@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -584,5 +585,60 @@ func TestIsTextSubCodec(t *testing.T) {
 				t.Errorf("isTextSubCodec(%q) = %v, want %v", c.codec, got, c.want)
 			}
 		})
+	}
+}
+
+func TestSubtitleTracksForPath(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "Movie.mkv")
+	files := []string{
+		"Movie.en.srt",
+		"Movie.en.hi.srt",
+		"Movie.es.srt",
+		"Movie.es.forced.srt",
+		"Movie.fr.sdh.srt",
+	}
+	for _, f := range files {
+		os.WriteFile(filepath.Join(dir, f), []byte(""), 0644)
+	}
+	tracks := subtitleTracksForPath(base)
+	if len(tracks) != len(files) {
+		t.Fatalf("expected %d tracks, got %d", len(files), len(tracks))
+	}
+	byFile := map[string]SubtitleTrack{}
+	for _, tr := range tracks {
+		byFile[filepath.Base(tr.File)] = tr
+	}
+	if byFile["Movie.en.srt"].Variant != "regular" {
+		t.Errorf("Movie.en.srt variant = %q, want regular", byFile["Movie.en.srt"].Variant)
+	}
+	if byFile["Movie.en.hi.srt"].Variant != "hi" {
+		t.Errorf("Movie.en.hi.srt variant = %q, want hi", byFile["Movie.en.hi.srt"].Variant)
+	}
+	if byFile["Movie.es.forced.srt"].Variant != "forced" {
+		t.Errorf("Movie.es.forced.srt variant = %q, want forced", byFile["Movie.es.forced.srt"].Variant)
+	}
+	if byFile["Movie.fr.sdh.srt"].Variant != "hi" {
+		t.Errorf("Movie.fr.sdh.srt variant = %q, want hi (sdh maps to hi)", byFile["Movie.fr.sdh.srt"].Variant)
+	}
+	if byFile["Movie.en.srt"].Lang != "en" {
+		t.Errorf("Movie.en.srt lang = %q, want en", byFile["Movie.en.srt"].Lang)
+	}
+}
+
+func TestDetectSubVariant(t *testing.T) {
+	cases := []struct{ file, want string }{
+		{"Movie.en.srt", "regular"},
+		{"Movie.en.hi.srt", "hi"},
+		{"Movie.en.HI.srt", "hi"},
+		{"Movie.es.forced.srt", "forced"},
+		{"Movie.fr.sdh.srt", "hi"},
+		{"Movie.de.srt", "regular"},
+	}
+	for _, c := range cases {
+		got := detectSubVariant(c.file)
+		if got != c.want {
+			t.Errorf("detectSubVariant(%q) = %q, want %q", c.file, got, c.want)
+		}
 	}
 }

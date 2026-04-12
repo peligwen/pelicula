@@ -29,6 +29,102 @@ type subStream struct {
 	CodecName string
 }
 
+// SubtitleTrack describes one subtitle sidecar file alongside a media item.
+type SubtitleTrack struct {
+	File    string `json:"file"`    // full path
+	Lang    string `json:"lang"`    // 2-letter code, e.g. "en"
+	Variant string `json:"variant"` // "regular" | "hi" | "forced"
+}
+
+// subtitleTracksForPath returns all subtitle sidecar files alongside mediaPath.
+// Detects lang and variant from filename conventions:
+//
+//	Movie.en.srt       → {lang:"en", variant:"regular"}
+//	Movie.en.hi.srt    → {lang:"en", variant:"hi"}
+//	Movie.es.forced.srt → {lang:"es", variant:"forced"}
+//
+// Dual-sub sidecars (e.g. Movie.en-es.ass) are excluded.
+func subtitleTracksForPath(mediaPath string) []SubtitleTrack {
+	dir := filepath.Dir(mediaPath)
+	base := strings.TrimSuffix(filepath.Base(mediaPath), filepath.Ext(mediaPath))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var tracks []SubtitleTrack
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".srt" && ext != ".ass" {
+			continue
+		}
+		if !strings.HasPrefix(name, base+".") {
+			continue
+		}
+		// Strip base. and extension to get the tag portion: e.g. "en", "en.hi", "es.forced"
+		inner := name[len(base)+1 : len(name)-len(ext)]
+		// Exclude dualsub sidecars (e.g. "en-es")
+		if strings.ContainsRune(inner, '-') {
+			continue
+		}
+		parts := strings.Split(strings.ToLower(inner), ".")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+		lang := normalizeLangCode(parts[0])
+		variant := "regular"
+		for _, tag := range parts[1:] {
+			v := detectSubVariant("." + tag + ".")
+			if v != "regular" {
+				variant = v
+				break
+			}
+		}
+		tracks = append(tracks, SubtitleTrack{
+			File:    filepath.Join(dir, name),
+			Lang:    lang,
+			Variant: variant,
+		})
+	}
+	return tracks
+}
+
+// detectSubVariant returns "hi", "forced", or "regular" based on filename tags.
+func detectSubVariant(filename string) string {
+	lower := strings.ToLower(filename)
+	if strings.Contains(lower, ".hi.") || strings.Contains(lower, ".sdh.") {
+		return "hi"
+	}
+	if strings.Contains(lower, ".forced.") {
+		return "forced"
+	}
+	return "regular"
+}
+
+// DeleteDualSubSidecars removes all dual-sub ASS sidecars alongside mediaPath
+// (those matching base.<lang>-<lang>.ass). Returns the count deleted.
+func DeleteDualSubSidecars(mediaPath string) int {
+	dir := filepath.Dir(mediaPath)
+	base := strings.TrimSuffix(filepath.Base(mediaPath), filepath.Ext(mediaPath))
+	entries, _ := os.ReadDir(dir)
+	count := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, base+".") || !strings.HasSuffix(name, ".ass") {
+			continue
+		}
+		inner := name[len(base)+1 : len(name)-4]
+		if strings.ContainsRune(inner, '-') {
+			os.Remove(filepath.Join(dir, name)) //nolint:errcheck
+			count++
+		}
+	}
+	return count
+}
+
 var (
 	srtTagRE = regexp.MustCompile(`<[^>]+>`)
 	assTagRE = regexp.MustCompile(`\{[^}]*\}`)
