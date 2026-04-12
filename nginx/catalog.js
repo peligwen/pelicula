@@ -582,7 +582,7 @@ component('catalog', function (el, store, _props) {
         if (!langs.length) { statusEl.textContent = 'Select at least one language.'; return; }
         statusEl.textContent = 'Searching\u2026';
         try {
-            const res = await catFetch('/api/procula/actions?wait=10', {
+            const res = await catFetch('/api/pelicula/actions?wait=10', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -861,7 +861,7 @@ component('catalog', function (el, store, _props) {
 
         statusEl.textContent = 'Generating\u2026';
         try {
-            const res = await catFetch('/api/procula/actions?wait=10', {
+            const res = await catFetch('/api/pelicula/actions?wait=10', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
