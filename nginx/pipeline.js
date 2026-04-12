@@ -331,6 +331,7 @@
                 checkPipeline();
                 plPoller = createPoller(checkPipeline, PL_INTERVAL, 'pl-refresh-status');
                 setTimeout(function() { plPoller.start(); }, 1200);
+                window.plPoller = plPoller;
             },
         };
     });
@@ -338,6 +339,7 @@
     // ── Window exports ────────────────────────────────────────────────────────
     // checkPipeline is called by dashboard.js refresh() and by dlPause/dlCancel callbacks.
     window.checkPipeline         = checkPipeline;
+    window.renderPipeline        = renderPipeline;
     window.manualRefreshPipeline = function() {
         if (plPoller) plPoller.refresh(); else checkPipeline();
     };

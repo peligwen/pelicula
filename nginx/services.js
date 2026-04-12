@@ -37,40 +37,46 @@
 
     // ── Services ──────────────────────────────────────────────────────────────
 
-    async function checkServices() {
+    function updateServicesFromData(data) {
         const warn = document.getElementById('search-warning');
+        const svcMap = data.services || {};
+        // Update sidebar pips
+        Object.keys(svcMap).forEach(name => {
+            const pip = document.getElementById('svc-pip-' + name);
+            if (!pip) return;
+            const up = svcMap[name] === 'up';
+            pip.className = 'svc-pip ' + (up ? 'up' : 'down');
+            const row = pip.closest('.svc-row');
+            if (row) { row.classList.remove('svc-up', 'svc-down', 'svc-unknown'); row.classList.add(up ? 'svc-up' : 'svc-down'); }
+        });
+        updateSvcTotals();
+        // Search depends on Radarr + Sonarr
+        const radarrUp = svcMap['radarr'] === 'up';
+        const sonarrUp = svcMap['sonarr'] === 'up';
+        const sinput = document.getElementById('search-input');
+        if (!radarrUp && !sonarrUp) {
+            if (sinput) { sinput.disabled = true; sinput.placeholder = 'Search unavailable'; }
+            if (warn) { warn.textContent = 'Radarr and Sonarr are both down \u2014 search is disabled'; warn.className = 'search-warning err'; }
+        } else if (!radarrUp || !sonarrUp) {
+            if (sinput) { sinput.disabled = false; sinput.placeholder = 'Search for a title...'; }
+            const down = !radarrUp ? 'Radarr (movies)' : 'Sonarr (TV shows)';
+            if (warn) { warn.textContent = down + ' is down \u2014 some results may be missing'; warn.className = 'search-warning warn'; }
+        } else {
+            if (sinput) { sinput.disabled = false; sinput.placeholder = 'Search for a title...'; }
+            if (warn) warn.className = 'search-warning';
+        }
+    }
+
+    async function checkServices() {
         try {
             const res = await tfetch('/api/pelicula/status');
             if (!res.ok) throw new Error();
             const data = await res.json();
-            const svcMap = data.services || {};
-            // Update sidebar pips
-            Object.keys(svcMap).forEach(name => {
-                const pip = document.getElementById('svc-pip-' + name);
-                if (!pip) return;
-                const up = svcMap[name] === 'up';
-                pip.className = 'svc-pip ' + (up ? 'up' : 'down');
-                const row = pip.closest('.svc-row');
-                if (row) { row.classList.remove('svc-up', 'svc-down', 'svc-unknown'); row.classList.add(up ? 'svc-up' : 'svc-down'); }
-            });
-            updateSvcTotals();
-            // Search depends on Radarr + Sonarr
-            const radarrUp = svcMap['radarr'] === 'up';
-            const sonarrUp = svcMap['sonarr'] === 'up';
-            const sinput = document.getElementById('search-input');
-            if (!radarrUp && !sonarrUp) {
-                if (sinput) { sinput.disabled = true; sinput.placeholder = 'Search unavailable'; }
-                if (warn) { warn.textContent = 'Radarr and Sonarr are both down \u2014 search is disabled'; warn.className = 'search-warning err'; }
-            } else if (!radarrUp || !sonarrUp) {
-                if (sinput) { sinput.disabled = false; sinput.placeholder = 'Search for a title...'; }
-                const down = !radarrUp ? 'Radarr (movies)' : 'Sonarr (TV shows)';
-                if (warn) { warn.textContent = down + ' is down \u2014 some results may be missing'; warn.className = 'search-warning warn'; }
-            } else {
-                if (sinput) { sinput.disabled = false; sinput.placeholder = 'Search for a title...'; }
-                if (warn) warn.className = 'search-warning';
-            }
+            updateServicesFromData(data);
+            return data;
         } catch (e) {
             console.warn('[pelicula] status check error:', e);
+            const warn = document.getElementById('search-warning');
             document.querySelectorAll('.svc-pip').forEach(pip => {
                 pip.className = 'svc-pip unknown';
                 const row = pip.closest('.svc-row');
@@ -416,13 +422,15 @@
                     'svc-refresh-status'
                 );
                 svcPoller.start();
+                window.svcPoller = svcPoller;
             },
         };
     });
 
     // ── Window exports ────────────────────────────────────────────────────────
-    window.checkServices         = checkServices;
-    window.checkVPN              = checkVPN;
+    window.checkServices          = checkServices;
+    window.updateServicesFromData = updateServicesFromData;
+    window.checkVPN               = checkVPN;
     window.checkHost             = checkHost;
     window.updateTimestamp       = updateTimestamp;
     window.manualRefreshServices = manualRefreshServices;
