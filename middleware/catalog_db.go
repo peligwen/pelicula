@@ -83,11 +83,11 @@ func runCatalogMigrations(db *sql.DB) error {
 			return fmt.Errorf("begin migration %d: %w", m.version, err)
 		}
 		if err := m.up(tx); err != nil {
-			tx.Rollback()
+			tx.Rollback() //nolint:errcheck
 			return fmt.Errorf("migration %d: %w", m.version, err)
 		}
 		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, m.version)); err != nil {
-			tx.Rollback()
+			tx.Rollback() //nolint:errcheck
 			return fmt.Errorf("set user_version %d: %w", m.version, err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -99,8 +99,8 @@ func runCatalogMigrations(db *sql.DB) error {
 }
 
 func catalogMigrate1(tx *sql.Tx) error {
-	_, err := tx.Exec(`
-		CREATE TABLE IF NOT EXISTS catalog_items (
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS catalog_items (
 			id                 TEXT PRIMARY KEY,
 			type               TEXT NOT NULL,
 			parent_id          TEXT NOT NULL DEFAULT '',
@@ -122,21 +122,27 @@ func catalogMigrate1(tx *sql.Tx) error {
 			file_path          TEXT NOT NULL DEFAULT '',
 			created_at         TEXT NOT NULL,
 			updated_at         TEXT NOT NULL
-		);
-		CREATE INDEX IF NOT EXISTS idx_catalog_tmdb
-			ON catalog_items(tmdb_id) WHERE tmdb_id != 0;
-		CREATE INDEX IF NOT EXISTS idx_catalog_tvdb
-			ON catalog_items(tvdb_id) WHERE tvdb_id != 0;
-		CREATE INDEX IF NOT EXISTS idx_catalog_arr
-			ON catalog_items(arr_id, arr_type) WHERE arr_id != 0;
-		CREATE INDEX IF NOT EXISTS idx_catalog_parent
-			ON catalog_items(parent_id) WHERE parent_id != '';
-		CREATE INDEX IF NOT EXISTS idx_catalog_tier
-			ON catalog_items(tier);
-		CREATE INDEX IF NOT EXISTS idx_catalog_path
-			ON catalog_items(file_path) WHERE file_path != '';
-	`)
-	return err
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_tmdb
+			ON catalog_items(tmdb_id) WHERE tmdb_id != 0`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_tvdb
+			ON catalog_items(tvdb_id) WHERE tvdb_id != 0`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_arr
+			ON catalog_items(arr_id, arr_type) WHERE arr_id != 0`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_parent
+			ON catalog_items(parent_id) WHERE parent_id != ''`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_tier
+			ON catalog_items(tier)`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_path
+			ON catalog_items(file_path) WHERE file_path != ''`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
+		}
+	}
+	return nil
 }
 
 func newCatalogID() string {

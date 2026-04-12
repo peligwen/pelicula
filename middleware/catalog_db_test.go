@@ -49,4 +49,29 @@ func TestOpenCatalogDB_CreatesSchema(t *testing.T) {
 			t.Errorf("missing column: %s", col)
 		}
 	}
+
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	if ver != 1 {
+		t.Errorf("expected user_version=1, got %d", ver)
+	}
+}
+
+func TestOpenCatalogDB_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/catalog_test.db"
+
+	db1, err := OpenCatalogDB(path)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	db1.Close()
+
+	db2, err := OpenCatalogDB(path)
+	if err != nil {
+		t.Fatalf("second open (should skip already-applied migrations): %v", err)
+	}
+	db2.Close()
 }
