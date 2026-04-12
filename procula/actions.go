@@ -8,11 +8,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ActionTarget identifies a library item an action applies to.
@@ -101,28 +103,20 @@ func registerBuiltinActions() {
 		Handler:     runTranscodeAction,
 	})
 	Register(&ActionDef{
-		Name:        "subtitle_refresh",
-		Label:       "Refresh subtitles",
+		Name:        "subtitle_search",
+		Label:       "Search subtitles\u2026",
 		AppliesTo:   []string{"movie", "episode"},
 		Sync:        true,
-		Description: "Ask Bazarr to re-search subtitles for this item.",
-		Handler:     runSubtitleRefreshAction,
+		Description: "Search Bazarr for subtitles with explicit languages, HI, and forced flags.",
+		Handler:     runSubtitleSearchAction,
 	})
 	Register(&ActionDef{
 		Name:        "dualsub",
-		Label:       "Regenerate dual subtitles",
+		Label:       "Dual subtitles\u2026",
 		AppliesTo:   []string{"movie", "episode"},
 		Sync:        true,
-		Description: "Delete existing dual-sub sidecars and regenerate them from the current subtitle files.",
+		Description: "Generate dual-language ASS subtitle sidecars with a chosen profile and track pair.",
 		Handler:     runDualSubAction,
-	})
-	Register(&ActionDef{
-		Name:        "subtitle_request",
-		Label:       "Request subtitles",
-		AppliesTo:   []string{"movie", "episode"},
-		Sync:        true,
-		Description: "Queue a Bazarr subtitle search with explicit languages, HI, and forced flags.",
-		Handler:     runSubtitleRequestAction,
 	})
 }
 
@@ -193,7 +187,7 @@ func runTranscodeAction(ctx context.Context, q *Queue, job *Job) (map[string]any
 	}, nil
 }
 
-// runSubtitleRequestAction dispatches a targeted Bazarr search. Params:
+// runSubtitleSearchAction dispatches a targeted Bazarr search. Params:
 //
 //	languages:  []string (required, at least one ISO 639-1 code)
 //	hi:         bool (default false)
@@ -201,12 +195,12 @@ func runTranscodeAction(ctx context.Context, q *Queue, job *Job) (map[string]any
 //	arr_type:   "radarr" | "sonarr" (required)
 //	arr_id:     int (required)
 //	episode_id: int (required for sonarr)
-func runSubtitleRequestAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
+func runSubtitleSearchAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
 	arrType, _ := job.Params["arr_type"].(string)
 	arrIDf, _ := job.Params["arr_id"].(float64)
 	epIDf, _ := job.Params["episode_id"].(float64)
 	if arrType == "" || arrIDf == 0 {
-		return nil, fmt.Errorf("subtitle_request: arr_type and arr_id required")
+		return nil, fmt.Errorf("subtitle_search: arr_type and arr_id required")
 	}
 
 	var langs []string
@@ -218,7 +212,7 @@ func runSubtitleRequestAction(ctx context.Context, q *Queue, job *Job) (map[stri
 		}
 	}
 	if len(langs) == 0 {
-		return nil, fmt.Errorf("subtitle_request: languages required")
+		return nil, fmt.Errorf("subtitle_search: languages required")
 	}
 
 	hi, _ := job.Params["hi"].(bool)
@@ -242,61 +236,139 @@ func runSubtitleRequestAction(ctx context.Context, q *Queue, job *Job) (map[stri
 	}, nil
 }
 
-// runSubtitleRefreshAction calls Bazarr directly using the target's arr IDs.
-func runSubtitleRefreshAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
-	arrType, _ := job.Params["arr_type"].(string)
-	arrIDf, _ := job.Params["arr_id"].(float64)
-	epIDf, _ := job.Params["episode_id"].(float64)
-	if arrType == "" || arrIDf == 0 {
-		return nil, fmt.Errorf("subtitle_refresh: arr_type and arr_id required")
-	}
-	synthetic := &Job{
-		ID: "action-" + job.ID,
-		Source: JobSource{
-			ArrType:   arrType,
-			ArrID:     int(arrIDf),
-			EpisodeID: int(epIDf),
-		},
-	}
-	bazarrSearchSubtitles(ctx, configDir, synthetic)
-	return map[string]any{"triggered": true}, nil
-}
-
-// runDualSubAction deletes existing dual-sub sidecars for the configured pairs
-// and regenerates them from the subtitle files already on disk.
+// runDualSubAction accepts a DualSubJob payload via job.Params:
+//
+//	"path"    string        (required) — media file path
+//	"profile" string        (optional) — profile name; defaults to "Default"
+//	"pairs"   []interface{} (required) — each entry: {"top_file":"…","bottom_file":"…"}
 func runDualSubAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
 	path, _ := job.Params["path"].(string)
 	if path == "" {
 		return nil, fmt.Errorf("dualsub: path required")
 	}
-	settings := GetSettings(appDB)
-	if !settings.DualSubEnabled {
-		return nil, fmt.Errorf("dualsub: dual subtitles are not enabled in settings")
-	}
-	if len(settings.DualSubPairs) == 0 {
-		settings.DualSubPairs = []string{"en-es"}
-	}
 
-	// Delete stale sidecars so GenerateDualSubs doesn't skip them.
-	for _, pair := range settings.DualSubPairs {
-		sidecar := dualSubPath(path, pair)
-		if err := os.Remove(sidecar); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("dualsub: remove stale sidecar %s: %w", sidecar, err)
+	rawPairs, _ := job.Params["pairs"].([]any)
+	var pairs []TrackPair
+	for _, rp := range rawPairs {
+		m, ok := rp.(map[string]any)
+		if !ok {
+			continue
+		}
+		top, _ := m["top_file"].(string)
+		bottom, _ := m["bottom_file"].(string)
+		if top != "" && bottom != "" {
+			pairs = append(pairs, TrackPair{TopFile: top, BottomFile: bottom})
 		}
 	}
+	if len(pairs) == 0 {
+		return nil, fmt.Errorf("dualsub: at least one track pair required")
+	}
 
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("dualsub: stat %s: %w", path, err)
+	profileName, _ := job.Params["profile"].(string)
+	prof := FindDualSubProfile(appDB, profileName)
+
+	var outputs []string
+	var warnings []string
+	for _, pair := range pairs {
+		topBase := strings.TrimSuffix(filepath.Base(pair.TopFile), filepath.Ext(pair.TopFile))
+		botBase := strings.TrimSuffix(filepath.Base(pair.BottomFile), filepath.Ext(pair.BottomFile))
+		topLang := langTagFromBase(topBase)
+		botLang := langTagFromBase(botBase)
+		mediaBase := strings.TrimSuffix(path, filepath.Ext(path))
+		outPath := mediaBase + "." + topLang + "-" + botLang + ".ass"
+
+		os.Remove(outPath) //nolint:errcheck
+
+		topCues, err := parseSidecarFile(pair.TopFile)
+		if err != nil || len(topCues) == 0 {
+			warnings = append(warnings, fmt.Sprintf("top track %s: %v", filepath.Base(pair.TopFile), err))
+			continue
+		}
+		botCues, err := parseSidecarFile(pair.BottomFile)
+		if err != nil || len(botCues) == 0 {
+			warnings = append(warnings, fmt.Sprintf("bottom track %s: %v", filepath.Base(pair.BottomFile), err))
+			continue
+		}
+
+		bottomTexts := alignCues(topCues, botCues)
+		if err := writeASS(outPath, prof, topCues, bottomTexts); err != nil {
+			warnings = append(warnings, fmt.Sprintf("write %s: %v", filepath.Base(outPath), err))
+			continue
+		}
+		outputs = append(outputs, outPath)
+		slog.Info("dual sub generated", "component", "dualsub", "output", outPath, "profile", prof.Name)
 	}
-	synthetic := &Job{
-		ID:     "action-" + job.ID,
-		Source: JobSource{Path: path, Size: fi.Size()},
-	}
-	outputs, firstErr := GenerateDualSubs(ctx, synthetic, settings, configDir)
+
 	result := map[string]any{"outputs": outputs}
-	if firstErr != nil {
-		result["warning"] = firstErr.Error()
+	if len(warnings) > 0 {
+		result["warnings"] = warnings
 	}
 	return result, nil
+}
+
+// langTagFromBase extracts the primary language tag from a subtitle base name.
+// "Movie.en" → "en", "Movie.en.hi" → "en"
+func langTagFromBase(base string) string {
+	parts := strings.Split(base, ".")
+	if len(parts) >= 2 {
+		return normalizeLangCode(parts[len(parts)-1])
+	}
+	return base
+}
+
+// parseSidecarFile reads SubtitleCues from a .srt or .ass file.
+func parseSidecarFile(path string) ([]SubtitleCue, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	if strings.ToLower(filepath.Ext(path)) == ".ass" {
+		return parseASSCues(data)
+	}
+	return parseSRT(data)
+}
+
+// parseASSCues extracts SubtitleCues from an ASS file by reading [Events] Dialogue lines.
+func parseASSCues(data []byte) ([]SubtitleCue, error) {
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	var cues []SubtitleCue
+	inEvents := false
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "[Events]" {
+			inEvents = true
+			continue
+		}
+		if !inEvents || !strings.HasPrefix(line, "Dialogue:") {
+			continue
+		}
+		// Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+		fields := strings.SplitN(line[len("Dialogue:"):], ",", 10)
+		if len(fields) < 10 {
+			continue
+		}
+		start, err1 := parseASSTime(strings.TrimSpace(fields[1]))
+		end, err2 := parseASSTime(strings.TrimSpace(fields[2]))
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		rawText := strings.TrimSpace(fields[9])
+		rawText = assTagRE.ReplaceAllString(rawText, "")
+		rawText = strings.ReplaceAll(rawText, "\\N", "\n")
+		if rawText != "" {
+			cues = append(cues, SubtitleCue{Start: start, End: end, Text: rawText})
+		}
+	}
+	return cues, nil
+}
+
+// parseASSTime parses an ASS timestamp "H:MM:SS.cs" into a Duration.
+func parseASSTime(s string) (time.Duration, error) {
+	var h, m, sec, cs int
+	if _, err := fmt.Sscanf(s, "%d:%d:%d.%d", &h, &m, &sec, &cs); err != nil {
+		return 0, fmt.Errorf("parse ASS time %q: %w", s, err)
+	}
+	return time.Duration(h)*time.Hour +
+		time.Duration(m)*time.Minute +
+		time.Duration(sec)*time.Second +
+		time.Duration(cs)*10*time.Millisecond, nil
 }

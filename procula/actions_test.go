@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,11 +87,11 @@ func TestTranscodeActionDetectsTVFromPath(t *testing.T) {
 	}
 }
 
-func TestSubtitleRefreshRegistered(t *testing.T) {
+func TestSubtitleSearchRegistered(t *testing.T) {
 	actionRegistry = map[string]*ActionDef{}
 	registerBuiltinActions()
-	if Lookup("subtitle_refresh") == nil {
-		t.Fatal("subtitle_refresh not registered")
+	if Lookup("subtitle_search") == nil {
+		t.Fatal("subtitle_search not registered")
 	}
 }
 
@@ -103,7 +105,7 @@ func TestHandleCreateActionSync(t *testing.T) {
 	// Need a background worker so the action actually runs.
 	go RunWorker(q, t.TempDir(), "http://localhost:0")
 
-	body := `{"action":"subtitle_refresh","target":{"arr_type":"radarr","arr_id":1}}`
+	body := `{"action":"subtitle_search","target":{"arr_type":"radarr","arr_id":1},"params":{"arr_type":"radarr","arr_id":1,"languages":["en"]}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/procula/actions?wait=3", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.handleCreateAction(w, req)
@@ -135,25 +137,44 @@ func TestHandleCreateActionUnknown(t *testing.T) {
 	}
 }
 
-func TestSubtitleRequestActionValidatesParams(t *testing.T) {
+func TestSubtitleSearchActionValidatesParams(t *testing.T) {
 	job := &Job{
 		ID:     "job_test",
 		Params: map[string]any{},
 	}
-	_, err := runSubtitleRequestAction(context.Background(), nil, job)
+	_, err := runSubtitleSearchAction(context.Background(), nil, job)
 	if err == nil {
 		t.Fatalf("expected error for missing params")
 	}
 }
 
-func TestSubtitleRequestActionRegistered(t *testing.T) {
+func TestSubtitleSearchActionRegistered(t *testing.T) {
 	registerBuiltinActions()
-	def := Lookup("subtitle_request")
+	def := Lookup("subtitle_search")
 	if def == nil {
-		t.Fatalf("subtitle_request not registered")
+		t.Fatalf("subtitle_search not registered")
 	}
 	if !def.Sync {
-		t.Errorf("subtitle_request should be sync")
+		t.Errorf("subtitle_search should be sync")
+	}
+}
+
+func TestRunDualSubAction_MissingPath(t *testing.T) {
+	job := &Job{Params: map[string]any{}}
+	_, err := runDualSubAction(context.Background(), nil, job)
+	if err == nil || err.Error() != "dualsub: path required" {
+		t.Errorf("expected 'dualsub: path required', got %v", err)
+	}
+}
+
+func TestRunDualSubAction_MissingPairs(t *testing.T) {
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "Movie.mkv")
+	os.WriteFile(mediaPath, []byte(""), 0644)
+	job := &Job{Params: map[string]any{"path": mediaPath}}
+	_, err := runDualSubAction(context.Background(), nil, job)
+	if err == nil || err.Error() != "dualsub: at least one track pair required" {
+		t.Errorf("expected pairs error, got %v", err)
 	}
 }
 
