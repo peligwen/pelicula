@@ -80,6 +80,7 @@
         <button class="tab" data-tab="coming" onclick="switchTab('coming')">pipeline</button>
         <button class="tab" data-tab="catalog" onclick="switchTab('catalog')">catalog</button>
         <button class="tab" data-tab="jobs" onclick="switchTab('jobs')">jobs</button>
+        <button class="tab admin-only" data-tab="logs" onclick="switchTab('logs')">logs</button>
         <button class="tab" data-tab="storage" onclick="switchTab('storage')">storage</button>
         <button class="tab" data-tab="users" onclick="switchTab('users')">users</button>
         <button class="tab" data-tab="settings" onclick="switchTab('settings')">settings</button>
@@ -210,6 +211,20 @@
                     <p class="um-hero-sub">All pipeline and action jobs, every state</p>
                 </div>
                 <div id="jobs-groups"></div>
+            </div>
+
+            <!-- Logs -->
+            <div class="section hidden admin-only" id="logs-section">
+                <div class="um-hero">
+                    <div class="um-hero-title-row">
+                        <span class="um-hero-icon">&#128220;</span>
+                        <h2 class="um-hero-title">Logs</h2>
+                        <button class="section-action" onclick="logsRefresh()">&#8635;</button>
+                    </div>
+                    <p class="um-hero-sub">Live log lines aggregated from every service</p>
+                </div>
+                <div class="logs-filters" id="logs-filters"></div>
+                <pre id="logs-stream" class="logs-stream"></pre>
             </div>
 
             <!-- Storage Management -->
@@ -953,6 +968,7 @@
     <script src="/framework.js"></script>
     <script src="/catalog.js" defer></script>
     <script src="/jobs.js" defer></script>
+    <script src="/logs.js" defer></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>

@@ -297,3 +297,32 @@
     user-select: none;
 }
 .sub-req-lang.active { background: rgba(200,160,255,0.75); color: #000; }
+
+.logs-filters { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
+.logs-filter-chip {
+    padding: 0.2rem 0.6rem; border-radius: 999px;
+    background: rgba(255,255,255,0.06); cursor: pointer; font-size: 0.75rem;
+}
+.logs-filter-chip.active { background: rgba(130,180,255,0.75); color: #000; }
+.logs-stream {
+    max-height: 60vh; overflow: auto;
+    background: #0c0e13; padding: 0.5rem; border-radius: 8px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem;
+    white-space: pre-wrap; word-break: break-word;
+}
+.logs-line { display: block; }
+.logs-line-svc {
+    display: inline-block; width: 10ch; margin-right: 0.6rem;
+    color: var(--muted); text-align: right;
+}
+/* colour-by-service: deterministic mapping */
+.logs-svc-sonarr      { color: #8ec7ff; }
+.logs-svc-radarr      { color: #ffb27a; }
+.logs-svc-prowlarr    { color: #c498ff; }
+.logs-svc-qbittorrent { color: #7adf97; }
+.logs-svc-jellyfin    { color: #ff8ac6; }
+.logs-svc-bazarr      { color: #ffd96e; }
+.logs-svc-gluetun     { color: #8affd9; }
+.logs-svc-procula     { color: #ffa0a0; }
+.logs-svc-nginx       { color: #ccc; }
+.logs-svc-pelicula-api { color: #9ef0c6; }
