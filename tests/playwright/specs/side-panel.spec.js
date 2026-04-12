@@ -56,4 +56,54 @@ test.describe('Collapsible side panel', () => {
         await expect(page.locator('#svc-pip-sonarr')).toHaveClass(/up/);
         await expect(page.locator('body')).not.toHaveClass(/panel-alert/);
     });
+
+    test('mobile: panel is collapsed by default and strip is visible', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(MOBILE_VIEWPORT);
+        await ensureLoggedIn(page);
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+        await expect(page.locator('#side-strip')).toBeVisible();
+        await expect(page.locator('.pane-side')).toBeHidden();
+    });
+
+    test('mobile: tapping the strip opens the panel', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(MOBILE_VIEWPORT);
+        await ensureLoggedIn(page);
+        await page.locator('#side-strip').click();
+        await expect(page.locator('body')).not.toHaveClass(/side-collapsed/);
+        await expect(page.locator('.pane-side')).toBeVisible();
+    });
+
+    test('mobile: tapping outside the open panel collapses it', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(MOBILE_VIEWPORT);
+        await ensureLoggedIn(page);
+        await page.locator('#side-strip').click();
+        await expect(page.locator('.pane-side')).toBeVisible();
+        // Click somewhere inside pane-main, well away from the panel.
+        await page.locator('.pane-main').click({ position: { x: 20, y: 200 } });
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+    });
+
+    test('desktop: panel is open by default; collapse button hides it', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(DESKTOP_VIEWPORT);
+        await ensureLoggedIn(page);
+        await expect(page.locator('body')).not.toHaveClass(/side-collapsed/);
+        await expect(page.locator('.pane-side')).toBeVisible();
+        await page.locator('#side-collapse-btn').click();
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+        await expect(page.locator('#side-strip')).toBeVisible();
+    });
+
+    test('preference persists across reloads', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(DESKTOP_VIEWPORT);
+        await ensureLoggedIn(page);
+        await page.locator('#side-collapse-btn').click();
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+        await page.reload();
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+    });
 });

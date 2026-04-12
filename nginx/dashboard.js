@@ -470,6 +470,57 @@ function updatePanelAlert() {
     document.body.classList.toggle('panel-alert', unhealthy);
 }
 
+// ── Side panel collapse state ─────────────
+// Collapse state is persisted under this localStorage key. When no preference
+// is stored, mobile viewports default to collapsed and desktops default to open.
+const _SIDE_COLLAPSED_KEY = 'pelicula_side_collapsed';
+const _SIDE_MOBILE_MAX = 768;
+
+function _isMobileViewport() {
+    return window.innerWidth <= _SIDE_MOBILE_MAX;
+}
+
+function setSidePanelCollapsed(collapsed) {
+    document.body.classList.toggle('side-collapsed', !!collapsed);
+    try { localStorage.setItem(_SIDE_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+}
+
+function toggleSidePanel() {
+    setSidePanelCollapsed(!document.body.classList.contains('side-collapsed'));
+}
+
+function initSidePanelState() {
+    let stored = null;
+    try { stored = localStorage.getItem(_SIDE_COLLAPSED_KEY); } catch (e) {}
+    if (stored === '1') { setSidePanelCollapsed(true); return; }
+    if (stored === '0') { setSidePanelCollapsed(false); return; }
+    // No preference — default based on viewport.
+    setSidePanelCollapsed(_isMobileViewport());
+}
+
+// Strip click opens the panel.
+document.addEventListener('DOMContentLoaded', () => {
+    initSidePanelState();
+    const strip = document.getElementById('side-strip');
+    if (strip) {
+        strip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setSidePanelCollapsed(false);
+        });
+    }
+});
+
+// Click-outside-to-close: only on mobile, only when panel is currently open.
+document.addEventListener('click', (e) => {
+    if (!_isMobileViewport()) return;
+    if (document.body.classList.contains('side-collapsed')) return;
+    const paneSide = document.querySelector('.pane-side');
+    if (!paneSide || paneSide.contains(e.target)) return;
+    const strip = document.getElementById('side-strip');
+    if (strip && strip.contains(e.target)) return;
+    setSidePanelCollapsed(true);
+});
+
 // ── Services ──────────────────────────────
 async function checkServices() {
     const warn = document.getElementById('search-warning');

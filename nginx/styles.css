@@ -1292,3 +1292,47 @@ details[open] .add-user-summary::before { content: '− '; }
     padding: 0.1rem 0.4rem;
 }
 .vpn-v-error { color: #e05050 !important; }
+
+/* ── Collapsible side panel ────────────────────────────────────────────── */
+
+/* Edge strip — a thin fixed-position button that lives on the right edge
+   of the viewport. Visible only when the panel is collapsed. */
+.side-strip {
+    display: none;
+    position: fixed;
+    top: 94px;       /* match header height */
+    bottom: 54px;    /* match footer height */
+    right: 0;
+    width: 8px;
+    padding: 0;
+    border: none;
+    background: var(--border);
+    cursor: pointer;
+    z-index: 50;
+    transition: background 0.2s, width 0.15s;
+}
+.side-strip:hover { width: 12px; background: var(--border2); }
+
+body.side-collapsed .side-strip { display: block; }
+body.side-collapsed .pane-side { display: none; }
+body.side-collapsed .main { grid-template-columns: 1fr; }
+
+/* Desktop collapse button — a small × inside the Services header. Hidden
+   on mobile (the strip handles opening and click-outside handles closing). */
+#side-collapse-btn { display: inline-flex; }
+
+/* Mobile layout: single column, pane-side floats over main content when open. */
+@media (max-width: 768px) {
+    .main { grid-template-columns: 1fr; }
+    .pane-side {
+        position: fixed;
+        top: 94px;
+        bottom: 54px;
+        right: 0;
+        width: min(300px, 85vw);
+        z-index: 100;
+        overflow-y: auto;
+        box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    }
+    #side-collapse-btn { display: none; }
+}
