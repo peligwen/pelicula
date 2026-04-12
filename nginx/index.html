@@ -967,6 +967,26 @@
         </div>
     </div>
 
+    <!-- Dual subtitle regeneration dialog -->
+    <div class="modal-backdrop hidden" id="dualsub-backdrop" onclick="dualsubClose()"></div>
+    <div class="cat-modal hidden" id="dualsub-dialog" role="dialog" aria-label="Regenerate dual subtitles">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Regenerate dual subtitles</div>
+                <div class="drawer-sub" id="dualsub-sub"></div>
+            </div>
+            <button class="drawer-close" onclick="dualsubClose()">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <p style="color:var(--muted);margin:0 0 1rem">Deletes existing dual-sub sidecars and rebuilds them from the subtitle files currently on disk.</p>
+            <div class="modal-buttons">
+                <button class="modal-btn-cancel" onclick="dualsubClose()">Cancel</button>
+                <button class="modal-btn-confirm" onclick="dualsubSubmit()">Regenerate</button>
+            </div>
+            <div id="dualsub-status" class="no-items"></div>
+        </div>
+    </div>
+
     <!-- Screen reader announcements for dynamic content changes -->
     <div aria-live="polite" class="sr-only" id="sr-announce"></div>
 

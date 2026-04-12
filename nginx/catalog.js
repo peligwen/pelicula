@@ -321,7 +321,14 @@ component('catalog', function (el, store, _props) {
                 const btn = document.createElement('button');
                 btn.className = 'cat-ctx-item';
                 btn.textContent = def.label + (isFanout ? ' (all episodes)' : '');
-                btn.addEventListener('click', () => { closeMenu(); isFanout ? runFanout(item, level, def) : runAction(def, item, level); });
+                btn.addEventListener('click', () => {
+                    closeMenu();
+                    if (def.name === 'dualsub') {
+                        openDualsubDialog(item, level);
+                    } else {
+                        isFanout ? runFanout(item, level, def) : runAction(def, item, level);
+                    }
+                });
                 menu.appendChild(btn);
             }
         } else {
@@ -454,7 +461,7 @@ component('catalog', function (el, store, _props) {
     }
 
     function buildParams(def, item, level) {
-        if (def.name === 'validate' || def.name === 'transcode') {
+        if (def.name === 'validate' || def.name === 'transcode' || def.name === 'dualsub') {
             return { path: level === 'movie' ? (item.movieFile ? item.movieFile.path : '') : (item.path || '') };
         }
         if (def.name === 'subtitle_refresh') {
@@ -572,6 +579,59 @@ component('catalog', function (el, store, _props) {
         }
         wrap.replaceChildren(frag);
     }
+
+    // ── Dual subtitle dialog ──────────────────────────────────────────────────
+    function itemPath(item, level) {
+        return level === 'movie' ? (item.movieFile ? item.movieFile.path : '') : (item.path || '');
+    }
+
+    function openDualsubDialog(item, level) {
+        store.set('catalog.dualsub.item', item);
+        store.set('catalog.dualsub.level', level);
+        const label = item.title || itemPath(item, level).split('/').slice(-1)[0] || 'Item';
+        document.getElementById('dualsub-sub').textContent = label;
+        document.getElementById('dualsub-status').textContent = '';
+        PeliculaFW.openDrawer(
+            document.getElementById('dualsub-dialog'),
+            document.getElementById('dualsub-backdrop')
+        );
+    }
+
+    window.dualsubClose = function () {
+        PeliculaFW.closeDrawer(
+            document.getElementById('dualsub-dialog'),
+            document.getElementById('dualsub-backdrop')
+        );
+    };
+
+    window.dualsubSubmit = async function () {
+        const item = store.get('catalog.dualsub.item');
+        const level = store.get('catalog.dualsub.level');
+        if (!item) return;
+        const path = itemPath(item, level);
+        if (!path) { document.getElementById('dualsub-status').textContent = 'No file path available.'; return; }
+        const statusEl = document.getElementById('dualsub-status');
+        statusEl.textContent = 'Regenerating\u2026';
+        const body = JSON.stringify({
+            action: 'dualsub',
+            target: { path, arr_type: level === 'movie' ? 'radarr' : 'sonarr', arr_id: item.id },
+            params: { path },
+        });
+        try {
+            const res = await catFetch('/api/pelicula/actions?wait=30', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+            const data = await res.json();
+            if (!res.ok) { statusEl.textContent = 'Failed: ' + (data.error || res.status); return; }
+            if (data.state === 'completed') {
+                const outputs = (data.result || {}).outputs || [];
+                statusEl.textContent = outputs.length ? 'Done \u2014 ' + outputs.length + ' file(s) written' : 'Done (no outputs)';
+                setTimeout(window.dualsubClose, 1800);
+            } else {
+                statusEl.textContent = 'State: ' + data.state;
+            }
+        } catch (e) {
+            statusEl.textContent = 'Error: ' + e.message;
+        }
+    };
 
     // ── Public API (window.*) ─────────────────────────────────────────────────
     window.catLoad = function () { loadCatalog(); };

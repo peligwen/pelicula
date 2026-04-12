@@ -109,6 +109,14 @@ func registerBuiltinActions() {
 		Handler:     runSubtitleRefreshAction,
 	})
 	Register(&ActionDef{
+		Name:        "dualsub",
+		Label:       "Regenerate dual subtitles",
+		AppliesTo:   []string{"movie", "episode"},
+		Sync:        true,
+		Description: "Delete existing dual-sub sidecars and regenerate them from the current subtitle files.",
+		Handler:     runDualSubAction,
+	})
+	Register(&ActionDef{
 		Name:        "subtitle_request",
 		Label:       "Request subtitles",
 		AppliesTo:   []string{"movie", "episode"},
@@ -252,4 +260,43 @@ func runSubtitleRefreshAction(ctx context.Context, q *Queue, job *Job) (map[stri
 	}
 	bazarrSearchSubtitles(ctx, configDir, synthetic)
 	return map[string]any{"triggered": true}, nil
+}
+
+// runDualSubAction deletes existing dual-sub sidecars for the configured pairs
+// and regenerates them from the subtitle files already on disk.
+func runDualSubAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
+	path, _ := job.Params["path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("dualsub: path required")
+	}
+	settings := GetSettings(appDB)
+	if !settings.DualSubEnabled {
+		return nil, fmt.Errorf("dualsub: dual subtitles are not enabled in settings")
+	}
+	if len(settings.DualSubPairs) == 0 {
+		settings.DualSubPairs = []string{"en-es"}
+	}
+
+	// Delete stale sidecars so GenerateDualSubs doesn't skip them.
+	for _, pair := range settings.DualSubPairs {
+		sidecar := dualSubPath(path, pair)
+		if err := os.Remove(sidecar); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("dualsub: remove stale sidecar %s: %w", sidecar, err)
+		}
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("dualsub: stat %s: %w", path, err)
+	}
+	synthetic := &Job{
+		ID:     "action-" + job.ID,
+		Source: JobSource{Path: path, Size: fi.Size()},
+	}
+	outputs, firstErr := GenerateDualSubs(ctx, synthetic, settings, configDir)
+	result := map[string]any{"outputs": outputs}
+	if firstErr != nil {
+		result["warning"] = firstErr.Error()
+	}
+	return result, nil
 }
