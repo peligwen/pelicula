@@ -139,8 +139,137 @@ function renderAttentionRow(row) {
     return div;
 }
 
-// Stub — replaced in Task 1.9
-function openDetail(path) {} // eslint-disable-line no-unused-vars
+// ── Detail drawer ────────────────────────────────────────────────────────────
+async function openDetail(path) {
+    if (!path) return;
+    const backdrop = document.getElementById('cat-drawer-backdrop');
+    const drawer = document.getElementById('cat-drawer');
+    const title = document.getElementById('cat-drawer-title');
+    const sub = document.getElementById('cat-drawer-sub');
+    const body = document.getElementById('cat-drawer-body');
+    if (!drawer) return;
+    backdrop.classList.remove('hidden');
+    drawer.classList.remove('hidden');
+    title.textContent = path.split('/').slice(-1)[0] || 'Details';
+    sub.textContent = path;
+    body.replaceChildren(makeTextNode('Loading\u2026', 'var(--muted)'));
+
+    try {
+        const res = await catFetch('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        body.replaceChildren(renderDetail(data));
+    } catch (e) {
+        body.replaceChildren(makeTextNode('Failed to load details: ' + e.message, 'var(--danger)'));
+    }
+}
+
+window.catCloseDetail = function () {
+    document.getElementById('cat-drawer-backdrop').classList.add('hidden');
+    document.getElementById('cat-drawer').classList.add('hidden');
+};
+
+function makeTextNode(text, color) {
+    const span = document.createElement('div');
+    span.style.color = color || 'var(--text)';
+    span.style.padding = '1rem 0';
+    span.textContent = text;
+    return span;
+}
+
+function renderDetail(data) {
+    const root = document.createElement('div');
+
+    // Section: Flags
+    if (Array.isArray(data.flags) && data.flags.length) {
+        root.appendChild(sectionTitle('Flags'));
+        const wrap = document.createElement('div');
+        for (const f of data.flags) {
+            const p = document.createElement('span');
+            p.className = 'cat-pill cat-pill-' + (f.severity || 'info');
+            p.textContent = f.code;
+            if (f.detail) p.title = f.detail;
+            wrap.appendChild(p);
+        }
+        root.appendChild(wrap);
+    }
+
+    const job = data.job || {};
+    const val = job.validation || null;
+    const codecs = val && val.checks && val.checks.codecs;
+
+    // Section: Encoding
+    root.appendChild(sectionTitle('Encoding'));
+    const enc = document.createElement('div');
+    if (codecs) {
+        enc.appendChild(pill('video: ' + (codecs.video || '?'), 'cat-pill-encoding'));
+        enc.appendChild(pill('audio: ' + (codecs.audio || '?'), 'cat-pill-encoding'));
+        if (codecs.width && codecs.height) {
+            enc.appendChild(pill(codecs.width + 'x' + codecs.height, 'cat-pill-encoding'));
+        }
+    } else {
+        enc.appendChild(makeTextNode('No codec info yet.', 'var(--muted)'));
+    }
+    root.appendChild(enc);
+
+    // Section: Subtitles
+    root.appendChild(sectionTitle('Subtitles'));
+    const subs = document.createElement('div');
+    const embedded = codecs && Array.isArray(codecs.subtitles) ? codecs.subtitles : [];
+    if (embedded.length) {
+        for (const lang of embedded) subs.appendChild(pill(lang, 'cat-pill-subs'));
+    } else {
+        subs.appendChild(makeTextNode('No embedded subtitle tracks.', 'var(--muted)'));
+    }
+    const missing = Array.isArray(job.missing_subs) ? job.missing_subs : [];
+    if (missing.length) {
+        const label = document.createElement('div');
+        label.style.marginTop = '0.5rem';
+        label.style.color = 'var(--muted)';
+        label.textContent = 'Missing:';
+        subs.appendChild(label);
+        for (const lang of missing) subs.appendChild(pill(lang, 'cat-pill-warn'));
+    }
+    root.appendChild(subs);
+
+    // Section: Status
+    root.appendChild(sectionTitle('Status'));
+    const status = document.createElement('div');
+    if (val && val.checks) {
+        for (const k of ['integrity', 'duration', 'sample']) {
+            const v = val.checks[k] || 'skip';
+            const cls = v === 'pass' ? 'cat-pill-status-pass'
+                : v === 'fail' ? 'cat-pill-status-fail'
+                : 'cat-pill';
+            status.appendChild(pill(k + ': ' + v, cls));
+        }
+    }
+    if (job.transcode_decision) status.appendChild(pill('transcode: ' + job.transcode_decision, 'cat-pill'));
+    if (job.catalog && job.catalog.jellyfin_synced) status.appendChild(pill('jellyfin synced', 'cat-pill-status-pass'));
+    if (job.error) {
+        const err = document.createElement('div');
+        err.className = 'drawer-error';
+        err.textContent = job.error;
+        status.appendChild(err);
+    }
+    root.appendChild(status);
+
+    return root;
+}
+
+function sectionTitle(text) {
+    const div = document.createElement('div');
+    div.className = 'drawer-section-title';
+    div.textContent = text;
+    return div;
+}
+
+function pill(text, cls) {
+    const span = document.createElement('span');
+    span.className = 'cat-pill ' + (cls || '');
+    span.textContent = text;
+    return span;
+}
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderCatalog() {
@@ -205,6 +334,11 @@ function renderMovieRow(item) {
     div.appendChild(title);
     div.appendChild(meta);
     div.appendChild(makeActions(makeCtxBtn(item, 'movie')));
+    div.addEventListener('click', (e) => {
+        if (e.target.closest('.cat-ctx-btn')) return;
+        const path = item.movieFile ? item.movieFile.path : '';
+        if (path) openDetail(path);
+    });
     return div;
 }
 

@@ -899,6 +899,19 @@
         <div class="drawer-body" id="drawer-body"></div>
     </div>
 
+    <!-- Catalog detail drawer -->
+    <div class="drawer-backdrop hidden" id="cat-drawer-backdrop" onclick="catCloseDetail()"></div>
+    <div class="drawer hidden" id="cat-drawer">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title" id="cat-drawer-title">Details</div>
+                <div class="drawer-sub" id="cat-drawer-sub"></div>
+            </div>
+            <button class="drawer-close" onclick="catCloseDetail()">&times;</button>
+        </div>
+        <div class="drawer-body" id="cat-drawer-body"></div>
+    </div>
+
     <script src="/framework.js"></script>
     <script src="/catalog.js" defer></script>
     <script src="/dashboard.js"></script>
