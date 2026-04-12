@@ -158,6 +158,9 @@ function byTestId(id, root) {
     return (root || document).querySelector(`[data-testid="${id}"]`);
 }
 
+// Set text content of an element by ID (no-op if element doesn't exist).
+function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+
 // ── Router ────────────────────────────────────────────────────────────────────
 // Thin hash-routing wrapper. Does not replace switchTab — wraps it.
 // Usage:
@@ -236,4 +239,4 @@ function releaseFocus(el) {
 
 // ── Exports (assigned to window for plain-script use) ─────────────────────────
 
-window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, esc: _escapeHtml, router, trapFocus, releaseFocus };
+window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus };
