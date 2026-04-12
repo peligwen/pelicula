@@ -454,8 +454,10 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 	proculaKey := generateAPIKey()
 	// Preserve existing WEBHOOK_SECRET if present so autowired webhooks keep working
 	webhookSecret := orDefault(existing["WEBHOOK_SECRET"], generateAPIKey())
-	// Note: JELLYFIN_API_KEY is intentionally NOT preserved — Jellyfin DB is wiped on reset,
-	// so the old key is stale. Autowire will create a fresh one on next boot.
+	// Preserve existing JELLYFIN_API_KEY if present — the web wizard does not wipe Jellyfin's
+	// database, so the existing key is still valid. (The CLI reset-config all DOES wipe
+	// Jellyfin's DB and drops this key explicitly; that path doesn't call handleResetAll.)
+	jellyfinAPIKey := existing["JELLYFIN_API_KEY"]
 
 	vars := map[string]string{
 		"CONFIG_DIR":                 req.ConfigDir,
@@ -470,6 +472,7 @@ func handleSettingsReset(w http.ResponseWriter, r *http.Request) {
 		"PELICULA_OPEN_REGISTRATION": "false",
 		"PROCULA_API_KEY":            proculaKey,
 		"WEBHOOK_SECRET":             webhookSecret,
+		"JELLYFIN_API_KEY":           jellyfinAPIKey,
 		"TRANSCODING_ENABLED":        "false",
 		"NOTIFICATIONS_ENABLED":      "false",
 		"NOTIFICATIONS_MODE":         "internal",

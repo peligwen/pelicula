@@ -188,7 +188,7 @@ func wireJellyfin(s *ServiceClients) {
 		// Authenticate using the stored API key (or password fallback for upgrades)
 		authToken, authErr := jellyfinAuth(s)
 		if authErr != nil {
-			slog.Error("Jellyfin auth failed, skipping library setup", "component", "autowire", "error", authErr)
+			slog.Error("Jellyfin auth failed, skipping library setup — to recover: re-run the setup wizard or run 'pelicula reset-config jellyfin'", "component", "autowire", "error", authErr)
 			return
 		}
 		token = authToken
