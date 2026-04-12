@@ -1355,3 +1355,13 @@ body.side-collapsed .main { grid-template-columns: 1fr; }
 body.side-collapsed.panel-alert .side-strip {
     animation: peli-side-alert-pulse 1.4s ease-in-out infinite;
 }
+
+/* Respect users with motion sensitivity: hold a static yellow glow
+   instead of pulsing, so the alert signal is still conveyed. */
+@media (prefers-reduced-motion: reduce) {
+    body.side-collapsed.panel-alert .side-strip {
+        animation: none;
+        background: #ffcb3d;
+        box-shadow: -4px 0 12px rgba(255, 203, 61, 0.5);
+    }
+}

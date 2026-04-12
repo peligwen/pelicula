@@ -159,4 +159,29 @@ test.describe('Collapsible side panel', () => {
         );
         expect(animName).toBe('none');
     });
+
+    test('alert glow: respects prefers-reduced-motion', async ({ browser }) => {
+        const context = await browser.newContext({ reducedMotion: 'reduce' });
+        const page = await context.newPage();
+        try {
+            await mockStatus(page, { down: ['sonarr'] });
+            await page.setViewportSize(MOBILE_VIEWPORT);
+            await ensureLoggedIn(page);
+            await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+            await expect(page.locator('body')).toHaveClass(/panel-alert/);
+            // Animation is suppressed under reduced-motion; the strip should
+            // still be visually distinct (static yellow background).
+            const animName = await page.locator('#side-strip').evaluate(
+                (el) => getComputedStyle(el).animationName
+            );
+            expect(animName).toBe('none');
+            const bg = await page.locator('#side-strip').evaluate(
+                (el) => getComputedStyle(el).backgroundColor
+            );
+            // #ffcb3d
+            expect(bg).toBe('rgb(255, 203, 61)');
+        } finally {
+            await context.close();
+        }
+    });
 });
