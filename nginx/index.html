@@ -943,45 +943,110 @@
         <div class="drawer-body" id="cat-drawer-body"></div>
     </div>
 
-    <!-- Subtitle request dialog -->
-    <div class="modal-backdrop hidden" id="sub-req-backdrop" onclick="subReqClose()"></div>
-    <div class="cat-modal hidden" id="sub-req-dialog" role="dialog" aria-label="Request subtitles">
+    <!-- Subtitle search dialog -->
+    <div class="modal-backdrop hidden" id="sub-search-backdrop" onclick="subSearchClose()"></div>
+    <div class="cat-modal hidden" id="sub-search-dialog" role="dialog" aria-label="Search subtitles">
         <div class="drawer-header">
             <div>
-                <div class="drawer-title">Request subtitles</div>
-                <div class="drawer-sub" id="sub-req-sub"></div>
+                <div class="drawer-title">Search subtitles</div>
+                <div class="drawer-sub" id="sub-search-sub"></div>
             </div>
-            <button class="drawer-close" onclick="subReqClose()">&times;</button>
+            <button class="drawer-close" onclick="subSearchClose()">&times;</button>
         </div>
         <div class="drawer-body">
             <div class="drawer-section-title">Languages</div>
-            <div id="sub-req-langs" class="sub-req-langs"></div>
-            <div class="drawer-section-title">Options</div>
-            <label><input type="checkbox" id="sub-req-hi"> Hearing impaired</label>
-            <label style="margin-left:1rem"><input type="checkbox" id="sub-req-forced"> Forced only</label>
-            <div class="modal-buttons" style="margin-top:1rem">
-                <button class="modal-btn-cancel" onclick="subReqClose()">Cancel</button>
-                <button class="modal-btn-confirm" onclick="subReqSubmit()">Queue request</button>
+            <div id="sub-search-langs" class="sub-req-langs"></div>
+            <div class="drawer-section-title" style="margin-top:.75rem">Options</div>
+            <div style="display:flex;flex-direction:column;gap:.55rem;margin-bottom:1rem">
+                <div>
+                    <label style="display:flex;align-items:center;gap:.45rem;font-size:.82rem;cursor:pointer">
+                        <input type="checkbox" id="sub-search-hi"> <span>Hearing impaired</span>
+                    </label>
+                    <div style="font-size:.72rem;color:var(--muted);margin-left:1.35rem;margin-top:.15rem">Includes sound-effect descriptions and speaker labels alongside dialogue</div>
+                </div>
+                <div>
+                    <label style="display:flex;align-items:center;gap:.45rem;font-size:.82rem;cursor:pointer">
+                        <input type="checkbox" id="sub-search-forced"> <span>Forced only</span>
+                    </label>
+                    <div style="font-size:.72rem;color:var(--muted);margin-left:1.35rem;margin-top:.15rem">Only foreign-language lines within otherwise native-audio content</div>
+                </div>
             </div>
-            <div id="sub-req-status" class="no-items"></div>
+            <div class="modal-buttons">
+                <button class="modal-btn-cancel" onclick="subSearchClose()">Cancel</button>
+                <button class="modal-btn-confirm" onclick="subSearchSubmit()">Search</button>
+            </div>
+            <div id="sub-search-status" class="no-items"></div>
         </div>
     </div>
 
-    <!-- Dual subtitle regeneration dialog -->
+    <!-- Dual subtitle dialog -->
     <div class="modal-backdrop hidden" id="dualsub-backdrop" onclick="dualsubClose()"></div>
-    <div class="cat-modal hidden" id="dualsub-dialog" role="dialog" aria-label="Regenerate dual subtitles">
+    <div class="cat-modal hidden" id="dualsub-dialog" role="dialog" aria-label="Dual subtitles" style="max-width:480px">
         <div class="drawer-header">
             <div>
-                <div class="drawer-title">Regenerate dual subtitles</div>
+                <div class="drawer-title">Dual subtitles</div>
                 <div class="drawer-sub" id="dualsub-sub"></div>
             </div>
             <button class="drawer-close" onclick="dualsubClose()">&times;</button>
         </div>
         <div class="drawer-body">
-            <p style="color:var(--muted);margin:0 0 1rem">Deletes existing dual-sub sidecars and rebuilds them from the subtitle files currently on disk.</p>
+            <div class="drawer-section-title">On disk</div>
+            <div id="dualsub-ondisk" style="margin-bottom:1rem"></div>
+
+            <div class="drawer-section-title">Profile</div>
+            <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+                <select id="dualsub-profile-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:.35rem .6rem;font-size:.82rem;color:var(--text)" onchange="dualsubProfileChanged()"></select>
+                <button id="dualsub-manage-btn" style="padding:.35rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.75rem;cursor:pointer;white-space:nowrap" onclick="dualsubToggleManage()">Manage &#9660;</button>
+            </div>
+
+            <div id="dualsub-profile-editor" style="display:none;border:1px solid var(--border);border-radius:8px;padding:.85rem;background:var(--bg);margin-bottom:1rem">
+                <div class="drawer-section-title" style="margin-bottom:.6rem">Edit profile</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .75rem;margin-bottom:.75rem">
+                    <div>
+                        <div style="font-size:.7rem;color:var(--muted);margin-bottom:.2rem">Name</div>
+                        <input id="dsp-name" style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;font-size:.8rem;color:var(--text)">
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;color:var(--muted);margin-bottom:.2rem">Font</div>
+                        <input id="dsp-font" style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;font-size:.8rem;color:var(--text)">
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;color:var(--muted);margin-bottom:.2rem">Font size (pt)</div>
+                        <input type="number" id="dsp-size" style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;font-size:.8rem;color:var(--text)">
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;color:var(--muted);margin-bottom:.2rem">Outline</div>
+                        <input type="number" step="0.5" id="dsp-outline" style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;font-size:.8rem;color:var(--text)">
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;color:var(--muted);margin-bottom:.2rem">Margin (px)</div>
+                        <input type="number" id="dsp-margin" style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;font-size:.8rem;color:var(--text)">
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;color:var(--muted);margin-bottom:.2rem">Gap &#8212; stacked (px)</div>
+                        <input type="number" id="dsp-gap" style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;font-size:.8rem;color:var(--text)">
+                    </div>
+                </div>
+                <div style="font-size:.7rem;color:var(--muted);margin-bottom:.4rem">Layout</div>
+                <div id="dsp-layout-btns" style="display:flex;gap:.4rem;margin-bottom:.75rem">
+                    <button data-layout="stacked_bottom" onclick="dualsubSetLayout(this)" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Stacked &#8595;</button>
+                    <button data-layout="stacked_top" onclick="dualsubSetLayout(this)" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Stacked &#8593;</button>
+                    <button data-layout="split" onclick="dualsubSetLayout(this)" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Split</button>
+                </div>
+                <div style="display:flex;gap:.4rem">
+                    <button onclick="dualsubSaveAsNew()" style="padding:.28rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">+ Save as new</button>
+                    <button id="dsp-update-btn" onclick="dualsubUpdateProfile()" style="padding:.28rem .6rem;border-radius:4px;border:none;background:var(--accent);color:#000;font-size:.72rem;font-weight:600;cursor:pointer">Update</button>
+                    <button id="dsp-delete-btn" onclick="dualsubDeleteProfile()" style="margin-left:auto;padding:.28rem .6rem;border-radius:4px;border:1px solid #c0392b;background:transparent;color:#c0392b;font-size:.72rem;cursor:pointer">Delete</button>
+                </div>
+            </div>
+
+            <div class="drawer-section-title">Track pairs</div>
+            <div id="dualsub-pairs"></div>
+            <button onclick="dualsubAddPair()" style="font-size:.75rem;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;padding:.25rem .65rem;cursor:pointer;margin:0 0 1rem">+ Add pair</button>
+
             <div class="modal-buttons">
                 <button class="modal-btn-cancel" onclick="dualsubClose()">Cancel</button>
-                <button class="modal-btn-confirm" onclick="dualsubSubmit()">Regenerate</button>
+                <button class="modal-btn-confirm" onclick="dualsubSubmit()">Generate</button>
             </div>
             <div id="dualsub-status" class="no-items"></div>
         </div>
