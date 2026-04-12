@@ -91,9 +91,13 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 	episodeID := int(floatVal(rec, "episodeId"))
 	seasonNum := 0
 	epNum := 0
+	epTitle := title // fallback to series title
 	if episode, ok := rec["episode"].(map[string]any); ok {
 		seasonNum = int(floatVal(episode, "seasonNumber"))
 		epNum = int(floatVal(episode, "episodeNumber"))
+		if t, ok := episode["title"].(string); ok && t != "" {
+			epTitle = t
+		}
 	}
 
 	// Upsert series
@@ -133,7 +137,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 		SeasonNumber:  seasonNum,
 		EpisodeNumber: epNum,
 		ArrType:       "sonarr",
-		Title:         title,
+		Title:         epTitle,
 		Year:          year,
 		Tier:          "queue",
 	}); err != nil {

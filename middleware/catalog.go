@@ -314,10 +314,6 @@ func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go func() {
-		if err := BackfillFromArr(catalogDB, services); err != nil {
-			slog.Error("catalog backfill failed", "component", "catalog", "error", err)
-		}
-	}()
+	go BackfillFromArr(catalogDB, services)
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }

@@ -69,10 +69,11 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 			SeasonNumber:  source.SeasonNumber,
 			EpisodeNumber: source.EpisodeNumber,
 			ArrType:       source.ArrType,
-			Title:         source.Title,
-			Year:          source.Year,
-			Tier:          "pipeline",
-			FilePath:      source.Path,
+			// Title is the series title — episode-level titles are not in ProculaJobSource
+			Title:    source.Title,
+			Year:     source.Year,
+			Tier:     "pipeline",
+			FilePath: source.Path,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert episode: %w", err)
