@@ -286,3 +286,14 @@
 .jobs-row { padding: 0.4rem 0.75rem; border-top: 1px solid rgba(255,255,255,0.04); }
 .jobs-row-title { font-size: 0.85rem; }
 .jobs-row-meta  { font-size: 0.72rem; color: var(--muted); }
+
+/* ── Subtitle request dialog ─────────────────────────────────────────────── */
+.sub-req-langs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; }
+.sub-req-lang {
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    cursor: pointer;
+    user-select: none;
+}
+.sub-req-lang.active { background: rgba(200,160,255,0.75); color: #000; }

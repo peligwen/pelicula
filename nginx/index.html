@@ -926,6 +926,30 @@
         <div class="drawer-body" id="cat-drawer-body"></div>
     </div>
 
+    <!-- Subtitle request dialog -->
+    <div class="drawer-backdrop hidden" id="sub-req-backdrop" onclick="subReqClose()"></div>
+    <div class="drawer hidden" id="sub-req-dialog" role="dialog" aria-label="Request subtitles">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Request subtitles</div>
+                <div class="drawer-sub" id="sub-req-sub"></div>
+            </div>
+            <button class="drawer-close" onclick="subReqClose()">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <div class="drawer-section-title">Languages</div>
+            <div id="sub-req-langs" class="sub-req-langs"></div>
+            <div class="drawer-section-title">Options</div>
+            <label><input type="checkbox" id="sub-req-hi"> Hearing impaired</label>
+            <label style="margin-left:1rem"><input type="checkbox" id="sub-req-forced"> Forced only</label>
+            <div class="modal-buttons" style="margin-top:1rem">
+                <button class="modal-btn-cancel" onclick="subReqClose()">Cancel</button>
+                <button class="modal-btn-confirm" onclick="subReqSubmit()">Queue request</button>
+            </div>
+            <div id="sub-req-status" class="no-items"></div>
+        </div>
+    </div>
+
     <script src="/framework.js"></script>
     <script src="/catalog.js" defer></script>
     <script src="/jobs.js" defer></script>

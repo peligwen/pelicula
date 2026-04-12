@@ -339,6 +339,15 @@ function renderMovieRow(item) {
         const path = item.movieFile ? item.movieFile.path : '';
         if (path) openDetail(path);
     });
+    div.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openSubRequest({
+            label: item.title || 'Movie',
+            arrType: 'radarr',
+            arrID: item.id,
+            episodeID: 0,
+        });
+    });
     return div;
 }
 
@@ -477,6 +486,16 @@ function renderEpisodeRow(series, ep) {
         const epItem = { id: series.id, title: series.title + ' ' + epNum, episodeId: ep.id, path: filePath, arrType: 'sonarr' };
         div.appendChild(makeActions(makeCtxBtn(epItem, 'episode')));
     }
+    div.addEventListener('contextmenu', (e) => {
+        if (!hasFile) return;
+        e.preventDefault();
+        openSubRequest({
+            label: series.title + ' ' + epNum,
+            arrType: 'sonarr',
+            arrID: series.id,
+            episodeID: ep.id,
+        });
+    });
     return div;
 }
 
@@ -711,3 +730,101 @@ document.addEventListener('pelicula:tab-changed', function (e) {
 if (document.body && document.body.dataset.tab === 'catalog') initCatalog();
 
 })();
+
+// ── Subtitle request dialog ──────────────────────────────────────────────────
+const _subReqState = { target: null, selected: new Set() };
+const SUB_REQ_DEFAULT_LANGS = ['en', 'es', 'fr', 'de', 'pt', 'it', 'ja', 'zh'];
+
+function openSubRequest(target) {
+    _subReqState.target = target;
+    _subReqState.selected = new Set();
+
+    // Pre-select from PELICULA_SUB_LANGS via the /settings endpoint if available.
+    (async () => {
+        try {
+            const res = await catFetch('/api/pelicula/settings');
+            if (res.ok) {
+                const s = await res.json();
+                const configured = (s.sub_langs || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+                for (const c of configured) _subReqState.selected.add(c);
+            }
+        } catch (e) { /* non-critical */ }
+        renderSubReqLangs();
+    })();
+
+    document.getElementById('sub-req-sub').textContent = target.label;
+    document.getElementById('sub-req-hi').checked = false;
+    document.getElementById('sub-req-forced').checked = false;
+    document.getElementById('sub-req-status').textContent = '';
+    renderSubReqLangs();
+
+    document.getElementById('sub-req-backdrop').classList.remove('hidden');
+    document.getElementById('sub-req-dialog').classList.remove('hidden');
+}
+
+function renderSubReqLangs() {
+    const wrap = document.getElementById('sub-req-langs');
+    if (!wrap) return;
+    const merged = new Set([...SUB_REQ_DEFAULT_LANGS, ..._subReqState.selected]);
+    const frag = document.createDocumentFragment();
+    for (const code of merged) {
+        const el = document.createElement('span');
+        el.className = 'sub-req-lang' + (_subReqState.selected.has(code) ? ' active' : '');
+        el.textContent = code;
+        el.addEventListener('click', () => {
+            if (_subReqState.selected.has(code)) _subReqState.selected.delete(code);
+            else _subReqState.selected.add(code);
+            renderSubReqLangs();
+        });
+        frag.appendChild(el);
+    }
+    wrap.replaceChildren(frag);
+}
+
+window.subReqClose = function () {
+    document.getElementById('sub-req-backdrop').classList.add('hidden');
+    document.getElementById('sub-req-dialog').classList.add('hidden');
+};
+
+window.subReqSubmit = async function () {
+    const t = _subReqState.target;
+    if (!t) return;
+    const langs = Array.from(_subReqState.selected);
+    if (!langs.length) {
+        document.getElementById('sub-req-status').textContent = 'Select at least one language.';
+        return;
+    }
+    const body = JSON.stringify({
+        action: 'subtitle_request',
+        target: { arr_type: t.arrType, arr_id: t.arrID, episode_id: t.episodeID || 0 },
+        params: {
+            languages: langs,
+            hi: document.getElementById('sub-req-hi').checked,
+            forced: document.getElementById('sub-req-forced').checked,
+            arr_type: t.arrType,
+            arr_id: t.arrID,
+            episode_id: t.episodeID || 0,
+        },
+    });
+    document.getElementById('sub-req-status').textContent = 'Queuing\u2026';
+    try {
+        const res = await catFetch('/api/pelicula/actions?wait=10', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            document.getElementById('sub-req-status').textContent = 'Failed: ' + (data.error || res.status);
+            return;
+        }
+        if (data.state === 'completed') {
+            document.getElementById('sub-req-status').textContent = 'Queued for ' + langs.join(', ');
+            setTimeout(subReqClose, 1200);
+        } else {
+            document.getElementById('sub-req-status').textContent = 'State: ' + data.state;
+        }
+    } catch (e) {
+        document.getElementById('sub-req-status').textContent = 'Error: ' + e.message;
+    }
+};
