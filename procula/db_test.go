@@ -26,8 +26,8 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if ver != 4 {
-		t.Errorf("user_version = %d, want 4", ver)
+	if ver != 5 {
+		t.Errorf("user_version = %d, want 5", ver)
 	}
 
 	tables := []string{"jobs", "settings"}
@@ -103,7 +103,68 @@ func TestOpenDB_IdempotentOnSecondOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if ver != 4 {
-		t.Errorf("user_version = %d after second open, want 4", ver)
+	if ver != 5 {
+		t.Errorf("user_version = %d after second open, want 5", ver)
+	}
+}
+
+func TestMigrate5AddsFlagSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if ver < 5 {
+		t.Fatalf("user_version = %d, want >= 5", ver)
+	}
+
+	// jobs.flags column exists
+	cols := map[string]bool{}
+	rows, err := db.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	if !cols["flags"] {
+		t.Errorf("jobs.flags column missing")
+	}
+
+	// catalog_flags table exists with expected columns
+	cols = map[string]bool{}
+	rows, err = db.Query(`PRAGMA table_info(catalog_flags)`)
+	if err != nil {
+		t.Fatalf("table_info catalog_flags: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	for _, want := range []string{"path", "flags", "severity", "job_id", "updated_at"} {
+		if !cols[want] {
+			t.Errorf("catalog_flags.%s missing", want)
+		}
 	}
 }
