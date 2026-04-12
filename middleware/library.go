@@ -781,6 +781,14 @@ func matchFile(
 			}
 		}
 	}
+
+	// If the file is already at its suggested destination path, mark it as
+	// in-place so the UI can skip the strategy prompt.
+	if item.Status == "new" && item.SuggestedPath != "" &&
+		filepath.Clean(f.Path) == filepath.Clean(item.SuggestedPath) {
+		item.Status = "in_place"
+	}
+
 	return item
 }
 

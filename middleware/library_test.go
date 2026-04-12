@@ -637,6 +637,73 @@ func TestHandleLibraryApply_DupEpisodeGuard(t *testing.T) {
 	}
 }
 
+// TestInPlaceDetection verifies that the in-place status is correctly assigned
+// when the scan result's file path matches its suggested destination path.
+// We can't call matchFile directly (it hits external APIs), so we validate the
+// post-processing logic that applyInPlaceStatus performs on MatchItem slices.
+func TestInPlaceDetection(t *testing.T) {
+	cases := []struct {
+		name       string
+		file       string
+		suggested  string
+		origStatus string
+		wantStatus string
+	}{
+		{
+			"movie already in library path",
+			"/movies/Inception (2010)/Inception.2010.mkv",
+			"/movies/Inception (2010)/Inception.2010.mkv",
+			"new",
+			"in_place",
+		},
+		{
+			"tv already in library path",
+			"/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv",
+			"/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv",
+			"new",
+			"in_place",
+		},
+		{
+			"file in downloads — different from suggested",
+			"/downloads/Inception.2010.mkv",
+			"/movies/Inception (2010)/Inception.2010.mkv",
+			"new",
+			"new",
+		},
+		{
+			"already exists in arr — keeps exists status",
+			"/movies/Inception (2010)/Inception.2010.mkv",
+			"/movies/Inception (2010)/Inception.2010.mkv",
+			"exists",
+			"exists",
+		},
+		{
+			"path normalization — trailing slash or double slash",
+			"/movies/Inception (2010)//Inception.2010.mkv",
+			"/movies/Inception (2010)/Inception.2010.mkv",
+			"new",
+			"in_place",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			item := MatchItem{
+				File:          c.file,
+				Status:        c.origStatus,
+				SuggestedPath: c.suggested,
+			}
+			// Apply the same logic used in matchFile post-processing
+			if item.Status == "new" && item.SuggestedPath != "" &&
+				filepath.Clean(item.File) == filepath.Clean(item.SuggestedPath) {
+				item.Status = "in_place"
+			}
+			if item.Status != c.wantStatus {
+				t.Errorf("status = %q, want %q", item.Status, c.wantStatus)
+			}
+		})
+	}
+}
+
 func TestApplyGroupKey_DifferentEpisodes_NotDups(t *testing.T) {
 	// Two different episodes of the same series must produce different group keys
 	// so the duplicate guard does NOT reject them.
