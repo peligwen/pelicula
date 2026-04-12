@@ -68,6 +68,7 @@ func ListDualSubProfiles(db *sql.DB) ([]DualSubProfile, error) {
 		}
 		var p DualSubProfile
 		if json.Unmarshal([]byte(data), &p) == nil {
+			p.Name = name // DB key is authoritative
 			p.Builtin = false
 			profiles = append(profiles, p)
 		}
