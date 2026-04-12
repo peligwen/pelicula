@@ -168,3 +168,43 @@ func TestMigrate5AddsFlagSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrate6CreatesDualSubProfiles(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if ver < 6 {
+		t.Fatalf("user_version = %d, want >= 6", ver)
+	}
+
+	// dualsub_profiles table exists with expected columns
+	cols := map[string]bool{}
+	rows, err := db.Query(`PRAGMA table_info(dualsub_profiles)`)
+	if err != nil {
+		t.Fatalf("table_info dualsub_profiles: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	for _, want := range []string{"name", "data"} {
+		if !cols[want] {
+			t.Errorf("dualsub_profiles.%s missing", want)
+		}
+	}
+}
