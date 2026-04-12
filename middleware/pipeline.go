@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -137,7 +138,18 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	resp, err := BuildPipelineResponse(services, dismissedStore)
+	if err != nil {
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	httputil.WriteJSON(w, resp)
+}
 
+// BuildPipelineResponse fetches data from qBittorrent and Procula in parallel
+// and assembles a PipelineResponse. It returns an error only if both upstream
+// fetches fail; partial failures produce a degraded-but-valid response.
+func BuildPipelineResponse(svc *ServiceClients, dismissed *DismissedStore) (PipelineResponse, error) {
 	type qbtFetchResult struct {
 		torrents []Torrent
 		dlSpeed  int64
@@ -152,7 +164,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 	proculaCh := make(chan proculaFetchResult, 1)
 
 	go func() {
-		data, err := services.QbtGet("/api/v2/torrents/info")
+		data, err := svc.QbtGet("/api/v2/torrents/info")
 		if err != nil {
 			qbtCh <- qbtFetchResult{err: err}
 			return
@@ -177,7 +189,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		var dlSpeed, upSpeed int64
-		if statsData, err := services.QbtGet("/api/v2/transfer/info"); err == nil {
+		if statsData, err := svc.QbtGet("/api/v2/transfer/info"); err == nil {
 			var rawStats map[string]any
 			if json.Unmarshal(statsData, &rawStats) == nil {
 				dlSpeed = intVal(rawStats, "dl_info_speed")
@@ -188,7 +200,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	go func() {
-		resp, err := services.client.Get(proculaURL + "/api/procula/jobs?action_type=pipeline")
+		resp, err := svc.client.Get(proculaURL + "/api/procula/jobs?action_type=pipeline")
 		if err != nil {
 			proculaCh <- proculaFetchResult{err: err}
 			return
@@ -209,6 +221,11 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 
 	qbtRes := <-qbtCh
 	proculaRes := <-proculaCh
+
+	// Both fetches failed — nothing useful to return.
+	if qbtRes.err != nil && proculaRes.err != nil {
+		return PipelineResponse{}, fmt.Errorf("qbt: %w; procula: %v", qbtRes.err, proculaRes.err)
+	}
 
 	lanes := map[string][]PipelineItem{
 		"downloading":     {},
@@ -291,7 +308,7 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 
 		for i := range proculaRes.jobs {
 			j := &proculaRes.jobs[i]
-			lane := proculaLaneFor(j, dismissedStore)
+			lane := proculaLaneFor(j, dismissed)
 			if lane == "" {
 				continue
 			}
@@ -370,11 +387,11 @@ func handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 		lanes["completed"] = lanes["completed"][:20]
 	}
 
-	httputil.WriteJSON(w, PipelineResponse{
+	return PipelineResponse{
 		Lanes:       lanes,
 		Stats:       stats,
 		GeneratedAt: time.Now().UTC(),
-	})
+	}, nil
 }
 
 // handlePipelineDismiss records a failed job as dismissed so it no longer
