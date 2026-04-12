@@ -1336,3 +1336,22 @@ body.side-collapsed .main { grid-template-columns: 1fr; }
     }
     #side-collapse-btn { display: none; }
 }
+
+/* ── Alert glow on collapsed strip ─────── */
+/* When the panel is collapsed AND something is unhealthy, pulse the
+   edge strip yellow so the user notices. Uses a gentle 1.4s animation
+   — deliberately subdued, not strobing, to avoid being anxiety-inducing. */
+@keyframes peli-side-alert-pulse {
+    0%, 100% {
+        background: #ffcb3d;
+        box-shadow: -4px 0 12px rgba(255, 203, 61, 0.35);
+    }
+    50% {
+        background: #ffe08a;
+        box-shadow: -8px 0 24px rgba(255, 203, 61, 0.7);
+    }
+}
+
+body.side-collapsed.panel-alert .side-strip {
+    animation: peli-side-alert-pulse 1.4s ease-in-out infinite;
+}

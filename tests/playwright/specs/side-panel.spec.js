@@ -132,4 +132,31 @@ test.describe('Collapsible side panel', () => {
         await page.reload();
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
     });
+
+    test('alert glow: collapsed strip animates when a service is down', async ({ page }) => {
+        await mockStatus(page, { down: ['sonarr'] });
+        await page.setViewportSize(MOBILE_VIEWPORT);
+        await ensureLoggedIn(page);
+        // Mobile defaults to collapsed; wait until the alert class has propagated.
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+        await expect(page.locator('body')).toHaveClass(/panel-alert/);
+        // The strip should have a non-'none' animation-name when in alert state.
+        const animName = await page.locator('#side-strip').evaluate(
+            (el) => getComputedStyle(el).animationName
+        );
+        expect(animName).not.toBe('none');
+        expect(animName.length).toBeGreaterThan(0);
+    });
+
+    test('alert glow: collapsed strip has no animation when all services are up', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(MOBILE_VIEWPORT);
+        await ensureLoggedIn(page);
+        await expect(page.locator('body')).toHaveClass(/side-collapsed/);
+        await expect(page.locator('body')).not.toHaveClass(/panel-alert/);
+        const animName = await page.locator('#side-strip').evaluate(
+            (el) => getComputedStyle(el).animationName
+        );
+        expect(animName).toBe('none');
+    });
 });
