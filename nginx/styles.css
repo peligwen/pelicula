@@ -747,12 +747,24 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .modal-backdrop.hidden { display: none; }
 .cat-modal {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: min(560px, 96vw); max-height: min(82vh, 720px);
+    width: min(780px, 94vw); max-height: min(90vh, 900px);
     background: var(--panel); border: 1.5px solid var(--border2);
     border-radius: 18px; box-shadow: 0 16px 64px rgba(120,60,200,0.28);
     z-index: 301; display: flex; flex-direction: column; overflow: hidden;
 }
 .cat-modal.hidden { display: none; }
+/* Title and path overflow control inside the modal header */
+.cat-modal .drawer-header { align-items: center; }
+.cat-modal .drawer-header > div { min-width: 0; flex: 1; }
+.cat-modal .drawer-title {
+    font-size: 1.05rem; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+}
+.cat-modal .drawer-sub {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 100%;
+}
+.cat-modal .drawer-body { padding: 1.25rem 1.75rem; }
 .drawer-header {
     display: flex; align-items: flex-start; justify-content: space-between;
     padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--border);

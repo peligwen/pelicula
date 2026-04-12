@@ -356,8 +356,12 @@ component('catalog', function (el, store, _props) {
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
         PeliculaFW.openDrawer(drawer, backdrop);
-        titleEl.textContent = path.split('/').slice(-1)[0] || 'Details';
+        const filename = path.split('/').slice(-1)[0] || 'Details';
+        // Strip extension for display; keep raw filename in title attr for hover
+        titleEl.textContent = filename.replace(/\.[^.]+$/, '');
+        titleEl.title = filename;
         sub.textContent = path;
+        sub.title = path;
         setHTML(body, html`<div style="color:var(--muted);padding:1rem 0">Loading\u2026</div>`);
         try {
             const res = await catFetch('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path));
