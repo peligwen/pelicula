@@ -307,11 +307,16 @@ func runDualSubAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 }
 
 // langTagFromBase extracts the primary language tag from a subtitle base name.
-// "Movie.en" → "en", "Movie.en.hi" → "en"
+// "Movie.en" → "en", "Movie.en.hi" → "en", "Movie.es.forced" → "es"
 func langTagFromBase(base string) string {
+	variantSuffixes := map[string]bool{"hi": true, "sdh": true, "forced": true}
 	parts := strings.Split(base, ".")
-	if len(parts) >= 2 {
-		return normalizeLangCode(parts[len(parts)-1])
+	// Walk from the end, skip known variant suffixes
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := strings.ToLower(parts[i])
+		if !variantSuffixes[seg] {
+			return normalizeLangCode(seg)
+		}
 	}
 	return base
 }

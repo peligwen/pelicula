@@ -206,3 +206,17 @@ func TestWorkerDispatchesRegisteredAction(t *testing.T) {
 		t.Errorf("Result = %v", got.Result)
 	}
 }
+
+func TestLangTagFromBase(t *testing.T) {
+	cases := []struct{ base, want string }{
+		{"Movie.en", "en"},
+		{"Movie.en.hi", "en"},
+		{"Movie.es.forced", "es"},
+		{"Movie.en.sdh", "en"},
+	}
+	for _, c := range cases {
+		if got := langTagFromBase(c.base); got != c.want {
+			t.Errorf("langTagFromBase(%q) = %q, want %q", c.base, got, c.want)
+		}
+	}
+}
