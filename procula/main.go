@@ -118,6 +118,7 @@ func main() {
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
 	mux.HandleFunc("POST /api/procula/actions", requireAPIKey(srv.handleCreateAction))
 	mux.HandleFunc("GET /api/procula/actions/registry", srv.handleListActionRegistry)
+	mux.HandleFunc("GET /api/procula/catalog/flags", srv.handleCatalogFlags)
 
 	slog.Info("listening", "component", "main", "addr", ":8282")
 	serveWithShutdown(":8282", mux)
@@ -562,6 +563,20 @@ func (s *Server) handleCreateAction(w http.ResponseWriter, r *http.Request) {
 // handleListActionRegistry returns all registered actions as JSON.
 func (s *Server) handleListActionRegistry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, List())
+}
+
+// handleCatalogFlags returns every row in the catalog_flags table,
+// sorted error > warn > info, newest first within each bucket.
+func (s *Server) handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
+	rows, err := AllFlagged(s.db)
+	if err != nil {
+		writeError(w, "flags query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []CatalogFlagRow{}
+	}
+	writeJSON(w, map[string]any{"rows": rows})
 }
 
 // isLibraryPath returns true only for paths under /movies or /tv.

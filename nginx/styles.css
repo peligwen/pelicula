@@ -183,6 +183,8 @@ body[data-tab] #storage-section,
 body[data-tab] #storage-explorer-section,
 body[data-tab] #users-section,
 body[data-tab] #requests-section,
+body[data-tab] #jobs-section,
+body[data-tab] #logs-section,
 body[data-tab] #settings-section { display: none !important; }
 
 /* search: search + activity feed */
@@ -199,6 +201,10 @@ body[data-tab="storage"] #storage-explorer-section,
 /* users: user management + requests */
 body[data-tab="users"] #users-section,
 body[data-tab="users"] #requests-section,
+/* jobs: job list */
+body[data-tab="jobs"] #jobs-section,
+/* logs: aggregated log stream */
+body[data-tab="logs"] #logs-section,
 /* settings: config panel */
 body[data-tab="settings"] #settings-section { display: block !important; }
 

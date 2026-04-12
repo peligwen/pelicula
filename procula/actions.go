@@ -108,6 +108,14 @@ func registerBuiltinActions() {
 		Description: "Ask Bazarr to re-search subtitles for this item.",
 		Handler:     runSubtitleRefreshAction,
 	})
+	Register(&ActionDef{
+		Name:        "subtitle_request",
+		Label:       "Request subtitles",
+		AppliesTo:   []string{"movie", "episode"},
+		Sync:        true,
+		Description: "Queue a Bazarr subtitle search with explicit languages, HI, and forced flags.",
+		Handler:     runSubtitleRequestAction,
+	})
 }
 
 func arrTypeFromPath(p string) string {
@@ -174,6 +182,55 @@ func runTranscodeAction(ctx context.Context, q *Queue, job *Job) (map[string]any
 		"outputs":  fresh.TranscodeOutputs,
 		"profile":  fresh.TranscodeProfile,
 		"error":    fresh.TranscodeError,
+	}, nil
+}
+
+// runSubtitleRequestAction dispatches a targeted Bazarr search. Params:
+//
+//	languages:  []string (required, at least one ISO 639-1 code)
+//	hi:         bool (default false)
+//	forced:     bool (default false)
+//	arr_type:   "radarr" | "sonarr" (required)
+//	arr_id:     int (required)
+//	episode_id: int (required for sonarr)
+func runSubtitleRequestAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
+	arrType, _ := job.Params["arr_type"].(string)
+	arrIDf, _ := job.Params["arr_id"].(float64)
+	epIDf, _ := job.Params["episode_id"].(float64)
+	if arrType == "" || arrIDf == 0 {
+		return nil, fmt.Errorf("subtitle_request: arr_type and arr_id required")
+	}
+
+	var langs []string
+	if raw, ok := job.Params["languages"].([]any); ok {
+		for _, v := range raw {
+			if s, ok := v.(string); ok && s != "" {
+				langs = append(langs, s)
+			}
+		}
+	}
+	if len(langs) == 0 {
+		return nil, fmt.Errorf("subtitle_request: languages required")
+	}
+
+	hi, _ := job.Params["hi"].(bool)
+	forced, _ := job.Params["forced"].(bool)
+
+	synthetic := &Job{
+		ID: "action-" + job.ID,
+		Source: JobSource{
+			ArrType:   arrType,
+			ArrID:     int(arrIDf),
+			EpisodeID: int(epIDf),
+		},
+	}
+	opts := BazarrSearchOpts{Languages: langs, HI: hi, Forced: forced}
+	bazarrSearchSubtitlesWithOpts(ctx, configDir, synthetic, opts)
+	return map[string]any{
+		"triggered": true,
+		"languages": langs,
+		"hi":        hi,
+		"forced":    forced,
 	}, nil
 }
 

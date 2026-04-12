@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -310,6 +311,49 @@ func TestBazarrSearchSubtitles_ServerError(t *testing.T) {
 
 	if len(*calls) != 2 {
 		t.Errorf("expected both languages attempted, got %d calls", len(*calls))
+	}
+}
+
+func TestBazarrSearchSubtitlesWithOpts(t *testing.T) {
+	var got url.Values
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("method = %s", r.Method)
+		}
+		r.ParseForm()
+		got = r.PostForm
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	orig := bazarrURL
+	bazarrURL = ts.URL
+	t.Cleanup(func() { bazarrURL = orig })
+
+	// Write a fake Bazarr config.yaml so readBazarrAPIKey succeeds.
+	cfgDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cfgDir, "bazarr/config"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bazarr/config/config.yaml"),
+		[]byte("auth:\n  apikey: testkey\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	job := &Job{
+		Source: JobSource{ArrType: "radarr", ArrID: 42, Title: "T"},
+	}
+	opts := BazarrSearchOpts{Languages: []string{"es"}, HI: true, Forced: false}
+	bazarrSearchSubtitlesWithOpts(context.Background(), cfgDir, job, opts)
+
+	if got.Get("language") != "es" {
+		t.Errorf("language = %q, want es", got.Get("language"))
+	}
+	if got.Get("hi") != "True" {
+		t.Errorf("hi = %q, want True", got.Get("hi"))
+	}
+	if got.Get("forced") != "False" {
+		t.Errorf("forced = %q, want False", got.Get("forced"))
 	}
 }
 

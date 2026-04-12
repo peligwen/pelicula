@@ -11,6 +11,10 @@ import (
 // Overridden in tests to avoid 30-second waits.
 var awaitPollInterval = 30 * time.Second
 
+// bazarrTrigger is the seam for tests to swap out the real Bazarr PATCH loop.
+// Production code leaves this bound to bazarrSearchSubtitles.
+var bazarrTrigger = bazarrSearchSubtitles
+
 // nowFn is the clock function used for deadline checks. Overridable in tests.
 var nowFn = time.Now
 
@@ -19,12 +23,21 @@ var nowFn = time.Now
 // until all sidecar files appear (or timeout/cancellation).
 // Always returns — never blocks the pipeline indefinitely.
 func awaitSubtitles(ctx context.Context, q *Queue, job *Job, settings PipelineSettings, configDir string) {
+	// Automation is paused for jobs that already carry an error-severity flag.
+	// The operator must clear the flag (or dismiss it) before Bazarr fires.
+	for _, f := range job.Flags {
+		if f.Severity == FlagSeverityError {
+			slog.Info("await_subs: skipping flagged job", "component", "await_subs", "job_id", job.ID)
+			return
+		}
+	}
+
 	if len(job.MissingSubs) == 0 {
 		return
 	}
 
 	// Kick Bazarr to search immediately (best-effort — errors logged internally)
-	bazarrSearchSubtitles(ctx, configDir, job)
+	bazarrTrigger(ctx, configDir, job)
 
 	timeout := time.Duration(settings.SubAcquireTimeout) * time.Minute
 	if timeout <= 0 {

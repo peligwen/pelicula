@@ -61,6 +61,7 @@ var migrations = []migration{
 	{version: 2, up: migrate2},
 	{version: 3, up: migrate3},
 	{version: 4, up: migrate4},
+	{version: 5, up: migrate5},
 }
 
 // runMigrations reads the current schema version and applies all pending
@@ -126,6 +127,29 @@ func migrate3(tx *sql.Tx) error {
 func migrate4(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN catalog TEXT`)
 	return err
+}
+
+// migrate5 adds the flags column to jobs and creates the catalog_flags
+// index table (path → aggregated flag list + top severity) used by the
+// catalog dashboard "Needs Attention" section.
+func migrate5(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE jobs ADD COLUMN flags TEXT`,
+		`CREATE TABLE IF NOT EXISTS catalog_flags (
+			path       TEXT PRIMARY KEY,
+			flags      TEXT NOT NULL,
+			severity   TEXT NOT NULL,
+			job_id     TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_flags_severity ON catalog_flags(severity)`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrate1 creates the initial schema (version 1).

@@ -152,6 +152,85 @@ func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, eps)
 }
 
+// handleCatalogFlags proxies GET /api/procula/catalog/flags unchanged.
+func handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp, err := services.client.Get(proculaURL + "/api/procula/catalog/flags")
+	if err != nil {
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(body) //nolint:errcheck
+}
+
+// handleCatalogDetail returns {path, flags, job} for a specific media path.
+// It fetches the flag row and the newest matching job from procula.
+func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		httputil.WriteError(w, "path required", http.StatusBadRequest)
+		return
+	}
+
+	type flagsWrap struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	var fw flagsWrap
+	if resp, err := services.client.Get(proculaURL + "/api/procula/catalog/flags"); err == nil {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		_ = json.Unmarshal(body, &fw)
+	}
+
+	flags := []map[string]any{}
+	for _, row := range fw.Rows {
+		if p, _ := row["path"].(string); p == path {
+			if f, ok := row["flags"].([]any); ok {
+				for _, item := range f {
+					if m, ok := item.(map[string]any); ok {
+						flags = append(flags, m)
+					}
+				}
+			}
+			break
+		}
+	}
+
+	var matched map[string]any
+	if resp, err := services.client.Get(proculaURL + "/api/procula/jobs"); err == nil {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var all []map[string]any
+		_ = json.Unmarshal(body, &all)
+		for _, j := range all {
+			src, _ := j["source"].(map[string]any)
+			if src == nil {
+				continue
+			}
+			if p, _ := src["path"].(string); p == path {
+				matched = j // latest by creation order (procula returns ASC)
+			}
+		}
+	}
+
+	httputil.WriteJSON(w, map[string]any{
+		"path":  path,
+		"flags": flags,
+		"job":   matched,
+	})
+}
+
 // handleCatalogItemHistory returns recent job history for a file path.
 func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

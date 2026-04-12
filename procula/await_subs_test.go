@@ -191,6 +191,25 @@ func TestAwaitSubtitles_Cancelled_Context(t *testing.T) {
 	}
 }
 
+// TestAwaitSubsSkipsFlaggedJob — bazarr trigger must not fire when the job already
+// carries an error-severity flag (automation is paused for flagged items).
+func TestAwaitSubsSkipsFlaggedJob(t *testing.T) {
+	called := false
+	origTrigger := bazarrTrigger
+	bazarrTrigger = func(ctx context.Context, cfgDir string, j *Job) { called = true }
+	t.Cleanup(func() { bazarrTrigger = origTrigger })
+
+	job := &Job{
+		Source:      JobSource{Path: "/movies/X/X.mkv", ArrType: "radarr", ArrID: 1},
+		MissingSubs: []string{"es"},
+		Flags:       []Flag{{Code: "validation_failed", Severity: FlagSeverityError}},
+	}
+	awaitSubtitles(context.Background(), nil, job, PipelineSettings{SubAcquireTimeout: 0}, t.TempDir())
+	if called {
+		t.Fatalf("bazarr trigger should be skipped when job is flagged error")
+	}
+}
+
 // TestAwaitSubtitles_Timeout — exercises the internal deadline path (EventSubTimeout emission).
 // Overrides nowFn so the deadline appears already expired on the first check,
 // without any context cancellation pressure.

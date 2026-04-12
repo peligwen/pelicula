@@ -135,6 +135,28 @@ func TestHandleCreateActionUnknown(t *testing.T) {
 	}
 }
 
+func TestSubtitleRequestActionValidatesParams(t *testing.T) {
+	job := &Job{
+		ID:     "job_test",
+		Params: map[string]any{},
+	}
+	_, err := runSubtitleRequestAction(context.Background(), nil, job)
+	if err == nil {
+		t.Fatalf("expected error for missing params")
+	}
+}
+
+func TestSubtitleRequestActionRegistered(t *testing.T) {
+	registerBuiltinActions()
+	def := Lookup("subtitle_request")
+	if def == nil {
+		t.Fatalf("subtitle_request not registered")
+	}
+	if !def.Sync {
+		t.Errorf("subtitle_request should be sync")
+	}
+}
+
 func TestWorkerDispatchesRegisteredAction(t *testing.T) {
 	actionRegistry = map[string]*ActionDef{}
 	Register(&ActionDef{

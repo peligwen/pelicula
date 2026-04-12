@@ -105,6 +105,10 @@ type Job struct {
 
 	// Catalog tracks outcomes from the catalog stage.
 	Catalog *CatalogInfo `json:"catalog,omitempty"`
+
+	// Flags are derived issues (validation failures, missing subs, etc.)
+	// computed by ComputeFlags after each pipeline stage. Empty means clean.
+	Flags []Flag `json:"flags,omitempty"`
 }
 
 // CatalogInfo records what happened during the catalog stage of a pipeline job.
@@ -210,8 +214,8 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 	_, err = q.db.Exec(
 		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
 		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, 'pipeline', NULL, NULL)`,
+		                   action_type, params, result, flags)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, 'pipeline', NULL, NULL, NULL)`,
 		id,
 		now.Format(time.RFC3339Nano),
 		now.Format(time.RFC3339Nano),
@@ -264,8 +268,8 @@ func (q *Queue) createActionJob(source JobSource, actionType string, params map[
 	_, err = q.db.Exec(
 		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
 		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL)`,
+		                   action_type, params, result, flags)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL)`,
 		id,
 		now.Format(time.RFC3339Nano),
 		now.Format(time.RFC3339Nano),
@@ -305,7 +309,7 @@ func (q *Queue) Get(id string) (*Job, bool) {
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result, catalog
+		        action_type, params, result, catalog, flags
 		 FROM jobs WHERE id=?`, id,
 	)
 	job, err := scanJob(row)
@@ -321,7 +325,7 @@ func (q *Queue) List() []Job {
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result, catalog
+		        action_type, params, result, catalog, flags
 		 FROM jobs ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -423,13 +427,20 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		catalogJSON = &s
 	}
 
+	var flagsJSON *string
+	if job.Flags != nil {
+		b, _ := json.Marshal(job.Flags)
+		s := string(b)
+		flagsJSON = &s
+	}
+
 	_, err := q.db.Exec(
 		`UPDATE jobs SET
 			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
 			subs_acquired=?,
 			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
 			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?,
-			action_type=?, params=?, result=?, catalog=?
+			action_type=?, params=?, result=?, catalog=?, flags=?
 		 WHERE id=?`,
 		job.UpdatedAt.Format(time.RFC3339Nano),
 		string(job.State), string(job.Stage), job.Progress,
@@ -437,7 +448,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		subsAcquiredJSON,
 		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
-		job.ActionType, paramsJSON, resultJSON, catalogJSON,
+		job.ActionType, paramsJSON, resultJSON, catalogJSON, flagsJSON,
 		id,
 	)
 	if err != nil {
@@ -590,6 +601,7 @@ func scanJob(s scanner) (*Job, error) {
 		paramsJSON           *string
 		resultJSON           *string
 		catalogJSON          *string
+		flagsJSON            *string
 	)
 
 	err := s.Scan(
@@ -601,7 +613,7 @@ func scanJob(s scanner) (*Job, error) {
 		&dualSubOutputsJSON, &job.DualSubError,
 		&job.TranscodeProfile, &job.TranscodeDecision,
 		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,
-		&actionType, &paramsJSON, &resultJSON, &catalogJSON,
+		&actionType, &paramsJSON, &resultJSON, &catalogJSON, &flagsJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -655,6 +667,10 @@ func scanJob(s scanner) (*Job, error) {
 		if err := json.Unmarshal([]byte(*catalogJSON), &c); err == nil {
 			job.Catalog = &c
 		}
+	}
+
+	if flagsJSON != nil {
+		json.Unmarshal([]byte(*flagsJSON), &job.Flags) //nolint:errcheck
 	}
 
 	return &job, nil

@@ -79,6 +79,8 @@
         <button class="tab active" data-tab="search" onclick="switchTab('search')">search</button>
         <button class="tab" data-tab="coming" onclick="switchTab('coming')">pipeline</button>
         <button class="tab" data-tab="catalog" onclick="switchTab('catalog')">catalog</button>
+        <button class="tab" data-tab="jobs" onclick="switchTab('jobs')">jobs</button>
+        <button class="tab admin-only" data-tab="logs" onclick="switchTab('logs')">logs</button>
         <button class="tab" data-tab="storage" onclick="switchTab('storage')">storage</button>
         <button class="tab" data-tab="users" onclick="switchTab('users')">users</button>
         <button class="tab" data-tab="settings" onclick="switchTab('settings')">settings</button>
@@ -185,9 +187,44 @@
                         <button class="cat-chip" data-type="show" onclick="catSetType(this,'show')">TV</button>
                     </div>
                 </div>
+                <!-- Needs Attention (flagged items) -->
+                <details class="cat-attention" id="cat-attention" open>
+                    <summary class="cat-attention-header">
+                        <span class="cat-attention-title">Needs Attention</span>
+                        <span class="cat-attention-count" id="cat-attention-count">0</span>
+                    </summary>
+                    <div id="cat-attention-list" class="cat-attention-list"></div>
+                </details>
                 <div id="cat-list" class="cat-list">
                     <div class="no-items">Loading…</div>
                 </div>
+            </div>
+
+            <!-- Jobs -->
+            <div class="section hidden" id="jobs-section">
+                <div class="um-hero">
+                    <div class="um-hero-title-row">
+                        <span class="um-hero-icon">&#128230;</span>
+                        <h2 class="um-hero-title">Jobs</h2>
+                        <button class="section-action" onclick="jobsRefresh()">&#8635;</button>
+                    </div>
+                    <p class="um-hero-sub">All pipeline and action jobs, every state</p>
+                </div>
+                <div id="jobs-groups"></div>
+            </div>
+
+            <!-- Logs -->
+            <div class="section hidden admin-only" id="logs-section">
+                <div class="um-hero">
+                    <div class="um-hero-title-row">
+                        <span class="um-hero-icon">&#128220;</span>
+                        <h2 class="um-hero-title">Logs</h2>
+                        <button class="section-action" onclick="logsRefresh()">&#8635;</button>
+                    </div>
+                    <p class="um-hero-sub">Live log lines aggregated from every service</p>
+                </div>
+                <div class="logs-filters" id="logs-filters"></div>
+                <pre id="logs-stream" class="logs-stream"></pre>
             </div>
 
             <!-- Storage Management -->
@@ -891,8 +928,47 @@
         <div class="drawer-body" id="drawer-body"></div>
     </div>
 
+    <!-- Catalog detail drawer -->
+    <div class="drawer-backdrop hidden" id="cat-drawer-backdrop" onclick="catCloseDetail()"></div>
+    <div class="drawer hidden" id="cat-drawer">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title" id="cat-drawer-title">Details</div>
+                <div class="drawer-sub" id="cat-drawer-sub"></div>
+            </div>
+            <button class="drawer-close" onclick="catCloseDetail()">&times;</button>
+        </div>
+        <div class="drawer-body" id="cat-drawer-body"></div>
+    </div>
+
+    <!-- Subtitle request dialog -->
+    <div class="drawer-backdrop hidden" id="sub-req-backdrop" onclick="subReqClose()"></div>
+    <div class="drawer hidden" id="sub-req-dialog" role="dialog" aria-label="Request subtitles">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Request subtitles</div>
+                <div class="drawer-sub" id="sub-req-sub"></div>
+            </div>
+            <button class="drawer-close" onclick="subReqClose()">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <div class="drawer-section-title">Languages</div>
+            <div id="sub-req-langs" class="sub-req-langs"></div>
+            <div class="drawer-section-title">Options</div>
+            <label><input type="checkbox" id="sub-req-hi"> Hearing impaired</label>
+            <label style="margin-left:1rem"><input type="checkbox" id="sub-req-forced"> Forced only</label>
+            <div class="modal-buttons" style="margin-top:1rem">
+                <button class="modal-btn-cancel" onclick="subReqClose()">Cancel</button>
+                <button class="modal-btn-confirm" onclick="subReqSubmit()">Queue request</button>
+            </div>
+            <div id="sub-req-status" class="no-items"></div>
+        </div>
+    </div>
+
     <script src="/framework.js"></script>
     <script src="/catalog.js" defer></script>
+    <script src="/jobs.js" defer></script>
+    <script src="/logs.js" defer></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>
