@@ -325,9 +325,13 @@ component('catalog', function (el, store, _props) {
                     closeMenu();
                     if (def.name === 'dualsub') {
                         openDualsubDialog(item, level);
-                    } else {
-                        isFanout ? runFanout(item, level, def) : runAction(def, item, level);
+                        return;
                     }
+                    if (def.name === 'subtitle_search') {
+                        openSubSearchDialog(item, level);
+                        return;
+                    }
+                    isFanout ? runFanout(item, level, def) : runAction(def, item, level);
                 });
                 menu.appendChild(btn);
             }
@@ -461,7 +465,7 @@ component('catalog', function (el, store, _props) {
     }
 
     function buildParams(def, item, level) {
-        if (def.name === 'validate' || def.name === 'transcode' || def.name === 'dualsub') {
+        if (def.name === 'validate' || def.name === 'transcode') {
             return { path: level === 'movie' ? (item.movieFile ? item.movieFile.path : '') : (item.path || '') };
         }
         if (def.name === 'subtitle_refresh') {
@@ -531,105 +535,351 @@ component('catalog', function (el, store, _props) {
         if (!stopped) setTimeout(() => strip.remove(), 2000);
     }
 
-    // ── Subtitle request dialog ───────────────────────────────────────────────
-    function openSubRequest(target) {
-        store.set('catalog.subReq.target', target);
-        store.set('catalog.subReq.selected', new Set());
+    // ── Subtitle search dialog ────────────────────────────────────────────────────
 
-        (async () => {
-            try {
-                const res = await catFetch('/api/pelicula/settings');
-                if (res.ok) {
-                    const s = await res.json();
-                    const configured = (s.sub_langs || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-                    store.set('catalog.subReq.selected', new Set(configured));
-                }
-            } catch (e) { /* non-critical */ }
-            renderSubReqLangs();
-        })();
+    function openSubSearchDialog(item, level) {
+        store.set('catalog.subsearch.item', item);
+        store.set('catalog.subsearch.level', level);
+        document.getElementById('sub-search-sub').textContent = item.title || item.seriesTitle || '';
+        document.getElementById('sub-search-hi').checked = false;
+        document.getElementById('sub-search-forced').checked = false;
+        document.getElementById('sub-search-status').textContent = '';
 
-        document.getElementById('sub-req-sub').textContent = target.label;
-        document.getElementById('sub-req-hi').checked = false;
-        document.getElementById('sub-req-forced').checked = false;
-        document.getElementById('sub-req-status').textContent = '';
-        renderSubReqLangs();
-        PeliculaFW.openDrawer(
-            document.getElementById('sub-req-dialog'),
-            document.getElementById('sub-req-backdrop')
-        );
-    }
-
-    function renderSubReqLangs() {
-        const wrap = document.getElementById('sub-req-langs');
-        if (!wrap) return;
-        const selected = store.get('catalog.subReq.selected');
-        const merged = new Set([...SUB_REQ_DEFAULT_LANGS, ...selected]);
-        const frag = document.createDocumentFragment();
-        for (const code of merged) {
-            const span = document.createElement('span');
-            span.className = 'sub-req-lang' + (selected.has(code) ? ' active' : '');
-            span.textContent = code;
-            span.addEventListener('click', () => {
-                const sel = store.get('catalog.subReq.selected');
-                if (sel.has(code)) sel.delete(code); else sel.add(code);
-                store.set('catalog.subReq.selected', sel);
-                renderSubReqLangs();
+        const langs = (item.subLangs || ['en']).slice();
+        const allLangs = Array.from(new Set([...langs, 'en', 'es', 'fr', 'de']));
+        const container = document.getElementById('sub-search-langs');
+        container.replaceChildren();
+        allLangs.forEach(lang => {
+            const chip = document.createElement('span');
+            chip.textContent = lang;
+            chip.className = 'sub-req-chip';
+            chip.dataset.lang = lang;
+            chip.dataset.active = langs.includes(lang) ? '1' : '0';
+            chip.style.cssText = 'padding:.2rem .6rem;border-radius:4px;font-size:.8rem;cursor:pointer;margin:.15rem';
+            const updateChip = () => {
+                const on = chip.dataset.active === '1';
+                chip.style.background = on ? 'var(--accent)' : 'var(--border)';
+                chip.style.color = on ? '#000' : 'var(--muted)';
+            };
+            updateChip();
+            chip.addEventListener('click', () => {
+                chip.dataset.active = chip.dataset.active === '1' ? '0' : '1';
+                updateChip();
             });
-            frag.appendChild(span);
+            container.appendChild(chip);
+        });
+
+        PeliculaFW.openDrawer(document.getElementById('sub-search-dialog'), document.getElementById('sub-search-backdrop'));
+    }
+
+    window.subSearchClose = function () {
+        PeliculaFW.closeDrawer(document.getElementById('sub-search-dialog'), document.getElementById('sub-search-backdrop'));
+    };
+
+    window.subSearchSubmit = async function () {
+        const item = store.get('catalog.subsearch.item');
+        const level = store.get('catalog.subsearch.level');
+        const statusEl = document.getElementById('sub-search-status');
+        const langs = Array.from(document.querySelectorAll('#sub-search-langs [data-active="1"]'))
+            .map(c => c.dataset.lang);
+        if (!langs.length) { statusEl.textContent = 'Select at least one language.'; return; }
+        statusEl.textContent = 'Searching\u2026';
+        try {
+            const res = await catFetch('/api/procula/actions?wait=10', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'subtitle_search',
+                    target: { arr_type: level === 'movie' ? 'radarr' : 'sonarr', arr_id: item.id, episode_id: item.episodeId || 0 },
+                    params: {
+                        languages: langs,
+                        hi: document.getElementById('sub-search-hi').checked,
+                        forced: document.getElementById('sub-search-forced').checked,
+                    },
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) { statusEl.textContent = data.error || 'Error'; return; }
+            statusEl.textContent = 'Search triggered.';
+            setTimeout(window.subSearchClose, 1500);
+        } catch (e) {
+            statusEl.textContent = 'Request failed.';
         }
-        wrap.replaceChildren(frag);
-    }
+    };
 
-    // ── Dual subtitle dialog ──────────────────────────────────────────────────
-    function itemPath(item, level) {
-        return level === 'movie' ? (item.movieFile ? item.movieFile.path : '') : (item.path || '');
-    }
+    // ── Dual subtitle dialog ──────────────────────────────────────────────────────
 
-    function openDualsubDialog(item, level) {
+    let _dualsubTracks = [];
+    let _dualsubProfiles = [];
+    let _dualsubManageOpen = false;
+    let _dualsubCurrentLayout = 'stacked_bottom';
+
+    async function openDualsubDialog(item, level) {
         store.set('catalog.dualsub.item', item);
         store.set('catalog.dualsub.level', level);
-        const label = item.title || itemPath(item, level).split('/').slice(-1)[0] || 'Item';
-        document.getElementById('dualsub-sub').textContent = label;
+        const path = level === 'movie' ? (item.movieFile ? item.movieFile.path : '') : (item.path || '');
+        store.set('catalog.dualsub.path', path);
+
+        document.getElementById('dualsub-sub').textContent = item.title || item.seriesTitle || '';
         document.getElementById('dualsub-status').textContent = '';
-        PeliculaFW.openDrawer(
-            document.getElementById('dualsub-dialog'),
-            document.getElementById('dualsub-backdrop')
-        );
+        document.getElementById('dualsub-profile-editor').style.display = 'none';
+        _dualsubManageOpen = false;
+        document.getElementById('dualsub-manage-btn').textContent = 'Manage \u25be';
+
+        const [profRes, trackRes] = await Promise.all([
+            catFetch('/api/procula/dualsub-profiles'),
+            path ? catFetch('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)) : Promise.resolve(null),
+        ]);
+        _dualsubProfiles = profRes.ok ? await profRes.json() : [];
+        _dualsubTracks = (trackRes && trackRes.ok) ? (await trackRes.json()).tracks || [] : [];
+
+        dualsubRenderProfiles();
+        dualsubRenderOnDisk();
+        dualsubRenderPairs();
+
+        PeliculaFW.openDrawer(document.getElementById('dualsub-dialog'), document.getElementById('dualsub-backdrop'));
     }
 
+    function dualsubRenderProfiles() {
+        const sel = document.getElementById('dualsub-profile-select');
+        sel.replaceChildren();
+        _dualsubProfiles.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name + (p.layout ? ' (' + p.layout.replace('_', ' ') + ', ' + p.font_size + 'pt)' : '');
+            sel.appendChild(opt);
+        });
+    }
+
+    function dualsubRenderOnDisk() {
+        const container = document.getElementById('dualsub-ondisk');
+        container.replaceChildren();
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color:var(--muted);font-size:.78rem';
+        msg.textContent = '\u2014';
+        container.appendChild(msg);
+    }
+
+    function dualsubRenderPairs() {
+        const container = document.getElementById('dualsub-pairs');
+        container.replaceChildren();
+        if (_dualsubTracks.length === 0) {
+            const msg = document.createElement('div');
+            msg.style.cssText = 'color:var(--muted);font-size:.8rem;margin-bottom:.75rem';
+            msg.textContent = 'No subtitle sidecar files found alongside this media file.';
+            container.appendChild(msg);
+            return;
+        }
+        dualsubAddPair();
+    }
+
+    function dualsubMakePairCard(topFile, bottomFile) {
+        const card = document.createElement('div');
+        card.className = 'dualsub-pair-card';
+        card.style.cssText = 'background:var(--bg);border-radius:6px;padding:.55rem .65rem;margin-bottom:.4rem;display:flex;align-items:center;gap:.4rem';
+
+        function makeSelect(selectedFile) {
+            const sel = document.createElement('select');
+            sel.style.cssText = 'flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.25rem .4rem;font-size:.78rem;color:var(--text)';
+            _dualsubTracks.forEach(tr => {
+                const opt = document.createElement('option');
+                opt.value = tr.file;
+                const varLabel = tr.variant === 'hi' ? ' \u2014 hearing impaired' : tr.variant === 'forced' ? ' \u2014 forced' : '';
+                opt.textContent = tr.lang.toUpperCase() + varLabel;
+                if (tr.file === selectedFile) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            return sel;
+        }
+
+        function makeRow(labelText, selectedFile) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:.4rem';
+            const lbl = document.createElement('span');
+            lbl.style.cssText = 'font-size:.65rem;color:var(--muted);width:2.6rem;flex-shrink:0';
+            lbl.textContent = labelText;
+            const sel = makeSelect(selectedFile);
+            row.appendChild(lbl);
+            row.appendChild(sel);
+            return { row, sel };
+        }
+
+        const rows = document.createElement('div');
+        rows.style.cssText = 'display:flex;flex-direction:column;gap:.25rem;flex:1';
+        const { row: topRow, sel: topSel } = makeRow('Top', topFile);
+        const { row: botRow, sel: botSel } = makeRow('Bottom', bottomFile);
+        rows.appendChild(topRow);
+        rows.appendChild(botRow);
+        card.appendChild(rows);
+
+        const btns = document.createElement('div');
+        btns.style.cssText = 'display:flex;flex-direction:column;gap:.2rem;align-items:center';
+
+        const swapBtn = document.createElement('button');
+        swapBtn.title = 'Swap top/bottom';
+        swapBtn.textContent = '\u21c5';
+        swapBtn.style.cssText = 'width:1.6rem;height:1.6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.8rem;cursor:pointer';
+        swapBtn.addEventListener('click', () => { const t = topSel.value; topSel.value = botSel.value; botSel.value = t; });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.title = 'Remove pair';
+        removeBtn.textContent = '\u00d7';
+        removeBtn.style.cssText = 'width:1.6rem;height:1.6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.75rem;cursor:pointer';
+        removeBtn.addEventListener('click', () => card.remove());
+
+        btns.appendChild(swapBtn);
+        btns.appendChild(removeBtn);
+        card.appendChild(btns);
+
+        card._getTopFile = () => topSel.value;
+        card._getBotFile = () => botSel.value;
+        return card;
+    }
+
+    window.dualsubAddPair = function () {
+        const container = document.getElementById('dualsub-pairs');
+        const topFile = _dualsubTracks[0] ? _dualsubTracks[0].file : '';
+        const botFile = _dualsubTracks[1] ? _dualsubTracks[1].file : (_dualsubTracks[0] ? _dualsubTracks[0].file : '');
+        container.appendChild(dualsubMakePairCard(topFile, botFile));
+    };
+
     window.dualsubClose = function () {
-        PeliculaFW.closeDrawer(
-            document.getElementById('dualsub-dialog'),
-            document.getElementById('dualsub-backdrop')
-        );
+        PeliculaFW.closeDrawer(document.getElementById('dualsub-dialog'), document.getElementById('dualsub-backdrop'));
+    };
+
+    window.dualsubToggleManage = function () {
+        _dualsubManageOpen = !_dualsubManageOpen;
+        document.getElementById('dualsub-profile-editor').style.display = _dualsubManageOpen ? 'block' : 'none';
+        document.getElementById('dualsub-manage-btn').textContent = _dualsubManageOpen ? 'Manage \u25b4' : 'Manage \u25be';
+        if (_dualsubManageOpen) dualsubLoadProfileEditor();
+    };
+
+    function dualsubLoadProfileEditor() {
+        const sel = document.getElementById('dualsub-profile-select');
+        const prof = _dualsubProfiles.find(p => p.name === sel.value) || _dualsubProfiles[0];
+        if (!prof) return;
+        document.getElementById('dsp-name').value = prof.name;
+        document.getElementById('dsp-font').value = prof.font_name || 'Arial';
+        document.getElementById('dsp-size').value = prof.font_size || 52;
+        document.getElementById('dsp-outline').value = prof.outline || 2;
+        document.getElementById('dsp-margin').value = prof.margin_v || 40;
+        document.getElementById('dsp-gap').value = prof.gap || 10;
+        _dualsubCurrentLayout = prof.layout || 'stacked_bottom';
+        dualsubHighlightLayout(_dualsubCurrentLayout);
+        const isBuiltin = !!prof.builtin;
+        document.getElementById('dsp-update-btn').disabled = isBuiltin;
+        document.getElementById('dsp-delete-btn').disabled = isBuiltin;
+    }
+
+    window.dualsubProfileChanged = function () {
+        if (_dualsubManageOpen) dualsubLoadProfileEditor();
+    };
+
+    window.dualsubSetLayout = function (btn) {
+        _dualsubCurrentLayout = btn.dataset.layout;
+        dualsubHighlightLayout(_dualsubCurrentLayout);
+    };
+
+    function dualsubHighlightLayout(layout) {
+        document.querySelectorAll('#dsp-layout-btns button').forEach(b => {
+            const active = b.dataset.layout === layout;
+            b.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+            b.style.background = active ? 'rgba(255,200,0,.12)' : 'transparent';
+            b.style.color = active ? 'var(--accent)' : 'var(--muted)';
+        });
+    }
+
+    function dualsubReadEditorFields() {
+        return {
+            name: document.getElementById('dsp-name').value.trim(),
+            font_name: document.getElementById('dsp-font').value.trim() || 'Arial',
+            font_size: parseInt(document.getElementById('dsp-size').value) || 52,
+            outline: parseFloat(document.getElementById('dsp-outline').value) || 2,
+            margin_v: parseInt(document.getElementById('dsp-margin').value) || 40,
+            gap: parseInt(document.getElementById('dsp-gap').value) || 10,
+            layout: _dualsubCurrentLayout,
+        };
+    }
+
+    window.dualsubSaveAsNew = async function () {
+        const fields = dualsubReadEditorFields();
+        if (!fields.name) { toast('Profile name required'); return; }
+        const res = await catFetch('/api/procula/dualsub-profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fields),
+        });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Save failed'); return; }
+        const saved = await res.json();
+        _dualsubProfiles.push(saved);
+        dualsubRenderProfiles();
+        document.getElementById('dualsub-profile-select').value = saved.name;
+        toast('Profile saved');
+    };
+
+    window.dualsubUpdateProfile = async function () {
+        const fields = dualsubReadEditorFields();
+        if (!fields.name) return;
+        const res = await catFetch('/api/procula/dualsub-profiles/' + encodeURIComponent(fields.name), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fields),
+        });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Update failed'); return; }
+        const idx = _dualsubProfiles.findIndex(p => p.name === fields.name);
+        if (idx !== -1) _dualsubProfiles[idx] = fields;
+        dualsubRenderProfiles();
+        document.getElementById('dualsub-profile-select').value = fields.name;
+        toast('Profile updated');
+    };
+
+    window.dualsubDeleteProfile = async function () {
+        const name = document.getElementById('dsp-name').value.trim();
+        if (!name) return;
+        const res = await catFetch('/api/procula/dualsub-profiles/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (!res.ok && res.status !== 204) { const d = await res.json(); toast(d.error || 'Delete failed'); return; }
+        _dualsubProfiles = _dualsubProfiles.filter(p => p.name !== name);
+        dualsubRenderProfiles();
+        document.getElementById('dualsub-profile-editor').style.display = 'none';
+        _dualsubManageOpen = false;
+        document.getElementById('dualsub-manage-btn').textContent = 'Manage \u25be';
+        toast('Profile deleted');
     };
 
     window.dualsubSubmit = async function () {
-        const item = store.get('catalog.dualsub.item');
-        const level = store.get('catalog.dualsub.level');
-        if (!item) return;
-        const path = itemPath(item, level);
-        if (!path) { document.getElementById('dualsub-status').textContent = 'No file path available.'; return; }
+        const path = store.get('catalog.dualsub.path');
         const statusEl = document.getElementById('dualsub-status');
-        statusEl.textContent = 'Regenerating\u2026';
-        const body = JSON.stringify({
-            action: 'dualsub',
-            target: { path, arr_type: level === 'movie' ? 'radarr' : 'sonarr', arr_id: item.id },
-            params: { path },
-        });
+        if (!path) { statusEl.textContent = 'No file path available.'; return; }
+
+        const profileName = document.getElementById('dualsub-profile-select').value;
+        const pairCards = document.querySelectorAll('.dualsub-pair-card');
+        const pairs = Array.from(pairCards).map(c => ({
+            top_file: c._getTopFile(),
+            bottom_file: c._getBotFile(),
+        })).filter(p => p.top_file && p.bottom_file);
+
+        if (!pairs.length) { statusEl.textContent = 'Add at least one track pair.'; return; }
+
+        statusEl.textContent = 'Generating\u2026';
         try {
-            const res = await catFetch('/api/pelicula/actions?wait=30', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+            const res = await catFetch('/api/procula/actions?wait=10', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'dualsub',
+                    target: { path },
+                    params: { profile: profileName, pairs },
+                }),
+            });
             const data = await res.json();
-            if (!res.ok) { statusEl.textContent = 'Failed: ' + (data.error || res.status); return; }
-            if (data.state === 'completed') {
-                const outputs = (data.result || {}).outputs || [];
-                statusEl.textContent = outputs.length ? 'Done \u2014 ' + outputs.length + ' file(s) written' : 'Done (no outputs)';
-                setTimeout(window.dualsubClose, 1800);
-            } else {
-                statusEl.textContent = 'State: ' + data.state;
-            }
+            if (!res.ok) { statusEl.textContent = data.error || 'Error'; return; }
+            const outputs = (data.result && data.result.outputs) || [];
+            statusEl.textContent = outputs.length
+                ? 'Generated: ' + outputs.map(o => o.split('/').pop()).join(', ')
+                : 'No output produced.';
+            if (outputs.length) setTimeout(window.dualsubClose, 2000);
         } catch (e) {
-            statusEl.textContent = 'Error: ' + e.message;
+            statusEl.textContent = 'Request failed.';
         }
     };
 
@@ -664,49 +914,6 @@ component('catalog', function (el, store, _props) {
     };
 
     window.catRefreshFlags = function () { loadFlags(); };
-
-    window.subReqOpen = function (target) { openSubRequest(target); };
-
-    window.subReqClose = function () {
-        PeliculaFW.closeDrawer(
-            document.getElementById('sub-req-dialog'),
-            document.getElementById('sub-req-backdrop')
-        );
-    };
-
-    window.subReqSubmit = async function () {
-        const t = store.get('catalog.subReq.target');
-        if (!t) return;
-        const langs = Array.from(store.get('catalog.subReq.selected'));
-        const statusEl = document.getElementById('sub-req-status');
-        if (!langs.length) { statusEl.textContent = 'Select at least one language.'; return; }
-        const body = JSON.stringify({
-            action: 'subtitle_request',
-            target: { arr_type: t.arrType, arr_id: t.arrID, episode_id: t.episodeID || 0 },
-            params: {
-                languages: langs,
-                hi: document.getElementById('sub-req-hi').checked,
-                forced: document.getElementById('sub-req-forced').checked,
-                arr_type: t.arrType,
-                arr_id: t.arrID,
-                episode_id: t.episodeID || 0,
-            },
-        });
-        statusEl.textContent = 'Queuing\u2026';
-        try {
-            const res = await catFetch('/api/pelicula/actions?wait=10', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-            const data = await res.json();
-            if (!res.ok) { statusEl.textContent = 'Failed: ' + (data.error || res.status); return; }
-            if (data.state === 'completed') {
-                statusEl.textContent = 'Queued for ' + langs.join(', ');
-                setTimeout(window.subReqClose, 1200);
-            } else {
-                statusEl.textContent = 'State: ' + data.state;
-            }
-        } catch (e) {
-            statusEl.textContent = 'Error: ' + e.message;
-        }
-    };
 
     // ── Subscribe to store changes ────────────────────────────────────────────
     store.subscribe('catalog.items', renderCatalog);
