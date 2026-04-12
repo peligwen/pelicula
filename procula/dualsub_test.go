@@ -223,13 +223,15 @@ func TestDualSubPath(t *testing.T) {
 
 func TestWriteASS_BasicOutput(t *testing.T) {
 	tmp := t.TempDir() + "/test.en-es.ass"
-	base := []SubtitleCue{
-		makeCue(1000, 3000, "Hello world"),
-		makeCue(5000, 7000, "Goodbye"),
+	// topCues = secondary (learning, yellow, top); bottomTexts = base (familiar, white, bottom)
+	topCues := []SubtitleCue{
+		makeCue(1000, 3000, "Hola mundo"),
+		makeCue(5000, 7000, ""),
 	}
-	secTexts := []string{"Hola mundo", ""}
+	bottomTexts := []string{"Hello world", "Goodbye"}
+	prof := FindDualSubProfile(nil, "Default")
 
-	if err := writeASS(tmp, "en", "es", base, secTexts); err != nil {
+	if err := writeASS(tmp, prof, topCues, bottomTexts); err != nil {
 		t.Fatalf("writeASS: %v", err)
 	}
 
@@ -256,7 +258,7 @@ func TestWriteASS_BasicOutput(t *testing.T) {
 		}
 	}
 
-	// Second cue has no secondary — only Bottom line should appear for it
+	// Second cue has no secondary text — only Bottom line should appear for it
 	if strings.Count(content, "Goodbye") != 1 {
 		t.Errorf("expected exactly one 'Goodbye' dialogue line")
 	}
@@ -264,8 +266,9 @@ func TestWriteASS_BasicOutput(t *testing.T) {
 
 func TestWriteASS_NewlineBecomesBackslashN(t *testing.T) {
 	tmp := t.TempDir() + "/test.ass"
-	base := []SubtitleCue{makeCue(0, 2000, "Line one\nLine two")}
-	if err := writeASS(tmp, "en", "es", base, []string{""}); err != nil {
+	prof := FindDualSubProfile(nil, "Default")
+	topCues := []SubtitleCue{makeCue(0, 2000, "Line one\nLine two")}
+	if err := writeASS(tmp, prof, topCues, []string{""}); err != nil {
 		t.Fatalf("writeASS: %v", err)
 	}
 	data, _ := os.ReadFile(tmp)
@@ -276,7 +279,8 @@ func TestWriteASS_NewlineBecomesBackslashN(t *testing.T) {
 
 func TestWriteASS_EmptyBaseCues(t *testing.T) {
 	tmp := t.TempDir() + "/empty.ass"
-	if err := writeASS(tmp, "en", "es", nil, nil); err != nil {
+	prof := FindDualSubProfile(nil, "Default")
+	if err := writeASS(tmp, prof, nil, nil); err != nil {
 		t.Fatalf("writeASS with empty cues: %v", err)
 	}
 	data, _ := os.ReadFile(tmp)
@@ -358,6 +362,80 @@ func TestAlignCues_MidpointJustOutside(t *testing.T) {
 	got := alignCues(base, sec)
 	if len(got) != 1 || got[0] != "" {
 		t.Errorf("just-outside align = %v, want [\"\"]", got)
+	}
+}
+
+// ── writeASS layout tests ─────────────────────────────────────────────────────
+
+func TestWriteASSLayout_StackedBottom(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.ass")
+	prof := DualSubProfile{
+		Layout: "stacked_bottom", FontSize: 52, FontName: "Arial",
+		Outline: 2, MarginV: 40, Gap: 10,
+	}
+	cues := []SubtitleCue{{Start: 0, End: time.Second, Text: "Hello"}}
+	sec := []string{"Hola"}
+	if err := writeASS(out, prof, cues, sec); err != nil {
+		t.Fatalf("writeASS: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	content := string(data)
+	// Bottom style: Alignment=2, MarginV=40
+	if !strings.Contains(content, "Style: Bottom,Arial,52,") {
+		t.Error("missing Bottom style with Arial,52")
+	}
+	// Top style: MarginV = margin_v + font_size + gap = 40+52+10 = 102
+	if !strings.Contains(content, ",8,10,10,102,") {
+		t.Errorf("Top style MarginV should be 102 (40+52+10); content:\n%s", content)
+	}
+}
+
+func TestWriteASSLayout_Split(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.ass")
+	prof := DualSubProfile{
+		Layout: "split", FontSize: 64, FontName: "Arial",
+		Outline: 2, MarginV: 40,
+	}
+	cues := []SubtitleCue{{Start: 0, End: time.Second, Text: "Hello"}}
+	sec := []string{"Hola"}
+	if err := writeASS(out, prof, cues, sec); err != nil {
+		t.Fatalf("writeASS: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	content := string(data)
+	// Top style: Alignment=8, MarginV=40
+	if !strings.Contains(content, ",8,10,10,40,") {
+		t.Errorf("Top style should have Alignment=8 MarginV=40; content:\n%s", content)
+	}
+	// Bottom style: Alignment=2, MarginV=40
+	if !strings.Contains(content, ",2,10,10,40,") {
+		t.Errorf("Bottom style should have Alignment=2 MarginV=40; content:\n%s", content)
+	}
+}
+
+func TestWriteASSLayout_StackedTop(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.ass")
+	prof := DualSubProfile{
+		Layout: "stacked_top", FontSize: 52, FontName: "Arial",
+		Outline: 2, MarginV: 40, Gap: 10,
+	}
+	cues := []SubtitleCue{{Start: 0, End: time.Second, Text: "Hello"}}
+	sec := []string{"Hola"}
+	if err := writeASS(out, prof, cues, sec); err != nil {
+		t.Fatalf("writeASS: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	content := string(data)
+	// Top style: Alignment=8, MarginV=40
+	if !strings.Contains(content, ",8,10,10,40,") {
+		t.Errorf("Top style should have Alignment=8 MarginV=40; content:\n%s", content)
+	}
+	// Bottom/secondary for stacked_top: MarginV = 40+52+10 = 102, also Alignment=8
+	if !strings.Contains(content, ",8,10,10,102,") {
+		t.Errorf("Secondary style MarginV should be 102; content:\n%s", content)
 	}
 }
 
