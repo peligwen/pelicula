@@ -169,7 +169,7 @@ component('catalog', function (el, store, _props) {
         });
         div.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            openSubSearchDialog({ label: item.title || 'Movie', arrType: 'radarr', arrID: item.id, episodeID: 0 });
+            openSubSearchDialog({ title: item.title || 'Movie', arrType: 'radarr', id: item.id, episodeId: 0, subLangs: item.subLangs || [] }, 'movie');
         });
         div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => { e.stopPropagation(); openContextMenu(e, item, 'movie'); });
         return div;
@@ -290,7 +290,7 @@ component('catalog', function (el, store, _props) {
         div.addEventListener('contextmenu', (e) => {
             if (!hasFile) return;
             e.preventDefault();
-            openSubSearchDialog({ label: series.title + ' ' + epNum, arrType: 'sonarr', arrID: series.id, episodeID: ep.id });
+            openSubSearchDialog({ title: series.title + ' ' + epNum, arrType: 'sonarr', id: series.id, episodeId: ep.id, subLangs: series.subLangs || [] }, 'episode');
         });
         return div;
     }
@@ -627,6 +627,8 @@ component('catalog', function (el, store, _props) {
             catFetch('/api/procula/dualsub-profiles'),
             path ? catFetch('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)) : Promise.resolve(null),
         ]);
+        // Guard: bail if another open superseded this one
+        if (store.get('catalog.dualsub.path') !== path) return;
         _dualsubProfiles = profRes.ok ? await profRes.json() : [];
         _dualsubTracks = (trackRes && trackRes.ok) ? (await trackRes.json()).tracks || [] : [];
 
