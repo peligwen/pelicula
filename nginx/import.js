@@ -9,16 +9,6 @@ const state = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-}
-
-function escAttr(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 async function apiFetch(url, opts) {
     const res = await fetch(url, opts);
     if (res.status === 401) {
@@ -82,7 +72,7 @@ async function loadBrowseRoots() {
         renderRoots(data.entries || []);
     } catch (e) {
         document.getElementById('browse-tree').innerHTML =
-            '<div class="no-items">Failed to load directories: ' + esc(e.message) + '</div>';
+            '<div class="no-items">Failed to load directories: ' + PeliculaFW.esc(e.message) + '</div>';
     }
 }
 
@@ -222,7 +212,7 @@ async function toggleDir(expandEl, childrenEl, path) {
         }
         childrenEl.dataset.loaded = 'true';
     } catch (e) {
-        childrenEl.innerHTML = '<div class="browse-loading">Error: ' + esc(e.message) + '</div>';
+        childrenEl.innerHTML = '<div class="browse-loading">Error: ' + PeliculaFW.esc(e.message) + '</div>';
     }
 }
 
@@ -321,7 +311,7 @@ async function onImportClick() {
         folderCount ? folderCount + ' folder' + (folderCount > 1 ? 's' : '') : '',
         fileCount ? fileCount + ' file' + (fileCount > 1 ? 's' : '') : '',
     ].filter(Boolean).join(', ');
-    results.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Scanning ' + esc(scanDesc) + '...</span></div>';
+    results.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Scanning ' + PeliculaFW.esc(scanDesc) + '...</span></div>';
 
     try {
         const files = state.selected.filter(s => !s.isDir).map(f => ({ path: f.path, size: f.size }));
@@ -340,7 +330,7 @@ async function onImportClick() {
         state.groupSelections = {};
         renderMatchResults();
     } catch (e) {
-        results.innerHTML = '<div class="no-items">Scan failed: ' + esc(e.message) + '</div>';
+        results.innerHTML = '<div class="no-items">Scan failed: ' + PeliculaFW.esc(e.message) + '</div>';
     }
 }
 
@@ -458,7 +448,7 @@ function createDupGroup(items, groupKey) {
                      'E' + String(firstMatch.episode || 0).padStart(2, '0');
     }
     hdr.innerHTML =
-        '<span class="dup-group-title">' + esc(titleText) + '</span>' +
+        '<span class="dup-group-title">' + PeliculaFW.esc(titleText) + '</span>' +
         '<span class="dup-group-hint">Pick one file to import</span>';
     card.appendChild(hdr);
 
@@ -481,17 +471,17 @@ function createDupGroup(items, groupKey) {
         const info = document.createElement('span');
         info.className = 'dup-candidate-info';
         const filename = item.file.split('/').pop();
-        let infoHtml = '<span class="dup-candidate-filename" title="' + escAttr(item.file) + '">' + esc(filename) + '</span>';
+        let infoHtml = '<span class="dup-candidate-filename" title="' + PeliculaFW.esc(item.file) + '">' + PeliculaFW.esc(filename) + '</span>';
         if (item.size) infoHtml += ' <span class="browse-size">' + formatSize(item.size) + '</span>';
         if (item.match && item.match.confidence) {
-            infoHtml += ' <span class="match-badge badge-' + esc(item.match.confidence) + '">' + esc(item.match.confidence) + '</span>';
+            infoHtml += ' <span class="match-badge badge-' + PeliculaFW.esc(item.match.confidence) + '">' + PeliculaFW.esc(item.match.confidence) + '</span>';
         }
         if (item.aliases && item.aliases.length) {
             infoHtml += ' <span class="dup-alias-hint">+ ' + item.aliases.length + ' hardlink' + (item.aliases.length > 1 ? 's' : '') + '</span>';
         }
         if (item.suggestedPath) {
-            infoHtml += '<div class="match-dest" title="' + escAttr(item.suggestedPath) + '">' +
-                        '<span class="match-dest-arrow">&rarr;</span>' + esc(item.suggestedPath) + '</div>';
+            infoHtml += '<div class="match-dest" title="' + PeliculaFW.esc(item.suggestedPath) + '">' +
+                        '<span class="match-dest-arrow">&rarr;</span>' + PeliculaFW.esc(item.suggestedPath) + '</div>';
         }
         info.innerHTML = infoHtml;
         row.appendChild(info);
@@ -582,20 +572,20 @@ function createMatchItem(item) {
 
     if (item.match) {
         const destHtml = item.suggestedPath
-            ? '<div class="match-dest" title="' + escAttr(item.suggestedPath) + '">' +
-              '<span class="match-dest-arrow">&rarr;</span>' + esc(item.suggestedPath) + '</div>'
+            ? '<div class="match-dest" title="' + PeliculaFW.esc(item.suggestedPath) + '">' +
+              '<span class="match-dest-arrow">&rarr;</span>' + PeliculaFW.esc(item.suggestedPath) + '</div>'
             : '';
         info.innerHTML =
-            '<div class="match-title">' + esc(item.match.title) +
+            '<div class="match-title">' + PeliculaFW.esc(item.match.title) +
             (item.match.year ? ' <span style="color:#666">(' + item.match.year + ')</span>' : '') +
             '</div>' +
-            '<div class="match-meta">' + esc(item.match.type) + '</div>' +
-            '<div class="match-file" title="' + escAttr(item.file) + '">' + esc(item.file) + '</div>' +
+            '<div class="match-meta">' + PeliculaFW.esc(item.match.type) + '</div>' +
+            '<div class="match-file" title="' + PeliculaFW.esc(item.file) + '">' + PeliculaFW.esc(item.file) + '</div>' +
             destHtml;
     } else {
         info.innerHTML =
-            '<div class="match-title" style="color:#666">' + esc(item.file.split('/').pop()) + '</div>' +
-            '<div class="match-file" title="' + escAttr(item.file) + '">' + esc(item.file) + '</div>';
+            '<div class="match-title" style="color:#666">' + PeliculaFW.esc(item.file.split('/').pop()) + '</div>' +
+            '<div class="match-file" title="' + PeliculaFW.esc(item.file) + '">' + PeliculaFW.esc(item.file) + '</div>';
     }
     row.appendChild(info);
 
@@ -711,7 +701,7 @@ async function doApply() {
         const result = await res.json();
         renderApplyResult(result, validate);
     } catch (e) {
-        content.innerHTML = '<div class="no-items">Import failed: ' + esc(e.message) + '</div>';
+        content.innerHTML = '<div class="no-items">Import failed: ' + PeliculaFW.esc(e.message) + '</div>';
     }
 
     document.getElementById('apply-nav').classList.remove('hidden');
@@ -728,7 +718,7 @@ function renderApplyResult(result, validate) {
     if (result.errors && result.errors.length) {
         html += '<div class="apply-errors">';
         result.errors.forEach(e => {
-            html += '<div class="apply-error-item">' + esc(e) + '</div>';
+            html += '<div class="apply-error-item">' + PeliculaFW.esc(e) + '</div>';
         });
         html += '</div>';
     }
@@ -738,17 +728,17 @@ function renderApplyResult(result, validate) {
         result.items.forEach(item => {
             const opClass = item.fsOp === 'failed' ? 'apply-item-failed' : 'apply-item-ok';
             html += '<div class="apply-item-row ' + opClass + '">';
-            html += '<span class="apply-item-op badge-' + esc(item.fsOp || 'kept') + '">' + esc(item.fsOp || 'kept') + '</span>';
-            html += '<span class="apply-item-title">' + esc(item.title) + '</span>';
+            html += '<span class="apply-item-op badge-' + PeliculaFW.esc(item.fsOp || 'kept') + '">' + PeliculaFW.esc(item.fsOp || 'kept') + '</span>';
+            html += '<span class="apply-item-title">' + PeliculaFW.esc(item.title) + '</span>';
             if (item.src && item.dest && item.src !== item.dest) {
-                html += '<div class="apply-item-paths"><span class="apply-item-src">' + esc(item.src) + '</span>' +
+                html += '<div class="apply-item-paths"><span class="apply-item-src">' + PeliculaFW.esc(item.src) + '</span>' +
                         '<span class="match-dest-arrow">&rarr;</span>' +
-                        '<span class="apply-item-dest">' + esc(item.dest) + '</span></div>';
+                        '<span class="apply-item-dest">' + PeliculaFW.esc(item.dest) + '</span></div>';
             } else if (item.dest) {
-                html += '<div class="apply-item-paths"><span class="apply-item-dest">' + esc(item.dest) + '</span></div>';
+                html += '<div class="apply-item-paths"><span class="apply-item-dest">' + PeliculaFW.esc(item.dest) + '</span></div>';
             }
             if (item.error) {
-                html += '<div class="apply-item-error">' + esc(item.error) + '</div>';
+                html += '<div class="apply-item-error">' + PeliculaFW.esc(item.error) + '</div>';
             }
             html += '</div>';
         });

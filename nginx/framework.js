@@ -1,5 +1,5 @@
 // nginx/framework.js
-// Pelicula micro-framework — ~180 lines, no dependencies, no build step.
+// Pelicula micro-framework — no dependencies, no build step.
 //
 // API:
 //   const store = createStore(initial)    — reactive state store
@@ -71,6 +71,7 @@ function createStore(initial) {
 
 const _registry  = {};   // name → factory fn
 const _mounted   = [];   // { name, el, instance, unsubs }
+const _loadedOnce = new Set();  // component names that have called loadOnce
 
 function component(name, factory) {
     _registry[name] = factory;
@@ -88,6 +89,10 @@ function mount(name, el, props) {
     const instance = factory(el, storeProxy, props || {});
     _mounted.push({ name, el, instance, unsubs });
     if (instance && typeof instance.render === 'function') instance.render();
+    if (instance && typeof instance.loadOnce === 'function' && !_loadedOnce.has(name)) {
+        _loadedOnce.add(name);
+        instance.loadOnce();
+    }
     return instance;
 }
 
@@ -153,6 +158,82 @@ function byTestId(id, root) {
     return (root || document).querySelector(`[data-testid="${id}"]`);
 }
 
+// ── Router ────────────────────────────────────────────────────────────────────
+// Thin hash-routing wrapper. Does not replace switchTab — wraps it.
+// Usage:
+//   router.navigate('catalog')           → sets location.hash = '#catalog'
+//   router.navigate('catalog', {id: 5})  → sets hash = '#catalog/id=5'
+//   router.current()                     → { tab: 'catalog', params: {id:'5'} }
+//   router.listen(fn)                    → calls fn({tab, params}) on hashchange + immediately
+
+const router = {
+    navigate(tab, params) {
+        let hash = '#' + tab;
+        if (params) {
+            const qs = Object.entries(params).map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
+            if (qs) hash += '/' + qs;
+        }
+        location.hash = hash;
+    },
+
+    current() {
+        const h = location.hash.slice(1); // strip #
+        if (!h) return { tab: '', params: {} };
+        const [tab, rest] = h.split('/', 2);
+        const params = {};
+        if (rest) rest.split('&').forEach(pair => {
+            const [k, v] = pair.split('=', 2);
+            if (k) params[k] = v ? decodeURIComponent(v) : '';
+        });
+        return { tab, params };
+    },
+
+    listen(fn) {
+        const handler = () => fn(router.current());
+        window.addEventListener('hashchange', handler);
+        handler(); // call immediately with current state
+        return () => window.removeEventListener('hashchange', handler);
+    }
+};
+
+// ── Focus trap ────────────────────────────────────────────────────────────────
+// trapFocus(el) — traps Tab/Shift-Tab within el, closes on Escape.
+// releaseFocus(el) — removes trap, restores focus to previously active element.
+
+const _focusTraps = new WeakMap();
+
+function trapFocus(el, onClose) {
+    const prev = document.activeElement;
+    const focusable = el.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    function handler(e) {
+        if (e.key === 'Escape') { if (onClose) onClose(); return; }
+        if (e.key !== 'Tab') return;
+        if (focusable.length === 0) { e.preventDefault(); return; }
+        if (e.shiftKey) {
+            if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        } else {
+            if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+    }
+
+    el.addEventListener('keydown', handler);
+    _focusTraps.set(el, { handler, prev });
+    if (first) first.focus();
+}
+
+function releaseFocus(el) {
+    const trap = _focusTraps.get(el);
+    if (!trap) return;
+    el.removeEventListener('keydown', trap.handler);
+    _focusTraps.delete(el);
+    if (trap.prev && typeof trap.prev.focus === 'function') trap.prev.focus();
+}
+
 // ── Exports (assigned to window for plain-script use) ─────────────────────────
 
-window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId };
+window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, esc: _escapeHtml, router, trapFocus, releaseFocus };

@@ -130,6 +130,7 @@
         </div>
     </div>
 
+<script src="/framework.js"></script>
 <script>
 let mode = 'setup';
 let detected = {};
@@ -283,17 +284,11 @@ function buildSummary() {
 }
 
 function row(label, value) {
-    return '<tr><td class="sum-label">' + esc(label) + '</td><td>' + esc(value) + '</td></tr>';
+    return '<tr><td class="sum-label">' + PeliculaFW.esc(label) + '</td><td>' + PeliculaFW.esc(value) + '</td></tr>';
 }
 
 function rowHTML(label, html) {
-    return '<tr><td class="sum-label">' + esc(label) + '</td><td>' + html + '</td></tr>';
-}
-
-function esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return '<tr><td class="sum-label">' + PeliculaFW.esc(label) + '</td><td>' + html + '</td></tr>';
 }
 
 async function submitSetup() {
