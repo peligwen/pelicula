@@ -97,6 +97,32 @@ test.describe('Collapsible side panel', () => {
         await expect(page.locator('#side-strip')).toBeVisible();
     });
 
+    test('mobile: clicks inside an open modal do not collapse the panel', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(MOBILE_VIEWPORT);
+        await ensureLoggedIn(page);
+        // Open the panel so the tap-outside handler is armed.
+        await page.locator('#side-strip').click();
+        await expect(page.locator('.pane-side')).toBeVisible();
+        // Force a visible modal overlay (none of the built-in modals are
+        // reachable from the mobile dashboard yet, so inject a stub).
+        await page.evaluate(() => {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.id = 'test-modal-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.5);';
+            const btn = document.createElement('button');
+            btn.id = 'test-modal-btn';
+            btn.textContent = 'click me';
+            btn.style.cssText = 'position:absolute;left:20px;top:200px;';
+            overlay.appendChild(btn);
+            document.body.appendChild(overlay);
+        });
+        await page.locator('#test-modal-btn').click();
+        // Panel must still be open because a modal is visible.
+        await expect(page.locator('body')).not.toHaveClass(/side-collapsed/);
+    });
+
     test('preference persists across reloads', async ({ page }) => {
         await mockStatus(page, {});
         await page.setViewportSize(DESKTOP_VIEWPORT);

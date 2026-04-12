@@ -514,6 +514,9 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('click', (e) => {
     if (!_isMobileViewport()) return;
     if (document.body.classList.contains('side-collapsed')) return;
+    // Don't collapse while a modal is open — modal clicks are outside .pane-side
+    // but should not trigger the side panel's tap-outside behavior.
+    if (document.querySelector('.modal-overlay:not(.hidden)')) return;
     const paneSide = document.querySelector('.pane-side');
     if (!paneSide || paneSide.contains(e.target)) return;
     const strip = document.getElementById('side-strip');
