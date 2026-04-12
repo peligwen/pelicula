@@ -82,6 +82,10 @@ func dockerLogs(name string, tail int) ([]byte, error) {
 	return demuxDockerLogs(resp.Body)
 }
 
+// dockerLogsFunc is the seam used by handleLogsAggregate; tests replace it.
+// Production leaves it bound to dockerLogs.
+var dockerLogsFunc = dockerLogs
+
 // demuxDockerLogs strips the Docker stream multiplexing headers and returns
 // the concatenated log payload.
 //

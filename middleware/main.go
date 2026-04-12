@@ -183,6 +183,7 @@ func main() {
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
 	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(handleVPNRestart)))
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
+	mux.Handle("/api/pelicula/logs/aggregate", auth.GuardAdmin(http.HandlerFunc(handleLogsAggregate)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
 	serveWithShutdown(":8181", mux)
