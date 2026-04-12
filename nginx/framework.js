@@ -237,6 +237,76 @@ function releaseFocus(el) {
     if (trap.prev && typeof trap.prev.focus === 'function') trap.prev.focus();
 }
 
+// ── Drawer ────────────────────────────────────────────────────────────────────
+// Standardised open/close for backdrop+drawer pairs with focus trapping.
+
+function openDrawer(drawer, backdrop) {
+    backdrop.classList.remove('hidden');
+    drawer.classList.remove('hidden');
+    trapFocus(drawer, function () { closeDrawer(drawer, backdrop); });
+}
+
+function closeDrawer(drawer, backdrop) {
+    backdrop.classList.add('hidden');
+    drawer.classList.add('hidden');
+    releaseFocus(drawer);
+}
+
+// ── Poller ────────────────────────────────────────────────────────────────────
+// Countdown-based auto-refresh timer with visibility awareness.
+// Returns { start(), stop(), refresh() }. Pauses countdown while tab is hidden;
+// resets on return.
+
+function createPoller(checkFn, intervalSecs, countdownElId) {
+    let countdown = intervalSecs;
+    let timer = null;
+    function updateDisplay() {
+        const el = countdownElId && document.getElementById(countdownElId);
+        if (el) el.textContent = countdown > 0 ? 'next in ' + countdown + 's' : '';
+    }
+    function tick() {
+        if (document.hidden) return;
+        countdown--;
+        if (countdown <= 0) { countdown = intervalSecs; checkFn(); }
+        updateDisplay();
+    }
+    function start() {
+        countdown = intervalSecs; updateDisplay();
+        if (timer) clearInterval(timer);
+        timer = setInterval(tick, 1000);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function refresh() { countdown = intervalSecs; checkFn(); updateDisplay(); }
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && timer) { countdown = intervalSecs; updateDisplay(); }
+    });
+    return { start: start, stop: stop, refresh: refresh };
+}
+
+// ── Tab activation ────────────────────────────────────────────────────────────
+// Declarative listener for tab switches. Centralizes the 'pelicula:tab-changed' event name.
+
+function onTab(tabName, fn) {
+    document.addEventListener('pelicula:tab-changed', function (e) {
+        if (e.detail && e.detail.tab === tabName) fn(e.detail);
+    });
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+// Global toast notification. Uses the #toast element from index.html.
+// toast('Saved!') or toast('Failed', { error: true, duration: 5000 })
+
+function toast(msg, opts) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    const isError = opts && opts.error;
+    const dur = (opts && opts.duration) || 3000;
+    el.textContent = msg;
+    el.classList.toggle('toast-error', !!isError);
+    el.classList.add('visible');
+    setTimeout(() => { el.classList.remove('visible'); el.classList.remove('toast-error'); }, dur);
+}
+
 // ── Exports (assigned to window for plain-script use) ─────────────────────────
 
-window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus };
+window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus, openDrawer, closeDrawer, createPoller, onTab, toast };
