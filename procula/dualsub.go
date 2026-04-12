@@ -548,6 +548,9 @@ func writeASSContent(path string, prof DualSubProfile, topCues []SubtitleCue, bo
 		topStyle = styleParams{8, prof.MarginV}
 		bottomStyle = styleParams{2, prof.MarginV}
 	default: // "stacked_bottom"
+		if prof.Layout != "stacked_bottom" {
+			slog.Warn("writeASS: unknown layout, falling back to stacked_bottom", "layout", prof.Layout)
+		}
 		topStyle = styleParams{2, prof.MarginV + prof.FontSize + prof.Gap}
 		bottomStyle = styleParams{2, prof.MarginV}
 	}
