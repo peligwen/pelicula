@@ -242,7 +242,7 @@ func checkMissingSubtitles(embedded []string) []string {
 
 	var missing []string
 	for _, raw := range strings.Split(langs, ",") {
-		code := strings.ToLower(strings.TrimSpace(raw))
+		code := normalizeLangCode(strings.TrimSpace(raw))
 		if code == "" {
 			continue
 		}

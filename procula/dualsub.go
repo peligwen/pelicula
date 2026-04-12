@@ -47,7 +47,7 @@ func GenerateDualSubs(ctx context.Context, job *Job, settings PipelineSettings, 
 			slog.Warn("invalid dualsub pair (expected 'baselang-seclang')", "component", "dualsub", "pair", pair)
 			continue
 		}
-		baseLang, secLang := parts[0], parts[1]
+		baseLang, secLang := normalizeLangCode(parts[0]), normalizeLangCode(parts[1])
 		outPath := dualSubPath(job.Source.Path, pair)
 
 		// Idempotency: skip if the output already exists and is newer than the source
