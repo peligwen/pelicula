@@ -9,6 +9,7 @@
     var source = null;
     var retryCount = 0;
     var sseActive = false;
+    var _started = false;
 
     function connect() {
         if (source) source.close();
@@ -23,7 +24,7 @@
         source.onerror = function() {
             retryCount++;
             sseActive = false;
-            if (retryCount >= 3) {
+            if (retryCount === 3) {
                 enablePollers();
                 // EventSource auto-reconnects; don't close it
             }
@@ -85,8 +86,13 @@
         }
     }
 
-    window.connectSSE = connect;
+    window.connectSSE = function() {
+        if (_started) return;
+        _started = true;
+        connect();
+    };
     window.disconnectSSE = function() {
+        _started = false;
         if (source) { source.close(); source = null; }
         sseActive = false;
         enablePollers();

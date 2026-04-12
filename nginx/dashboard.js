@@ -108,11 +108,8 @@ function applyRole(role, username) {
     // Store role on body for use by dynamically rendered download/pipeline cards
     document.body.dataset.role = role;
 
-    // Start SSE connection once (guarded against repeated applyRole calls)
-    if (window.connectSSE && !window._sseConnected) {
-        window._sseConnected = true;
-        window.connectSSE();
-    }
+    // Start SSE connection — guard lives inside sse.js (_started flag)
+    if (window.connectSSE) window.connectSSE();
 }
 
 document.getElementById('login-form').addEventListener('submit', e => { e.preventDefault(); doLogin(); });
