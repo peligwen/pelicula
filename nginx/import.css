@@ -142,5 +142,40 @@
 .dup-candidate-filename { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 60%; vertical-align: bottom; font-family: var(--font-display, 'Nunito', sans-serif); color: var(--ink, #2a1f35); }
 .dup-alias-hint { font-size: 0.68rem; color: var(--muted, #9080a8); margin-left: 0.3rem; }
 
+/* In-place badge */
+.badge-in_place { background: var(--mint-l, #e4f8f4); color: var(--mint, #40c8a8); border: 1px solid rgba(64,200,168,0.35); }
+
+/* Collapsible summary — collapsed section for non-actionable items */
+.collapsible-summary {
+    border: 1.5px solid var(--border, rgba(180,140,220,0.25)); border-radius: 12px;
+    margin-bottom: 0.4rem; overflow: hidden;
+}
+.collapsible-summary-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.55rem 1rem; cursor: pointer; transition: background 0.1s;
+    font-size: 0.82rem; color: var(--muted, #9080a8);
+    font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 600;
+}
+.collapsible-summary-header:hover { background: var(--panel2, #fdf5ff); }
+.collapsible-summary-chevron {
+    font-size: 0.55rem; color: var(--faint, #c8b8d8); transition: transform 0.15s;
+    flex-shrink: 0; width: 0.8rem; text-align: center;
+}
+.collapsible-summary.open .collapsible-summary-chevron { transform: rotate(90deg); }
+.collapsible-summary-label { flex: 1; }
+.collapsible-summary-subtitle { font-size: 0.72rem; color: var(--faint, #c8b8d8); font-weight: 400; }
+.collapsible-summary-body {
+    display: none; padding: 0 1rem 0.5rem;
+    max-height: 30vh; overflow-y: auto;
+}
+.collapsible-summary.open .collapsible-summary-body { display: block; }
+.collapsible-summary-item {
+    font-size: 0.78rem; color: var(--ink, #2a1f35); padding: 0.2rem 0;
+    border-bottom: 1px solid var(--border, rgba(180,140,220,0.15));
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.collapsible-summary-item:last-child { border-bottom: none; }
+.collapsible-summary-item-year { color: var(--muted, #9080a8); font-size: 0.72rem; }
+
 /* Folder checkbox */
 .browse-entry input[type="checkbox"].browse-checkbox { margin-right: 0.35rem; flex-shrink: 0; accent-color: var(--pink, #f060a8); }

@@ -350,15 +350,19 @@ function renderMatchResults() {
     const container = document.getElementById('match-results');
     container.innerHTML = '';
 
-    const buckets = { new: [], exists: [], unmatched: [] };
+    const buckets = { new: [], in_place: [], exists: [], unmatched: [] };
     state.scanResults.forEach((item, i) => {
         const status = item.status || 'unmatched';
         if (buckets[status]) buckets[status].push({ ...item, idx: i });
         else buckets.unmatched.push({ ...item, idx: i });
     });
 
-    document.getElementById('match-stats').textContent =
-        buckets.new.length + ' new, ' + buckets.exists.length + ' existing, ' + buckets.unmatched.length + ' unmatched';
+    const statParts = [];
+    if (buckets.new.length) statParts.push(buckets.new.length + ' new');
+    if (buckets.in_place.length) statParts.push(buckets.in_place.length + ' in place');
+    if (buckets.exists.length) statParts.push(buckets.exists.length + ' existing');
+    if (buckets.unmatched.length) statParts.push(buckets.unmatched.length + ' unmatched');
+    document.getElementById('match-stats').textContent = statParts.join(', ');
 
     // Group "new" items by groupKey so duplicates get a picker card.
     const newByKey = new Map(); // groupKey → [item, ...]
@@ -398,18 +402,40 @@ function renderMatchResults() {
             }
         });
     }
+    if (buckets.in_place.length) {
+        container.appendChild(createCollapsibleSummary(
+            'In place (' + buckets.in_place.length + ')',
+            'Already in correct location \u2014 will be registered automatically',
+            buckets.in_place
+        ));
+    }
     if (buckets.exists.length) {
-        container.appendChild(groupHeader('Already in library (' + buckets.exists.length + ')'));
-        buckets.exists.forEach(item => container.appendChild(createMatchItem(item)));
+        container.appendChild(createCollapsibleSummary(
+            'Already in library (' + buckets.exists.length + ')',
+            'Already tracked by Sonarr/Radarr \u2014 no action needed',
+            buckets.exists
+        ));
     }
     if (buckets.unmatched.length) {
         container.appendChild(groupHeader('Unmatched (' + buckets.unmatched.length + ')'));
         buckets.unmatched.forEach(item => container.appendChild(createMatchItem(item)));
     }
 
-    // Enable "Next" only if there are active new items and no unresolved dup groups.
+    // Enable "Next" when there are actionable items and no unresolved dup groups.
     const activeNewCount = buckets.new.filter(item => !state.dismissed.has(item.idx)).length;
-    document.getElementById('btn-configure').disabled = activeNewCount === 0 || unresolvedDups > 0;
+    const hasInPlace = buckets.in_place.length > 0;
+    const btn = document.getElementById('btn-configure');
+
+    if (activeNewCount === 0 && hasInPlace) {
+        // Only in-place items — skip Configure, go straight to Apply.
+        btn.disabled = false;
+        btn.textContent = 'Register in Library';
+        btn.onclick = function () { doApply(); };
+    } else {
+        btn.disabled = (activeNewCount === 0 && !hasInPlace) || unresolvedDups > 0;
+        btn.textContent = 'Next: Configure';
+        btn.onclick = function () { importGoToStep('configure'); };
+    }
 }
 
 // createDupGroup renders a single card for a duplicate group (multiple files
@@ -497,6 +523,54 @@ function groupHeader(text) {
     return el;
 }
 
+function createCollapsibleSummary(headerText, subtitle, items) {
+    const wrap = document.createElement('div');
+    wrap.className = 'collapsible-summary';
+
+    const header = document.createElement('div');
+    header.className = 'collapsible-summary-header';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'collapsible-summary-chevron';
+    chevron.textContent = '\u25B6';
+    header.appendChild(chevron);
+
+    const label = document.createElement('span');
+    label.className = 'collapsible-summary-label';
+    label.textContent = headerText;
+    header.appendChild(label);
+
+    const sub = document.createElement('span');
+    sub.className = 'collapsible-summary-subtitle';
+    sub.textContent = subtitle;
+    header.appendChild(sub);
+
+    header.addEventListener('click', () => wrap.classList.toggle('open'));
+    wrap.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'collapsible-summary-body';
+    items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'collapsible-summary-item';
+        if (item.match) {
+            row.textContent = item.match.title;
+            if (item.match.year) {
+                const yr = document.createElement('span');
+                yr.className = 'collapsible-summary-item-year';
+                yr.textContent = ' (' + item.match.year + ')';
+                row.appendChild(yr);
+            }
+        } else {
+            row.textContent = item.file.split('/').pop();
+        }
+        body.appendChild(row);
+    });
+    wrap.appendChild(body);
+
+    return wrap;
+}
+
 function createMatchItem(item) {
     const row = document.createElement('div');
     row.className = 'match-item';
@@ -569,11 +643,13 @@ async function doApply() {
     const content = document.getElementById('apply-content');
     content.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Applying import...</span></div>';
 
-    const strategy = document.querySelector('input[name="strategy"]:checked').value;
-    const validate = document.getElementById('validate-toggle').checked;
+    const strategyEl = document.querySelector('input[name="strategy"]:checked');
+    const strategy = strategyEl ? strategyEl.value : 'keep';
+    const validateEl = document.getElementById('validate-toggle');
+    const validate = validateEl ? validateEl.checked : false;
 
     // Build the item list, respecting group selections for duplicate groups.
-    const items = state.scanResults
+    const newItems = state.scanResults
         .filter((r, i) => {
             if (r.status !== 'new' || !r.match || state.dismissed.has(i)) return false;
             const key = r.groupKey;
@@ -597,6 +673,25 @@ async function doApply() {
             destPath: r.suggestedPath || '',
         }));
 
+    // In-place items need registration but no FS operation — always use "keep".
+    const inPlaceItems = state.scanResults
+        .filter(r => r.status === 'in_place' && r.match)
+        .map(r => ({
+            type: r.match.type === 'series' ? 'series' : 'movie',
+            tmdbId: r.match.tmdbId || 0,
+            tvdbId: r.match.tvdbId || 0,
+            title: r.match.title,
+            year: r.match.year || 0,
+            season: r.match.season || 0,
+            episode: r.match.episode || 0,
+            rootFolderPath: r.match.type === 'movie' ? '/movies' : '/tv',
+            monitored: false,
+            sourcePath: r.file,
+            destPath: r.suggestedPath || '',
+        }));
+
+    const items = newItems.concat(inPlaceItems);
+
     if (!items.length) {
         content.innerHTML = '<div class="no-items">No items to import</div>';
         document.getElementById('apply-nav').classList.remove('hidden');
@@ -607,7 +702,7 @@ async function doApply() {
         const res = await apiFetch('/api/pelicula/library/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items, strategy, validate }),
+            body: JSON.stringify({ items, strategy: newItems.length === 0 ? 'keep' : strategy, validate }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
