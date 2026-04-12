@@ -270,16 +270,20 @@ function createPoller(checkFn, intervalSecs, countdownElId) {
         if (countdown <= 0) { countdown = intervalSecs; checkFn(); }
         updateDisplay();
     }
+    function visHandler() {
+        if (!document.hidden && timer) { countdown = intervalSecs; updateDisplay(); }
+    }
     function start() {
         countdown = intervalSecs; updateDisplay();
         if (timer) clearInterval(timer);
         timer = setInterval(tick, 1000);
+        document.addEventListener('visibilitychange', visHandler);
     }
-    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+        document.removeEventListener('visibilitychange', visHandler);
+    }
     function refresh() { countdown = intervalSecs; checkFn(); updateDisplay(); }
-    document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && timer) { countdown = intervalSecs; updateDisplay(); }
-    });
     return { start: start, stop: stop, refresh: refresh };
 }
 
@@ -287,24 +291,28 @@ function createPoller(checkFn, intervalSecs, countdownElId) {
 // Declarative listener for tab switches. Centralizes the 'pelicula:tab-changed' event name.
 
 function onTab(tabName, fn) {
-    document.addEventListener('pelicula:tab-changed', function (e) {
+    function handler(e) {
         if (e.detail && e.detail.tab === tabName) fn(e.detail);
-    });
+    }
+    document.addEventListener('pelicula:tab-changed', handler);
+    return function () { document.removeEventListener('pelicula:tab-changed', handler); };
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
-// Global toast notification. Uses the #toast element from index.html.
+// Global toast notification. Uses the #notify-toast element from index.html.
 // toast('Saved!') or toast('Failed', { error: true, duration: 5000 })
 
+let _toastTimer = 0;
 function toast(msg, opts) {
-    const el = document.getElementById('toast');
+    const el = document.getElementById('notify-toast');
     if (!el) return;
+    clearTimeout(_toastTimer);
     const isError = opts && opts.error;
     const dur = (opts && opts.duration) || 3000;
     el.textContent = msg;
     el.classList.toggle('toast-error', !!isError);
     el.classList.add('visible');
-    setTimeout(() => { el.classList.remove('visible'); el.classList.remove('toast-error'); }, dur);
+    _toastTimer = setTimeout(function () { el.classList.remove('visible'); el.classList.remove('toast-error'); }, dur);
 }
 
 // ── Screen reader announcements ───────────────────────────────────────────────

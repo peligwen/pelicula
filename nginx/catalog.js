@@ -2,7 +2,7 @@
 'use strict';
 
 (function () {
-const { component, html, raw, esc } = PeliculaFW;
+const { component, html, raw, esc, toast } = PeliculaFW;
 
 const REGISTRY_TTL = 60_000;
 const SUB_REQ_DEFAULT_LANGS = ['en', 'es', 'fr', 'de', 'pt', 'it', 'ja', 'zh'];
@@ -10,10 +10,6 @@ const SUB_REQ_DEFAULT_LANGS = ['en', 'es', 'fr', 'de', 'pt', 'it', 'ja', 'zh'];
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function catFetch(url, opts) {
     return fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
-}
-
-function catToast(msg, isError) {
-    PeliculaFW.toast(msg, isError ? { error: true } : undefined);
 }
 
 function fmtSize(bytes) {
@@ -434,16 +430,16 @@ component('catalog', function (el, store, _props) {
             const url = '/api/pelicula/actions' + (waitSec > 0 ? '?wait=' + waitSec : '');
             const res = await catFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
             const data = await res.json();
-            if (!res.ok) { catToast((def.label || def.name) + ' failed: ' + (data.error || 'unknown'), true); return; }
+            if (!res.ok) { toast((def.label || def.name) + ' failed: ' + (data.error || 'unknown'), { error: true }); return; }
             if (def.sync && data.state === 'completed') {
                 const passed = (data.result || {}).passed;
                 const summary = passed === true ? '\u2713 Passed' : passed === false ? '\u2717 Failed' : 'Done';
-                catToast((def.label || def.name) + ': ' + summary, passed === false);
+                toast((def.label || def.name) + ': ' + summary, passed === false ? { error: true } : undefined);
             } else {
-                catToast((def.label || def.name) + ' queued', false);
+                toast((def.label || def.name) + ' queued');
             }
         } catch (e) {
-            catToast((def.label || def.name) + ' error: ' + e.message, true);
+            toast((def.label || def.name) + ' error: ' + e.message, { error: true });
         }
     }
 
@@ -485,7 +481,7 @@ component('catalog', function (el, store, _props) {
             }
         } catch (e) { /* non-critical */ }
 
-        if (!episodes.length) { catToast('No episodes with files found', false); return; }
+        if (!episodes.length) { toast('No episodes with files found'); return; }
 
         const strip = document.createElement('div');
         strip.className = 'cat-fanout-strip';

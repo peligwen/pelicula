@@ -92,8 +92,8 @@
     <div class="main">
         <!-- ── Left pane ─────────────────────────────────────── -->
         <div class="pane-main">
-            <!-- Toast -->
-            <div class="toast" id="toast">
+            <!-- Indexer status bar -->
+            <div class="toast" id="indexer-status">
                 <span class="toast-icon">&#9888;</span>
                 <span>No indexers configured — you can browse titles, but downloads won't work. <a href="/prowlarr/" target="_blank" rel="noopener">Add indexers in Prowlarr</a></span>
             </div>
@@ -971,6 +971,9 @@
 
     <!-- Screen reader announcements for dynamic content changes -->
     <div aria-live="polite" class="sr-only" id="sr-announce"></div>
+
+    <!-- Transient toast notifications (framework toast()) -->
+    <div class="notify-toast" id="notify-toast" role="status" aria-live="polite"></div>
 
     <script src="/framework.js"></script>
     <script src="/catalog.js" defer></script>

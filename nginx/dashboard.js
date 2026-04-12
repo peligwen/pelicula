@@ -117,13 +117,13 @@ async function checkStatus() {
         const res = await tfetch('/api/pelicula/status');
         if (!res.ok) return;
         const data = await res.json();
-        const toast = document.getElementById('toast');
+        const statusBar = document.getElementById('indexer-status');
         const hint = document.getElementById('footer-hint');
         if (data.indexers === 0) {
-            toast.classList.add('visible');
+            if (statusBar) statusBar.classList.add('visible');
             if (hint) hint.textContent = 'Prowlarr needs an indexer';
         } else {
-            toast.classList.remove('visible');
+            if (statusBar) statusBar.classList.remove('visible');
             if (hint) hint.textContent = '';
         }
     } catch (e) { console.warn('[pelicula] error:', e); }
@@ -777,12 +777,10 @@ window.closeJobDrawer = function() {
 // switchTab updates the DOM + hash; router.listen drives back/forward.
 
 const _validTabs = new Set(['search', 'coming', 'catalog', 'jobs', 'logs', 'storage', 'users', 'settings']);
-let _currentTab = '';
 
 window.switchTab = function(tab, fromHash) {
     if (!_validTabs.has(tab)) tab = 'search';
-    if (tab === _currentTab) return;
-    _currentTab = tab;
+    if (tab === document.body.dataset.tab) return;
     document.querySelectorAll('.tab[data-tab]').forEach(function(btn) {
         var isActive = btn.dataset.tab === tab;
         btn.classList.toggle('active', isActive);
