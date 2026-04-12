@@ -600,12 +600,20 @@ func (s *Server) handleSaveDualSubProfile(w http.ResponseWriter, r *http.Request
 		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	// On PUT, the URL segment is the authoritative name.
+	if urlName := r.PathValue("name"); urlName != "" {
+		p.Name = urlName
+	}
 	if p.Name == "" {
 		writeError(w, "name is required", http.StatusBadRequest)
 		return
 	}
 	if err := SaveDualSubProfile(s.db, p); err != nil {
-		writeError(w, err.Error(), http.StatusBadRequest)
+		if strings.HasPrefix(err.Error(), "cannot ") {
+			writeError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			writeError(w, "failed to save profile: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	writeJSON(w, p)
@@ -614,7 +622,11 @@ func (s *Server) handleSaveDualSubProfile(w http.ResponseWriter, r *http.Request
 func (s *Server) handleDeleteDualSubProfile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := DeleteDualSubProfile(s.db, name); err != nil {
-		writeError(w, err.Error(), http.StatusBadRequest)
+		if strings.HasPrefix(err.Error(), "cannot ") {
+			writeError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			writeError(w, "failed to delete profile: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
