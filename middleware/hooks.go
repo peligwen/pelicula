@@ -87,6 +87,13 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Upsert catalog record — best-effort, non-blocking
+	go func() {
+		if err := UpsertFromHook(catalogDB, source); err != nil {
+			slog.Error("catalog upsert from hook failed", "component", "hooks", "error", err)
+		}
+	}()
+
 	// Mark any matching pending request as available now that the content has landed.
 	// Webhook type is "movie" or "episode"; requests use "movie" or "series".
 	reqType := source.Type
