@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -450,5 +451,33 @@ func TestQueueLoadSkipsCorruptFiles(t *testing.T) {
 	_, ok := q2.Get(valid.ID)
 	if !ok {
 		t.Error("valid job not found in second queue")
+	}
+}
+
+func TestJobPersistsFlags(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+
+	job, err := q.Create(JobSource{Path: "/movies/T/T.mkv", ArrType: "radarr", Title: "T"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := q.Update(job.ID, func(j *Job) {
+		j.Flags = []Flag{{Code: "validation_failed", Severity: FlagSeverityError}}
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, ok := q.Get(job.ID)
+	if !ok || len(got.Flags) != 1 || got.Flags[0].Code != "validation_failed" {
+		t.Fatalf("flags round-trip failed: %+v", got)
 	}
 }
