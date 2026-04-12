@@ -140,6 +140,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 
 			// Notify the dashboard
 			WriteValidationFailedNotification(job, configDir, failReason)
+			persistFlags(q, id)
 			return
 		}
 
@@ -163,6 +164,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 				_ = q.Update(id, func(j *Job) { j.MissingSubs = missing })
 			}
 		}
+		persistFlags(q, id)
 	} else {
 		slog.Info("validation skipped (disabled in settings)", "component", "pipeline", "job_id", id)
 		_ = q.Update(id, func(j *Job) { j.Progress = 0.33 })
@@ -271,6 +273,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		WriteTranscodeFailedNotification(job, configDir, err.Error())
 	}
 	job, _ = q.Get(id)
+	persistFlags(q, id)
 
 	// ── Stage 5: Catalog (late) ───────────────────────────────────────────
 	// Trigger a second refresh if any sidecar was written (dual-sub ASS,
@@ -294,8 +297,26 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Stage = StageDone
 		j.Progress = 1.0
 	})
+	persistFlags(q, id)
 
 	slog.Info("job completed", "component", "pipeline", "job_id", id, "title", job.Source.Title)
+}
+
+// persistFlags recomputes flags for the job and writes them to both the
+// job row and the catalog_flags index. Called after each pipeline stage
+// that can change flag state.
+func persistFlags(q *Queue, id string) {
+	job, ok := q.Get(id)
+	if !ok {
+		return
+	}
+	flags := ComputeFlags(job)
+	_ = q.Update(id, func(j *Job) { j.Flags = flags })
+	if job.Source.Path != "" {
+		if err := UpsertFlagsForPath(appDB, job.Source.Path, id, flags); err != nil {
+			slog.Warn("persist flags failed", "component", "pipeline", "job_id", id, "error", err)
+		}
+	}
 }
 
 // maybeTranscode runs FFmpeg if TRANSCODING_ENABLED=true and a matching profile

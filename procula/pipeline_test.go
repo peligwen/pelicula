@@ -860,6 +860,55 @@ func TestProcessJob_DualSub_NoSource(t *testing.T) {
 	}
 }
 
+// TestPipelineStampsValidationFailedFlag verifies that when validation fails
+// the pipeline writes a validation_failed flag to both the job row and the
+// catalog_flags index table.
+func TestPipelineStampsValidationFailedFlag(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	old := appDB
+	appDB = db
+	t.Cleanup(func() { appDB = old })
+
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+
+	// Non-existent path → Validate fails with "file not found".
+	job, err := q.Create(JobSource{
+		Path:    filepath.Join(tmp, "missing.mkv"),
+		ArrType: "radarr",
+		Title:   "Missing",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	processJob(q, job.ID, tmp, "http://test")
+
+	got, _ := q.Get(job.ID)
+	if got.State != StateFailed {
+		t.Fatalf("state = %s, want failed", got.State)
+	}
+	if !containsFlagCode(got.Flags, "validation_failed") {
+		t.Fatalf("missing validation_failed flag; got %+v", got.Flags)
+	}
+
+	row, err := FlagsByPath(db, job.Source.Path)
+	if err != nil || row == nil {
+		t.Fatalf("catalog_flags row missing: err=%v row=%v", err, row)
+	}
+	if row.Severity != "error" {
+		t.Errorf("severity = %s, want error", row.Severity)
+	}
+}
+
 // TestCatalogLate_TriggersOnDualSubOutputs verifies that a late Jellyfin refresh
 // fires when DualSubOutputs is populated — even without a transcode sidecar.
 func TestCatalogLate_TriggersOnDualSubOutputs(t *testing.T) {
