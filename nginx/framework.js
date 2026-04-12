@@ -307,6 +307,17 @@ function toast(msg, opts) {
     setTimeout(() => { el.classList.remove('visible'); el.classList.remove('toast-error'); }, dur);
 }
 
+// ── Screen reader announcements ───────────────────────────────────────────────
+// Push a message to the aria-live region so screen readers announce it.
+
+function announce(msg) {
+    var el = document.getElementById('sr-announce');
+    if (!el) return;
+    el.textContent = '';
+    // Force a DOM mutation so the live region re-announces.
+    requestAnimationFrame(function () { el.textContent = msg; });
+}
+
 // ── Exports (assigned to window for plain-script use) ─────────────────────────
 
-window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus, openDrawer, closeDrawer, createPoller, onTab, toast };
+window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus, openDrawer, closeDrawer, createPoller, onTab, toast, announce };

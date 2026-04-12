@@ -773,27 +773,37 @@ window.closeJobDrawer = function() {
     );
 };
 
-// ── Tab routing ───────────────────────────
+// ── Tab routing (hash-based) ─────────────
+// switchTab updates the DOM + hash; router.listen drives back/forward.
 
-window.switchTab = window.switchTab || function(tab) {
+const _validTabs = new Set(['search', 'coming', 'catalog', 'jobs', 'logs', 'storage', 'users', 'settings']);
+let _currentTab = '';
+
+window.switchTab = function(tab, fromHash) {
+    if (!_validTabs.has(tab)) tab = 'search';
+    if (tab === _currentTab) return;
+    _currentTab = tab;
     document.querySelectorAll('.tab[data-tab]').forEach(function(btn) {
         btn.classList.toggle('active', btn.dataset.tab === tab);
     });
     document.body.dataset.tab = tab;
+    // Sync hash: pushState for user clicks (enables back button), replaceState for
+    // hash-driven navigation (avoids double history entry).
+    const target = '#' + tab;
+    if (location.hash !== target) {
+        if (fromHash) history.replaceState(null, '', target);
+        else history.pushState(null, '', target);
+    }
+    // Lazy-load storage explorer on first visit
+    if (tab === 'storage') _ensureStorageExplorerLoaded();
+    document.dispatchEvent(new CustomEvent('pelicula:tab-changed', { detail: { tab: tab } }));
 };
 
-// Wrap switchTab to lazy-load content when navigating to tabs.
-(function() {
-    const origSwitch = window.switchTab;
-    window.switchTab = function(tab) {
-        origSwitch(tab);
-        // Storage tab: load import.js so the browse tree populates.
-        // CSS shows storage-explorer-section whenever tab=storage, but import.js
-        // is only loaded on demand — without this, the tree stays "Loading directories...".
-        if (tab === 'storage') _ensureStorageExplorerLoaded();
-        document.dispatchEvent(new CustomEvent('pelicula:tab-changed', { detail: { tab: tab } }));
-    };
-})();
+// Drive tab navigation from hash changes (back/forward, deep links, manual hash edits)
+PeliculaFW.router.listen(function(route) {
+    var tab = route.tab || 'search';
+    if (_validTabs.has(tab)) window.switchTab(tab, true);
+});
 
 // Settings functions are in settings.js (PeliculaFW component 'settings').
 // loadSettingsTab, saveSettingsTab, toggleSetting, updateNotifMode, clearProfileForm,
