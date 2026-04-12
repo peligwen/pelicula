@@ -418,8 +418,7 @@
                 // The first actual check fires from refresh() in dashboard.js.
                 svcPoller = createPoller(
                     function() { checkServices().then(updateSvcTotals); },
-                    SVC_INTERVAL,
-                    'svc-refresh-status'
+                    SVC_INTERVAL
                 );
                 svcPoller.start();
                 window.svcPoller = svcPoller;

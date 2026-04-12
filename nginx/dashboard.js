@@ -792,6 +792,7 @@ window.switchTab = function(tab, fromHash) {
         var isActive = btn.dataset.tab === tab;
         btn.classList.toggle('active', isActive);
         btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        btn.setAttribute('tabindex', isActive ? '0' : '-1');
     });
     document.body.dataset.tab = tab;
     // Sync hash: pushState for user clicks (enables back button), replaceState for

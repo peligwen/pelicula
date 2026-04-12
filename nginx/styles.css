@@ -738,6 +738,21 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     display: flex; flex-direction: column; overflow: hidden;
 }
 .drawer.hidden { display: none; }
+
+/* Centered modal (catalog detail, subtitle request) */
+.modal-backdrop {
+    position: fixed; inset: 0; background: rgba(20,12,40,0.55);
+    backdrop-filter: blur(6px); z-index: 300;
+}
+.modal-backdrop.hidden { display: none; }
+.cat-modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(560px, 96vw); max-height: min(82vh, 720px);
+    background: var(--panel); border: 1.5px solid var(--border2);
+    border-radius: 18px; box-shadow: 0 16px 64px rgba(120,60,200,0.28);
+    z-index: 301; display: flex; flex-direction: column; overflow: hidden;
+}
+.cat-modal.hidden { display: none; }
 .drawer-header {
     display: flex; align-items: flex-start; justify-content: space-between;
     padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--border);

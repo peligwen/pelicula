@@ -329,7 +329,7 @@
             render: function() {},  // operates on existing DOM
             loadOnce: function() {
                 checkPipeline();
-                plPoller = createPoller(checkPipeline, PL_INTERVAL, 'pl-refresh-status');
+                plPoller = createPoller(checkPipeline, PL_INTERVAL);
                 setTimeout(function() { plPoller.start(); }, 1200);
                 window.plPoller = plPoller;
             },

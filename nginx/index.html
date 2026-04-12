@@ -78,14 +78,14 @@
 
     <!-- Tabbar -->
     <nav class="tabbar" id="tabbar" role="tablist" aria-label="Dashboard sections">
-        <button class="tab active" data-tab="search" role="tab" aria-selected="true" onclick="switchTab('search')">search</button>
-        <button class="tab" data-tab="coming" role="tab" aria-selected="false" onclick="switchTab('coming')">pipeline</button>
-        <button class="tab" data-tab="catalog" role="tab" aria-selected="false" onclick="switchTab('catalog')">catalog</button>
-        <button class="tab" data-tab="jobs" role="tab" aria-selected="false" onclick="switchTab('jobs')">jobs</button>
-        <button class="tab admin-only" data-tab="logs" role="tab" aria-selected="false" onclick="switchTab('logs')">logs</button>
-        <button class="tab" data-tab="storage" role="tab" aria-selected="false" onclick="switchTab('storage')">storage</button>
-        <button class="tab" data-tab="users" role="tab" aria-selected="false" onclick="switchTab('users')">users</button>
-        <button class="tab" data-tab="settings" role="tab" aria-selected="false" onclick="switchTab('settings')">settings</button>
+        <button class="tab active" data-tab="search" role="tab" aria-selected="true" tabindex="0" onclick="switchTab('search')">search</button>
+        <button class="tab" data-tab="coming" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('coming')">pipeline</button>
+        <button class="tab" data-tab="catalog" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('catalog')">catalog</button>
+        <button class="tab" data-tab="jobs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('jobs')">jobs</button>
+        <button class="tab admin-only" data-tab="logs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('logs')">logs</button>
+        <button class="tab" data-tab="storage" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('storage')">storage</button>
+        <button class="tab" data-tab="users" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('users')">users</button>
+        <button class="tab" data-tab="settings" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">settings</button>
     </nav>
 
     <!-- Two-pane grid -->
@@ -119,7 +119,6 @@
                     <span>On the way</span>
                     <span id="pipeline-stats"></span>
                     <div class="svc-header-actions">
-                        <span class="svc-refresh-status" id="pl-refresh-status"></span>
                         <button class="section-action" id="pl-refresh-btn" title="Refresh now" onclick="manualRefreshPipeline()">&#8635;</button>
                     </div>
                 </div>
@@ -737,7 +736,6 @@
                 <span>Services</span>
                 <span class="svc-totals" id="svc-totals"></span>
                 <div class="svc-header-actions">
-                    <span class="svc-refresh-status" id="svc-refresh-status"></span>
                     <button class="section-action" id="side-collapse-btn" title="Collapse sidebar" onclick="setSidePanelCollapsed(true)">&times;</button>
                     <button class="section-action" id="svc-refresh-btn" title="Refresh now" onclick="manualRefreshServices()">&#8635;</button>
                     <div class="svc-stack-menu-wrap admin-only">
@@ -932,9 +930,9 @@
         <div class="drawer-body" id="drawer-body"></div>
     </div>
 
-    <!-- Catalog detail drawer -->
-    <div class="drawer-backdrop hidden" id="cat-drawer-backdrop" onclick="catCloseDetail()"></div>
-    <div class="drawer hidden" id="cat-drawer" role="dialog" aria-modal="true" aria-label="Catalog item details">
+    <!-- Catalog detail modal -->
+    <div class="modal-backdrop hidden" id="cat-drawer-backdrop" onclick="catCloseDetail()"></div>
+    <div class="cat-modal hidden" id="cat-drawer" role="dialog" aria-modal="true" aria-label="Catalog item details">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title" id="cat-drawer-title">Details</div>
@@ -946,8 +944,8 @@
     </div>
 
     <!-- Subtitle request dialog -->
-    <div class="drawer-backdrop hidden" id="sub-req-backdrop" onclick="subReqClose()"></div>
-    <div class="drawer hidden" id="sub-req-dialog" role="dialog" aria-label="Request subtitles">
+    <div class="modal-backdrop hidden" id="sub-req-backdrop" onclick="subReqClose()"></div>
+    <div class="cat-modal hidden" id="sub-req-dialog" role="dialog" aria-label="Request subtitles">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title">Request subtitles</div>
