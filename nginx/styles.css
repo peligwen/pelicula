@@ -1298,3 +1298,76 @@ details[open] .add-user-summary::before { content: '− '; }
     padding: 0.1rem 0.4rem;
 }
 .vpn-v-error { color: #e05050 !important; }
+
+/* ── Collapsible side panel ────────────────────────────────────────────── */
+
+/* Edge strip — a thin fixed-position button that lives on the right edge
+   of the viewport. Visible only when the panel is collapsed. */
+.side-strip {
+    display: none;
+    position: fixed;
+    top: 94px;       /* match header height */
+    bottom: 54px;    /* match footer height */
+    right: 0;
+    width: 8px;
+    padding: 0;
+    border: none;
+    background: var(--border);
+    cursor: pointer;
+    z-index: 50;
+    transition: background 0.2s, width 0.15s;
+}
+.side-strip:hover { width: 12px; background: var(--border2); }
+
+body.side-collapsed .side-strip { display: block; }
+body.side-collapsed .pane-side { display: none; }
+body.side-collapsed .main { grid-template-columns: 1fr; }
+
+/* Desktop collapse button — a small × inside the Services header. Hidden
+   on mobile (the strip handles opening and click-outside handles closing). */
+#side-collapse-btn { display: inline-flex; }
+
+/* Mobile layout: single column, pane-side floats over main content when open. */
+@media (max-width: 768px) {
+    .main { grid-template-columns: 1fr; }
+    .pane-side {
+        position: fixed;
+        top: 94px;
+        bottom: 54px;
+        right: 0;
+        width: min(300px, 85vw);
+        z-index: 100;
+        overflow-y: auto;
+        box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    }
+    #side-collapse-btn { display: none; }
+}
+
+/* ── Alert glow on collapsed strip ─────── */
+/* When the panel is collapsed AND something is unhealthy, pulse the
+   edge strip yellow so the user notices. Uses a gentle 1.4s animation
+   — deliberately subdued, not strobing, to avoid being anxiety-inducing. */
+@keyframes peli-side-alert-pulse {
+    0%, 100% {
+        background: #ffcb3d;
+        box-shadow: -4px 0 12px rgba(255, 203, 61, 0.35);
+    }
+    50% {
+        background: #ffe08a;
+        box-shadow: -8px 0 24px rgba(255, 203, 61, 0.7);
+    }
+}
+
+body.side-collapsed.panel-alert .side-strip {
+    animation: peli-side-alert-pulse 1.4s ease-in-out infinite;
+}
+
+/* Respect users with motion sensitivity: hold a static yellow glow
+   instead of pulsing, so the alert signal is still conveyed. */
+@media (prefers-reduced-motion: reduce) {
+    body.side-collapsed.panel-alert .side-strip {
+        animation: none;
+        background: #ffcb3d;
+        box-shadow: -4px 0 12px rgba(255, 203, 61, 0.5);
+    }
+}

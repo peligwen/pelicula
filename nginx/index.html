@@ -728,6 +728,7 @@
         </div><!-- /.pane-main -->
 
         <!-- ── Right sidebar ──────────────────────────────────── -->
+        <button type="button" class="side-strip" id="side-strip" aria-label="Open services panel"></button>
         <div class="pane-side">
             <!-- Service health list -->
             <div class="sidebar-hdr sidebar-hdr-services">
@@ -735,6 +736,7 @@
                 <span class="svc-totals" id="svc-totals"></span>
                 <div class="svc-header-actions">
                     <span class="svc-refresh-status" id="svc-refresh-status"></span>
+                    <button class="section-action" id="side-collapse-btn" title="Collapse sidebar" onclick="setSidePanelCollapsed(true)">&times;</button>
                     <button class="section-action" id="svc-refresh-btn" title="Refresh now" onclick="manualRefreshServices()">&#8635;</button>
                     <div class="svc-stack-menu-wrap admin-only">
                         <button class="section-action" id="svc-menu-btn" onclick="toggleStackMenu()" title="Stack actions">&#8943;</button>

@@ -452,6 +452,78 @@ function formatSpeed(bps) { if (bps > 1048576) return (bps/1048576).toFixed(1)+'
 function formatSize(b) { if (!b) return '0 B'; const u=['B','KB','MB','GB','TB']; let i=0,n=b; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(1)+' '+u[i]; }
 function formatETA(s) { if (s > 86400) return Math.floor(s/86400)+'d'; if (s > 3600) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m'; if (s > 60) return Math.floor(s/60)+'m'; return s+'s'; }
 
+// ── Side panel health signal ──────────────
+// Derives body.panel-alert from service health + VPN degraded flag.
+// A pip is "unhealthy" when it's explicitly .down OR .unknown — the latter
+// covers the case where /api/pelicula/status itself is unreachable, which
+// is the single most important failure mode the user wants surfaced.
+// Called by updateSvcTotals() and updateVPNPortBanner() — no new polling.
+let _panelVPNDegraded = false;
+
+function updatePanelAlert() {
+    const pips = document.querySelectorAll('#svc-sidebar-list .svc-pip');
+    let unhealthyCount = 0;
+    pips.forEach(p => {
+        if (p.classList.contains('down') || p.classList.contains('unknown')) unhealthyCount++;
+    });
+    const unhealthy = unhealthyCount > 0 || _panelVPNDegraded;
+    document.body.classList.toggle('panel-alert', unhealthy);
+}
+
+// ── Side panel collapse state ─────────────
+// Collapse state is persisted under this localStorage key. When no preference
+// is stored, mobile viewports default to collapsed and desktops default to open.
+const _SIDE_COLLAPSED_KEY = 'pelicula_side_collapsed';
+const _SIDE_MOBILE_MAX = 768;
+
+function _isMobileViewport() {
+    return window.innerWidth <= _SIDE_MOBILE_MAX;
+}
+
+function setSidePanelCollapsed(collapsed) {
+    document.body.classList.toggle('side-collapsed', !!collapsed);
+    try { localStorage.setItem(_SIDE_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+}
+
+function toggleSidePanel() {
+    setSidePanelCollapsed(!document.body.classList.contains('side-collapsed'));
+}
+
+function initSidePanelState() {
+    let stored = null;
+    try { stored = localStorage.getItem(_SIDE_COLLAPSED_KEY); } catch (e) {}
+    if (stored === '1') { setSidePanelCollapsed(true); return; }
+    if (stored === '0') { setSidePanelCollapsed(false); return; }
+    // No preference — default based on viewport.
+    setSidePanelCollapsed(_isMobileViewport());
+}
+
+// Strip click opens the panel.
+document.addEventListener('DOMContentLoaded', () => {
+    initSidePanelState();
+    const strip = document.getElementById('side-strip');
+    if (strip) {
+        strip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setSidePanelCollapsed(false);
+        });
+    }
+});
+
+// Click-outside-to-close: only on mobile, only when panel is currently open.
+document.addEventListener('click', (e) => {
+    if (!_isMobileViewport()) return;
+    if (document.body.classList.contains('side-collapsed')) return;
+    // Don't collapse while a modal is open — modal clicks are outside .pane-side
+    // but should not trigger the side panel's tap-outside behavior.
+    if (document.querySelector('.modal-overlay:not(.hidden)')) return;
+    const paneSide = document.querySelector('.pane-side');
+    if (!paneSide || paneSide.contains(e.target)) return;
+    const strip = document.getElementById('side-strip');
+    if (strip && strip.contains(e.target)) return;
+    setSidePanelCollapsed(true);
+});
+
 // ── Services ──────────────────────────────
 async function checkServices() {
     const warn = document.getElementById('search-warning');
@@ -561,6 +633,7 @@ function updateSvcTotals() {
         el.textContent = '';
         el.style.color = '';
     }
+    updatePanelAlert();
 }
 
 // ── Stack actions ──────────────────────────
@@ -729,6 +802,8 @@ async function checkVPN() {
 
         updateVPNPortBanner(portDegraded);
     } catch (e) {
+        // Note: we deliberately do NOT reset _panelVPNDegraded here.
+        // A telemetry error is itself a reason to keep any existing alert lit.
         console.warn('[pelicula] VPN telemetry error:', e);
         setText('s-region', '\u2014');
         setText('s-port', '\u2014');
@@ -737,6 +812,8 @@ async function checkVPN() {
 }
 
 function updateVPNPortBanner(degraded) {
+    _panelVPNDegraded = degraded;
+    updatePanelAlert();
     const bannerId = 'vpn-port-warn-banner';
     let banner = document.getElementById(bannerId);
     if (!degraded) {
