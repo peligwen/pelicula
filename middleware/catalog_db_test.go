@@ -195,6 +195,65 @@ func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 	}
 }
 
+func TestUpsertCatalogItem_BackfillsTmdbID(t *testing.T) {
+	db := testCatalogDB(t)
+
+	// First upsert by arr_id only (no tmdb_id yet)
+	id, err := UpsertCatalogItem(db, CatalogItem{
+		Type: "movie", ArrID: 77, ArrType: "radarr",
+		Title: "Arrival", Year: 2016, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Re-upsert with tmdb_id now known
+	_, err = UpsertCatalogItem(db, CatalogItem{
+		Type: "movie", ArrID: 77, ArrType: "radarr",
+		TmdbID: 329865,
+		Title:  "Arrival", Year: 2016, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+
+	got, err := GetCatalogItemByID(db, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.TmdbID != 329865 {
+		t.Errorf("expected TmdbID=329865, got %d", got.TmdbID)
+	}
+}
+
+func TestUpsertCatalogItem_UpdatesTitle(t *testing.T) {
+	db := testCatalogDB(t)
+
+	id, err := UpsertCatalogItem(db, CatalogItem{
+		Type: "movie", TmdbID: 500, ArrType: "radarr",
+		Title: "Provisional Title", Year: 2022, Tier: "queue",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	_, err = UpsertCatalogItem(db, CatalogItem{
+		Type: "movie", TmdbID: 500, ArrType: "radarr",
+		Title: "Final Title", Year: 2022, Tier: "queue",
+	})
+	if err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+
+	got, err := GetCatalogItemByID(db, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Title != "Final Title" {
+		t.Errorf("expected title updated, got %q", got.Title)
+	}
+}
+
 func TestListCatalogItems_FilterByTier(t *testing.T) {
 	db := testCatalogDB(t)
 

@@ -199,19 +199,35 @@ func scanCatalogRow(s scanner) (*CatalogItem, error) {
 // Returns nil, nil if not found.
 func findExistingCatalogItem(db *sql.DB, item CatalogItem) (*CatalogItem, error) {
 	var row *sql.Row
+	tryRow := func(q string, args ...any) (*CatalogItem, error) {
+		return scanCatalogRow(db.QueryRow(q, args...))
+	}
+
 	switch item.Type {
 	case "movie":
 		if item.TmdbID != 0 {
-			row = db.QueryRow(selectCatalogItem+` WHERE type='movie' AND tmdb_id=?`, item.TmdbID)
-		} else if item.ArrID != 0 {
+			it, err := tryRow(selectCatalogItem+` WHERE type='movie' AND tmdb_id=?`, item.TmdbID)
+			if err != nil || it != nil {
+				return it, err
+			}
+		}
+		if item.ArrID != 0 {
 			row = db.QueryRow(selectCatalogItem+` WHERE type='movie' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
 		}
 	case "series":
 		if item.TvdbID != 0 {
-			row = db.QueryRow(selectCatalogItem+` WHERE type='series' AND tvdb_id=?`, item.TvdbID)
-		} else if item.TmdbID != 0 {
-			row = db.QueryRow(selectCatalogItem+` WHERE type='series' AND tmdb_id=?`, item.TmdbID)
-		} else if item.ArrID != 0 {
+			it, err := tryRow(selectCatalogItem+` WHERE type='series' AND tvdb_id=?`, item.TvdbID)
+			if err != nil || it != nil {
+				return it, err
+			}
+		}
+		if item.TmdbID != 0 {
+			it, err := tryRow(selectCatalogItem+` WHERE type='series' AND tmdb_id=?`, item.TmdbID)
+			if err != nil || it != nil {
+				return it, err
+			}
+		}
+		if item.ArrID != 0 {
 			row = db.QueryRow(selectCatalogItem+` WHERE type='series' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
 		}
 	case "season":
@@ -270,16 +286,34 @@ func UpsertCatalogItem(db *sql.DB, item CatalogItem) (string, error) {
 		if item.EpisodeID != 0 {
 			episodeID = item.EpisodeID
 		}
+		tmdbID := existing.TmdbID
+		if item.TmdbID != 0 {
+			tmdbID = item.TmdbID
+		}
+		tvdbID := existing.TvdbID
+		if item.TvdbID != 0 {
+			tvdbID = item.TvdbID
+		}
+		title := item.Title
+		if title == "" {
+			title = existing.Title
+		}
+		year := item.Year
+		if year == 0 {
+			year = existing.Year
+		}
 
 		_, err = db.Exec(`
 			UPDATE catalog_items SET
+				title=?, year=?, tmdb_id=?, tvdb_id=?,
 				tier=?, artwork_url=?, synopsis=?,
 				metadata_synced_at=?, jellyfin_id=?,
 				procula_job_id=?, file_path=?,
 				arr_id=?, arr_type=?, episode_id=?,
 				updated_at=?
 			WHERE id=?
-		`, tier, artworkURL, synopsis, metadataSyncedAt, jellyfinID,
+		`, title, year, tmdbID, tvdbID,
+			tier, artworkURL, synopsis, metadataSyncedAt, jellyfinID,
 			proculaJobID, filePath, arrID, arrType, episodeID,
 			now, existing.ID)
 		if err != nil {
@@ -341,8 +375,9 @@ func ListCatalogItems(db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
 		args = append(args, f.Tier)
 	}
 	if f.Query != "" {
-		query += ` AND lower(title) LIKE ?`
-		args = append(args, "%"+strings.ToLower(f.Query)+"%")
+		escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(f.Query)
+		args = append(args, "%"+strings.ToLower(escaped)+"%")
+		query += ` AND lower(title) LIKE ? ESCAPE '\'`
 	}
 	query += ` ORDER BY updated_at DESC LIMIT ?`
 	args = append(args, limit)
@@ -353,11 +388,14 @@ func ListCatalogItems(db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
 	}
 	defer rows.Close()
 
-	var items []CatalogItem
+	items := []CatalogItem{}
 	for rows.Next() {
 		it, err := scanCatalogRow(rows)
 		if err != nil {
 			return nil, err
+		}
+		if it == nil {
+			continue
 		}
 		items = append(items, *it)
 	}
@@ -366,11 +404,18 @@ func ListCatalogItems(db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
 
 // UpdateCatalogMetadata sets Jellyfin-sourced fields on a catalog item.
 func UpdateCatalogMetadata(db *sql.DB, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
-	_, err := db.Exec(`
+	result, err := db.Exec(`
 		UPDATE catalog_items
 		SET jellyfin_id=?, artwork_url=?, synopsis=?, metadata_synced_at=?, updated_at=?
 		WHERE id=?
 	`, jellyfinID, artworkURL, synopsis, syncedAt,
 		time.Now().UTC().Format(time.RFC3339), id)
-	return err
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("catalog item %s not found", id)
+	}
+	return nil
 }
