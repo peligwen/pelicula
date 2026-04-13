@@ -3,7 +3,70 @@ package main
 import (
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"time"
+)
+
+// searchCooldown tracks per-item search history to prevent hammering the *arr
+// APIs with repeated searches for content that has no available releases.
+// The map lives in memory — losing it on restart triggers one extra search per
+// item, which is fine.
+type searchCooldown struct {
+	mu      sync.Mutex
+	entries map[int]cooldownEntry
+}
+
+type cooldownEntry struct {
+	lastSearched time.Time
+	attempts     int
+}
+
+// cooldownDurations defines backoff tiers by attempt number (0-indexed).
+// Attempt 0 → immediate, 1 → 30min, 2 → 2hr, 3 → 12hr, 4+ → 24hr.
+var cooldownDurations = []time.Duration{
+	0,
+	30 * time.Minute,
+	2 * time.Hour,
+	12 * time.Hour,
+	24 * time.Hour,
+}
+
+func newSearchCooldown() *searchCooldown {
+	return &searchCooldown{entries: make(map[int]cooldownEntry)}
+}
+
+// shouldSearch returns true if id has not been searched recently.
+// If it returns true, the entry is updated (attempt count incremented,
+// lastSearched set to now) so the next call respects the cooldown.
+func (c *searchCooldown) shouldSearch(id int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	e := c.entries[id]
+	tier := e.attempts
+	if tier >= len(cooldownDurations) {
+		tier = len(cooldownDurations) - 1
+	}
+	if cooldownDurations[tier] > 0 && time.Since(e.lastSearched) < cooldownDurations[tier] {
+		return false
+	}
+	e.attempts++
+	e.lastSearched = time.Now()
+	c.entries[id] = e
+	return true
+}
+
+// clear resets the cooldown for id (call when the item enters the queue or
+// gets a file).
+func (c *searchCooldown) clear(id int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, id)
+}
+
+var (
+	movieCooldown   = newSearchCooldown()
+	episodeCooldown = newSearchCooldown()
 )
 
 // StartMissingWatcher runs in the background and periodically searches for
@@ -52,7 +115,7 @@ func searchMissingMovies(s *ServiceClients) {
 		available, _ := m["isAvailable"].(bool)
 		id := int(floatVal(m, "id"))
 
-		if monitored && !hasFile && available && !queuedIDs[id] {
+		if monitored && !hasFile && available && !queuedIDs[id] && movieCooldown.shouldSearch(id) {
 			missing = append(missing, id)
 		}
 	}
@@ -112,7 +175,7 @@ func searchMissingSeries(s *ServiceClients) {
 	for _, ep := range wanted.Records {
 		monitored, _ := ep["monitored"].(bool)
 		id := int(floatVal(ep, "id"))
-		if monitored && !queuedEpisodes[id] {
+		if monitored && !queuedEpisodes[id] && episodeCooldown.shouldSearch(id) {
 			missing = append(missing, id)
 		}
 	}
