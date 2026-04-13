@@ -319,7 +319,7 @@
 }
 .logs-line {
     display: grid;
-    grid-template-columns: 7ch 14ch 1fr;
+    grid-template-columns: 9ch 14ch 1fr;
     gap: 0 0.6rem;
     line-height: 1.6;
     align-items: baseline;
@@ -327,6 +327,7 @@
 .logs-line-ts {
     color: #555;
     text-align: right;
+    white-space: nowrap;
 }
 .logs-line-svc {
     background: color-mix(in srgb, currentColor 8%, transparent);
