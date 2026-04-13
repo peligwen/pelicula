@@ -84,7 +84,7 @@ func AutoWire(s *ServiceClients) error {
 }
 
 func triggerHealthCheck(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
-	_, err := s.ArrPost(baseURL, apiKey, apiPath+"/command", []byte(`{"name":"CheckHealth"}`))
+	_, err := s.ArrPost(baseURL, apiKey, apiPath+"/command", map[string]string{"name": "CheckHealth"})
 	if err != nil {
 		slog.Warn("failed to trigger health check", "component", "autowire", "service", name, "error", err)
 	}
