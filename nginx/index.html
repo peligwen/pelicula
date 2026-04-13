@@ -535,6 +535,62 @@
                     </label>
                 </div>
 
+                <!-- Remote Access (Peligrosa) -->
+                <div class="settings-panel admin-only">
+                    <div class="settings-panel-title" style="display:flex;align-items:center;justify-content:space-between">
+                        <span>Remote Access</span>
+                        <span id="st-remote-status" class="st-remote-badge"></span>
+                    </div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Enable remote access</span>
+                        <span class="toggle-sub">Serve the dashboard over HTTPS from a public hostname (Peligrosa). Requires a stack restart to activate.</span>
+                        <button class="toggle" id="st-remote-enabled" role="switch" onclick="toggleSetting(this)" data-key="remote_access_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                    <div id="st-remote-opts">
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="st-remote-hostname">Hostname</label>
+                            <span class="settings-field-hint">Bare hostname, no scheme or port (e.g. <code>jellyfin.example.com</code>)</span>
+                            <input type="text" id="st-remote-hostname" class="settings-input" placeholder="jellyfin.example.com">
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="st-remote-http-port">HTTP port</label>
+                            <input type="number" id="st-remote-http-port" class="settings-input" placeholder="80" min="1" max="65535">
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="st-remote-https-port">HTTPS port</label>
+                            <input type="number" id="st-remote-https-port" class="settings-input" placeholder="8920" min="1" max="65535">
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label">Certificate mode</label>
+                            <div class="settings-radio-row">
+                                <label><input type="radio" name="st-cert-mode" value="letsencrypt" onchange="updateCertMode()"> Let&#x2019;s Encrypt</label>
+                                <label><input type="radio" name="st-cert-mode" value="byo" onchange="updateCertMode()"> BYO certificate</label>
+                                <label><input type="radio" name="st-cert-mode" value="self-signed" onchange="updateCertMode()"> Self-signed</label>
+                            </div>
+                        </div>
+                        <div id="st-le-opts" style="display:none">
+                            <div class="settings-field-row">
+                                <label class="settings-field-label" for="st-le-email">Let&#x2019;s Encrypt email</label>
+                                <input type="email" id="st-le-email" class="settings-input" placeholder="you@example.com">
+                            </div>
+                            <label class="toggle-row">
+                                <span class="toggle-label">Staging certificates</span>
+                                <span class="toggle-sub">Use Let&#x2019;s Encrypt staging CA (for testing; not trusted by browsers)</span>
+                                <button class="toggle" id="st-le-staging" role="switch" onclick="toggleSetting(this)" data-key="remote_le_staging">
+                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                </button>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-actions" style="margin-top:0.75rem">
+                        <button class="settings-save-btn" onclick="saveRemoteAccess()">Save remote access</button>
+                        <span class="settings-save-status" id="st-remote-save-status"></span>
+                    </div>
+                    <p class="settings-field-hint" style="margin-top:0.25rem;color:var(--muted)">Changes require a stack restart: <code>pelicula restart nginx</code></p>
+                </div>
+
                 <!-- Pipeline toggles -->
                 <div class="settings-panel">
                     <div class="settings-panel-title">Pipeline</div>
