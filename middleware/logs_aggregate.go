@@ -97,7 +97,7 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			raw, err := dockerLogsFunc(name, tail, false)
+			raw, err := dockerLogsFunc(name, tail, true)
 			resCh <- fetchResult{svc: name, raw: raw, err: err}
 		}(svc)
 	}
@@ -117,16 +117,18 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 			if line == "" {
 				continue
 			}
-			entries = append(entries, LogEntry{Service: res.svc, Line: line})
+			ts, content := parseLogTimestamp(line)
+			entries = append(entries, LogEntry{Service: res.svc, Line: content, Timestamp: ts})
 		}
 	}
 
-	if entries == nil {
-		entries = []LogEntry{}
+	sorted := sortedLogEntries(entries, tail)
+	if sorted == nil {
+		sorted = []LogEntry{}
 	}
 
 	httputil.WriteJSON(w, map[string]any{
-		"entries":  entries,
+		"entries":  sorted,
 		"services": services,
 	})
 }
