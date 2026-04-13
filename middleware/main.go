@@ -200,6 +200,8 @@ func main() {
 	// admin only: backfill catalog from existing Radarr/Sonarr library
 	mux.Handle("/api/pelicula/catalog/backfill", auth.GuardAdmin(http.HandlerFunc(handleCatalogBackfill)))
 	mux.Handle("/api/pelicula/catalog/command", auth.GuardAdmin(http.HandlerFunc(handleCatalogCommand)))
+	mux.Handle("/api/pelicula/catalog/replace", auth.GuardAdmin(http.HandlerFunc(handleCatalogReplace)))
+	mux.Handle("/api/pelicula/catalog/blocklist/{id}", auth.GuardAdmin(http.HandlerFunc(handleCatalogUnblocklist)))
 	mux.Handle("/api/pelicula/catalog/qualityprofiles", auth.Guard(http.HandlerFunc(handleCatalogQualityProfiles)))
 	mux.Handle("/api/pelicula/jobs", auth.Guard(http.HandlerFunc(handleJobsList)))
 

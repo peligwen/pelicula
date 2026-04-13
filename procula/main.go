@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -124,6 +125,8 @@ func main() {
 	mux.HandleFunc("POST /api/procula/actions", requireAPIKey(srv.handleCreateAction))
 	mux.HandleFunc("GET /api/procula/actions/registry", srv.handleListActionRegistry)
 	mux.HandleFunc("GET /api/procula/catalog/flags", srv.handleCatalogFlags)
+	mux.HandleFunc("GET /api/procula/blocked-releases", srv.handleListBlockedReleases)
+	mux.HandleFunc("DELETE /api/procula/blocked-releases/{id}", requireAPIKey(srv.handleDeleteBlockedRelease))
 
 	slog.Info("listening", "component", "main", "addr", ":8282")
 	serveWithShutdown(":8282", mux)
@@ -582,6 +585,58 @@ func (s *Server) handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 		rows = []CatalogFlagRow{}
 	}
 	writeJSON(w, map[string]any{"rows": rows})
+}
+
+// handleListBlockedReleases returns all rows in blocked_releases, newest first.
+func (s *Server) handleListBlockedReleases(w http.ResponseWriter, r *http.Request) {
+	rows, err := ListBlockedReleases(s.db)
+	if err != nil {
+		writeError(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []BlockedRelease{}
+	}
+	writeJSON(w, rows)
+}
+
+// handleDeleteBlockedRelease removes a blocked release by id and calls
+// middleware to delete the entry from *arr's blocklist.
+func (s *Server) handleDeleteBlockedRelease(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil || id == 0 {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	blocklistID, err := DeleteBlockedRelease(s.db, id)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if blocklistID > 0 {
+		// Best-effort: remove from *arr blocklist via middleware.
+		peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
+		req, _ := http.NewRequest(http.MethodDelete,
+			fmt.Sprintf("%s/api/pelicula/catalog/blocklist/%d", peliculaAPI, blocklistID),
+			nil)
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				slog.Warn("failed to remove *arr blocklist entry", "component", "replace",
+					"blocklist_id", blocklistID)
+			}
+		} else {
+			slog.Warn("failed to remove *arr blocklist entry", "component", "replace",
+				"blocklist_id", blocklistID)
+		}
+	}
+
+	writeJSON(w, map[string]any{"deleted": id})
 }
 
 func (s *Server) handleListDualSubProfiles(w http.ResponseWriter, r *http.Request) {

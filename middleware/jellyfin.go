@@ -916,6 +916,10 @@ func setEmbyAuth(req *http.Request, token string) {
 func handleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		if authMiddleware == nil {
+			httputil.WriteError(w, "authentication not configured", http.StatusServiceUnavailable)
+			return
+		}
 		users, err := ListJellyfinUsers(services)
 		if err != nil {
 			slog.Error("list jellyfin users failed", "component", "users", "error", err)
@@ -925,6 +929,10 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSON(w, users)
 
 	case http.MethodPost:
+		if authMiddleware == nil {
+			httputil.WriteError(w, "authentication not configured", http.StatusServiceUnavailable)
+			return
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap
 		var req struct {
 			Username string `json:"username"`

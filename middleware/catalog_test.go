@@ -303,6 +303,63 @@ func TestHandleActionsRegistryCached(t *testing.T) {
 	}
 }
 
+func TestHandleCatalogReplaceValidation(t *testing.T) {
+	origSvc := services
+	services = &ServiceClients{}
+	services.client = &http.Client{}
+	t.Cleanup(func() { services = origSvc })
+
+	// Missing arr_type → 400
+	body := `{"arr_id":1,"episode_id":2,"path":"/tv/Silo/S01E01.mkv"}`
+	req := httptest.NewRequest("POST", "/api/pelicula/catalog/replace", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleCatalogReplace(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing arr_type: want 400, got %d", w.Code)
+	}
+
+	// Missing arr_id → 400
+	body = `{"arr_type":"sonarr","episode_id":2,"path":"/tv/Silo/S01E01.mkv"}`
+	req = httptest.NewRequest("POST", "/api/pelicula/catalog/replace", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handleCatalogReplace(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing arr_id: want 400, got %d", w.Code)
+	}
+}
+
+func TestHandleCatalogCommandRescan(t *testing.T) {
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
+			w.Write([]byte(`{"id":1}`))
+		}
+	}))
+	defer sonarr.Close()
+
+	origS := sonarrURL
+	origSvc := services
+	sonarrURL = sonarr.URL
+	services = &ServiceClients{SonarrKey: "k"}
+	services.client = &http.Client{}
+	t.Cleanup(func() { sonarrURL = origS; services = origSvc })
+
+	req := httptest.NewRequest("POST", "/api/pelicula/catalog/command",
+		strings.NewReader(`{"arr_type":"sonarr","arr_id":1,"command":"rescan"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleCatalogCommand(w, req)
+	// Should NOT return 400 "unknown command"
+	if w.Code == http.StatusBadRequest {
+		var errResp map[string]string
+		json.NewDecoder(w.Body).Decode(&errResp)
+		if errResp["error"] == "unknown command" {
+			t.Error("rescan command not recognised")
+		}
+	}
+}
+
 func TestHandleCatalogQualityProfiles(t *testing.T) {
 	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/qualityprofile" {

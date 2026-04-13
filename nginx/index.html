@@ -645,6 +645,12 @@
                     <p class="requests-settings-note">Changes take effect after restarting the pelicula-api container.</p>
                 </div>
 
+                <!-- Blocked Releases -->
+                <div class="settings-panel admin-only">
+                    <div class="settings-panel-title">Blocked Releases</div>
+                    <div id="st-blocked-releases-list" style="margin-top:.5rem"></div>
+                </div>
+
                 <!-- Advanced -->
                 <div class="settings-panel settings-panel-advanced">
                     <div class="settings-panel-title">Advanced</div>
@@ -1177,6 +1183,51 @@
                 <button class="modal-btn-confirm" onclick="dualsubSubmit()">Generate</button>
             </div>
             <div id="dualsub-status" class="no-items"></div>
+        </div>
+    </div>
+
+    <!-- Replace drawer -->
+    <div class="modal-backdrop hidden" id="replace-backdrop" onclick="replaceClose()"></div>
+    <div class="cat-modal hidden" id="replace-dialog" role="dialog" aria-modal="true" aria-label="Replace file" style="max-width:420px">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Replace &amp; Re-search</div>
+                <div class="drawer-sub" id="replace-sub"></div>
+            </div>
+            <button class="drawer-close" onclick="replaceClose()">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <div id="replace-path" style="font-size:.75rem;color:var(--muted);word-break:break-all;margin-bottom:1rem"></div>
+
+            <div id="replace-scope-section">
+                <div class="drawer-section-title">Replace scope</div>
+                <div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:1rem">
+                    <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer">
+                        <input type="radio" name="replace-scope" value="episode" id="replace-scope-episode" checked>
+                        <span>This episode</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer">
+                        <input type="radio" name="replace-scope" value="season" id="replace-scope-season">
+                        <span id="replace-scope-season-label">Entire season</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer">
+                        <input type="radio" name="replace-scope" value="series" id="replace-scope-series">
+                        <span>Entire series</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="drawer-section-title">Reason <span style="color:var(--muted);font-weight:400">(optional)</span></div>
+            <input type="text" id="replace-reason" placeholder="e.g. wrong audio language"
+                style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.4rem .6rem;font-size:.82rem;color:var(--text);margin-bottom:1rem">
+
+            <div id="replace-file-count" style="font-size:.78rem;color:var(--muted);margin-bottom:1rem"></div>
+
+            <div class="modal-buttons">
+                <button class="modal-btn-cancel" onclick="replaceClose()">Cancel</button>
+                <button class="modal-btn-confirm modal-btn-danger" id="replace-confirm-btn" onclick="replaceConfirm()">Replace &amp; Re-search</button>
+            </div>
+            <div id="replace-status" class="no-items" style="margin-top:.75rem"></div>
         </div>
     </div>
 

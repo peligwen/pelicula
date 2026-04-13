@@ -464,6 +464,77 @@
         } catch (e) { alert('Network error'); }
     }
 
+    // ── Blocked releases ──────────────────────────────────────────────────────
+
+    async function loadBlockedReleases() {
+        const container = document.getElementById('st-blocked-releases-list');
+        if (!container) return;
+        container.textContent = 'Loading\u2026';
+        try {
+            const res = await fetch('/api/procula/blocked-releases', { credentials: 'same-origin' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const rows = await res.json();
+            renderBlockedReleases(rows || []);
+        } catch (e) {
+            container.textContent = 'Failed to load blocked releases.';
+        }
+    }
+
+    function renderBlockedReleases(rows) {
+        const container = document.getElementById('st-blocked-releases-list');
+        if (!container) return;
+        if (!rows.length) {
+            container.textContent = 'No blocked releases.';
+            return;
+        }
+        container.replaceChildren();
+        for (const row of rows) {
+            const div = document.createElement('div');
+            div.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)';
+
+            const info = document.createElement('div');
+            info.style.cssText = 'flex:1;min-width:0';
+            const title = document.createElement('div');
+            title.style.cssText = 'font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+            title.textContent = row.display_title || row.file_path;
+            title.title = row.file_path;
+            info.appendChild(title);
+
+            const meta = document.createElement('div');
+            meta.style.cssText = 'font-size:.72rem;color:var(--muted);margin-top:.15rem';
+            const date = row.blocked_at ? new Date(row.blocked_at).toLocaleDateString() : '';
+            meta.textContent = [row.arr_app, date, row.reason].filter(Boolean).join(' \u00b7 ');
+            info.appendChild(meta);
+
+            const btn = document.createElement('button');
+            btn.textContent = 'Unblock';
+            btn.style.cssText = 'flex-shrink:0;padding:.3rem .7rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.75rem;cursor:pointer';
+            btn.addEventListener('click', () => unblockRelease(row.id, btn));
+
+            div.appendChild(info);
+            div.appendChild(btn);
+            container.appendChild(div);
+        }
+    }
+
+    async function unblockRelease(id, btn) {
+        btn.disabled = true;
+        btn.textContent = 'Unblocking\u2026';
+        try {
+            const res = await fetch('/api/procula/blocked-releases/' + id, {
+                method: 'DELETE',
+                credentials: 'same-origin',
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            // Reload the list
+            await loadBlockedReleases();
+        } catch (e) {
+            btn.disabled = false;
+            btn.textContent = 'Unblock';
+            alert('Unblock failed: ' + e.message);
+        }
+    }
+
     // ── Settings drawer helpers ───────────────────────────────────────────────
 
     const _settingsDrawers = {
@@ -499,6 +570,7 @@
             if (!_settingsLoaded) loadSettingsTab();
             loadProfilesPanel();
             if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
+            loadBlockedReleases();
         }
 
         function init() {
