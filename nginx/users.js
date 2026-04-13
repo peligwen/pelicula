@@ -41,6 +41,11 @@
                     ? '<span class="user-admin-badge" style="background:var(--danger-dim,#3a1a2a);color:var(--danger,#ff6b8a)">disabled</span>'
                     : '';
                 const disableBtn = `<button class="user-action-btn" onclick="toggleDisableUser(this)" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`;
+                const moviesOn = u.enableAllFolders || false;
+                const tvOn     = u.enableAllFolders || false;
+                // When enableAllFolders is false, both boxes default to unchecked.
+                // Saving will apply the chosen coarse access.
+                const libraryRow = `<div class="user-library-row" style="font-size:0.8rem;padding:0.25rem 0;display:flex;gap:1rem;align-items:center"><label><input type="checkbox" class="user-lib-movies"${moviesOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> Movies</label><label><input type="checkbox" class="user-lib-tv"${tvOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> TV Shows</label></div>`;
                 return html`<li data-user-id="${u.id}" data-user-name="${u.name}">
                     <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}${raw(disabledBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
                     <div class="user-actions">
@@ -48,6 +53,7 @@
                     ${raw(disableBtn)}
                     <button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>
                     </div>
+                    ${raw(libraryRow)}
                     <form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">
                     <input type="password" class="user-reset-input" placeholder="New password" autocomplete="new-password">
                     <button type="submit" class="user-action-btn">Set</button>
@@ -146,6 +152,28 @@
             const errEl = li.querySelector('.users-error');
             if (errEl) { errEl.textContent = 'Network error deleting user.'; errEl.classList.remove('hidden'); }
             btn.disabled = false;
+        }
+    }
+
+    async function saveLibraryAccess(checkbox) {
+        const li    = checkbox.closest('li');
+        const id    = li.dataset.userId;
+        const movies = li.querySelector('.user-lib-movies').checked;
+        const tv     = li.querySelector('.user-lib-tv').checked;
+        const errEl  = li.querySelector('.users-error');
+        if (errEl) errEl.classList.add('hidden');
+        try {
+            const resp = await fetch('/api/pelicula/users/' + encodeURIComponent(id) + '/library', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ movies, tv }),
+            });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                if (errEl) { errEl.textContent = data.error || 'Failed to update library access.'; errEl.classList.remove('hidden'); }
+            }
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
         }
     }
 
@@ -719,6 +747,7 @@
     window.submitResetPassword   = submitResetPassword;
     window.startDeleteUser       = startDeleteUser;
     window.toggleDisableUser     = toggleDisableUser;
+    window.saveLibraryAccess     = saveLibraryAccess;
     window.openInviteModal       = openInviteModal;
     window.closeInviteModal      = closeInviteModal;
     window.submitCreateInvite    = submitCreateInvite;
