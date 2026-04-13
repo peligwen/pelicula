@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -95,6 +96,7 @@ func runReplaceAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 	if path == "" {
 		return nil, fmt.Errorf("replace: path required")
 	}
+	path = filepath.Clean(path)
 	if !isLibraryPath(path) {
 		return nil, fmt.Errorf("replace: path must be under /movies or /tv")
 	}
