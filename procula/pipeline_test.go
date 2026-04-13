@@ -900,7 +900,7 @@ func TestPipelineStampsValidationFailedFlag(t *testing.T) {
 		t.Fatalf("missing validation_failed flag; got %+v", got.Flags)
 	}
 
-	row, err := FlagsByPath(db, job.Source.Path)
+	row, err := flagsByPath(db, job.Source.Path)
 	if err != nil || row == nil {
 		t.Fatalf("catalog_flags row missing: err=%v row=%v", err, row)
 	}

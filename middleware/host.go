@@ -106,9 +106,8 @@ func jsonArrayLen(data []byte) int {
 	return len(arr)
 }
 
-// FormatUptime formats uptime seconds for display (e.g. "3d 4h", "2h 15m").
-// Exported so it can be unit-tested; not currently called by other handlers.
-func FormatUptime(secs float64) string {
+// formatUptime formats uptime seconds for display (e.g. "3d 4h", "2h 15m").
+func formatUptime(secs float64) string {
 	s := int(secs)
 	d := s / 86400
 	h := (s % 86400) / 3600

@@ -126,9 +126,9 @@ func TestFlagsPersistence(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	got, err := FlagsByPath(db, "/movies/Foo (2024)/Foo.mkv")
+	got, err := flagsByPath(db, "/movies/Foo (2024)/Foo.mkv")
 	if err != nil || got == nil {
-		t.Fatalf("FlagsByPath err=%v row=%v", err, got)
+		t.Fatalf("flagsByPath err=%v row=%v", err, got)
 	}
 	if got.Severity != "error" {
 		t.Errorf("severity = %q, want error", got.Severity)
@@ -141,7 +141,7 @@ func TestFlagsPersistence(t *testing.T) {
 	if err := UpsertFlagsForPath(db, "/movies/Foo (2024)/Foo.mkv", "job_1", nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	got, _ = FlagsByPath(db, "/movies/Foo (2024)/Foo.mkv")
+	got, _ = flagsByPath(db, "/movies/Foo (2024)/Foo.mkv")
 	if got != nil {
 		t.Errorf("expected row deleted, got %+v", got)
 	}

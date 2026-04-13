@@ -18,12 +18,6 @@ type DualSubProfile struct {
 	Gap      int     `json:"gap"`      // stacked layouts only: space between top and bottom line
 }
 
-// DualSubJob is the payload sent with the dualsub action.
-type DualSubJob struct {
-	Profile string      `json:"profile"`
-	Pairs   []TrackPair `json:"pairs"`
-}
-
 // TrackPair identifies the two subtitle sources to combine for one output sidecar.
 // Each side is either a sidecar file path or an embedded stream index.
 // A SubIndex of -1 means "use the file path"; >= 0 means "use embedded stream N".

@@ -20,9 +20,9 @@ func TestFormatUptime(t *testing.T) {
 		{7 * 86400, "7d 0h"},
 	}
 	for _, tc := range cases {
-		got := FormatUptime(tc.secs)
+		got := formatUptime(tc.secs)
 		if got != tc.want {
-			t.Errorf("FormatUptime(%v) = %q, want %q", tc.secs, got, tc.want)
+			t.Errorf("formatUptime(%v) = %q, want %q", tc.secs, got, tc.want)
 		}
 	}
 }

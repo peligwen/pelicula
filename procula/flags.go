@@ -156,8 +156,8 @@ type CatalogFlagRow struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// FlagsByPath returns the flag row for a single path, or (nil, nil) if absent.
-func FlagsByPath(db *sql.DB, path string) (*CatalogFlagRow, error) {
+// flagsByPath returns the flag row for a single path, or (nil, nil) if absent.
+func flagsByPath(db *sql.DB, path string) (*CatalogFlagRow, error) {
 	row := db.QueryRow(
 		`SELECT path, flags, severity, job_id, updated_at FROM catalog_flags WHERE path = ?`,
 		path,
