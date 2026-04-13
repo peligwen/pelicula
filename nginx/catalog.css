@@ -305,15 +305,42 @@
 }
 .logs-filter-chip.active { background: rgba(130,180,255,0.75); color: #000; }
 .logs-stream {
-    max-height: 60vh; overflow: auto;
+    max-height: 60vh; overflow-y: auto;
     background: #0c0e13; padding: 0.5rem; border-radius: 8px;
-    font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem;
-    white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.65rem;
+    word-break: break-word;
 }
-.logs-line { display: block; }
+.logs-date-sep {
+    color: #555; font-size: 0.58rem; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.25rem 0 0.1rem;
+    border-bottom: 1px solid #1e2028;
+    margin-bottom: 0.15rem;
+}
+.logs-line {
+    display: grid;
+    grid-template-columns: 7ch 14ch 1fr;
+    gap: 0 0.6rem;
+    line-height: 1.6;
+    align-items: baseline;
+}
+.logs-line-ts {
+    color: #555;
+    text-align: right;
+    flex-shrink: 0;
+}
 .logs-line-svc {
-    display: inline-block; width: 10ch; margin-right: 0.6rem;
-    color: var(--muted); text-align: right;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.logs-line-msg {
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-width: 0;
 }
 /* colour-by-service: deterministic mapping */
 .logs-svc-sonarr      { color: #8ec7ff; }
