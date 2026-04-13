@@ -18,6 +18,16 @@ function fmtSize(bytes) {
     return Math.round(bytes / 1024) + ' KB';
 }
 
+// isMissing returns true for items with no downloaded content.
+// Movies: hasFile === false. Series: episodeFileCount === 0.
+// Partially-downloaded series (episodeFileCount > 0) stay in the main list.
+function isMissing(item) {
+    if (Array.isArray(item.seasons)) {
+        return !(item.statistics && item.statistics.episodeFileCount > 0);
+    }
+    return !item.hasFile;
+}
+
 // setHTML: safely set element content from a framework html`` result (pre-escaped).
 // All interpolations in html`` are auto-escaped by the framework's _escapeHtml().
 function setHTML(el, htmlResult) {
@@ -45,6 +55,7 @@ component('catalog', function (el, store, _props) {
     store.set('catalog.flaggedRows', []);
     store.set('catalog.subReq.target', null);
     store.set('catalog.subReq.selected', new Set());
+    store.set('catalog.qualityProfiles', null);
 
     // ── Action registry ───────────────────────────────────────────────────────
     async function loadActionRegistry() {
@@ -144,11 +155,68 @@ component('catalog', function (el, store, _props) {
             setHTML(list, html`<div class="no-items">No items found.</div>`);
             return;
         }
+        const missingItems = items.filter(isMissing);
+        const presentItems = items.filter(item => !isMissing(item));
         const frag = document.createDocumentFragment();
-        for (const item of items) {
+        const missingSection = buildMissingSection(missingItems);
+        if (missingSection) frag.appendChild(missingSection);
+        for (const item of presentItems) {
             frag.appendChild(Array.isArray(item.seasons) ? buildSeriesRow(item) : buildMovieRow(item));
         }
         list.replaceChildren(frag);
+    }
+
+    function buildMissingSection(items) {
+        if (!items.length) return null;
+        const details = document.createElement('details');
+        details.className = 'cat-missing-section';
+        // collapsed by default — open attribute intentionally omitted
+
+        const summary = document.createElement('summary');
+        summary.className = 'cat-missing-header';
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'cat-missing-title';
+        titleSpan.textContent = 'Missing / Searching';
+        const countSpan = document.createElement('span');
+        countSpan.className = 'cat-missing-count';
+        countSpan.textContent = String(items.length);
+        summary.appendChild(titleSpan);
+        summary.appendChild(countSpan);
+        details.appendChild(summary);
+
+        const inner = document.createElement('div');
+        inner.className = 'cat-missing-list';
+        for (const item of items) inner.appendChild(buildMissingRow(item));
+        details.appendChild(inner);
+        return details;
+    }
+
+    function buildMissingRow(item) {
+        const isSeries = Array.isArray(item.seasons);
+        const metaParts = [];
+        if (item.year) metaParts.push(item.year);
+        if (isSeries && item.statistics) {
+            metaParts.push(item.statistics.episodeFileCount + '/' + item.statistics.totalEpisodeCount + ' ep');
+        }
+        const div = document.createElement('div');
+        div.className = 'cat-row cat-row-missing';
+        setHTML(div, html`
+            <span class="cat-row-title" title="${item.title || ''}">${item.title || '(untitled)'}</span>
+            <span class="cat-row-meta">${metaParts.join(' \u00b7 ')}</span>
+            <div class="cat-row-actions"><button class="cat-ctx-btn" title="Actions">\u22ef</button></div>`);
+        div.addEventListener('click', (e) => {
+            if (e.target.closest('.cat-ctx-btn')) return;
+            openMissingDetail(item);
+        });
+        div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            openMissingContextMenu(e, item);
+        });
+        div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openMissingContextMenu(e, item);
+        });
+        return div;
     }
 
     function buildMovieRow(item) {
