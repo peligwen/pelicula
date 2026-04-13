@@ -28,6 +28,7 @@ test-race:
 test-cover:
 	cd procula && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
 	cd middleware && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+	cd cmd/pelicula && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
 
 e2e:
 	bash tests/e2e.sh

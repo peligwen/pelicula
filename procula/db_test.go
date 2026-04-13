@@ -208,3 +208,37 @@ func TestMigrate6CreatesDualSubProfiles(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrate7CreatesBlockedReleases(t *testing.T) {
+	db := testDB(t)
+
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if ver < 7 {
+		t.Fatalf("user_version = %d, want >= 7", ver)
+	}
+
+	cols := map[string]bool{}
+	rows, err := db.Query(`PRAGMA table_info(blocked_releases)`)
+	if err != nil {
+		t.Fatalf("table_info blocked_releases: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	for _, want := range []string{"id", "arr_app", "arr_blocklist_id", "arr_item_id", "display_title", "file_path", "blocked_at", "reason"} {
+		if !cols[want] {
+			t.Errorf("blocked_releases.%s missing", want)
+		}
+	}
+}
