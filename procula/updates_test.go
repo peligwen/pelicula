@@ -128,4 +128,11 @@ func TestUpdateCacheThreadSafety(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+
+	updateMu.Lock()
+	final := cachedUpdate
+	updateMu.Unlock()
+	if final == nil {
+		t.Fatal("cachedUpdate should be non-nil after concurrent writes")
+	}
 }

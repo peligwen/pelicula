@@ -392,6 +392,21 @@ func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
 	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: src, DestPath: dst}}
 	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
 	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}) // should not panic / error
+
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatalf("dst should exist after idempotent symlink: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("dst should be a symlink")
+	}
+	target, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	if target != src {
+		t.Errorf("symlink target = %q, want %q", target, src)
+	}
 }
 
 func TestApplyFSOps_Keep(t *testing.T) {

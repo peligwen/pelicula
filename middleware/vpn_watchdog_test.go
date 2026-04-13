@@ -180,5 +180,8 @@ func TestSyncQbtListenPort_ToleratesError(t *testing.T) {
 	t.Cleanup(func() { qbtBaseURL = origURL })
 
 	s := &ServiceClients{client: &http.Client{}}
-	_ = syncQbtListenPort(s, 51413) // must not panic
+	err := syncQbtListenPort(s, 51413)
+	if err == nil {
+		t.Fatal("expected error when nothing is listening, got nil")
+	}
 }
