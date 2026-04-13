@@ -651,7 +651,23 @@ func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
 	if dualsubs == nil {
 		dualsubs = []DualSubSidecar{}
 	}
-	writeJSON(w, map[string]any{"tracks": tracks, "dualsubs": dualsubs})
+
+	var embedded []EmbeddedTrack
+	streams, err := probeSubStreams(clean)
+	if err == nil {
+		embedded = filterTextEmbeddedTracks(streams)
+	} else {
+		slog.Warn("probe embedded subs failed", "path", clean, "error", err)
+	}
+	if embedded == nil {
+		embedded = []EmbeddedTrack{}
+	}
+
+	writeJSON(w, map[string]any{
+		"tracks":          tracks,
+		"dualsubs":        dualsubs,
+		"embedded_tracks": embedded,
+	})
 }
 
 // isLibraryPath returns true only for paths under /movies or /tv.
