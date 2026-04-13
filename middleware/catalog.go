@@ -397,6 +397,22 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	case "rescan":
+		if req.ArrType == "radarr" {
+			if _, err := services.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
+				"name": "RescanMovie", "movieId": req.ArrID,
+			}); err != nil {
+				httputil.WriteError(w, "radarr rescan failed", http.StatusBadGateway)
+				return
+			}
+		} else {
+			if _, err := services.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
+				"name": "RescanSeries", "seriesId": req.ArrID,
+			}); err != nil {
+				httputil.WriteError(w, "sonarr rescan failed", http.StatusBadGateway)
+				return
+			}
+		}
 	case "unmonitor":
 		if req.ArrType == "radarr" {
 			body, err := services.ArrGet(radarrURL, radarrKey, fmt.Sprintf("/api/v3/movie/%d", req.ArrID))
@@ -436,6 +452,197 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleCatalogReplace finds the *arr history record for the given episode/movie,
+// marks it failed (blocklisting the release), queries the blocklist for the new
+// entry ID, then triggers a rescan and fresh search.
+//
+// POST /api/pelicula/catalog/replace
+// Body: {"arr_type":"sonarr"|"radarr","arr_id":N,"episode_id":N,"path":"/tv/..."}
+// Returns: {"arr_blocklist_id":N,"display_title":"...","arr_item_id":N,"arr_app":"..."}
+func handleCatalogReplace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var req struct {
+		ArrType   string `json:"arr_type"`
+		ArrID     int    `json:"arr_id"`
+		EpisodeID int    `json:"episode_id"`
+		Path      string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ArrType == "" || req.ArrID == 0 {
+		httputil.WriteError(w, "arr_type and arr_id required", http.StatusBadRequest)
+		return
+	}
+	if req.ArrType != "sonarr" && req.ArrType != "radarr" {
+		httputil.WriteError(w, "invalid arr_type", http.StatusBadRequest)
+		return
+	}
+
+	sonarrKey, radarrKey, _ := services.Keys()
+	var baseURL, apiKey string
+	if req.ArrType == "radarr" {
+		baseURL, apiKey = radarrURL, radarrKey
+	} else {
+		baseURL, apiKey = sonarrURL, sonarrKey
+	}
+
+	// 1. Look up history for this episode/movie to find the import event.
+	historyID, displayTitle, err := findImportHistoryID(baseURL, apiKey, req.ArrType, req.ArrID, req.EpisodeID)
+	if err != nil {
+		slog.Warn("replace: history lookup failed", "arr_type", req.ArrType,
+			"arr_id", req.ArrID, "error", err)
+		historyID = 0
+	}
+
+	// 2. Mark the history event as failed (blocklists the release).
+	blocklistID := 0
+	if historyID > 0 {
+		if _, err := services.ArrPost(baseURL, apiKey,
+			fmt.Sprintf("/api/v3/history/failed/%d", historyID), nil); err != nil {
+			slog.Warn("replace: history/failed call failed", "history_id", historyID, "error", err)
+		} else {
+			// 3. Query blocklist to get the new entry ID.
+			blocklistID, _ = findBlocklistID(baseURL, apiKey, req.ArrType, req.ArrID)
+		}
+	}
+
+	// 4. Trigger rescan (so *arr notices the deleted file after procula removes it).
+	var rescanCmd map[string]any
+	if req.ArrType == "radarr" {
+		rescanCmd = map[string]any{"name": "RescanMovie", "movieId": req.ArrID}
+	} else {
+		rescanCmd = map[string]any{"name": "RescanSeries", "seriesId": req.ArrID}
+	}
+	if _, err := services.ArrPost(baseURL, apiKey, "/api/v3/command", rescanCmd); err != nil {
+		slog.Warn("replace: rescan command failed", "arr_type", req.ArrType, "error", err)
+	}
+
+	// 5. Trigger a fresh search.
+	var searchCmd map[string]any
+	if req.ArrType == "radarr" {
+		searchCmd = map[string]any{"name": "MoviesSearch", "movieIds": []int{req.ArrID}}
+	} else if req.EpisodeID > 0 {
+		searchCmd = map[string]any{"name": "EpisodeSearch", "episodeIds": []int{req.EpisodeID}}
+	} else {
+		searchCmd = map[string]any{"name": "SeriesSearch", "seriesId": req.ArrID}
+	}
+	if _, err := services.ArrPost(baseURL, apiKey, "/api/v3/command", searchCmd); err != nil {
+		slog.Warn("replace: search command failed", "arr_type", req.ArrType, "error", err)
+	}
+
+	if displayTitle == "" {
+		displayTitle = req.Path
+	}
+
+	httputil.WriteJSON(w, map[string]any{
+		"arr_blocklist_id": blocklistID,
+		"display_title":    displayTitle,
+		"arr_item_id":      req.ArrID,
+		"arr_app":          req.ArrType,
+	})
+}
+
+// handleCatalogUnblocklist removes an entry from the *arr blocklist.
+// DELETE /api/pelicula/catalog/blocklist/{id}
+func handleCatalogUnblocklist(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	idStr := r.PathValue("id")
+	var id int
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil || id == 0 {
+		httputil.WriteError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	arrType := r.URL.Query().Get("arr_type")
+	sonarrKey, radarrKey, _ := services.Keys()
+	if arrType == "radarr" {
+		services.ArrDelete(radarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+	} else if arrType == "sonarr" {
+		services.ArrDelete(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+	} else {
+		// No arr_type provided: try both, ignore errors.
+		services.ArrDelete(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		services.ArrDelete(radarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// findImportHistoryID queries *arr history for an episode/movie and returns the
+// historyId of the most recent downloadFolderImported event, plus the source title.
+func findImportHistoryID(baseURL, apiKey, arrType string, arrID, episodeID int) (int, string, error) {
+	var path string
+	if arrType == "sonarr" && episodeID > 0 {
+		path = fmt.Sprintf("/api/v3/history/episode?episodeId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", episodeID)
+	} else if arrType == "radarr" {
+		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", arrID)
+	} else {
+		path = fmt.Sprintf("/api/v3/history?seriesId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending&pageSize=10", arrID)
+	}
+	data, err := services.ArrGet(baseURL, apiKey, path)
+	if err != nil {
+		return 0, "", err
+	}
+
+	// Sonarr history/episode returns an array directly.
+	// Radarr history/movie returns {records:[...]} or an array depending on version.
+	var records []map[string]any
+	if err := json.Unmarshal(data, &records); err != nil {
+		var wrapped struct {
+			Records []map[string]any `json:"records"`
+		}
+		if err2 := json.Unmarshal(data, &wrapped); err2 != nil {
+			return 0, "", fmt.Errorf("parse history: %w", err)
+		}
+		records = wrapped.Records
+	}
+
+	for _, rec := range records {
+		id := int(floatVal(rec, "id"))
+		if id == 0 {
+			continue
+		}
+		title := strVal(rec, "sourceTitle")
+		return id, title, nil
+	}
+	return 0, "", fmt.Errorf("no import history found")
+}
+
+// findBlocklistID queries the *arr blocklist to find the most recently added
+// entry for the given item. Returns 0 if not found (non-fatal).
+func findBlocklistID(baseURL, apiKey, arrType string, arrID int) (int, error) {
+	data, err := services.ArrGet(baseURL, apiKey,
+		"/api/v3/blocklist?pageSize=10&sortKey=date&sortDirection=descending")
+	if err != nil {
+		return 0, err
+	}
+	var resp struct {
+		Records []map[string]any `json:"records"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return 0, err
+	}
+	for _, rec := range resp.Records {
+		var matchID float64
+		if arrType == "radarr" {
+			matchID = floatVal(rec, "movieId")
+		} else {
+			matchID = floatVal(rec, "seriesId")
+		}
+		if int(matchID) == arrID {
+			return int(floatVal(rec, "id")), nil
+		}
+	}
+	return 0, nil
 }
 
 // handleCatalogQualityProfiles returns quality profile id→name maps for Radarr and Sonarr.
