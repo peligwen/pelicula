@@ -110,6 +110,11 @@ func TestUpdateCachePersistence(t *testing.T) {
 }
 
 func TestUpdateCacheThreadSafety(t *testing.T) {
+	// Reset global cache to ensure a writer goroutine must populate it.
+	updateMu.Lock()
+	cachedUpdate = nil
+	updateMu.Unlock()
+
 	// Confirm getCachedUpdate and writing to cachedUpdate don't race.
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -129,9 +134,9 @@ func TestUpdateCacheThreadSafety(t *testing.T) {
 	}
 	wg.Wait()
 
-	updateMu.Lock()
+	updateMu.RLock()
 	final := cachedUpdate
-	updateMu.Unlock()
+	updateMu.RUnlock()
 	if final == nil {
 		t.Fatal("cachedUpdate should be non-nil after concurrent writes")
 	}
