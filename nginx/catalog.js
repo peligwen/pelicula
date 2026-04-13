@@ -1249,6 +1249,7 @@ component('catalog', function (el, store, _props) {
     let _replaceItem = null;
     let _replaceLevel = null;
     let _replaceFiles = []; // [{path, arr_id, episode_id, arr_type}]
+    let _replaceGen = 0;
 
     async function openReplaceDrawer(item, level) {
         _replaceItem = item;
@@ -1288,6 +1289,7 @@ component('catalog', function (el, store, _props) {
     }
 
     async function updateReplaceFileCount() {
+        const gen = ++_replaceGen;
         const countEl = document.getElementById('replace-file-count');
         const scope = document.querySelector('input[name="replace-scope"]:checked');
         const scopeVal = scope ? scope.value : 'episode';
@@ -1338,6 +1340,7 @@ component('catalog', function (el, store, _props) {
                     }
                 }
             }
+            if (gen !== _replaceGen) return;
             _replaceFiles = episodes
                 .filter(e => e.file && e.file.path)
                 .map(e => ({
