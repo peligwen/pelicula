@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +113,39 @@ func TestCheck_PassEmptyFile(t *testing.T) {
 	path := writeFile(t, `package p`)
 	if err := checkFile(path); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestCheck_PassMethodHelper(t *testing.T) {
+	// suite.assertOK(t, value) — t is first arg to a method call
+	path := writeFile(t, `package p
+import "testing"
+type suite struct{}
+func TestFoo(t *testing.T) {
+    s := suite{}
+    s.assertOK(t, 42)
+}`)
+	if err := checkFile(path); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestCheck_ErrorMessageFormat(t *testing.T) {
+	path := writeFile(t, `package p
+import "testing"
+func TestNoAssert(t *testing.T) {
+    _ = 42
+}`)
+	err := checkFile(path)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "TestNoAssert") {
+		t.Errorf("error message missing function name: %q", msg)
+	}
+	// Should contain a line number
+	if !strings.Contains(msg, ":3:") && !strings.Contains(msg, ":4:") {
+		t.Errorf("error message missing line number: %q", msg)
 	}
 }

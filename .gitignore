@@ -11,6 +11,7 @@ nginx/remote.conf
 middleware/pelicula-api
 procula/procula
 cmd/pelicula/pelicula
+/tools/check-test-assertions/check-test-assertions
 coverage.out
 procula/testcache/
 docs/design-exploration/_archive/

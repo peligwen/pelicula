@@ -132,13 +132,14 @@ func hasAssertion(body *ast.BlockStmt, tParam string) bool {
 			}
 		}
 
-		// Pattern 2: helper(t, ...) — non-method call with t as first arg
-		if _, isMethod := call.Fun.(*ast.SelectorExpr); !isMethod {
-			if len(call.Args) > 0 {
-				if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == tParam {
-					found = true
-					return false
-				}
+		// Pattern 2: helper(t, ...) or suite.assert(t, ...) — t as first argument
+		// to any call, whether method or non-method. This excludes t.Method(...)
+		// where t is the receiver (already handled by Pattern 1 — only assertion
+		// methods are flagged there).
+		if len(call.Args) > 0 {
+			if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == tParam {
+				found = true
+				return false
 			}
 		}
 
