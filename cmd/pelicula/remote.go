@@ -35,7 +35,7 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 	// Validate required vars
 	hostname := env["REMOTE_HOSTNAME"]
 	if hostname == "" {
-		return fmt.Errorf("REMOTE_ACCESS_ENABLED=true but REMOTE_HOSTNAME is not set\nRun: pelicula configure → Remote access")
+		return fmt.Errorf("REMOTE_ACCESS_ENABLED=true but REMOTE_HOSTNAME is not set\nSet REMOTE_HOSTNAME in your .env file and re-run: pelicula up")
 	}
 
 	httpsPort := envDefault(env, "REMOTE_HTTPS_PORT", "8920")
@@ -45,7 +45,7 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 	leStaging := env["REMOTE_LE_STAGING"]
 
 	if certMode == "letsencrypt" && leEmail == "" {
-		return fmt.Errorf("Let's Encrypt mode requires REMOTE_LE_EMAIL to be set\nRun: pelicula configure → Remote access → Change cert mode")
+		return fmt.Errorf("Let's Encrypt mode requires REMOTE_LE_EMAIL to be set\nSet REMOTE_LE_EMAIL in your .env file and re-run: pelicula up")
 	}
 
 	// Cert directories

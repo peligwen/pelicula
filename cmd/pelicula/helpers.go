@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 // getScriptDir returns the pelicula project root directory.
@@ -97,15 +96,4 @@ func loadEnvOrFatal(envFile string) EnvMap {
 		fatal("Failed to read .env: " + err.Error())
 	}
 	return env
-}
-
-// expandHome replaces a leading ~ with the user's home directory.
-func expandHome(path, home string) string {
-	if strings.HasPrefix(path, "~/") {
-		return home + path[1:]
-	}
-	if path == "~" {
-		return home
-	}
-	return path
 }
