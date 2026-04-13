@@ -39,6 +39,48 @@
         // placeholder — no extra UI to update currently
     }
 
+    function updateProfilesSummary() {
+        const el = document.getElementById('st-profiles-summary-status');
+        if (!el) return;
+        const total  = _profilesCache.length;
+        const active = _profilesCache.filter(p => p.enabled !== false).length;
+        if (total === 0) {
+            el.textContent = 'No profiles configured';
+        } else {
+            el.textContent = total + ' profile' + (total !== 1 ? 's' : '') + ', ' + active + ' active';
+        }
+    }
+
+    function updateSubsSummary() {
+        const el = document.getElementById('st-subs-summary-status');
+        if (!el) return;
+        const langs = (document.getElementById('st-sub-langs')?.value || '').trim();
+        const dual  = document.getElementById('st-dualsub')?.getAttribute('aria-checked') === 'true';
+        let text = langs || 'none';
+        if (dual) text += ' \u00b7 dual on';
+        el.textContent = text;
+    }
+
+    function updateRemoteSummary() {
+        const el = document.getElementById('st-remote-summary-status');
+        if (!el) return;
+        const ms = _settingsData.middleware || {};
+        const dot = document.createElement('span');
+        if (ms.remote_access_enabled === 'true') {
+            dot.className = 'status-dot active';
+            const host = ms.remote_hostname || 'configured';
+            const cert = ms.remote_cert_mode || 'self-signed';
+            el.textContent = '';
+            el.appendChild(dot);
+            el.appendChild(document.createTextNode(host + ' \u00b7 ' + cert));
+        } else {
+            dot.className = 'status-dot inactive';
+            el.textContent = '';
+            el.appendChild(dot);
+            el.appendChild(document.createTextNode('Disabled'));
+        }
+    }
+
     function updateCertMode() {
         const mode = document.querySelector('input[name="st-cert-mode"]:checked');
         const leOpts = document.getElementById('st-le-opts');
@@ -91,18 +133,9 @@
                 if (leEmail) leEmail.value = ms.remote_le_email || '';
                 setToggle('st-le-staging', ms.remote_le_staging === 'true');
 
-                // Status badge
-                const badge = document.getElementById('st-remote-status');
-                if (badge) {
-                    if (ms.remote_access_enabled === 'true') {
-                        badge.textContent = 'active \u00b7 ' + certMode;
-                        badge.style.color = 'var(--mint, #7dda93)';
-                    } else {
-                        badge.textContent = 'disabled';
-                        badge.style.color = 'var(--muted, #9080a8)';
-                    }
-                }
             }
+            updateRemoteSummary();
+            updateSubsSummary();
             _settingsLoaded = true;
         } catch (e) { console.warn('[pelicula] settings load error:', e); }
     }
@@ -115,12 +148,8 @@
                 validation_enabled:  document.getElementById('st-validation')?.getAttribute('aria-checked') === 'true',
                 transcoding_enabled: document.getElementById('st-transcoding')?.getAttribute('aria-checked') === 'true',
                 catalog_enabled:     document.getElementById('st-cataloging')?.getAttribute('aria-checked') === 'true',
-                dual_sub_enabled:    document.getElementById('st-dualsub')?.getAttribute('aria-checked') === 'true',
-                dual_sub_pairs:      (document.getElementById('st-dualsub-pairs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean),
-                dual_sub_translator: document.querySelector('input[name="st-translator"]:checked')?.value || 'none',
             };
             const middlewarePayload = {
-                sub_langs:          document.getElementById('st-sub-langs')?.value || '',
                 notifications_mode: document.querySelector('input[name="st-notif"]:checked')?.value || 'internal',
                 open_registration:  document.getElementById('st-open-registration')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
             };
@@ -130,6 +159,34 @@
             ]);
             if (r1.ok && r2.ok) {
                 if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+            } else {
+                if (statusEl) statusEl.textContent = 'Save failed';
+            }
+        } catch (e) {
+            if (statusEl) statusEl.textContent = 'Save failed';
+        }
+    }
+
+    async function saveSubtitlesDrawer() {
+        const statusEl = document.getElementById('st-subs-save-status');
+        if (statusEl) statusEl.textContent = 'Saving\u2026';
+        try {
+            const procPayload = {
+                dual_sub_enabled:    document.getElementById('st-dualsub')?.getAttribute('aria-checked') === 'true',
+                dual_sub_pairs:      (document.getElementById('st-dualsub-pairs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean),
+                dual_sub_translator: document.querySelector('input[name="st-translator"]:checked')?.value || 'none',
+            };
+            const middlewarePayload = {
+                sub_langs: document.getElementById('st-sub-langs')?.value || '',
+            };
+            const [r1, r2] = await Promise.all([
+                tfetch('/api/pelicula/procula-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(procPayload) }),
+                tfetch('/api/pelicula/settings',         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(middlewarePayload) }),
+            ]);
+            if (r1.ok && r2.ok) {
+                if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000); }
+                updateSubsSummary();
+                closeSettingsDrawer('subs');
             } else {
                 if (statusEl) statusEl.textContent = 'Save failed';
             }
@@ -159,6 +216,9 @@
             });
             if (resp.ok) {
                 if (statusEl) { statusEl.textContent = 'Saved \u2713 \u2014 restart nginx to apply'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000); }
+                Object.assign(_settingsData.middleware || (_settingsData.middleware = {}), body);
+                updateRemoteSummary();
+                closeSettingsDrawer('remote');
             } else {
                 const data = await resp.json().catch(() => ({}));
                 if (statusEl) statusEl.textContent = 'Save failed: ' + (data.error || resp.status);
@@ -179,6 +239,7 @@
             const profiles = await res.json();
             _profilesCache = profiles || [];
             renderProfilesList(_profilesCache);
+            updateProfilesSummary();
         } catch (e) { listEl.textContent = 'Error loading profiles'; }
     }
 
@@ -403,6 +464,34 @@
         } catch (e) { alert('Network error'); }
     }
 
+    // ── Settings drawer helpers ───────────────────────────────────────────────
+
+    const _settingsDrawers = {
+        remote:   'st-remote-drawer',
+        profiles: 'st-profiles-drawer',
+        subs:     'st-subs-drawer',
+    };
+
+    function openSettingsDrawer(name) {
+        const drawerId = _settingsDrawers[name];
+        if (!drawerId) return;
+        const drawer   = document.getElementById(drawerId);
+        const backdrop = document.getElementById('settings-drawer-backdrop');
+        if (!drawer || !backdrop) return;
+        if (name === 'profiles') loadProfilesPanel();
+        backdrop.onclick = function () { closeSettingsDrawer(name); };
+        PeliculaFW.openDrawer(drawer, backdrop);
+    }
+
+    function closeSettingsDrawer(name) {
+        const drawerId = _settingsDrawers[name];
+        if (!drawerId) return;
+        PeliculaFW.closeDrawer(
+            document.getElementById(drawerId),
+            document.getElementById('settings-drawer-backdrop')
+        );
+    }
+
     // ── Component registration ────────────────────────────────────────────────
 
     component('settings', function (el) {
@@ -429,6 +518,9 @@
 
     // ── Window exports ────────────────────────────────────────────────────────
     // Called from onclick handlers in index.html and from applyRole() in dashboard.js.
+    window.openSettingsDrawer    = openSettingsDrawer;
+    window.closeSettingsDrawer   = closeSettingsDrawer;
+    window.saveSubtitlesDrawer   = saveSubtitlesDrawer;
     window.toggleSetting          = toggleSetting;
     window.updateNotifMode        = updateNotifMode;
     window.saveRemoteAccess            = saveRemoteAccess;
