@@ -157,6 +157,106 @@ func TestHandleCatalogDetailMergesFlagsAndJob(t *testing.T) {
 	}
 }
 
+func TestHandleCatalogCommandSearch_Radarr(t *testing.T) {
+	var gotBody map[string]any
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Write([]byte(`{"id":1}`))
+		}
+	}))
+	defer radarr.Close()
+
+	origR := radarrURL
+	radarrURL = radarr.URL
+	services = &ServiceClients{RadarrKey: "k"}
+	services.client = &http.Client{}
+	t.Cleanup(func() { radarrURL = origR })
+
+	body := `{"arr_type":"radarr","arr_id":42,"command":"search"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleCatalogCommand(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	if gotBody["name"] != "MoviesSearch" {
+		t.Errorf("command name = %v, want MoviesSearch", gotBody["name"])
+	}
+	ids, _ := gotBody["movieIds"].([]any)
+	if len(ids) != 1 || ids[0].(float64) != 42 {
+		t.Errorf("movieIds = %v, want [42]", gotBody["movieIds"])
+	}
+}
+
+func TestHandleCatalogCommandSearch_Sonarr(t *testing.T) {
+	var gotBody map[string]any
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Write([]byte(`{"id":1}`))
+		}
+	}))
+	defer sonarr.Close()
+
+	origS := sonarrURL
+	sonarrURL = sonarr.URL
+	services = &ServiceClients{SonarrKey: "k"}
+	services.client = &http.Client{}
+	t.Cleanup(func() { sonarrURL = origS })
+
+	body := `{"arr_type":"sonarr","arr_id":7,"command":"search"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleCatalogCommand(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	if gotBody["name"] != "SeriesSearch" {
+		t.Errorf("command name = %v, want SeriesSearch", gotBody["name"])
+	}
+	if gotBody["seriesId"].(float64) != 7 {
+		t.Errorf("seriesId = %v, want 7", gotBody["seriesId"])
+	}
+}
+
+func TestHandleCatalogCommandUnmonitor_Radarr(t *testing.T) {
+	var putBody map[string]any
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/movie/42" && r.Method == http.MethodGet:
+			w.Write([]byte(`{"id":42,"title":"Foo","monitored":true}`))
+		case r.URL.Path == "/api/v3/movie/42" && r.Method == http.MethodPut:
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			w.Write([]byte(`{"id":42}`))
+		}
+	}))
+	defer radarr.Close()
+
+	origR := radarrURL
+	radarrURL = radarr.URL
+	services = &ServiceClients{RadarrKey: "k"}
+	services.client = &http.Client{}
+	t.Cleanup(func() { radarrURL = origR })
+
+	body := `{"arr_type":"radarr","arr_id":42,"command":"unmonitor"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleCatalogCommand(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	if monitored, _ := putBody["monitored"].(bool); monitored {
+		t.Errorf("monitored = true after unmonitor, want false")
+	}
+}
+
 func TestHandleActionsRegistryCached(t *testing.T) {
 	hits := 0
 	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
