@@ -394,16 +394,26 @@ component('catalog', function (el, store, _props) {
         sub.title = path;
         setHTML(body, html`<div style="color:var(--muted);padding:1rem 0">Loading\u2026</div>`);
         try {
-            const res = await catFetch('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path));
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
-            setHTML(body, renderDetailHtml(data, mediaInfo));
+            const [detailRes, trackRes] = await Promise.all([
+                catFetch('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path)),
+                catFetch('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)),
+            ]);
+            if (!detailRes.ok) throw new Error('HTTP ' + detailRes.status);
+            const data = await detailRes.json();
+            const tracksData = trackRes.ok ? await trackRes.json() : {};
+            const drawerDualsubs = tracksData.dualsubs || [];
+            if (data.title) {
+                titleEl.textContent = data.title;
+                titleEl.title = filename;
+            }
+            setHTML(body, renderDetailHtml(data, mediaInfo, drawerDualsubs));
         } catch (e) {
             setHTML(body, html`<div style="color:var(--danger);padding:1rem 0">Failed to load details: ${e.message}</div>`);
         }
     }
 
-    function renderDetailHtml(data, mediaInfo) {
+    function renderDetailHtml(data, mediaInfo, dualsubs) {
+        dualsubs = dualsubs || [];
         const job = data.job || {};
         const val = job.validation || null;
         const codecs = (val && val.checks && val.checks.codecs) || radarrCodecFallback(mediaInfo);
@@ -416,6 +426,19 @@ component('catalog', function (el, store, _props) {
                 ${hasArtwork ? html`<img class="cat-drawer-poster" src="${data.artwork_url}" alt="" loading="lazy">` : raw('')}
                 ${hasSynopsis ? html`<div class="cat-drawer-synopsis">${data.synopsis}</div>` : raw('')}
             </div>`);
+        } else {
+            // Show a subtle indicator for why artwork/synopsis are absent.
+            let jfNote = '';
+            if (!data.in_catalog) {
+                jfNote = 'Not in catalog — run Resync to index';
+            } else if (!data.metadata_synced_at) {
+                jfNote = 'Jellyfin sync pending\u2026';
+            } else if (!hasArtwork && !hasSynopsis) {
+                jfNote = 'Not yet in Jellyfin library';
+            }
+            if (jfNote) {
+                parts.push(html`<div class="cat-meta-note">${jfNote}</div>`);
+            }
         }
 
         if (Array.isArray(data.flags) && data.flags.length) {
@@ -435,13 +458,15 @@ component('catalog', function (el, store, _props) {
             parts.push(html`<div style="color:var(--muted);padding:1rem 0">No codec info yet.</div>`);
         }
 
-        const embedded = codecs && Array.isArray(codecs.subtitles) ? codecs.subtitles : [];
+        const rawEmbedded = codecs && Array.isArray(codecs.subtitles) ? codecs.subtitles : [];
+        const embedded = [...new Set(rawEmbedded)];
         const missing = Array.isArray(job.missing_subs) ? job.missing_subs : [];
         parts.push(html`<div class="drawer-section-title">Subtitles</div>`);
         parts.push(html`<div>
             ${embedded.length
                 ? embedded.map(lang => html`<span class="cat-pill cat-pill-subs">${lang}</span>`)
                 : html`<div style="color:var(--muted);padding:1rem 0">No embedded subtitle tracks.</div>`}
+            ${dualsubs.map(ds => html`<span class="cat-pill cat-pill-subs" title="${ds.file}">${ds.pair} (dual)</span>`)}
             ${missing.length ? html`<div style="margin-top:0.5rem;color:var(--muted)">Missing:</div>` : raw('')}
             ${missing.map(lang => html`<span class="cat-pill cat-pill-warn">${lang}</span>`)}
         </div>`);
@@ -635,6 +660,7 @@ component('catalog', function (el, store, _props) {
     // ── Dual subtitle dialog ──────────────────────────────────────────────────────
 
     let _dualsubTracks = [];
+    let _dualsubDualsubs = [];
     let _dualsubProfiles = [];
     let _dualsubManageOpen = false;
     let _dualsubCurrentLayout = 'stacked_bottom';
@@ -658,7 +684,9 @@ component('catalog', function (el, store, _props) {
         // Guard: bail if another open superseded this one
         if (store.get('catalog.dualsub.path') !== path) return;
         _dualsubProfiles = profRes.ok ? await profRes.json() : [];
-        _dualsubTracks = (trackRes && trackRes.ok) ? (await trackRes.json()).tracks || [] : [];
+        const tracksData = (trackRes && trackRes.ok) ? await trackRes.json() : {};
+        _dualsubTracks = tracksData.tracks || [];
+        _dualsubDualsubs = tracksData.dualsubs || [];
 
         dualsubRenderProfiles();
         dualsubRenderOnDisk();
@@ -681,10 +709,20 @@ component('catalog', function (el, store, _props) {
     function dualsubRenderOnDisk() {
         const container = document.getElementById('dualsub-ondisk');
         container.replaceChildren();
-        const msg = document.createElement('div');
-        msg.style.cssText = 'color:var(--muted);font-size:.78rem';
-        msg.textContent = '\u2014';
-        container.appendChild(msg);
+        if (_dualsubDualsubs.length === 0) {
+            const msg = document.createElement('div');
+            msg.style.cssText = 'color:var(--muted);font-size:.78rem';
+            msg.textContent = '\u2014';
+            container.appendChild(msg);
+            return;
+        }
+        _dualsubDualsubs.forEach(ds => {
+            const chip = document.createElement('span');
+            chip.className = 'cat-pill cat-pill-subs';
+            chip.textContent = ds.pair;
+            chip.title = ds.file;
+            container.appendChild(chip);
+        });
     }
 
     function dualsubRenderPairs() {
@@ -912,6 +950,24 @@ component('catalog', function (el, store, _props) {
 
     // ── Public API (window.*) ─────────────────────────────────────────────────
     window.catLoad = function () { loadCatalog(); };
+
+    window.catResync = async function (btn) {
+        btn.disabled = true;
+        try {
+            const res = await catFetch('/api/pelicula/catalog/backfill', { method: 'POST' });
+            if (res.ok) {
+                toast('Catalog resync started');
+                store.set('catalog.loaded', false);
+                setTimeout(loadCatalog, 3000);
+            } else {
+                toast('Resync failed: ' + res.status, { error: true });
+            }
+        } catch (e) {
+            toast('Resync error: ' + e.message, { error: true });
+        } finally {
+            btn.disabled = false;
+        }
+    };
 
     window.catSearch = function (value) {
         store.set('catalog.query', (value || '').trim());
