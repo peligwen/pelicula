@@ -167,7 +167,9 @@ func TestHandleCatalogCommandSearch_Radarr(t *testing.T) {
 	var gotBody map[string]any
 	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
-			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
 			w.Write([]byte(`{"id":1}`))
 		}
 	}))
@@ -202,7 +204,9 @@ func TestHandleCatalogCommandSearch_Sonarr(t *testing.T) {
 	var gotBody map[string]any
 	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
-			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
 			w.Write([]byte(`{"id":1}`))
 		}
 	}))
@@ -239,7 +243,9 @@ func TestHandleCatalogCommandUnmonitor_Radarr(t *testing.T) {
 		case r.URL.Path == "/api/v3/movie/42" && r.Method == http.MethodGet:
 			w.Write([]byte(`{"id":42,"title":"Foo","monitored":true}`))
 		case r.URL.Path == "/api/v3/movie/42" && r.Method == http.MethodPut:
-			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			if err := json.NewDecoder(r.Body).Decode(&putBody); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
 			w.Write([]byte(`{"id":42}`))
 		}
 	}))

@@ -71,7 +71,7 @@ if [[ ${#staged_test_files[@]} -gt 0 ]]; then
   fi
 
   # Rule: don't discard json decode errors in tests
-  if grep -n '_ = json\.' "${staged_test_files[@]}" 2>/dev/null; then
+  if grep -En '^\s*_ = json\.' "${staged_test_files[@]}" 2>/dev/null; then
     echo "pre-commit: don't discard json decode errors in tests — check the error with t.Fatal" >&2
     exit 1
   fi
