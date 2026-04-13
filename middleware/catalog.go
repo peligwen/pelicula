@@ -581,12 +581,13 @@ func handleCatalogUnblocklist(w http.ResponseWriter, r *http.Request) {
 // historyId of the most recent downloadFolderImported event, plus the source title.
 func findImportHistoryID(baseURL, apiKey, arrType string, arrID, episodeID int) (int, string, error) {
 	var path string
-	if arrType == "sonarr" && episodeID > 0 {
+	if arrType == "sonarr" {
+		if episodeID == 0 {
+			return 0, "", fmt.Errorf("episode_id required for sonarr history lookup")
+		}
 		path = fmt.Sprintf("/api/v3/history/episode?episodeId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", episodeID)
-	} else if arrType == "radarr" {
-		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", arrID)
 	} else {
-		path = fmt.Sprintf("/api/v3/history?seriesId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending&pageSize=10", arrID)
+		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", arrID)
 	}
 	data, err := services.ArrGet(baseURL, apiKey, path)
 	if err != nil {
