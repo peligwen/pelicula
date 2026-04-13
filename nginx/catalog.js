@@ -394,6 +394,10 @@ component('catalog', function (el, store, _props) {
                 btn.textContent = def.label + (isFanout ? ' (all episodes)' : '');
                 btn.addEventListener('click', () => {
                     closeMenu();
+                    if (def.name === 'replace') {
+                        openReplaceDrawer(item, level);
+                        return;
+                    }
                     if (def.name === 'dualsub') {
                         openDualsubDialog(item, level);
                         return;
@@ -1239,6 +1243,159 @@ component('catalog', function (el, store, _props) {
     // ── Subscribe to store changes ────────────────────────────────────────────
     store.subscribe('catalog.items', renderCatalog);
     store.subscribe('catalog.flaggedRows', renderAttention);
+
+    // ── Replace drawer ────────────────────────────────────────────────────────
+
+    let _replaceItem = null;
+    let _replaceLevel = null;
+    let _replaceFiles = []; // [{path, arr_id, episode_id, arr_type}]
+
+    async function openReplaceDrawer(item, level) {
+        _replaceItem = item;
+        _replaceLevel = level;
+        _replaceFiles = [];
+
+        const isTv = (level === 'episode' || level === 'season' || level === 'series');
+        const path = level === 'movie'
+            ? (item.movieFile ? item.movieFile.path : '')
+            : (item.path || '');
+
+        document.getElementById('replace-sub').textContent = item.title || item.seriesTitle || '';
+        document.getElementById('replace-path').textContent = path || '';
+        document.getElementById('replace-reason').value = '';
+        document.getElementById('replace-status').textContent = '';
+        document.getElementById('replace-confirm-btn').disabled = false;
+
+        // Show/hide scope section
+        const scopeSection = document.getElementById('replace-scope-section');
+        scopeSection.style.display = isTv ? '' : 'none';
+
+        if (isTv) {
+            // Default to most specific scope
+            const episodeRadio = document.getElementById('replace-scope-episode');
+            episodeRadio.checked = true;
+            const seasonLabel = document.getElementById('replace-scope-season-label');
+            if (item.season) seasonLabel.textContent = 'Entire season (Season ' + item.season + ')';
+
+            // Wire scope radio change to update file count preview
+            document.querySelectorAll('input[name="replace-scope"]').forEach(r => {
+                r.onchange = () => updateReplaceFileCount();
+            });
+        }
+
+        await updateReplaceFileCount();
+        PeliculaFW.openDrawer(document.getElementById('replace-dialog'), document.getElementById('replace-backdrop'));
+    }
+
+    async function updateReplaceFileCount() {
+        const countEl = document.getElementById('replace-file-count');
+        const scope = document.querySelector('input[name="replace-scope"]:checked');
+        const scopeVal = scope ? scope.value : 'episode';
+        const level = _replaceLevel;
+        const item = _replaceItem;
+
+        if (level === 'movie') {
+            _replaceFiles = item.movieFile ? [{
+                path: item.movieFile.path,
+                arr_id: item.id,
+                episode_id: 0,
+                arr_type: 'radarr',
+            }] : [];
+            countEl.textContent = _replaceFiles.length === 1 ? 'Will replace 1 file.' : '';
+            return;
+        }
+
+        if (level === 'episode' || scopeVal === 'episode') {
+            _replaceFiles = item.path ? [{
+                path: item.path,
+                arr_id: item.id,
+                episode_id: item.episodeId || 0,
+                arr_type: 'sonarr',
+            }] : [];
+            countEl.textContent = _replaceFiles.length === 1 ? 'Will replace 1 file.' : '';
+            return;
+        }
+
+        countEl.textContent = 'Counting\u2026';
+        try {
+            let episodes = [];
+            if (scopeVal === 'season') {
+                const seasonNum = item.season || (item.seasons && item.seasons[0] && item.seasons[0].seasonNumber);
+                if (seasonNum) {
+                    const r = await catFetch('/api/pelicula/catalog/series/' + item.id + '/season/' + seasonNum);
+                    if (r.ok) episodes = (await r.json()).filter(e => e.hasFile || (e.file && e.file.id));
+                }
+            } else if (scopeVal === 'series') {
+                const r = await catFetch('/api/pelicula/catalog/series/' + item.id);
+                if (r.ok) {
+                    const detail = await r.json();
+                    for (const s of (detail.seasons || []).filter(s => s.seasonNumber > 0)) {
+                        const r2 = await catFetch('/api/pelicula/catalog/series/' + item.id + '/season/' + s.seasonNumber);
+                        if (r2.ok) {
+                            const eps = await r2.json();
+                            episodes.push(...eps.filter(e => e.hasFile || (e.file && e.file.id)));
+                        }
+                    }
+                }
+            }
+            _replaceFiles = episodes
+                .filter(e => e.file && e.file.path)
+                .map(e => ({
+                    path: e.file.path,
+                    arr_id: item.id,
+                    episode_id: e.id,
+                    arr_type: 'sonarr',
+                }));
+            countEl.textContent = 'Will replace ' + _replaceFiles.length + ' file' + (_replaceFiles.length !== 1 ? 's' : '') + '.';
+        } catch (e) {
+            countEl.textContent = 'Could not count files.';
+        }
+    }
+
+    window.replaceClose = function () {
+        PeliculaFW.closeDrawer(document.getElementById('replace-dialog'), document.getElementById('replace-backdrop'));
+    };
+
+    window.replaceConfirm = async function () {
+        if (!_replaceFiles.length) {
+            document.getElementById('replace-status').textContent = 'No files to replace.';
+            return;
+        }
+        const reason = document.getElementById('replace-reason').value.trim();
+        const statusEl = document.getElementById('replace-status');
+        const confirmBtn = document.getElementById('replace-confirm-btn');
+        confirmBtn.disabled = true;
+        statusEl.textContent = 'Replacing\u2026';
+
+        let succeeded = 0;
+        let failed = 0;
+        for (const f of _replaceFiles) {
+            try {
+                const res = await catFetch('/api/pelicula/actions?wait=10', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'replace',
+                        target: { path: f.path, arr_type: f.arr_type, arr_id: f.arr_id, episode_id: f.episode_id },
+                        params: { reason },
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok || data.state === 'failed') { failed++; } else { succeeded++; }
+            } catch (e) {
+                failed++;
+            }
+        }
+
+        if (failed === 0) {
+            statusEl.textContent = '';
+            window.replaceClose();
+            toast(succeeded + ' file' + (succeeded !== 1 ? 's' : '') + ' replaced \u2014 Searching for new release\u2026');
+        } else {
+            statusEl.textContent = succeeded + ' replaced, ' + failed + ' failed.';
+            confirmBtn.disabled = false;
+        }
+    };
 
     // ── Component lifecycle ───────────────────────────────────────────────────
     return {
