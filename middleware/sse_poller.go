@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -8,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -69,6 +72,7 @@ func (p *SSEPoller) pollOnce(ctx context.Context) {
 		{"downloads", wrapFetch(p.fetchDownloads)},
 		{"storage", wrapFetch(p.fetchStorage)},
 		{"notifications", wrapFetch(p.fetchNotifications)},
+		{"logs", wrapFetch(p.fetchLogs)},
 	}
 
 	results := make(chan fetchResult, len(fetches))
@@ -222,6 +226,54 @@ func (p *SSEPoller) fetchStorage(ctx context.Context) ([]byte, error) {
 // fetchNotifications proxies Procula's notification feed.
 func (p *SSEPoller) fetchNotifications(ctx context.Context) ([]byte, error) {
 	return proculaGet(p.svc, proculaURL+"/api/procula/notifications")
+}
+
+// fetchLogs fans out over all allowed containers with Docker timestamps enabled,
+// parses the RFC3339 prefix from each line, sorts entries newest-first, and
+// returns the top 200 as JSON in the same {entries} shape as handleLogsAggregate.
+func (p *SSEPoller) fetchLogs(ctx context.Context) ([]byte, error) {
+	const perSvcTail = 50 // 10 services × 50 = 500 candidates; trimmed to 200
+
+	type result struct {
+		svc string
+		raw []byte
+		err error
+	}
+	ch := make(chan result, len(allowedContainers))
+	var wg sync.WaitGroup
+	for name := range allowedContainers {
+		wg.Add(1)
+		go func(svc string) {
+			defer wg.Done()
+			raw, err := dockerLogsFunc(svc, perSvcTail, true)
+			ch <- result{svc: svc, raw: raw, err: err}
+		}(name)
+	}
+	wg.Wait()
+	close(ch)
+
+	var entries []LogEntry
+	for r := range ch {
+		if r.err != nil {
+			continue // skip unavailable containers silently
+		}
+		sc := bufio.NewScanner(bytes.NewReader(r.raw))
+		sc.Buffer(make([]byte, 256*1024), 1024*1024)
+		for sc.Scan() {
+			line := strings.TrimRight(sc.Text(), "\r\n")
+			if line == "" {
+				continue
+			}
+			ts, content := parseLogTimestamp(line)
+			entries = append(entries, LogEntry{Service: r.svc, Line: content, Timestamp: ts})
+		}
+	}
+
+	sorted := sortedLogEntries(entries, 200)
+	if sorted == nil {
+		sorted = []LogEntry{}
+	}
+	return json.Marshal(map[string]any{"entries": sorted})
 }
 
 // proculaGet makes a GET request using svc's HTTP client and returns the body.
