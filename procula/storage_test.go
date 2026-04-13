@@ -53,7 +53,7 @@ func TestBuildStorageReport_GroupsByFilesystem(t *testing.T) {
 		{"Alpha", sub1},
 		{"Beta", sub2},
 	}
-	defer func() { monitoredVolumes = orig }()
+	t.Cleanup(func() { monitoredVolumes = orig })
 
 	report := buildStorageReport()
 
@@ -88,7 +88,7 @@ func TestBuildStorageReport_Timestamp(t *testing.T) {
 	}{
 		{"Temp", dir},
 	}
-	defer func() { monitoredVolumes = orig }()
+	t.Cleanup(func() { monitoredVolumes = orig })
 
 	report := buildStorageReport()
 	if report.Timestamp.IsZero() {
@@ -118,7 +118,7 @@ func TestComputeFolderSizes(t *testing.T) {
 	}{
 		{"Test", dir},
 	}
-	defer func() { monitoredVolumes = orig }()
+	t.Cleanup(func() { monitoredVolumes = orig })
 
 	// Reset cache first.
 	folderSizeMu.Lock()
@@ -147,7 +147,7 @@ func TestVolumeStatus(t *testing.T) {
 	})
 	old := appDB
 	appDB = db
-	defer func() { appDB = old }()
+	t.Cleanup(func() { appDB = old })
 
 	cases := []struct {
 		usedPct float64

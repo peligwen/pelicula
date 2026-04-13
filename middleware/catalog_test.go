@@ -23,10 +23,11 @@ func TestHandleCatalogListFansOut(t *testing.T) {
 	defer sonarr.Close()
 
 	origR, origS := radarrURL, sonarrURL
+	origSvc := services
 	radarrURL, sonarrURL = radarr.URL, sonarr.URL
 	services = &ServiceClients{RadarrKey: "k", SonarrKey: "k"}
 	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS })
+	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog", nil)
 	w := httptest.NewRecorder()
@@ -62,10 +63,11 @@ func TestHandleCatalogSeasonMergesFiles(t *testing.T) {
 	defer sonarr.Close()
 
 	origS := sonarrURL
+	origSvc := services
 	sonarrURL = sonarr.URL
 	services = &ServiceClients{SonarrKey: "k"}
 	services.client = &http.Client{}
-	t.Cleanup(func() { sonarrURL = origS })
+	t.Cleanup(func() { sonarrURL = origS; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/series/5/season/1", nil)
 	req.SetPathValue("id", "5")
@@ -100,10 +102,11 @@ func TestHandleCatalogFlagsProxies(t *testing.T) {
 	defer upstream.Close()
 
 	orig := proculaURL
+	origSvc := services
 	proculaURL = upstream.URL
 	services = &ServiceClients{}
 	services.client = &http.Client{}
-	t.Cleanup(func() { proculaURL = orig })
+	t.Cleanup(func() { proculaURL = orig; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/flags", nil)
 	w := httptest.NewRecorder()
@@ -129,10 +132,11 @@ func TestHandleCatalogDetailMergesFlagsAndJob(t *testing.T) {
 	defer upstream.Close()
 
 	orig := proculaURL
+	origSvc := services
 	proculaURL = upstream.URL
 	services = &ServiceClients{}
 	services.client = &http.Client{}
-	t.Cleanup(func() { proculaURL = orig })
+	t.Cleanup(func() { proculaURL = orig; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/detail?path=%2Fmovies%2FA%2FA.mkv", nil)
 	w := httptest.NewRecorder()
@@ -168,10 +172,11 @@ func TestHandleCatalogCommandSearch_Radarr(t *testing.T) {
 	defer radarr.Close()
 
 	origR := radarrURL
+	origSvc := services
 	radarrURL = radarr.URL
 	services = &ServiceClients{RadarrKey: "k"}
 	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL = origR })
+	t.Cleanup(func() { radarrURL = origR; services = origSvc })
 
 	body := `{"arr_type":"radarr","arr_id":42,"command":"search"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
@@ -202,10 +207,11 @@ func TestHandleCatalogCommandSearch_Sonarr(t *testing.T) {
 	defer sonarr.Close()
 
 	origS := sonarrURL
+	origSvc := services
 	sonarrURL = sonarr.URL
 	services = &ServiceClients{SonarrKey: "k"}
 	services.client = &http.Client{}
-	t.Cleanup(func() { sonarrURL = origS })
+	t.Cleanup(func() { sonarrURL = origS; services = origSvc })
 
 	body := `{"arr_type":"sonarr","arr_id":7,"command":"search"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
@@ -238,10 +244,11 @@ func TestHandleCatalogCommandUnmonitor_Radarr(t *testing.T) {
 	defer radarr.Close()
 
 	origR := radarrURL
+	origSvc := services
 	radarrURL = radarr.URL
 	services = &ServiceClients{RadarrKey: "k"}
 	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL = origR })
+	t.Cleanup(func() { radarrURL = origR; services = origSvc })
 
 	body := `{"arr_type":"radarr","arr_id":42,"command":"unmonitor"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
@@ -268,11 +275,12 @@ func TestHandleActionsRegistryCached(t *testing.T) {
 	defer procula.Close()
 
 	origP := proculaURL
+	origSvc := services
 	proculaURL = procula.URL
 	services = &ServiceClients{}
 	services.client = &http.Client{}
 	registryCache = actionRegistryCache{}
-	t.Cleanup(func() { proculaURL = origP })
+	t.Cleanup(func() { proculaURL = origP; services = origSvc })
 
 	for i := 0; i < 3; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/api/pelicula/actions/registry", nil)
@@ -303,10 +311,11 @@ func TestHandleCatalogQualityProfiles(t *testing.T) {
 	defer sonarr.Close()
 
 	origR, origS := radarrURL, sonarrURL
+	origSvc := services
 	radarrURL, sonarrURL = radarr.URL, sonarr.URL
 	services = &ServiceClients{RadarrKey: "k", SonarrKey: "k"}
 	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS })
+	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/qualityprofiles", nil)
 	w := httptest.NewRecorder()

@@ -23,8 +23,9 @@ func TestHandleStorageProxy(t *testing.T) {
 	fake := newFakeProcula(t, "/api/procula/storage", `{"volumes":[],"timestamp":"2026-04-06T00:00:00Z"}`)
 	defer fake.Close()
 	old := proculaURL
+	origSvc := services
 	proculaURL = fake.URL
-	t.Cleanup(func() { proculaURL = old })
+	t.Cleanup(func() { proculaURL = old; services = origSvc })
 	services = NewServiceClients("/config")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
@@ -47,8 +48,9 @@ func TestHandleUpdatesProxy(t *testing.T) {
 	fake := newFakeProcula(t, "/api/procula/updates", `{"current_version":"dev","update_available":false}`)
 	defer fake.Close()
 	old := proculaURL
+	origSvc := services
 	proculaURL = fake.URL
-	t.Cleanup(func() { proculaURL = old })
+	t.Cleanup(func() { proculaURL = old; services = origSvc })
 	services = NewServiceClients("/config")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)
@@ -87,6 +89,8 @@ func TestHandleUpdatesProxyMethodNotAllowed(t *testing.T) {
 
 func TestHandleStorageProxyBadGateway(t *testing.T) {
 	// Point PROCULA_URL at a port with nothing listening.
+	origSvc := services
+	t.Cleanup(func() { services = origSvc })
 	t.Setenv("PROCULA_URL", "http://127.0.0.1:1")
 	services = NewServiceClients("/config")
 
@@ -99,6 +103,8 @@ func TestHandleStorageProxyBadGateway(t *testing.T) {
 }
 
 func TestHandleUpdatesProxyBadGateway(t *testing.T) {
+	origSvc := services
+	t.Cleanup(func() { services = origSvc })
 	t.Setenv("PROCULA_URL", "http://127.0.0.1:1")
 	services = NewServiceClients("/config")
 
@@ -324,6 +330,8 @@ func newRadarrPayload() []byte {
 
 func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
 	// When WEBHOOK_SECRET is unset, the check is skipped (backward compat).
+	origSvc := services
+	t.Cleanup(func() { services = origSvc })
 	t.Setenv("WEBHOOK_SECRET", "")
 	services = NewServiceClients("/config")
 
@@ -339,6 +347,8 @@ func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
 }
 
 func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
+	origSvc := services
+	t.Cleanup(func() { services = origSvc })
 	t.Setenv("WEBHOOK_SECRET", "correct-secret")
 	services = NewServiceClients("/config")
 
@@ -353,6 +363,8 @@ func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
 }
 
 func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
+	origSvc := services
+	t.Cleanup(func() { services = origSvc })
 	t.Setenv("WEBHOOK_SECRET", "my-secret")
 	services = NewServiceClients("/config")
 
@@ -368,6 +380,8 @@ func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
 }
 
 func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
+	origSvc := services
+	t.Cleanup(func() { services = origSvc })
 	t.Setenv("WEBHOOK_SECRET", "required-secret")
 	services = NewServiceClients("/config")
 

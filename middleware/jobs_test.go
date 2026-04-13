@@ -22,10 +22,11 @@ func TestHandleJobsListGroupsByState(t *testing.T) {
 	defer upstream.Close()
 
 	orig := proculaURL
+	origSvc := services
 	proculaURL = upstream.URL
 	services = &ServiceClients{}
 	services.client = &http.Client{}
-	t.Cleanup(func() { proculaURL = orig })
+	t.Cleanup(func() { proculaURL = orig; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/jobs", nil)
 	w := httptest.NewRecorder()

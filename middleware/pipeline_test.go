@@ -18,10 +18,11 @@ func TestPipelineGetRequestsPipelineActionType(t *testing.T) {
 	defer procula.Close()
 
 	origP := proculaURL
+	origSvc := services
 	proculaURL = procula.URL
 	services = &ServiceClients{}
 	services.client = &http.Client{}
-	t.Cleanup(func() { proculaURL = origP })
+	t.Cleanup(func() { proculaURL = origP; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/pipeline", nil)
 	w := httptest.NewRecorder()
