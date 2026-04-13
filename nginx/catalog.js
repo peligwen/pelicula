@@ -165,11 +165,11 @@ component('catalog', function (el, store, _props) {
         div.addEventListener('click', (e) => {
             if (e.target.closest('.cat-ctx-btn')) return;
             const path = item.movieFile ? item.movieFile.path : '';
-            if (path) openDetail(path);
+            if (path) openDetail(path, item.movieFile && item.movieFile.mediaInfo);
         });
         div.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            openSubSearchDialog({ title: item.title || 'Movie', arrType: 'radarr', id: item.id, episodeId: 0, subLangs: item.subLangs || [] }, 'movie');
+            openContextMenu(e, item, 'movie');
         });
         div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => { e.stopPropagation(); openContextMenu(e, item, 'movie'); });
         return div;
@@ -290,7 +290,7 @@ component('catalog', function (el, store, _props) {
         div.addEventListener('contextmenu', (e) => {
             if (!hasFile) return;
             e.preventDefault();
-            openSubSearchDialog({ title: series.title + ' ' + epNum, arrType: 'sonarr', id: series.id, episodeId: ep.id, subLangs: series.subLangs || [] }, 'episode');
+            openContextMenu(e, epItem, 'episode');
         });
         return div;
     }
@@ -358,7 +358,26 @@ component('catalog', function (el, store, _props) {
     }
 
     // ── Detail drawer ─────────────────────────────────────────────────────────
-    async function openDetail(path) {
+    // radarrCodecFallback converts a Radarr/Sonarr mediaInfo object into the
+    // same CodecInfo shape that procula emits, for items not yet run through the pipeline.
+    function radarrCodecFallback(mi) {
+        if (!mi) return null;
+        const c = {};
+        if (mi.videoCodec) c.video = mi.videoCodec;
+        if (mi.audioCodec) c.audio = mi.audioCodec;
+        if (mi.resolution) {
+            const m = mi.resolution.match(/^(\d+)x(\d+)/i);
+            if (m) { c.width = parseInt(m[1], 10); c.height = parseInt(m[2], 10); }
+        }
+        if (typeof mi.subtitles === 'string' && mi.subtitles) {
+            c.subtitles = mi.subtitles.split(/\s*\/\s*/).filter(Boolean);
+        } else {
+            c.subtitles = [];
+        }
+        return (c.video || c.audio) ? c : null;
+    }
+
+    async function openDetail(path, mediaInfo) {
         if (!path) return;
         const backdrop = document.getElementById('cat-drawer-backdrop');
         const drawer = document.getElementById('cat-drawer');
@@ -378,17 +397,26 @@ component('catalog', function (el, store, _props) {
             const res = await catFetch('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path));
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
-            setHTML(body, renderDetailHtml(data));
+            setHTML(body, renderDetailHtml(data, mediaInfo));
         } catch (e) {
             setHTML(body, html`<div style="color:var(--danger);padding:1rem 0">Failed to load details: ${e.message}</div>`);
         }
     }
 
-    function renderDetailHtml(data) {
+    function renderDetailHtml(data, mediaInfo) {
         const job = data.job || {};
         const val = job.validation || null;
-        const codecs = val && val.checks && val.checks.codecs;
+        const codecs = (val && val.checks && val.checks.codecs) || radarrCodecFallback(mediaInfo);
         const parts = [];
+
+        const hasSynopsis = typeof data.synopsis === 'string' && data.synopsis.trim();
+        const hasArtwork = typeof data.artwork_url === 'string' && data.artwork_url.trim();
+        if (hasSynopsis || hasArtwork) {
+            parts.push(html`<div class="cat-drawer-hero">
+                ${hasArtwork ? html`<img class="cat-drawer-poster" src="${data.artwork_url}" alt="" loading="lazy">` : raw('')}
+                ${hasSynopsis ? html`<div class="cat-drawer-synopsis">${data.synopsis}</div>` : raw('')}
+            </div>`);
+        }
 
         if (Array.isArray(data.flags) && data.flags.length) {
             parts.push(html`<div class="drawer-section-title">Flags</div>`);
