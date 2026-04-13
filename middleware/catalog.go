@@ -374,6 +374,10 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	if req.ArrType != "radarr" && req.ArrType != "sonarr" {
+		httputil.WriteError(w, "invalid arr_type", http.StatusBadRequest)
+		return
+	}
 	sonarrKey, radarrKey, _ := services.Keys()
 
 	switch req.Command {
