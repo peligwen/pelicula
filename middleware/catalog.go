@@ -171,8 +171,8 @@ func handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 	w.Write(body) //nolint:errcheck
 }
 
-// handleCatalogDetail returns {path, flags, job} for a specific media path.
-// It fetches the flag row and the newest matching job from procula.
+// handleCatalogDetail returns {path, flags, job, synopsis, artwork_url} for a specific media path.
+// It fetches the flag row and the newest matching job from procula, plus catalog metadata.
 func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -220,15 +220,35 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if p, _ := src["path"].(string); p == path {
-				matched = j // latest by creation order (procula returns ASC)
+				matched = j
+			}
+		}
+	}
+
+	// Resolve synopsis and artwork from the catalog DB.
+	// For episodes: walk up episode → season → series to find the item that carries them.
+	synopsis, artworkURL := "", ""
+	if catalogDB != nil {
+		if item, err := GetCatalogItemByFilePath(catalogDB, path); err == nil && item != nil {
+			synopsis = item.Synopsis
+			artworkURL = item.ArtworkURL
+			if synopsis == "" && artworkURL == "" && item.Type == "episode" {
+				if season, err := GetCatalogItemByID(catalogDB, item.ParentID); err == nil && season != nil {
+					if series, err := GetCatalogItemByID(catalogDB, season.ParentID); err == nil && series != nil {
+						synopsis = series.Synopsis
+						artworkURL = series.ArtworkURL
+					}
+				}
 			}
 		}
 	}
 
 	httputil.WriteJSON(w, map[string]any{
-		"path":  path,
-		"flags": flags,
-		"job":   matched,
+		"path":        path,
+		"flags":       flags,
+		"job":         matched,
+		"synopsis":    synopsis,
+		"artwork_url": artworkURL,
 	})
 }
 
