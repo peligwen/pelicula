@@ -690,6 +690,41 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 }
 .settings-adv-link:hover { text-decoration: underline; }
 
+/* ── Settings summary row (drawer trigger) ──────────────────────────────── */
+.settings-summary-row {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; transition: border-color 0.15s;
+}
+.settings-summary-row:hover { border-color: var(--pink); }
+.summary-row-left { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.summary-row-status {
+    font-size: 0.75rem; color: var(--muted); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.status-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    margin-right: 0.3rem; vertical-align: middle;
+}
+.status-dot.active   { background: var(--mint, #7dda93); }
+.status-dot.inactive { background: var(--muted, #9080a8); }
+.summary-row-action {
+    background: none; border: 1.5px solid var(--border2);
+    padding: 0.35rem 0.85rem; border-radius: 20px;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+    font-size: 0.75rem; font-weight: 700; color: var(--pink); cursor: pointer;
+    display: flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+.summary-row-action:hover { border-color: var(--pink); background: var(--pink-l); }
+.summary-row-chevron { font-size: 1rem; line-height: 1; }
+
+/* ── Drawer footer (Save/Cancel row at bottom of settings drawers) ───────── */
+.drawer-footer {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1.25rem; border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
 /* ── Small inline buttons (sm-btn) ─────────────────────────────────────── */
 .sm-btn {
     display: inline-flex; align-items: center; padding: 0.3rem 0.75rem;
