@@ -6,7 +6,42 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestParseLogTimestamp(t *testing.T) {
+	ts, line := parseLogTimestamp("2024-01-15T12:34:05.123456789Z sonarr started\n")
+	if ts.IsZero() {
+		t.Fatal("expected non-zero timestamp")
+	}
+	if line != "sonarr started\n" {
+		t.Errorf("got line %q, want %q", line, "sonarr started\n")
+	}
+
+	// No timestamp prefix → zero time, line unchanged
+	ts2, line2 := parseLogTimestamp("plain log line")
+	if !ts2.IsZero() {
+		t.Error("expected zero time for line without timestamp")
+	}
+	if line2 != "plain log line" {
+		t.Errorf("got %q", line2)
+	}
+}
+
+func TestSortedLogEntries(t *testing.T) {
+	entries := []LogEntry{
+		{Service: "a", Line: "old", Timestamp: time.Unix(100, 0)},
+		{Service: "b", Line: "new", Timestamp: time.Unix(200, 0)},
+		{Service: "c", Line: "older", Timestamp: time.Unix(50, 0)},
+	}
+	got := sortedLogEntries(entries, 2)
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries, got %d", len(got))
+	}
+	if got[0].Line != "new" || got[1].Line != "old" {
+		t.Errorf("wrong order: got %v %v", got[0].Line, got[1].Line)
+	}
+}
 
 func TestHandleLogsAggregateFansOut(t *testing.T) {
 	origFetch := dockerLogsFunc

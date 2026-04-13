@@ -7,15 +7,46 @@ import (
 	"bytes"
 	"net/http"
 	"pelicula-api/httputil"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // LogEntry is one line tagged with its source service.
 type LogEntry struct {
-	Service string `json:"service"`
-	Line    string `json:"line"`
+	Service   string    `json:"service"`
+	Line      string    `json:"line"`
+	Timestamp time.Time `json:"ts,omitempty"`
+}
+
+// parseLogTimestamp peels the RFC3339Nano prefix Docker adds when timestamps=1.
+// Returns the parsed time and the remainder of the line. On parse failure,
+// returns a zero time and the original line unchanged.
+func parseLogTimestamp(line string) (time.Time, string) {
+	idx := strings.IndexByte(line, ' ')
+	if idx <= 0 {
+		return time.Time{}, line
+	}
+	t, err := time.Parse(time.RFC3339Nano, line[:idx])
+	if err != nil {
+		return time.Time{}, line
+	}
+	return t, line[idx+1:]
+}
+
+// sortedLogEntries returns a copy of entries sorted newest-first, capped at max.
+func sortedLogEntries(entries []LogEntry, max int) []LogEntry {
+	out := make([]LogEntry, len(entries))
+	copy(out, entries)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Timestamp.After(out[j].Timestamp)
+	})
+	if len(out) > max {
+		out = out[:max]
+	}
+	return out
 }
 
 const (
