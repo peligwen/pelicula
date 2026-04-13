@@ -49,20 +49,45 @@ async function loadLogs() {
 }
 
 function renderLogs(out, entries) {
+    initScrollAnchor(out);
     const frag = document.createDocumentFragment();
+    let lastDate = null;
     for (const e of entries) {
-        if (!logsState.enabled.has(e.service)) continue; // client-side service filter
-        const row = document.createElement('span');
+        if (!logsState.enabled.has(e.service)) continue;
+
+        // date separator
+        const ts = e.ts ? new Date(e.ts) : null;
+        const dateStr = ts && !isNaN(ts) ? ts.toLocaleDateString('en-US', {month:'short', day:'numeric'}) : null;
+        if (dateStr && dateStr !== lastDate) {
+            const sep = document.createElement('div');
+            sep.className = 'logs-date-sep';
+            sep.textContent = dateStr;
+            frag.appendChild(sep);
+            lastDate = dateStr;
+        }
+
+        const row = document.createElement('div');
         row.className = 'logs-line logs-svc-' + e.service;
+
+        const tsEl = document.createElement('span');
+        tsEl.className = 'logs-line-ts';
+        tsEl.textContent = ts && !isNaN(ts)
+            ? ts.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false})
+            : '';
+
         const svc = document.createElement('span');
         svc.className = 'logs-line-svc';
         svc.textContent = e.service;
-        row.appendChild(svc);
-        row.appendChild(document.createTextNode(e.line + '\n'));
+
+        const msg = document.createElement('span');
+        msg.className = 'logs-line-msg';
+        msg.textContent = e.line;
+
+        row.append(tsEl, svc, msg);
         frag.appendChild(row);
     }
     out.replaceChildren(frag);
-    out.scrollTop = out.scrollHeight;
+    if (!logsState.userScrolled) out.scrollTop = out.scrollHeight;
 }
 
 function renderFilters() {
