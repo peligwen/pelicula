@@ -350,6 +350,17 @@ func GetCatalogItemByID(db *sql.DB, id string) (*CatalogItem, error) {
 	return scanCatalogRow(row)
 }
 
+// GetCatalogItemByFilePath fetches a catalog item by its file_path.
+// Returns (nil, nil) if no item matches.
+func GetCatalogItemByFilePath(db *sql.DB, filePath string) (*CatalogItem, error) {
+	row := db.QueryRow(selectCatalogItem+` WHERE file_path=?`, filePath)
+	it, err := scanCatalogRow(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return it, err
+}
+
 // CatalogFilter controls which items ListCatalogItems returns.
 type CatalogFilter struct {
 	Type  string // "" = all types

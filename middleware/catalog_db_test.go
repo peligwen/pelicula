@@ -254,6 +254,54 @@ func TestUpsertCatalogItem_UpdatesTitle(t *testing.T) {
 	}
 }
 
+func TestGetCatalogItemByFilePath(t *testing.T) {
+	db := testCatalogDB(t)
+
+	_, err := UpsertCatalogItem(db, CatalogItem{
+		Type:       "movie",
+		TmdbID:     101,
+		ArrType:    "radarr",
+		ArrID:      1,
+		Title:      "Test Movie",
+		Year:       2020,
+		Tier:       "library",
+		FilePath:   "/media/movies/test.mkv",
+		Synopsis:   "A test film.",
+		ArtworkURL: "http://jellyfin/Items/abc/Images/Primary",
+	})
+	if err != nil {
+		t.Fatalf("UpsertCatalogItem: %v", err)
+	}
+
+	item, err := GetCatalogItemByFilePath(db, "/media/movies/test.mkv")
+	if err != nil {
+		t.Fatalf("GetCatalogItemByFilePath: %v", err)
+	}
+	if item == nil {
+		t.Fatal("expected item, got nil")
+	}
+	if item.Title != "Test Movie" {
+		t.Errorf("title: got %q, want %q", item.Title, "Test Movie")
+	}
+	if item.Synopsis != "A test film." {
+		t.Errorf("synopsis: got %q, want %q", item.Synopsis, "A test film.")
+	}
+	if item.ArtworkURL != "http://jellyfin/Items/abc/Images/Primary" {
+		t.Errorf("artwork_url: got %q", item.ArtworkURL)
+	}
+}
+
+func TestGetCatalogItemByFilePath_NotFound(t *testing.T) {
+	db := testCatalogDB(t)
+	item, err := GetCatalogItemByFilePath(db, "/media/movies/missing.mkv")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if item != nil {
+		t.Errorf("expected nil, got item with title %q", item.Title)
+	}
+}
+
 func TestListCatalogItems_FilterByTier(t *testing.T) {
 	db := testCatalogDB(t)
 
