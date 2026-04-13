@@ -12,6 +12,7 @@ const logsState = {
     loaded: false,
     loading: false,
     enabled: new Set(ALL_SERVICES),
+    lastEntries: [],
 };
 
 function lfetch(url) { return fetch(url, { credentials: 'same-origin' }); }
@@ -27,7 +28,8 @@ async function loadLogs() {
         const res = await lfetch('/api/pelicula/logs/aggregate?tail=200&services=' + encodeURIComponent(enabled));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        renderLogs(out, data.entries || []);
+        logsState.lastEntries = data.entries || [];
+        renderLogs(out, logsState.lastEntries);
         logsState.loaded = true;
     } catch (e) {
         out.textContent = 'Failed to load logs: ' + e.message;
@@ -39,6 +41,7 @@ async function loadLogs() {
 function renderLogs(out, entries) {
     const frag = document.createDocumentFragment();
     for (const e of entries) {
+        if (!logsState.enabled.has(e.service)) continue; // client-side service filter
         const row = document.createElement('span');
         row.className = 'logs-line logs-svc-' + e.service;
         const svc = document.createElement('span');
@@ -64,18 +67,34 @@ function renderFilters() {
             if (logsState.enabled.has(svc)) logsState.enabled.delete(svc);
             else logsState.enabled.add(svc);
             renderFilters();
-            loadLogs();
+            const out = document.getElementById('logs-stream');
+            if (window.sseIsActive && window.sseIsActive() && out) {
+                renderLogs(out, logsState.lastEntries); // re-render from cache
+            } else {
+                loadLogs(); // fallback: re-fetch (SSE not connected)
+            }
         });
         frag.appendChild(chip);
     }
     wrap.replaceChildren(frag);
 }
 
-window.logsRefresh = function () { loadLogs(); };
+// renderLogsFromSSE is called by sse.js on each 'logs' SSE event.
+window.renderLogsFromSSE = function(data) {
+    const out = document.getElementById('logs-stream');
+    if (!out) return;
+    logsState.lastEntries = data.entries || [];
+    renderLogs(out, logsState.lastEntries);
+    logsState.loaded = true;
+};
 
 PeliculaFW.onTab('logs', function () {
     renderFilters();
-    loadLogs();
+    // If SSE is already connected, the next push will populate the view.
+    // Only do an initial fetch if SSE is not available.
+    if (!window.sseIsActive || !window.sseIsActive()) {
+        loadLogs();
+    }
 });
 
 })();
