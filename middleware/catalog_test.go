@@ -79,7 +79,9 @@ func TestHandleCatalogSeasonMergesFiles(t *testing.T) {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
 	}
 	var eps []map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &eps)
+	if err := json.Unmarshal(w.Body.Bytes(), &eps); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 	if len(eps) != 2 {
 		t.Fatalf("eps = %d, want 2", len(eps))
 	}
