@@ -27,6 +27,16 @@ func migrateJobsJSON(db *sql.DB, configDir string) {
 		return
 	}
 
+	// If jobs.migrated already exists, the migration ran successfully on a prior
+	// start. The jobs/ dir is leftover (e.g. recreated by a Docker volume mount).
+	// Remove it and skip — re-processing is safe but wasteful, and the rename will
+	// fail again producing the same warning.
+	migratedDir := filepath.Join(configDir, "jobs.migrated")
+	if _, err := os.Stat(migratedDir); err == nil {
+		os.RemoveAll(jobsDir)
+		return
+	}
+
 	entries, err := os.ReadDir(jobsDir)
 	if err != nil {
 		slog.Warn("jobs migration: cannot read jobs dir", "component", "migrate", "dir", jobsDir, "error", err)
