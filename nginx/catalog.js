@@ -565,6 +565,62 @@ component('catalog', function (el, store, _props) {
         return html`<div>${parts}</div>`;
     }
 
+    function openMissingContextMenu(event, item) {
+        if (_openMenu) { _openMenu.remove(); _openMenu = null; }
+        const menu = document.createElement('div');
+        menu.className = 'cat-ctx-menu';
+        menu.addEventListener('click', (e) => e.stopPropagation());
+        _openMenu = menu;
+
+        const isSeries = Array.isArray(item.seasons);
+        const arrType = isSeries ? 'sonarr' : 'radarr';
+
+        const actions = [
+            {
+                label: 'Force Search',
+                fn: () => { closeMenu(); runArrCommand('search', arrType, item.id, item.title); },
+            },
+            {
+                label: 'Unmonitor',
+                fn: () => { closeMenu(); runArrCommand('unmonitor', arrType, item.id, item.title); },
+            },
+        ];
+
+        for (const action of actions) {
+            const btn = document.createElement('button');
+            btn.className = 'cat-ctx-item';
+            btn.textContent = action.label;
+            btn.addEventListener('click', action.fn);
+            menu.appendChild(btn);
+        }
+
+        document.body.appendChild(menu);
+        positionMenu(menu, event);
+        function closeMenu() { if (_openMenu === menu) { menu.remove(); _openMenu = null; } }
+    }
+
+    async function runArrCommand(command, arrType, arrId, title) {
+        const label = command === 'search' ? 'Force Search' : 'Unmonitor';
+        try {
+            const res = await catFetch('/api/pelicula/catalog/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ arr_type: arrType, arr_id: arrId, command }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                toast(label + ' failed: ' + (data.error || 'unknown'), { error: true });
+                return;
+            }
+            const successMsg = command === 'search'
+                ? (title || 'Item') + ': search triggered'
+                : (title || 'Item') + ': unmonitored';
+            toast(successMsg);
+        } catch (e) {
+            toast(label + ' error: ' + e.message, { error: true });
+        }
+    }
+
     function renderDetailHtml(data, mediaInfo, dualsubs) {
         dualsubs = dualsubs || [];
         const job = data.job || {};
