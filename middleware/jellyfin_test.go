@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"pelicula-api/httputil"
@@ -759,6 +760,52 @@ func TestHandleUserPassword_EmptyPassword(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// ── SetJellyfinUserDisabled / handleUsersWithID /disable /enable ──────────────
+
+func TestSetJellyfinUserDisabled(t *testing.T) {
+	const uid = "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21"
+	var postedBody []byte
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/"+uid, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"` + uid + `","Name":"alice","Policy":{"IsAdministrator":false,"IsDisabled":false}}`))
+		})
+		mux.HandleFunc("/Users/"+uid+"/Policy", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var err error
+			postedBody, err = io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read body", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	resetServices(t)
+
+	if err := SetJellyfinUserDisabled(services, uid, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if postedBody == nil {
+		t.Fatal("no POST body recorded for /Policy")
+	}
+	var policy map[string]any
+	if err := json.Unmarshal(postedBody, &policy); err != nil {
+		t.Fatalf("invalid JSON in POST body: %v", err)
+	}
+	isDisabled, _ := policy["IsDisabled"].(bool)
+	if !isDisabled {
+		t.Errorf("policy[IsDisabled] = %v, want true; full body: %s", policy["IsDisabled"], postedBody)
 	}
 }
 

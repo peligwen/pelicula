@@ -449,6 +449,7 @@ type JellyfinUser struct {
 	Name          string `json:"name"`
 	HasPassword   bool   `json:"hasPassword"`
 	IsAdmin       bool   `json:"isAdmin"`
+	IsDisabled    bool   `json:"isDisabled"`
 	LastLoginDate string `json:"lastLoginDate,omitempty"`
 }
 
@@ -485,15 +486,17 @@ func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
 		id, _ := u["Id"].(string)
 		hasPass, _ := u["HasPassword"].(bool)
 		lastLogin, _ := u["LastLoginDate"].(string)
-		isAdmin := false
+		isAdmin, isDisabled := false, false
 		if policy, ok := u["Policy"].(map[string]any); ok {
 			isAdmin, _ = policy["IsAdministrator"].(bool)
+			isDisabled, _ = policy["IsDisabled"].(bool)
 		}
 		users = append(users, JellyfinUser{
 			ID:            id,
 			Name:          name,
 			HasPassword:   hasPass,
 			IsAdmin:       isAdmin,
+			IsDisabled:    isDisabled,
 			LastLoginDate: lastLogin,
 		})
 	}
@@ -569,6 +572,42 @@ func SetJellyfinUserPassword(s *ServiceClients, id, newPw string) error {
 		return fmt.Errorf("%s: %w", msg, err)
 	}
 	slog.Info("reset Jellyfin user password", "component", "jellyfin", "userId", id)
+	return nil
+}
+
+// SetJellyfinUserDisabled enables or disables a Jellyfin user account.
+// It GETs the full current policy, sets IsDisabled, then POSTs the entire
+// policy back — Jellyfin replaces the full policy on POST, so partial updates
+// would zero out other fields.
+func SetJellyfinUserDisabled(s *ServiceClients, id string, disabled bool) error {
+	if !validJellyfinID(id) {
+		return fmt.Errorf("invalid user ID format: %q", id)
+	}
+	token, err := jellyfinAuth(s)
+	if err != nil {
+		return fmt.Errorf("auth failed: %w", err)
+	}
+	userData, err := jellyfinGet(s, "/Users/"+id, token)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+	var user map[string]any
+	if err := json.Unmarshal(userData, &user); err != nil {
+		return fmt.Errorf("decode user: %w", err)
+	}
+	policy, _ := user["Policy"].(map[string]any)
+	if policy == nil {
+		policy = map[string]any{}
+	}
+	policy["IsDisabled"] = disabled
+	if _, err := jellyfinPost(s, "/Users/"+id+"/Policy", token, policy); err != nil {
+		return fmt.Errorf("post policy: %w", err)
+	}
+	action := "disabled"
+	if !disabled {
+		action = "enabled"
+	}
+	slog.Info("Jellyfin user account "+action, "component", "jellyfin", "userId", id)
 	return nil
 }
 
@@ -851,6 +890,44 @@ func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		handleUserPassword(w, r, id)
+		return
+	}
+
+	if strings.HasSuffix(tail, "/disable") {
+		id := strings.TrimSuffix(tail, "/disable")
+		if !validJellyfinID(id) {
+			httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := SetJellyfinUserDisabled(services, id, true); err != nil {
+			slog.Error("disable user failed", "component", "users", "userId", id, "error", err)
+			httputil.WriteError(w, "could not disable user", http.StatusBadGateway)
+			return
+		}
+		httputil.WriteJSON(w, map[string]string{"status": "ok"})
+		return
+	}
+
+	if strings.HasSuffix(tail, "/enable") {
+		id := strings.TrimSuffix(tail, "/enable")
+		if !validJellyfinID(id) {
+			httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := SetJellyfinUserDisabled(services, id, false); err != nil {
+			slog.Error("enable user failed", "component", "users", "userId", id, "error", err)
+			httputil.WriteError(w, "could not enable user", http.StatusBadGateway)
+			return
+		}
+		httputil.WriteJSON(w, map[string]string{"status": "ok"})
 		return
 	}
 
