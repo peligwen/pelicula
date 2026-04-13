@@ -48,6 +48,7 @@
                     <button type="submit" class="user-action-btn">Set</button>
                     <button type="button" class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>
                     </form>
+                    <span class="users-error hidden"></span>
                 </li>`.str;
             }).join('');
         } catch (e) {
@@ -85,12 +86,14 @@
             });
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                alert(data.error || 'Failed to reset password.');
+                const errEl = li.querySelector('.users-error');
+                if (errEl) { errEl.textContent = data.error || 'Failed to reset password.'; errEl.classList.remove('hidden'); }
                 return;
             }
             cancelResetPassword(btn);
         } catch (e) {
-            alert('Network error resetting password.');
+            const errEl = li.querySelector('.users-error');
+            if (errEl) { errEl.textContent = 'Network error resetting password.'; errEl.classList.remove('hidden'); }
         } finally {
             btn.disabled = false;
         }
@@ -125,7 +128,8 @@
             });
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                alert(data.error || 'Failed to delete ' + name + '.');
+                const errEl = li.querySelector('.users-error');
+                if (errEl) { errEl.textContent = data.error || 'Failed to delete ' + name + '.'; errEl.classList.remove('hidden'); }
                 btn.disabled = false;
                 btn.dataset.confirming = '';
                 btn.textContent = 'Delete';
@@ -134,7 +138,8 @@
             }
             loadUsers();
         } catch (e) {
-            alert('Network error deleting user.');
+            const errEl = li.querySelector('.users-error');
+            if (errEl) { errEl.textContent = 'Network error deleting user.'; errEl.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
@@ -241,13 +246,17 @@
             const resp = await fetch('/api/pelicula/requests/' + id + '/approve', {method: 'POST'});
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                alert('Approve failed: ' + (data.error || resp.status));
+                const li = btn ? btn.closest('li') : null;
+                const errEl = li ? li.querySelector('.users-error') : null;
+                if (errEl) { errEl.textContent = 'Approve failed: ' + (data.error || resp.status); errEl.classList.remove('hidden'); }
                 if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
                 return;
             }
             await loadRequests();
         } catch (e) {
-            alert('Network error');
+            const li = btn ? btn.closest('li') : null;
+            const errEl = li ? li.querySelector('.users-error') : null;
+            if (errEl) { errEl.textContent = 'Network error'; errEl.classList.remove('hidden'); }
             if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
         }
     }
@@ -311,6 +320,7 @@
                     ${raw(copyBtn)}${raw(revokeBtn)}
                     <button class="user-action-btn user-action-delete" onclick="deleteInvite(this)" title="Delete record">Delete</button>
                     </div>
+                    <span class="invite-error hidden" style="font-size:0.75rem;color:var(--danger,#ff6b8a);padding:0.2rem 0;display:block"></span>
                 </li>`.str;
             }).join('');
         } catch (e) {
@@ -339,13 +349,15 @@
             const resp = await fetch('/api/pelicula/invites/' + encodeURIComponent(token) + '/revoke', { method: 'POST' });
             if (!resp.ok) {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.error || 'Failed to revoke invite.');
+                const errEl2 = li.querySelector('.invite-error');
+                if (errEl2) { errEl2.textContent = d.error || 'Failed to revoke invite.'; errEl2.classList.remove('hidden'); }
                 btn.disabled = false;
                 return;
             }
             loadInvites();
         } catch (e) {
-            alert('Network error revoking invite.');
+            const errEl2 = li.querySelector('.invite-error');
+            if (errEl2) { errEl2.textContent = 'Network error revoking invite.'; errEl2.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
@@ -371,13 +383,15 @@
             const resp = await fetch('/api/pelicula/invites/' + encodeURIComponent(token), { method: 'DELETE' });
             if (!resp.ok) {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.error || 'Failed to delete invite.');
+                const errEl3 = li.querySelector('.invite-error');
+                if (errEl3) { errEl3.textContent = d.error || 'Failed to delete invite.'; errEl3.classList.remove('hidden'); }
                 btn.disabled = false;
                 return;
             }
             loadInvites();
         } catch (e) {
-            alert('Network error deleting invite.');
+            const errEl3 = li.querySelector('.invite-error');
+            if (errEl3) { errEl3.textContent = 'Network error deleting invite.'; errEl3.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
