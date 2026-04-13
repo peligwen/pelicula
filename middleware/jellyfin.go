@@ -493,7 +493,9 @@ func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
 		if policy, ok := u["Policy"].(map[string]any); ok {
 			isAdmin, _ = policy["IsAdministrator"].(bool)
 			isDisabled, _ = policy["IsDisabled"].(bool)
-			enableAll, _ = policy["EnableAllFolders"].(bool)
+			if v, ok := policy["EnableAllFolders"].(bool); ok {
+				enableAll = v
+			}
 			if raw, ok := policy["EnabledFolders"].([]any); ok {
 				for _, f := range raw {
 					if s, ok := f.(string); ok {
