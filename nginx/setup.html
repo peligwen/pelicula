@@ -174,8 +174,8 @@ function applySettingsMode() {
     document.getElementById('confirm-desc').textContent = 'Review your configuration changes. A restart is required for changes to take effect.';
     document.getElementById('btn-submit').textContent = 'Save Settings';
     document.getElementById('platform-badge').style.display = 'none';
-    // In settings mode, hide registration step and start at step 2 (storage)
-    // TODO: settings mode will be addressed separately — for now, this is setup-only
+    // Settings mode: registration step hidden, storage is step 1.
+    // Full settings UI lives in settings.js / the dashboard settings tab.
 }
 
 function prefillSettings(s) {
