@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -717,6 +718,57 @@ func TestDetectSubVariant(t *testing.T) {
 		got := detectSubVariant(c.file)
 		if got != c.want {
 			t.Errorf("detectSubVariant(%q) = %q, want %q", c.file, got, c.want)
+		}
+	}
+}
+
+// ── EmbeddedTrack struct ──────────────────────────────────────────────────────
+
+func TestEmbeddedTrackStruct(t *testing.T) {
+	// Verify the struct exists and JSON tags are correct
+	et := EmbeddedTrack{SubIndex: 2, Lang: "es", CodecName: "subrip"}
+	data, err := json.Marshal(et)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["sub_index"] != float64(2) {
+		t.Errorf("sub_index = %v, want 2", m["sub_index"])
+	}
+	if m["lang"] != "es" {
+		t.Errorf("lang = %v, want es", m["lang"])
+	}
+	if m["codec"] != "subrip" {
+		t.Errorf("codec = %v, want subrip", m["codec"])
+	}
+}
+
+func TestFilterTextEmbeddedTracks(t *testing.T) {
+	streams := []subStream{
+		{SubIndex: 0, Lang: "en", CodecName: "subrip"},
+		{SubIndex: 1, Lang: "es", CodecName: "ass"},
+		{SubIndex: 2, Lang: "ja", CodecName: "hdmv_pgs_subtitle"},
+		{SubIndex: 3, Lang: "fr", CodecName: "webvtt"},
+	}
+	got := filterTextEmbeddedTracks(streams)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 text tracks, got %d", len(got))
+	}
+	wantIndices := []int{0, 1, 3}
+	wantLangs := []string{"en", "es", "fr"}
+	wantCodecs := []string{"subrip", "ass", "webvtt"}
+	for i, et := range got {
+		if et.SubIndex != wantIndices[i] {
+			t.Errorf("[%d] SubIndex = %d, want %d", i, et.SubIndex, wantIndices[i])
+		}
+		if et.Lang != wantLangs[i] {
+			t.Errorf("[%d] Lang = %q, want %q", i, et.Lang, wantLangs[i])
+		}
+		if et.CodecName != wantCodecs[i] {
+			t.Errorf("[%d] CodecName = %q, want %q", i, et.CodecName, wantCodecs[i])
 		}
 	}
 }

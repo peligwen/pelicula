@@ -42,6 +42,29 @@ type DualSubSidecar struct {
 	Pair string `json:"pair"` // e.g. "en-es"
 }
 
+// EmbeddedTrack describes a text-based subtitle stream embedded in a media file.
+type EmbeddedTrack struct {
+	SubIndex  int    `json:"sub_index"` // ordinal among subtitle streams, for ffmpeg -map 0:s:N
+	Lang      string `json:"lang"`      // normalized 2-letter code
+	CodecName string `json:"codec"`     // e.g. "subrip", "ass"
+}
+
+// filterTextEmbeddedTracks returns only the text-based subtitle streams from
+// the given list, converted to EmbeddedTrack for JSON serialization.
+func filterTextEmbeddedTracks(streams []subStream) []EmbeddedTrack {
+	var tracks []EmbeddedTrack
+	for _, s := range streams {
+		if isTextSubCodec(s.CodecName) {
+			tracks = append(tracks, EmbeddedTrack{
+				SubIndex:  s.SubIndex,
+				Lang:      s.Lang,
+				CodecName: s.CodecName,
+			})
+		}
+	}
+	return tracks
+}
+
 // dualsubSidecarsForPath returns all dual-sub ASS sidecars alongside mediaPath
 // (those matching base.<lang>-<lang>.ass).
 func dualsubSidecarsForPath(mediaPath string) []DualSubSidecar {
