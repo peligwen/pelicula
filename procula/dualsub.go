@@ -36,6 +36,36 @@ type SubtitleTrack struct {
 	Variant string `json:"variant"` // "regular" | "hi" | "forced"
 }
 
+// DualSubSidecar describes an existing dual-subtitle ASS file alongside a media item.
+type DualSubSidecar struct {
+	File string `json:"file"` // full path, e.g. /movies/Foo/Foo.en-es.ass
+	Pair string `json:"pair"` // e.g. "en-es"
+}
+
+// dualsubSidecarsForPath returns all dual-sub ASS sidecars alongside mediaPath
+// (those matching base.<lang>-<lang>.ass).
+func dualsubSidecarsForPath(mediaPath string) []DualSubSidecar {
+	dir := filepath.Dir(mediaPath)
+	base := strings.TrimSuffix(filepath.Base(mediaPath), filepath.Ext(mediaPath))
+	entries, _ := os.ReadDir(dir)
+	var sidecars []DualSubSidecar
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, base+".") || !strings.HasSuffix(name, ".ass") {
+			continue
+		}
+		inner := name[len(base)+1 : len(name)-4] // strip "base." and ".ass"
+		if !strings.ContainsRune(inner, '-') {
+			continue
+		}
+		sidecars = append(sidecars, DualSubSidecar{
+			File: filepath.Join(dir, name),
+			Pair: inner,
+		})
+	}
+	return sidecars
+}
+
 // subtitleTracksForPath returns all subtitle sidecar files alongside mediaPath.
 // Detects lang and variant from filename conventions:
 //

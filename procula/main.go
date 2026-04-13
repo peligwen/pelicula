@@ -647,7 +647,11 @@ func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
 	if tracks == nil {
 		tracks = []SubtitleTrack{}
 	}
-	writeJSON(w, map[string]any{"tracks": tracks})
+	dualsubs := dualsubSidecarsForPath(clean)
+	if dualsubs == nil {
+		dualsubs = []DualSubSidecar{}
+	}
+	writeJSON(w, map[string]any{"tracks": tracks, "dualsubs": dualsubs})
 }
 
 // isLibraryPath returns true only for paths under /movies or /tv.
