@@ -480,6 +480,91 @@ component('catalog', function (el, store, _props) {
         }
     }
 
+    async function openMissingDetail(item) {
+        const isSeries = Array.isArray(item.seasons);
+        const arrType = isSeries ? 'sonarr' : 'radarr';
+        const backdrop = document.getElementById('cat-drawer-backdrop');
+        const drawer = document.getElementById('cat-drawer');
+        const titleEl = document.getElementById('cat-drawer-title');
+        const sub = document.getElementById('cat-drawer-sub');
+        const body = document.getElementById('cat-drawer-body');
+        if (!drawer) return;
+        PeliculaFW.openDrawer(drawer, backdrop);
+        titleEl.textContent = item.title || '(untitled)';
+        titleEl.title = item.title || '';
+        sub.textContent = item.monitored ? 'Monitored \u2014 not downloaded' : 'Not monitored';
+        sub.title = '';
+        setHTML(body, html`<div style="color:var(--muted);padding:1rem 0">Loading\u2026</div>`);
+
+        // Fetch and cache quality profiles
+        let profilesData = store.get('catalog.qualityProfiles');
+        if (!profilesData) {
+            try {
+                const res = await catFetch('/api/pelicula/catalog/qualityprofiles');
+                if (res.ok) {
+                    profilesData = await res.json();
+                    store.set('catalog.qualityProfiles', profilesData);
+                }
+            } catch (e) { /* non-critical — will show profile ID instead of name */ }
+        }
+
+        setHTML(body, renderMissingDetailHtml(item, arrType, profilesData));
+    }
+
+    function renderMissingDetailHtml(item, arrType, profilesData) {
+        const isSeries = Array.isArray(item.seasons);
+        const stats = item.statistics || {};
+        const profileId = item.qualityProfileId;
+        const profileMap = profilesData && profilesData[arrType] ? profilesData[arrType] : {};
+        const profileName = profileId
+            ? (profileMap[String(profileId)] || 'Profile #' + profileId)
+            : '\u2014';
+
+        const parts = [];
+
+        // Poster image (Radarr/Sonarr both return images array with coverType)
+        const poster = (item.images || []).find(img => img.coverType === 'poster');
+        if (poster) {
+            parts.push(html`<div class="cat-drawer-hero">
+                <img class="cat-drawer-poster" src="${poster.remoteUrl || poster.url || ''}" alt="" loading="lazy">
+            </div>`);
+        }
+
+        // Overview / synopsis
+        if (item.overview) {
+            parts.push(html`<div class="cat-drawer-synopsis">${item.overview}</div>`);
+        }
+
+        parts.push(html`<div class="drawer-section-title">Status</div>`);
+        parts.push(html`<div>
+            <span class="cat-pill">${item.monitored ? 'monitored' : 'unmonitored'}</span>
+            <span class="cat-pill">${isSeries ? 'series' : 'movie'}</span>
+            ${item.status ? html`<span class="cat-pill">${item.status}</span>` : raw('')}
+            ${item.network ? html`<span class="cat-pill">${item.network}</span>` : raw('')}
+        </div>`);
+
+        parts.push(html`<div class="drawer-section-title">Quality Profile</div>`);
+        parts.push(html`<div><span class="cat-pill cat-pill-encoding">${profileName}</span></div>`);
+
+        if (isSeries) {
+            const downloaded = stats.episodeFileCount || 0;
+            const total = stats.totalEpisodeCount || 0;
+            const monitored = stats.monitoredEpisodeCount || 0;
+            parts.push(html`<div class="drawer-section-title">Episodes</div>`);
+            parts.push(html`<div>
+                <span class="cat-pill">${downloaded}/${total} downloaded</span>
+                <span class="cat-pill">${monitored} monitored</span>
+            </div>`);
+        }
+
+        if (Array.isArray(item.genres) && item.genres.length) {
+            parts.push(html`<div class="drawer-section-title">Genres</div>`);
+            parts.push(html`<div>${item.genres.map(g => html`<span class="cat-pill">${g}</span>`)}</div>`);
+        }
+
+        return html`<div>${parts}</div>`;
+    }
+
     function renderDetailHtml(data, mediaInfo, dualsubs) {
         dualsubs = dualsubs || [];
         const job = data.job || {};
