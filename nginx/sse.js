@@ -67,6 +67,15 @@
         source.addEventListener('storage', function() {
             if (window.checkStorage) window.checkStorage();
         });
+
+        // logs event: {entries: [{service, line, ts},...]} — interleaved across services,
+        // newest first. renderLogsFromSSE is exported by logs.js.
+        source.addEventListener('logs', function(e) {
+            try {
+                var data = JSON.parse(e.data);
+                if (window.renderLogsFromSSE) window.renderLogsFromSSE(data);
+            } catch(err) { console.warn('[sse] logs parse error', err); }
+        });
     }
 
     function disablePollers() {
