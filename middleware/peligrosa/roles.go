@@ -92,3 +92,10 @@ func (rs *RolesStore) All() []RolesEntry {
 	}
 	return result
 }
+
+// Delete removes the role entry for jellyfinID. No-ops silently if the ID is
+// not in the table.
+func (rs *RolesStore) Delete(jellyfinID string) error {
+	_, err := rs.db.Exec(`DELETE FROM roles WHERE jellyfin_id = ?`, jellyfinID)
+	return err
+}
