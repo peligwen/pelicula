@@ -273,14 +273,21 @@ func wireJellyfin(s *ServiceClients) {
 	// Set the service user's preferred audio language so Jellyfin defaults to
 	// the right track on playback (handles multi-audio files like Silo where
 	// the first track is a foreign language but English is also present).
-	svcUserData, err := jellyfinGet(s, "/Users/Me", token)
-	if err != nil {
-		slog.Warn("could not fetch service user for audio pref", "component", "autowire", "error", err)
+	// Use GET /Users (list all users) rather than /Users/Me — the token at this
+	// point is an API key, not a session token, and /Users/Me returns 400 without
+	// a valid session token on Jellyfin 10.9+.
+	if usersData, err := jellyfinGet(s, "/Users", token); err != nil {
+		slog.Warn("could not fetch users for audio pref", "component", "autowire", "error", err)
 	} else {
-		var svcUser map[string]any
-		if jsonErr := json.Unmarshal(svcUserData, &svcUser); jsonErr == nil {
-			if svcUserID, _ := svcUser["Id"].(string); svcUserID != "" {
-				setJellyfinAudioPref(s, token, svcUserID)
+		var users []map[string]any
+		if jsonErr := json.Unmarshal(usersData, &users); jsonErr == nil {
+			for _, u := range users {
+				if name, _ := u["Name"].(string); name == jellyfinServiceUser {
+					if svcUserID, _ := u["Id"].(string); svcUserID != "" {
+						setJellyfinAudioPref(s, token, svcUserID)
+					}
+					break
+				}
 			}
 		}
 	}
