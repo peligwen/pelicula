@@ -118,6 +118,14 @@ func registerBuiltinActions() {
 		Description: "Generate dual-language ASS subtitle sidecars with a chosen profile and track pair.",
 		Handler:     runDualSubAction,
 	})
+	Register(&ActionDef{
+		Name:        "replace",
+		Label:       "Replace\u2026",
+		AppliesTo:   []string{"movie", "episode"},
+		Sync:        true,
+		Description: "Delete this file, blocklist the release in Sonarr/Radarr, and trigger a fresh search.",
+		Handler:     runReplaceAction,
+	})
 }
 
 func arrTypeFromPath(p string) string {
