@@ -65,12 +65,16 @@ func dockerRestart(name string) error {
 // dockerLogs fetches the last tail lines of stdout+stderr for a container.
 // Docker multiplexes streams using an 8-byte framing header when the container
 // has no TTY (our case); we strip those headers and return raw log bytes.
-func dockerLogs(name string, tail int) ([]byte, error) {
+func dockerLogs(name string, tail int, timestamps bool) ([]byte, error) {
 	if tail <= 0 || tail > 500 {
 		tail = 200
 	}
-	url := fmt.Sprintf("%s/containers/%s/logs?stdout=1&stderr=1&tail=%d&timestamps=0",
-		dockerHost(), name, tail)
+	tsParam := "0"
+	if timestamps {
+		tsParam = "1"
+	}
+	url := fmt.Sprintf("%s/containers/%s/logs?stdout=1&stderr=1&tail=%d&timestamps=%s",
+		dockerHost(), name, tail, tsParam)
 	resp, err := dockerClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("docker logs %s: %w (is the Docker socket proxy reachable?)", name, err)

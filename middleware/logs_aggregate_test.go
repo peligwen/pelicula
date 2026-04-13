@@ -10,7 +10,7 @@ import (
 
 func TestHandleLogsAggregateFansOut(t *testing.T) {
 	origFetch := dockerLogsFunc
-	dockerLogsFunc = func(name string, tail int) ([]byte, error) {
+	dockerLogsFunc = func(name string, tail int, ts bool) ([]byte, error) {
 		switch name {
 		case "sonarr":
 			return []byte("sonarr line 1\nsonarr line 2\n"), nil

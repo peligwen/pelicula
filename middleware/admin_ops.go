@@ -166,7 +166,7 @@ func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 			tail = n
 		}
 	}
-	logs, err := dockerLogs(svc, tail)
+	logs, err := dockerLogs(svc, tail, false)
 	if err != nil {
 		slog.Warn("logs failed", "component", "admin_ops", "svc", svc, "error", err)
 		httputil.WriteError(w, "logs unavailable: "+err.Error(), http.StatusBadGateway)
