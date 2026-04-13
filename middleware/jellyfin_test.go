@@ -809,6 +809,70 @@ func TestSetJellyfinUserDisabled(t *testing.T) {
 	}
 }
 
+// ── SetJellyfinUserLibraryAccess ──────────────────────────────────────────────
+
+func TestSetJellyfinUserLibraryAccess(t *testing.T) {
+	const uid = "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21"
+	const moviesID = "folder-movies-id-0000000000000000"
+	const tvID = "folder-tv-id-000000000000000000"
+	var postedBody []byte
+
+	newFakeJellyfin(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/"+uid, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"` + uid + `","Name":"alice","Policy":{"IsAdministrator":false,"IsDisabled":false,"EnableAllFolders":true,"EnabledFolders":[]}}`))
+		})
+		mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[{"Name":"Movies","ItemId":"` + moviesID + `"},{"Name":"TV Shows","ItemId":"` + tvID + `"}]`))
+		})
+		mux.HandleFunc("/Users/"+uid+"/Policy", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var err error
+			postedBody, err = io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read body", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+	resetServices(t)
+
+	// movies=true, tv=false → should restrict to Movies folder only
+	if err := SetJellyfinUserLibraryAccess(services, uid, true, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if postedBody == nil {
+		t.Fatal("no POST body recorded for /Policy")
+	}
+	var policy map[string]any
+	if err := json.Unmarshal(postedBody, &policy); err != nil {
+		t.Fatalf("invalid JSON in POST body: %v", err)
+	}
+	if enableAll, _ := policy["EnableAllFolders"].(bool); enableAll {
+		t.Errorf("policy[EnableAllFolders] = true, want false for partial access")
+	}
+	folders, _ := policy["EnabledFolders"].([]any)
+	if len(folders) != 1 {
+		t.Fatalf("EnabledFolders length = %d, want 1; full body: %s", len(folders), postedBody)
+	}
+	if folders[0].(string) != moviesID {
+		t.Errorf("EnabledFolders[0] = %q, want %q", folders[0], moviesID)
+	}
+}
+
 // ── handleUsersWithID routing ─────────────────────────────────────────────────
 
 func TestHandleUsersWithID_ForeignOrigin(t *testing.T) {
