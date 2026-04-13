@@ -138,6 +138,8 @@ func (p *SSEPoller) TriggerImmediate(ctx context.Context, eventType string) {
 		fn = wrapFetch(p.fetchStorage)
 	case "notifications":
 		fn = wrapFetch(p.fetchNotifications)
+	case "logs":
+		fn = wrapFetch(p.fetchLogs)
 	default:
 		slog.Warn("sse poller: unknown event type for TriggerImmediate", "component", "sse_poller", "event", eventType)
 		return
