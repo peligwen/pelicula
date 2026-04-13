@@ -125,11 +125,16 @@ window.renderLogsFromSSE = function(data) {
 
 PeliculaFW.onTab('logs', function () {
     renderFilters();
-    // If SSE is already connected, the next push will populate the view.
-    // Only do an initial fetch if SSE is not available.
-    if (!window.sseIsActive || !window.sseIsActive()) {
-        loadLogs();
+    if (window.sseIsActive && window.sseIsActive()) {
+        // SSE is active — render from cache immediately if we have it,
+        // otherwise fall through to a one-time fetch so the tab isn't blank.
+        if (logsState.lastEntries.length > 0) {
+            const out = document.getElementById('logs-stream');
+            if (out) renderLogs(out, logsState.lastEntries);
+            return;
+        }
     }
+    loadLogs();
 });
 
 })();
