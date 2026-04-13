@@ -935,11 +935,43 @@ component('catalog', function (el, store, _props) {
             return;
         }
         _dualsubDualsubs.forEach(ds => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:.4rem;margin-bottom:.25rem';
+
             const chip = document.createElement('span');
             chip.className = 'cat-pill cat-pill-subs';
             chip.textContent = ds.pair;
             chip.title = ds.file;
-            container.appendChild(chip);
+
+            const del = document.createElement('button');
+            del.textContent = '\u00d7';
+            del.title = 'Delete sidecar (so it can be re-rendered)';
+            del.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:.95rem;padding:0 .15rem;line-height:1';
+            del.onclick = async () => {
+                del.disabled = true;
+                try {
+                    const res = await catFetch('/api/procula/dualsub-sidecars', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ file: ds.file }),
+                    });
+                    if (res.ok) {
+                        _dualsubDualsubs = _dualsubDualsubs.filter(x => x.file !== ds.file);
+                        dualsubRenderOnDisk();
+                    } else {
+                        const d = await res.json().catch(() => ({}));
+                        document.getElementById('dualsub-status').textContent = d.error || 'Delete failed';
+                        del.disabled = false;
+                    }
+                } catch {
+                    document.getElementById('dualsub-status').textContent = 'Request failed';
+                    del.disabled = false;
+                }
+            };
+
+            row.appendChild(chip);
+            row.appendChild(del);
+            container.appendChild(row);
         });
     }
 

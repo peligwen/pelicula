@@ -45,9 +45,10 @@ func requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 
 // Server holds the dependencies for HTTP handlers.
 type Server struct {
-	queue     *Queue
-	db        *sql.DB
-	configDir string
+	queue       *Queue
+	db          *sql.DB
+	configDir   string
+	peliculaAPI string
 }
 
 func main() {
@@ -93,7 +94,7 @@ func main() {
 	go RunStorageMonitor(configDir)
 	go RunUpdateChecker(configDir)
 
-	srv := &Server{queue: q, db: db, configDir: configDir}
+	srv := &Server{queue: q, db: db, configDir: configDir, peliculaAPI: peliculaAPI}
 
 	mux := http.NewServeMux()
 
@@ -119,6 +120,7 @@ func main() {
 	mux.HandleFunc("PUT /api/procula/dualsub-profiles/{name}", requireAPIKey(srv.handleSaveDualSubProfile))
 	mux.HandleFunc("DELETE /api/procula/dualsub-profiles/{name}", requireAPIKey(srv.handleDeleteDualSubProfile))
 	mux.HandleFunc("GET /api/procula/subtitle-tracks", srv.handleSubtitleTracks)
+	mux.HandleFunc("DELETE /api/procula/dualsub-sidecars", requireAPIKey(srv.handleDeleteDualSubSidecar))
 	mux.HandleFunc("POST /api/procula/subtitles/search", requireAPIKey(srv.handleSubSearch))
 	mux.HandleFunc("POST /api/procula/transcode", requireAPIKey(srv.handleManualTranscode))
 	mux.HandleFunc("GET /api/procula/events", srv.handleListEvents)
@@ -618,9 +620,8 @@ func (s *Server) handleDeleteBlockedRelease(w http.ResponseWriter, r *http.Reque
 
 	if blocklistID > 0 {
 		// Best-effort: remove from *arr blocklist via middleware.
-		peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
 		req, _ := http.NewRequest(http.MethodDelete,
-			fmt.Sprintf("%s/api/pelicula/catalog/blocklist/%d", peliculaAPI, blocklistID),
+			fmt.Sprintf("%s/api/pelicula/catalog/blocklist/%d", s.peliculaAPI, blocklistID),
 			nil)
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
@@ -723,6 +724,38 @@ func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
 		"dualsubs":        dualsubs,
 		"embedded_tracks": embedded,
 	})
+}
+
+// handleDeleteDualSubSidecar removes a single dual-sub ASS sidecar file.
+// The caller passes the exact sidecar file path (from the dualsubs list returned
+// by handleSubtitleTracks). Only paths under /movies or /tv are accepted.
+func (s *Server) handleDeleteDualSubSidecar(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		File string `json:"file"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.File == "" {
+		writeError(w, "file is required", http.StatusBadRequest)
+		return
+	}
+	clean := filepath.Clean(body.File)
+	if !isLibraryPath(clean) {
+		writeError(w, "path must be under /movies or /tv", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasSuffix(clean, ".ass") {
+		writeError(w, "file must be an .ass file", http.StatusBadRequest)
+		return
+	}
+	if err := os.Remove(clean); err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, "file not found", http.StatusNotFound)
+			return
+		}
+		writeError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slog.Info("deleted dual-sub sidecar", "component", "dualsub", "file", clean)
+	writeJSON(w, map[string]any{"deleted": clean})
 }
 
 // isLibraryPath returns true only for paths under /movies or /tv.
