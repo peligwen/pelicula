@@ -333,6 +333,7 @@ services:
       - ./nginx/register.html:/usr/share/nginx/html/register.html:ro
       - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
       - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
+      - ./nginx/sse.js:/usr/share/nginx/html/sse.js:ro
       - ./nginx/fonts:/usr/share/nginx/html/fonts:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
       - ${CONFIG_DIR}/nginx/remote.conf:/etc/nginx/conf.d/remote.conf:ro
