@@ -37,17 +37,31 @@
                     ? new Date(u.lastLoginDate).toLocaleDateString()
                     : 'never';
                 const adminBadge = u.isAdmin ? html`<span class="user-admin-badge">admin</span>`.str : '';
+                const disabledBadge = u.isDisabled
+                    ? '<span class="user-admin-badge" style="background:var(--danger-dim,#3a1a2a);color:var(--danger,#ff6b8a)">disabled</span>'
+                    : '';
+                const disableBtn = `<button class="user-action-btn" onclick="toggleDisableUser(this)" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`;
+                const moviesOn = u.enableAllFolders || false;
+                const tvOn     = u.enableAllFolders || false;
+                // TODO: when enableAllFolders is false, check u.enabledFolders to
+                // pre-tick the correct boxes. Requires the frontend to know the Movies/
+                // TV Shows folder IDs (not returned by the API yet). For now, partial
+                // access shows both unchecked; saving applies the chosen coarse access.
+                const libraryRow = `<div class="user-library-row" style="font-size:0.8rem;padding:0.25rem 0;display:flex;gap:1rem;align-items:center"><label><input type="checkbox" class="user-lib-movies"${moviesOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> Movies</label><label><input type="checkbox" class="user-lib-tv"${tvOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> TV Shows</label></div>`;
                 return html`<li data-user-id="${u.id}" data-user-name="${u.name}">
-                    <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
+                    <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}${raw(disabledBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
                     <div class="user-actions">
                     <button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>
+                    ${raw(disableBtn)}
                     <button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>
                     </div>
+                    ${raw(libraryRow)}
                     <form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">
                     <input type="password" class="user-reset-input" placeholder="New password" autocomplete="new-password">
                     <button type="submit" class="user-action-btn">Set</button>
                     <button type="button" class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>
                     </form>
+                    <span class="users-error hidden"></span>
                 </li>`.str;
             }).join('');
         } catch (e) {
@@ -85,12 +99,14 @@
             });
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                alert(data.error || 'Failed to reset password.');
+                const errEl = li.querySelector('.users-error');
+                if (errEl) { errEl.textContent = data.error || 'Failed to reset password.'; errEl.classList.remove('hidden'); }
                 return;
             }
             cancelResetPassword(btn);
         } catch (e) {
-            alert('Network error resetting password.');
+            const errEl = li.querySelector('.users-error');
+            if (errEl) { errEl.textContent = 'Network error resetting password.'; errEl.classList.remove('hidden'); }
         } finally {
             btn.disabled = false;
         }
@@ -125,7 +141,8 @@
             });
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                alert(data.error || 'Failed to delete ' + name + '.');
+                const errEl = li.querySelector('.users-error');
+                if (errEl) { errEl.textContent = data.error || 'Failed to delete ' + name + '.'; errEl.classList.remove('hidden'); }
                 btn.disabled = false;
                 btn.dataset.confirming = '';
                 btn.textContent = 'Delete';
@@ -134,7 +151,53 @@
             }
             loadUsers();
         } catch (e) {
-            alert('Network error deleting user.');
+            const errEl = li.querySelector('.users-error');
+            if (errEl) { errEl.textContent = 'Network error deleting user.'; errEl.classList.remove('hidden'); }
+            btn.disabled = false;
+        }
+    }
+
+    async function saveLibraryAccess(checkbox) {
+        const li    = checkbox.closest('li');
+        const id    = li.dataset.userId;
+        const movies = li.querySelector('.user-lib-movies').checked;
+        const tv     = li.querySelector('.user-lib-tv').checked;
+        const errEl  = li.querySelector('.users-error');
+        if (errEl) errEl.classList.add('hidden');
+        try {
+            const resp = await fetch('/api/pelicula/users/' + encodeURIComponent(id) + '/library', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ movies, tv }),
+            });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                if (errEl) { errEl.textContent = data.error || 'Failed to update library access.'; errEl.classList.remove('hidden'); }
+            }
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
+    async function toggleDisableUser(btn) {
+        const li        = btn.closest('li');
+        const id        = li.dataset.userId;
+        const isDisabled = btn.dataset.disabled === 'true';
+        const action    = isDisabled ? 'enable' : 'disable';
+        const errEl     = li.querySelector('.users-error');
+        if (errEl) errEl.classList.add('hidden');
+        btn.disabled = true;
+        try {
+            const resp = await fetch('/api/pelicula/users/' + encodeURIComponent(id) + '/' + action, { method: 'POST' });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                if (errEl) { errEl.textContent = data.error || 'Failed to ' + action + ' user.'; errEl.classList.remove('hidden'); }
+                btn.disabled = false;
+                return;
+            }
+            loadUsers();
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
@@ -241,13 +304,17 @@
             const resp = await fetch('/api/pelicula/requests/' + id + '/approve', {method: 'POST'});
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                alert('Approve failed: ' + (data.error || resp.status));
+                const li = btn ? btn.closest('li') : null;
+                const errEl = li ? li.querySelector('.users-error') : null;
+                if (errEl) { errEl.textContent = 'Approve failed: ' + (data.error || resp.status); errEl.classList.remove('hidden'); }
                 if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
                 return;
             }
             await loadRequests();
         } catch (e) {
-            alert('Network error');
+            const li = btn ? btn.closest('li') : null;
+            const errEl = li ? li.querySelector('.users-error') : null;
+            if (errEl) { errEl.textContent = 'Network error'; errEl.classList.remove('hidden'); }
             if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
         }
     }
@@ -311,6 +378,7 @@
                     ${raw(copyBtn)}${raw(revokeBtn)}
                     <button class="user-action-btn user-action-delete" onclick="deleteInvite(this)" title="Delete record">Delete</button>
                     </div>
+                    <span class="invite-error hidden" style="font-size:0.75rem;color:var(--danger,#ff6b8a);padding:0.2rem 0;display:block"></span>
                 </li>`.str;
             }).join('');
         } catch (e) {
@@ -339,13 +407,15 @@
             const resp = await fetch('/api/pelicula/invites/' + encodeURIComponent(token) + '/revoke', { method: 'POST' });
             if (!resp.ok) {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.error || 'Failed to revoke invite.');
+                const errEl2 = li.querySelector('.invite-error');
+                if (errEl2) { errEl2.textContent = d.error || 'Failed to revoke invite.'; errEl2.classList.remove('hidden'); }
                 btn.disabled = false;
                 return;
             }
             loadInvites();
         } catch (e) {
-            alert('Network error revoking invite.');
+            const errEl2 = li.querySelector('.invite-error');
+            if (errEl2) { errEl2.textContent = 'Network error revoking invite.'; errEl2.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
@@ -371,13 +441,15 @@
             const resp = await fetch('/api/pelicula/invites/' + encodeURIComponent(token), { method: 'DELETE' });
             if (!resp.ok) {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.error || 'Failed to delete invite.');
+                const errEl3 = li.querySelector('.invite-error');
+                if (errEl3) { errEl3.textContent = d.error || 'Failed to delete invite.'; errEl3.classList.remove('hidden'); }
                 btn.disabled = false;
                 return;
             }
             loadInvites();
         } catch (e) {
-            alert('Network error deleting invite.');
+            const errEl3 = li.querySelector('.invite-error');
+            if (errEl3) { errEl3.textContent = 'Network error deleting invite.'; errEl3.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
@@ -533,11 +605,142 @@
         };
     });
 
+    async function loadOperators() {
+        const list   = document.getElementById('operators-list');
+        const empty  = document.getElementById('operators-empty');
+        const errEl  = document.getElementById('operators-error');
+        if (!list) return;
+        try {
+            const [usersResp, rolesResp] = await Promise.all([
+                fetch('/api/pelicula/users'),
+                fetch('/api/pelicula/operators'),
+            ]);
+            if (!usersResp.ok || !rolesResp.ok) {
+                if (errEl) { errEl.textContent = 'Failed to load operators.'; errEl.classList.remove('hidden'); }
+                return;
+            }
+            const users = await usersResp.json();
+            const roles = await rolesResp.json();
+            const roleMap = {};
+            (roles || []).forEach(r => { roleMap[r.jellyfin_id] = r.role; });
+
+            if (!users || users.length === 0) {
+                if (empty) empty.classList.remove('hidden');
+                list.replaceChildren();
+                return;
+            }
+            if (empty) empty.classList.add('hidden');
+
+            const frag = document.createDocumentFragment();
+            users.forEach(u => {
+                const li = document.createElement('li');
+                li.dataset.userId   = u.id;
+                li.dataset.userName = u.name;
+                li.className = 'users-list-item';
+
+                const info = document.createElement('div');
+                info.className = 'user-info';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'user-name';
+                nameSpan.textContent = u.name;
+                info.appendChild(nameSpan);
+
+                const actions = document.createElement('div');
+                actions.className = 'user-actions';
+                actions.style.gap = '0.5rem';
+
+                const select = document.createElement('select');
+                select.className = 'operator-role-select';
+                const currentRole = roleMap[u.id] || '';
+                [['', '\u2014 no access \u2014'], ['viewer', 'viewer'], ['manager', 'manager'], ['admin', 'admin']].forEach(([val, label]) => {
+                    const opt = document.createElement('option');
+                    opt.value = val;
+                    opt.textContent = label;
+                    if (currentRole === val) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                select.addEventListener('change', () => setOperatorRole(select));
+                actions.appendChild(select);
+
+                if (currentRole) {
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'user-action-btn user-action-delete';
+                    removeBtn.title = 'Remove role';
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.addEventListener('click', () => removeOperator(removeBtn));
+                    actions.appendChild(removeBtn);
+                }
+
+                const errSpan = document.createElement('span');
+                errSpan.className = 'users-error hidden';
+
+                li.appendChild(info);
+                li.appendChild(actions);
+                li.appendChild(errSpan);
+                frag.appendChild(li);
+            });
+            list.replaceChildren(frag);
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error loading operators.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
+    async function setOperatorRole(select) {
+        const li    = select.closest('li');
+        const id    = li.dataset.userId;
+        const name  = li.dataset.userName;
+        const role  = select.value;
+        const errEl = li.querySelector('.users-error');
+        if (errEl) errEl.classList.add('hidden');
+        if (!role) {
+            await doRemoveOperator(id, name, li);
+            return;
+        }
+        try {
+            const resp = await fetch('/api/pelicula/operators/' + encodeURIComponent(id), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role, username: name }),
+            });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                if (errEl) { errEl.textContent = data.error || 'Failed to set role.'; errEl.classList.remove('hidden'); }
+                return;
+            }
+            loadOperators();
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
+    async function removeOperator(btn) {
+        const li = btn.closest('li');
+        await doRemoveOperator(li.dataset.userId, li.dataset.userName, li);
+    }
+
+    async function doRemoveOperator(id, name, li) {
+        const errEl = li ? li.querySelector('.users-error') : null;
+        try {
+            const resp = await fetch('/api/pelicula/operators/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (resp.ok || resp.status === 204) {
+                loadOperators();
+                return;
+            }
+            const data = await resp.json().catch(() => ({}));
+            if (errEl) { errEl.textContent = data.error || 'Failed to remove role for ' + name + '.'; errEl.classList.remove('hidden'); }
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
     // ── Window exports (for onclick handlers and cross-file access) ───────────
     window.loadUsers             = loadUsers;
     window.loadSessions          = loadSessions;
     window.loadRequests          = loadRequests;
     window.loadInvites           = loadInvites;
+    window.loadOperators         = loadOperators;
+    window.setOperatorRole       = setOperatorRole;
+    window.removeOperator        = removeOperator;
     // loadArrMeta + saveRequestsSettings exported by settings.js (canonical owner)
     window.approveRequest        = approveRequest;
     window.denyRequest           = denyRequest;
@@ -545,6 +748,8 @@
     window.cancelResetPassword   = cancelResetPassword;
     window.submitResetPassword   = submitResetPassword;
     window.startDeleteUser       = startDeleteUser;
+    window.toggleDisableUser     = toggleDisableUser;
+    window.saveLibraryAccess     = saveLibraryAccess;
     window.openInviteModal       = openInviteModal;
     window.closeInviteModal      = closeInviteModal;
     window.submitCreateInvite    = submitCreateInvite;

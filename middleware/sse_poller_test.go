@@ -193,6 +193,50 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 	}
 }
 
+func TestFetchLogsTimestampedAndSorted(t *testing.T) {
+	orig := dockerLogsFunc
+	dockerLogsFunc = func(name string, tail int, ts bool) ([]byte, error) {
+		if !ts {
+			t.Errorf("fetchLogs should pass timestamps=true, got false for %q", name)
+		}
+		switch name {
+		case "sonarr":
+			return []byte("2024-01-15T12:34:06.000000000Z sonarr newer\n2024-01-15T12:34:04.000000000Z sonarr older\n"), nil
+		case "radarr":
+			return []byte("2024-01-15T12:34:05.000000000Z radarr middle\n"), nil
+		}
+		return []byte{}, nil
+	}
+	t.Cleanup(func() { dockerLogsFunc = orig })
+
+	// Temporarily restrict allowedContainers to avoid needing all services
+	origAC := allowedContainers
+	allowedContainers = map[string]bool{"sonarr": true, "radarr": true}
+	t.Cleanup(func() { allowedContainers = origAC })
+
+	p := &SSEPoller{hub: NewSSEHub(), hashes: make(map[string][32]byte)}
+	data, err := p.fetchLogs(context.Background())
+	if err != nil {
+		t.Fatalf("fetchLogs error: %v", err)
+	}
+	var resp struct {
+		Entries []LogEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Entries) != 3 {
+		t.Fatalf("want 3 entries, got %d", len(resp.Entries))
+	}
+	// Newest first: sonarr newer (T+6) > radarr middle (T+5) > sonarr older (T+4)
+	if resp.Entries[0].Line != "sonarr newer" {
+		t.Errorf("first entry: got %q, want %q", resp.Entries[0].Line, "sonarr newer")
+	}
+	if resp.Entries[1].Line != "radarr middle" {
+		t.Errorf("second entry: got %q, want %q", resp.Entries[1].Line, "radarr middle")
+	}
+}
+
 // TestSSEPollerUnknownEventType verifies that TriggerImmediate with an
 // unrecognized event type does not panic and sends nothing.
 func TestSSEPollerUnknownEventType(t *testing.T) {

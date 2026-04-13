@@ -445,11 +445,14 @@ func wireJellyfinLibrary(s *ServiceClients, token, name, collectionType, path st
 
 // JellyfinUser is a minimal representation of a Jellyfin user for the dashboard.
 type JellyfinUser struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	HasPassword   bool   `json:"hasPassword"`
-	IsAdmin       bool   `json:"isAdmin"`
-	LastLoginDate string `json:"lastLoginDate,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	HasPassword      bool     `json:"hasPassword"`
+	IsAdmin          bool     `json:"isAdmin"`
+	IsDisabled       bool     `json:"isDisabled"`
+	EnableAllFolders bool     `json:"enableAllFolders"`
+	EnabledFolders   []string `json:"enabledFolders,omitempty"`
+	LastLoginDate    string   `json:"lastLoginDate,omitempty"`
 }
 
 // JellyfinSession is an active or recent Jellyfin session, for the now-playing card.
@@ -485,16 +488,31 @@ func ListJellyfinUsers(s *ServiceClients) ([]JellyfinUser, error) {
 		id, _ := u["Id"].(string)
 		hasPass, _ := u["HasPassword"].(bool)
 		lastLogin, _ := u["LastLoginDate"].(string)
-		isAdmin := false
+		isAdmin, isDisabled, enableAll := false, false, true
+		var enabledFolders []string
 		if policy, ok := u["Policy"].(map[string]any); ok {
 			isAdmin, _ = policy["IsAdministrator"].(bool)
+			isDisabled, _ = policy["IsDisabled"].(bool)
+			if v, ok := policy["EnableAllFolders"].(bool); ok {
+				enableAll = v
+			}
+			if raw, ok := policy["EnabledFolders"].([]any); ok {
+				for _, f := range raw {
+					if s, ok := f.(string); ok {
+						enabledFolders = append(enabledFolders, s)
+					}
+				}
+			}
 		}
 		users = append(users, JellyfinUser{
-			ID:            id,
-			Name:          name,
-			HasPassword:   hasPass,
-			IsAdmin:       isAdmin,
-			LastLoginDate: lastLogin,
+			ID:               id,
+			Name:             name,
+			HasPassword:      hasPass,
+			IsAdmin:          isAdmin,
+			IsDisabled:       isDisabled,
+			EnableAllFolders: enableAll,
+			EnabledFolders:   enabledFolders,
+			LastLoginDate:    lastLogin,
 		})
 	}
 	return users, nil
@@ -569,6 +587,117 @@ func SetJellyfinUserPassword(s *ServiceClients, id, newPw string) error {
 		return fmt.Errorf("%s: %w", msg, err)
 	}
 	slog.Info("reset Jellyfin user password", "component", "jellyfin", "userId", id)
+	return nil
+}
+
+// SetJellyfinUserDisabled enables or disables a Jellyfin user account.
+// It GETs the full current policy, sets IsDisabled, then POSTs the entire
+// policy back — Jellyfin replaces the full policy on POST, so partial updates
+// would zero out other fields.
+func SetJellyfinUserDisabled(s *ServiceClients, id string, disabled bool) error {
+	if !validJellyfinID(id) {
+		return fmt.Errorf("invalid user ID format: %q", id)
+	}
+	token, err := jellyfinAuth(s)
+	if err != nil {
+		return fmt.Errorf("auth failed: %w", err)
+	}
+	userData, err := jellyfinGet(s, "/Users/"+id, token)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+	var user map[string]any
+	if err := json.Unmarshal(userData, &user); err != nil {
+		return fmt.Errorf("decode user: %w", err)
+	}
+	policy, _ := user["Policy"].(map[string]any)
+	if policy == nil {
+		policy = map[string]any{}
+	}
+	policy["IsDisabled"] = disabled
+	if _, err := jellyfinPost(s, "/Users/"+id+"/Policy", token, policy); err != nil {
+		return fmt.Errorf("post policy: %w", err)
+	}
+	action := "disabled"
+	if !disabled {
+		action = "enabled"
+	}
+	slog.Info("Jellyfin user account "+action, "component", "jellyfin", "userId", id)
+	return nil
+}
+
+// jellyfinLibraryIDs returns a map of library name → Jellyfin folder ID.
+func jellyfinLibraryIDs(s *ServiceClients, token string) (map[string]string, error) {
+	data, err := jellyfinGet(s, "/Library/VirtualFolders", token)
+	if err != nil {
+		return nil, err
+	}
+	var folders []struct {
+		Name   string `json:"Name"`
+		ItemId string `json:"ItemId"`
+	}
+	if err := json.Unmarshal(data, &folders); err != nil {
+		return nil, err
+	}
+	ids := make(map[string]string, len(folders))
+	for _, f := range folders {
+		ids[f.Name] = f.ItemId
+	}
+	return ids, nil
+}
+
+// SetJellyfinUserLibraryAccess patches the user's policy to control access to
+// the "Movies" and "TV Shows" libraries. When both are true, EnableAllFolders
+// is set to true. When partial, EnableAllFolders is false and EnabledFolders
+// lists the selected library IDs.
+func SetJellyfinUserLibraryAccess(s *ServiceClients, id string, movies, tv bool) error {
+	if !validJellyfinID(id) {
+		return fmt.Errorf("invalid user ID format: %q", id)
+	}
+	token, err := jellyfinAuth(s)
+	if err != nil {
+		return fmt.Errorf("auth failed: %w", err)
+	}
+	userData, err := jellyfinGet(s, "/Users/"+id, token)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+	var user map[string]any
+	if err := json.Unmarshal(userData, &user); err != nil {
+		return fmt.Errorf("decode user: %w", err)
+	}
+	policy, _ := user["Policy"].(map[string]any)
+	if policy == nil {
+		policy = map[string]any{}
+	}
+
+	if movies && tv {
+		policy["EnableAllFolders"] = true
+		policy["EnabledFolders"] = []string{}
+	} else {
+		libIDs, err := jellyfinLibraryIDs(s, token)
+		if err != nil {
+			return fmt.Errorf("get library IDs: %w", err)
+		}
+		var folders []string
+		if movies {
+			if fid, ok := libIDs["Movies"]; ok {
+				folders = append(folders, fid)
+			}
+		}
+		if tv {
+			if fid, ok := libIDs["TV Shows"]; ok {
+				folders = append(folders, fid)
+			}
+		}
+		policy["EnableAllFolders"] = false
+		policy["EnabledFolders"] = folders
+	}
+
+	if _, err := jellyfinPost(s, "/Users/"+id+"/Policy", token, policy); err != nil {
+		return fmt.Errorf("post policy: %w", err)
+	}
+	slog.Info("updated library access", "component", "jellyfin", "userId", id, "movies", movies, "tv", tv)
 	return nil
 }
 
@@ -851,6 +980,72 @@ func handleUsersWithID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		handleUserPassword(w, r, id)
+		return
+	}
+
+	if strings.HasSuffix(tail, "/disable") {
+		id := strings.TrimSuffix(tail, "/disable")
+		if !validJellyfinID(id) {
+			httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := SetJellyfinUserDisabled(services, id, true); err != nil {
+			slog.Error("disable user failed", "component", "users", "userId", id, "error", err)
+			httputil.WriteError(w, "could not disable user", http.StatusBadGateway)
+			return
+		}
+		httputil.WriteJSON(w, map[string]string{"status": "ok"})
+		return
+	}
+
+	if strings.HasSuffix(tail, "/enable") {
+		id := strings.TrimSuffix(tail, "/enable")
+		if !validJellyfinID(id) {
+			httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := SetJellyfinUserDisabled(services, id, false); err != nil {
+			slog.Error("enable user failed", "component", "users", "userId", id, "error", err)
+			httputil.WriteError(w, "could not enable user", http.StatusBadGateway)
+			return
+		}
+		httputil.WriteJSON(w, map[string]string{"status": "ok"})
+		return
+	}
+
+	if strings.HasSuffix(tail, "/library") {
+		id := strings.TrimSuffix(tail, "/library")
+		if !validJellyfinID(id) {
+			httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		var req struct {
+			Movies bool `json:"movies"`
+			TV     bool `json:"tv"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httputil.WriteError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := SetJellyfinUserLibraryAccess(services, id, req.Movies, req.TV); err != nil {
+			slog.Error("set library access failed", "component", "users", "userId", id, "error", err)
+			httputil.WriteError(w, "could not update library access", http.StatusBadGateway)
+			return
+		}
+		httputil.WriteJSON(w, map[string]string{"status": "ok"})
 		return
 	}
 

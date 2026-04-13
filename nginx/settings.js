@@ -39,6 +39,13 @@
         // placeholder — no extra UI to update currently
     }
 
+    function updateCertMode() {
+        const mode = document.querySelector('input[name="st-cert-mode"]:checked');
+        const leOpts = document.getElementById('st-le-opts');
+        if (!leOpts) return;
+        leOpts.style.display = (mode && mode.value === 'letsencrypt') ? '' : 'none';
+    }
+
     // ── Settings load / save ──────────────────────────────────────────────────
 
     async function loadSettingsTab() {
@@ -68,6 +75,33 @@
                 const mode = ms.notifications_mode || 'internal';
                 document.querySelectorAll('input[name="st-notif"]').forEach(r => { r.checked = r.value === mode; });
                 setToggle('st-open-registration', ms.open_registration === 'true' || ms.open_registration === true);
+
+                // Remote access
+                setToggle('st-remote-enabled', ms.remote_access_enabled === 'true');
+                const hostname = document.getElementById('st-remote-hostname');
+                if (hostname) hostname.value = ms.remote_hostname || '';
+                const httpPort = document.getElementById('st-remote-http-port');
+                if (httpPort) httpPort.value = ms.remote_http_port || '';
+                const httpsPort = document.getElementById('st-remote-https-port');
+                if (httpsPort) httpsPort.value = ms.remote_https_port || '';
+                const certMode = ms.remote_cert_mode || 'self-signed';
+                document.querySelectorAll('input[name="st-cert-mode"]').forEach(r => { r.checked = r.value === certMode; });
+                updateCertMode();
+                const leEmail = document.getElementById('st-le-email');
+                if (leEmail) leEmail.value = ms.remote_le_email || '';
+                setToggle('st-le-staging', ms.remote_le_staging === 'true');
+
+                // Status badge
+                const badge = document.getElementById('st-remote-status');
+                if (badge) {
+                    if (ms.remote_access_enabled === 'true') {
+                        badge.textContent = 'active \u00b7 ' + certMode;
+                        badge.style.color = 'var(--mint, #7dda93)';
+                    } else {
+                        badge.textContent = 'disabled';
+                        badge.style.color = 'var(--muted, #9080a8)';
+                    }
+                }
             }
             _settingsLoaded = true;
         } catch (e) { console.warn('[pelicula] settings load error:', e); }
@@ -98,6 +132,36 @@
                 if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
             } else {
                 if (statusEl) statusEl.textContent = 'Save failed';
+            }
+        } catch (e) {
+            if (statusEl) statusEl.textContent = 'Save failed';
+        }
+    }
+
+    async function saveRemoteAccess() {
+        const statusEl = document.getElementById('st-remote-save-status');
+        if (statusEl) statusEl.textContent = 'Saving\u2026';
+        const certMode = document.querySelector('input[name="st-cert-mode"]:checked');
+        const body = {
+            remote_access_enabled: document.getElementById('st-remote-enabled')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
+            remote_hostname:       document.getElementById('st-remote-hostname')?.value.trim() || '',
+            remote_http_port:      document.getElementById('st-remote-http-port')?.value.trim() || '',
+            remote_https_port:     document.getElementById('st-remote-https-port')?.value.trim() || '',
+            remote_cert_mode:      certMode ? certMode.value : 'self-signed',
+            remote_le_email:       document.getElementById('st-le-email')?.value.trim() || '',
+            remote_le_staging:     document.getElementById('st-le-staging')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
+        };
+        try {
+            const resp = await tfetch('/api/pelicula/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (resp.ok) {
+                if (statusEl) { statusEl.textContent = 'Saved \u2713 \u2014 restart nginx to apply'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000); }
+            } else {
+                const data = await resp.json().catch(() => ({}));
+                if (statusEl) statusEl.textContent = 'Save failed: ' + (data.error || resp.status);
             }
         } catch (e) {
             if (statusEl) statusEl.textContent = 'Save failed';
@@ -367,6 +431,8 @@
     // Called from onclick handlers in index.html and from applyRole() in dashboard.js.
     window.toggleSetting          = toggleSetting;
     window.updateNotifMode        = updateNotifMode;
+    window.saveRemoteAccess            = saveRemoteAccess;
+    window.updateCertMode              = updateCertMode;
     window.saveSettingsTab        = saveSettingsTab;
     window.clearProfileForm       = clearProfileForm;
     window.saveProfile            = saveProfile;

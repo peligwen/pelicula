@@ -166,10 +166,12 @@ func main() {
 	// admin only: per-user operations (delete + password reset)
 	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
 
-	// read: active Jellyfin sessions for the now-playing card.
-	// GuardAdmin is intentionally conservative — the dashboard is admin-only today.
-	// Relax to GuardAuthenticated when viewer/manager roles land on the dashboard.
-	mux.Handle("/api/pelicula/sessions", auth.GuardAdmin(http.HandlerFunc(handleSessions)))
+	// admin only: role management (list + set + delete)
+	mux.Handle("/api/pelicula/operators", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperators))))
+	mux.Handle("/api/pelicula/operators/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperatorsWithID))))
+
+	// viewer+: active Jellyfin sessions for the now-playing card.
+	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(handleSessions)))
 
 	// admin only: library import scan + apply + browse
 	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(handleBrowse)))
