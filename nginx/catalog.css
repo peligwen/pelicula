@@ -84,9 +84,9 @@
     transform: rotate(90deg);
 }
 
-/* Season and episode rows are hidden until JS shows them */
-.cat-row-season  { display: none; padding-left: 1.5rem; }
-.cat-row-episode { display: none; padding-left: 3rem; }
+/* Season and episode rows are injected by JS; they inherit display:flex from .cat-row */
+.cat-row-season  { padding-left: 1.5rem; }
+.cat-row-episode { padding-left: 3rem; }
 
 /* Title */
 .cat-row-title {
