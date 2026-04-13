@@ -18,6 +18,16 @@ function fmtSize(bytes) {
     return Math.round(bytes / 1024) + ' KB';
 }
 
+// isMissing returns true for items with no downloaded content.
+// Movies: hasFile === false. Series: episodeFileCount === 0.
+// Partially-downloaded series (episodeFileCount > 0) stay in the main list.
+function isMissing(item) {
+    if (Array.isArray(item.seasons)) {
+        return !(item.statistics && item.statistics.episodeFileCount > 0);
+    }
+    return !item.hasFile;
+}
+
 // setHTML: safely set element content from a framework html`` result (pre-escaped).
 // All interpolations in html`` are auto-escaped by the framework's _escapeHtml().
 function setHTML(el, htmlResult) {
@@ -45,6 +55,7 @@ component('catalog', function (el, store, _props) {
     store.set('catalog.flaggedRows', []);
     store.set('catalog.subReq.target', null);
     store.set('catalog.subReq.selected', new Set());
+    store.set('catalog.qualityProfiles', null);
 
     // ── Action registry ───────────────────────────────────────────────────────
     async function loadActionRegistry() {
@@ -144,11 +155,68 @@ component('catalog', function (el, store, _props) {
             setHTML(list, html`<div class="no-items">No items found.</div>`);
             return;
         }
+        const missingItems = items.filter(isMissing);
+        const presentItems = items.filter(item => !isMissing(item));
         const frag = document.createDocumentFragment();
-        for (const item of items) {
+        const missingSection = buildMissingSection(missingItems);
+        if (missingSection) frag.appendChild(missingSection);
+        for (const item of presentItems) {
             frag.appendChild(Array.isArray(item.seasons) ? buildSeriesRow(item) : buildMovieRow(item));
         }
         list.replaceChildren(frag);
+    }
+
+    function buildMissingSection(items) {
+        if (!items.length) return null;
+        const details = document.createElement('details');
+        details.className = 'cat-missing-section';
+        // collapsed by default — open attribute intentionally omitted
+
+        const summary = document.createElement('summary');
+        summary.className = 'cat-missing-header';
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'cat-missing-title';
+        titleSpan.textContent = 'Missing / Searching';
+        const countSpan = document.createElement('span');
+        countSpan.className = 'cat-missing-count';
+        countSpan.textContent = String(items.length);
+        summary.appendChild(titleSpan);
+        summary.appendChild(countSpan);
+        details.appendChild(summary);
+
+        const inner = document.createElement('div');
+        inner.className = 'cat-missing-list';
+        for (const item of items) inner.appendChild(buildMissingRow(item));
+        details.appendChild(inner);
+        return details;
+    }
+
+    function buildMissingRow(item) {
+        const isSeries = Array.isArray(item.seasons);
+        const metaParts = [];
+        if (item.year) metaParts.push(item.year);
+        if (isSeries && item.statistics) {
+            metaParts.push(item.statistics.episodeFileCount + '/' + item.statistics.totalEpisodeCount + ' ep');
+        }
+        const div = document.createElement('div');
+        div.className = 'cat-row cat-row-missing';
+        setHTML(div, html`
+            <span class="cat-row-title" title="${item.title || ''}">${item.title || '(untitled)'}</span>
+            <span class="cat-row-meta">${metaParts.join(' \u00b7 ')}</span>
+            <div class="cat-row-actions"><button class="cat-ctx-btn" title="Actions">\u22ef</button></div>`);
+        div.addEventListener('click', (e) => {
+            if (e.target.closest('.cat-ctx-btn')) return;
+            openMissingDetail(item);
+        });
+        div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            openMissingContextMenu(e, item);
+        });
+        div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openMissingContextMenu(e, item);
+        });
+        return div;
     }
 
     function buildMovieRow(item) {
@@ -409,6 +477,147 @@ component('catalog', function (el, store, _props) {
             setHTML(body, renderDetailHtml(data, mediaInfo, drawerDualsubs));
         } catch (e) {
             setHTML(body, html`<div style="color:var(--danger);padding:1rem 0">Failed to load details: ${e.message}</div>`);
+        }
+    }
+
+    async function openMissingDetail(item) {
+        const isSeries = Array.isArray(item.seasons);
+        const arrType = isSeries ? 'sonarr' : 'radarr';
+        const backdrop = document.getElementById('cat-drawer-backdrop');
+        const drawer = document.getElementById('cat-drawer');
+        const titleEl = document.getElementById('cat-drawer-title');
+        const sub = document.getElementById('cat-drawer-sub');
+        const body = document.getElementById('cat-drawer-body');
+        if (!drawer) return;
+        PeliculaFW.openDrawer(drawer, backdrop);
+        titleEl.textContent = item.title || '(untitled)';
+        titleEl.title = item.title || '';
+        sub.textContent = item.monitored ? 'Monitored \u2014 not downloaded' : 'Not monitored';
+        sub.title = '';
+        setHTML(body, html`<div style="color:var(--muted);padding:1rem 0">Loading\u2026</div>`);
+
+        // Fetch and cache quality profiles
+        let profilesData = store.get('catalog.qualityProfiles');
+        if (!profilesData) {
+            try {
+                const res = await catFetch('/api/pelicula/catalog/qualityprofiles');
+                if (res.ok) {
+                    profilesData = await res.json();
+                    store.set('catalog.qualityProfiles', profilesData);
+                }
+            } catch (e) { /* non-critical — will show profile ID instead of name */ }
+        }
+
+        setHTML(body, renderMissingDetailHtml(item, arrType, profilesData));
+    }
+
+    function renderMissingDetailHtml(item, arrType, profilesData) {
+        const isSeries = Array.isArray(item.seasons);
+        const stats = item.statistics || {};
+        const profileId = item.qualityProfileId;
+        const profileMap = profilesData && profilesData[arrType] ? profilesData[arrType] : {};
+        const profileName = profileId
+            ? (profileMap[String(profileId)] || 'Profile #' + profileId)
+            : '\u2014';
+
+        const parts = [];
+
+        // Poster image (Radarr/Sonarr both return images array with coverType)
+        const poster = (item.images || []).find(img => img.coverType === 'poster');
+        if (poster) {
+            parts.push(html`<div class="cat-drawer-hero">
+                <img class="cat-drawer-poster" src="${poster.remoteUrl || poster.url || ''}" alt="" loading="lazy">
+            </div>`);
+        }
+
+        // Overview / synopsis
+        if (item.overview) {
+            parts.push(html`<div class="cat-drawer-synopsis">${item.overview}</div>`);
+        }
+
+        parts.push(html`<div class="drawer-section-title">Status</div>`);
+        parts.push(html`<div>
+            <span class="cat-pill">${item.monitored ? 'monitored' : 'unmonitored'}</span>
+            <span class="cat-pill">${isSeries ? 'series' : 'movie'}</span>
+            ${item.status ? html`<span class="cat-pill">${item.status}</span>` : raw('')}
+            ${item.network ? html`<span class="cat-pill">${item.network}</span>` : raw('')}
+        </div>`);
+
+        parts.push(html`<div class="drawer-section-title">Quality Profile</div>`);
+        parts.push(html`<div><span class="cat-pill cat-pill-encoding">${profileName}</span></div>`);
+
+        if (isSeries) {
+            const downloaded = stats.episodeFileCount || 0;
+            const total = stats.totalEpisodeCount || 0;
+            const monitored = stats.monitoredEpisodeCount || 0;
+            parts.push(html`<div class="drawer-section-title">Episodes</div>`);
+            parts.push(html`<div>
+                <span class="cat-pill">${downloaded}/${total} downloaded</span>
+                <span class="cat-pill">${monitored} monitored</span>
+            </div>`);
+        }
+
+        if (Array.isArray(item.genres) && item.genres.length) {
+            parts.push(html`<div class="drawer-section-title">Genres</div>`);
+            parts.push(html`<div>${item.genres.map(g => html`<span class="cat-pill">${g}</span>`)}</div>`);
+        }
+
+        return html`<div>${parts}</div>`;
+    }
+
+    function openMissingContextMenu(event, item) {
+        if (_openMenu) { _openMenu.remove(); _openMenu = null; }
+        const menu = document.createElement('div');
+        menu.className = 'cat-ctx-menu';
+        menu.addEventListener('click', (e) => e.stopPropagation());
+        _openMenu = menu;
+
+        const isSeries = Array.isArray(item.seasons);
+        const arrType = isSeries ? 'sonarr' : 'radarr';
+
+        const actions = [
+            {
+                label: 'Force Search',
+                fn: () => { closeMenu(); runArrCommand('search', arrType, item.id, item.title); },
+            },
+            {
+                label: 'Unmonitor',
+                fn: () => { closeMenu(); runArrCommand('unmonitor', arrType, item.id, item.title); },
+            },
+        ];
+
+        for (const action of actions) {
+            const btn = document.createElement('button');
+            btn.className = 'cat-ctx-item';
+            btn.textContent = action.label;
+            btn.addEventListener('click', action.fn);
+            menu.appendChild(btn);
+        }
+
+        document.body.appendChild(menu);
+        positionMenu(menu, event);
+        function closeMenu() { if (_openMenu === menu) { menu.remove(); _openMenu = null; } }
+    }
+
+    async function runArrCommand(command, arrType, arrId, title) {
+        const label = command === 'search' ? 'Force Search' : 'Unmonitor';
+        try {
+            const res = await catFetch('/api/pelicula/catalog/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ arr_type: arrType, arr_id: arrId, command }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                toast(label + ' failed: ' + (data.error || 'unknown'), { error: true });
+                return;
+            }
+            const successMsg = command === 'search'
+                ? (title || 'Item') + ': search triggered'
+                : (title || 'Item') + ': unmonitored';
+            toast(successMsg);
+        } catch (e) {
+            toast(label + ' error: ' + e.message, { error: true });
         }
     }
 

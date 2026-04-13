@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -354,4 +355,141 @@ func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 	}
 	go BackfillFromArr(catalogDB, services)
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
+}
+
+// handleCatalogCommand proxies force-search and unmonitor commands to Radarr/Sonarr.
+// POST /api/pelicula/catalog/command
+// Body: {"arr_type":"radarr"|"sonarr","arr_id":N,"command":"search"|"unmonitor"}
+func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ArrType string `json:"arr_type"`
+		ArrID   int    `json:"arr_id"`
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ArrID == 0 {
+		httputil.WriteError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.ArrType != "radarr" && req.ArrType != "sonarr" {
+		httputil.WriteError(w, "invalid arr_type", http.StatusBadRequest)
+		return
+	}
+	sonarrKey, radarrKey, _ := services.Keys()
+
+	switch req.Command {
+	case "search":
+		if req.ArrType == "radarr" {
+			if _, err := services.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
+				"name": "MoviesSearch", "movieIds": []int{req.ArrID},
+			}); err != nil {
+				httputil.WriteError(w, "radarr search failed", http.StatusBadGateway)
+				return
+			}
+		} else {
+			if _, err := services.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
+				"name": "SeriesSearch", "seriesId": req.ArrID,
+			}); err != nil {
+				httputil.WriteError(w, "sonarr search failed", http.StatusBadGateway)
+				return
+			}
+		}
+	case "unmonitor":
+		if req.ArrType == "radarr" {
+			body, err := services.ArrGet(radarrURL, radarrKey, fmt.Sprintf("/api/v3/movie/%d", req.ArrID))
+			if err != nil {
+				httputil.WriteError(w, "radarr fetch failed", http.StatusBadGateway)
+				return
+			}
+			var movie map[string]any
+			if err := json.Unmarshal(body, &movie); err != nil {
+				httputil.WriteError(w, "invalid radarr response", http.StatusBadGateway)
+				return
+			}
+			movie["monitored"] = false
+			if _, err := services.ArrPut(radarrURL, radarrKey, fmt.Sprintf("/api/v3/movie/%d", req.ArrID), movie); err != nil {
+				httputil.WriteError(w, "radarr update failed", http.StatusBadGateway)
+				return
+			}
+		} else {
+			body, err := services.ArrGet(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/series/%d", req.ArrID))
+			if err != nil {
+				httputil.WriteError(w, "sonarr fetch failed", http.StatusBadGateway)
+				return
+			}
+			var series map[string]any
+			if err := json.Unmarshal(body, &series); err != nil {
+				httputil.WriteError(w, "invalid sonarr response", http.StatusBadGateway)
+				return
+			}
+			series["monitored"] = false
+			if _, err := services.ArrPut(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/series/%d", req.ArrID), series); err != nil {
+				httputil.WriteError(w, "sonarr update failed", http.StatusBadGateway)
+				return
+			}
+		}
+	default:
+		httputil.WriteError(w, "unknown command", http.StatusBadRequest)
+		return
+	}
+	httputil.WriteJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleCatalogQualityProfiles returns quality profile id→name maps for Radarr and Sonarr.
+// GET /api/pelicula/catalog/qualityprofiles
+// Response: {"radarr":{"1":"HD-1080p",...},"sonarr":{"4":"HD TV",...}}
+func handleCatalogQualityProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sonarrKey, radarrKey, _ := services.Keys()
+
+	type fetch struct {
+		data []byte
+		err  error
+	}
+	rCh := make(chan fetch, 1)
+	sCh := make(chan fetch, 1)
+	go func() {
+		body, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
+		rCh <- fetch{body, err}
+	}()
+	go func() {
+		body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		sCh <- fetch{body, err}
+	}()
+
+	buildMap := func(data []byte) map[string]string {
+		var profiles []map[string]any
+		m := map[string]string{}
+		if json.Unmarshal(data, &profiles) != nil {
+			return m
+		}
+		for _, p := range profiles {
+			if id, ok := p["id"].(float64); ok {
+				if name, ok := p["name"].(string); ok {
+					m[fmt.Sprintf("%.0f", id)] = name
+				}
+			}
+		}
+		return m
+	}
+
+	radarrMap := map[string]string{}
+	sonarrMap := map[string]string{}
+	if rr := <-rCh; rr.err == nil {
+		radarrMap = buildMap(rr.data)
+	}
+	if sr := <-sCh; sr.err == nil {
+		sonarrMap = buildMap(sr.data)
+	}
+
+	httputil.WriteJSON(w, map[string]any{
+		"radarr": radarrMap,
+		"sonarr": sonarrMap,
+	})
 }
