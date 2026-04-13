@@ -354,12 +354,15 @@ component('catalog', function (el, store, _props) {
         if (hasFile) {
             const epItem = { id: series.id, title: series.title + ' ' + epNum, episodeId: ep.id, path: filePath, arrType: 'sonarr' };
             div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => { e.stopPropagation(); openContextMenu(e, epItem, 'episode'); });
+            div.addEventListener('click', (e) => {
+                if (e.target.closest('.cat-ctx-btn')) return;
+                openDetail(filePath, ep.file && ep.file.mediaInfo);
+            });
+            div.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                openContextMenu(e, epItem, 'episode');
+            });
         }
-        div.addEventListener('contextmenu', (e) => {
-            if (!hasFile) return;
-            e.preventDefault();
-            openContextMenu(e, epItem, 'episode');
-        });
         return div;
     }
 
@@ -869,6 +872,7 @@ component('catalog', function (el, store, _props) {
     // ── Dual subtitle dialog ──────────────────────────────────────────────────────
 
     let _dualsubTracks = [];
+    let _dualsubEmbedded = [];
     let _dualsubDualsubs = [];
     let _dualsubProfiles = [];
     let _dualsubManageOpen = false;
@@ -895,6 +899,7 @@ component('catalog', function (el, store, _props) {
         _dualsubProfiles = profRes.ok ? await profRes.json() : [];
         const tracksData = (trackRes && trackRes.ok) ? await trackRes.json() : {};
         _dualsubTracks = tracksData.tracks || [];
+        _dualsubEmbedded = tracksData.embedded_tracks || [];
         _dualsubDualsubs = tracksData.dualsubs || [];
 
         dualsubRenderProfiles();
@@ -937,10 +942,10 @@ component('catalog', function (el, store, _props) {
     function dualsubRenderPairs() {
         const container = document.getElementById('dualsub-pairs');
         container.replaceChildren();
-        if (_dualsubTracks.length === 0) {
+        if (_dualsubTracks.length === 0 && _dualsubEmbedded.length === 0) {
             const msg = document.createElement('div');
             msg.style.cssText = 'color:var(--muted);font-size:.8rem;margin-bottom:.75rem';
-            msg.textContent = 'No subtitle sidecar files found alongside this media file.';
+            msg.textContent = 'No subtitle tracks found (sidecar or embedded).';
             container.appendChild(msg);
             return;
         }
@@ -961,6 +966,14 @@ component('catalog', function (el, store, _props) {
                 const varLabel = tr.variant === 'hi' ? ' \u2014 hearing impaired' : tr.variant === 'forced' ? ' \u2014 forced' : '';
                 opt.textContent = tr.lang.toUpperCase() + varLabel;
                 if (tr.file === selectedFile) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            _dualsubEmbedded.forEach(et => {
+                const opt = document.createElement('option');
+                opt.value = 'embedded:' + et.sub_index;
+                const codecLabel = et.codec === 'subrip' ? 'SRT' : et.codec.toUpperCase();
+                opt.textContent = et.lang.toUpperCase() + ' \u2014 embedded (' + codecLabel + ')';
+                if ('embedded:' + et.sub_index === selectedFile) opt.selected = true;
                 sel.appendChild(opt);
             });
             return sel;
@@ -1012,8 +1025,12 @@ component('catalog', function (el, store, _props) {
 
     window.dualsubAddPair = function () {
         const container = document.getElementById('dualsub-pairs');
-        const topFile = _dualsubTracks[0] ? _dualsubTracks[0].file : '';
-        const botFile = _dualsubTracks[1] ? _dualsubTracks[1].file : (_dualsubTracks[0] ? _dualsubTracks[0].file : '');
+        const allOptions = [
+            ..._dualsubTracks.map(tr => tr.file),
+            ..._dualsubEmbedded.map(et => 'embedded:' + et.sub_index),
+        ];
+        const topFile = allOptions[0] || '';
+        const botFile = allOptions[1] || allOptions[0] || '';
         container.appendChild(dualsubMakePairCard(topFile, botFile));
     };
 
@@ -1127,10 +1144,22 @@ component('catalog', function (el, store, _props) {
 
         const profileName = document.getElementById('dualsub-profile-select').value;
         const pairCards = document.querySelectorAll('.dualsub-pair-card');
-        const pairs = Array.from(pairCards).map(c => ({
-            top_file: c._getTopFile(),
-            bottom_file: c._getBotFile(),
-        })).filter(p => p.top_file && p.bottom_file);
+        const pairs = Array.from(pairCards).map(c => {
+            const topVal = c._getTopFile();
+            const botVal = c._getBotFile();
+            const pair = {};
+            if (topVal.startsWith('embedded:')) {
+                pair.top_sub_index = parseInt(topVal.slice(9), 10);
+            } else {
+                pair.top_file = topVal;
+            }
+            if (botVal.startsWith('embedded:')) {
+                pair.bottom_sub_index = parseInt(botVal.slice(9), 10);
+            } else {
+                pair.bottom_file = botVal;
+            }
+            return pair;
+        }).filter(p => (p.top_file || p.top_sub_index >= 0) && (p.bottom_file || p.bottom_sub_index >= 0));
 
         if (!pairs.length) { statusEl.textContent = 'Add at least one track pair.'; return; }
 
