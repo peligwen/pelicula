@@ -225,14 +225,21 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve synopsis and artwork from the catalog DB.
+	// Resolve synopsis, artwork, and title from the catalog DB.
 	// For episodes: walk up episode → season → series to find the item that carries them.
-	synopsis, artworkURL := "", ""
+	// Also trigger a background Jellyfin metadata sync so subsequent requests see fresh data.
+	synopsis, artworkURL, title, metadataSyncedAt := "", "", "", ""
+	inCatalog := false
 	if catalogDB != nil {
 		if item, err := GetCatalogItemByFilePath(catalogDB, path); err == nil && item != nil {
+			inCatalog = true
 			synopsis = item.Synopsis
 			artworkURL = item.ArtworkURL
-			if (synopsis == "" || artworkURL == "") && item.Type == "episode" {
+			title = item.Title
+			metadataSyncedAt = item.MetadataSyncedAt
+			if item.Type == "movie" {
+				go maybeSyncJellyfinMetadata(item)
+			} else if item.Type == "episode" {
 				if season, err := GetCatalogItemByID(catalogDB, item.ParentID); err == nil && season != nil {
 					if series, err := GetCatalogItemByID(catalogDB, season.ParentID); err == nil && series != nil {
 						if synopsis == "" {
@@ -241,6 +248,10 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 						if artworkURL == "" {
 							artworkURL = series.ArtworkURL
 						}
+						if metadataSyncedAt == "" {
+							metadataSyncedAt = series.MetadataSyncedAt
+						}
+						go maybeSyncJellyfinMetadata(series)
 					}
 				}
 			}
@@ -248,11 +259,14 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, map[string]any{
-		"path":        path,
-		"flags":       flags,
-		"job":         matched,
-		"synopsis":    synopsis,
-		"artwork_url": artworkURL,
+		"path":               path,
+		"flags":              flags,
+		"job":                matched,
+		"synopsis":           synopsis,
+		"artwork_url":        artworkURL,
+		"title":              title,
+		"in_catalog":         inCatalog,
+		"metadata_synced_at": metadataSyncedAt,
 	})
 }
 

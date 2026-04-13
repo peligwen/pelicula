@@ -5,8 +5,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 )
+
+// jellyfinItemCache is a short-lived in-process cache of Jellyfin library items
+// keyed by provider IDs. Jellyfin 10.11+ ignores AnyProviderIdEquals on
+// user-scoped queries, so we fetch the full library once and match client-side.
+var jellyfinCache struct {
+	mu        sync.Mutex
+	items     []jellyfinItem
+	fetchedAt time.Time
+}
+
+type jellyfinItem struct {
+	ID          string            `json:"Id"`
+	Overview    string            `json:"Overview"`
+	ImageTags   map[string]string `json:"ImageTags"`
+	ProviderIDs map[string]string `json:"ProviderIds"`
+}
+
+const jellyfinCacheTTL = 5 * time.Minute
+
+// fetchJellyfinLibrary fetches all Movie/Series items from Jellyfin and caches them.
+func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
+	jellyfinCache.mu.Lock()
+	defer jellyfinCache.mu.Unlock()
+
+	if time.Since(jellyfinCache.fetchedAt) < jellyfinCacheTTL {
+		return jellyfinCache.items, nil
+	}
+
+	userID, err := resolveJellyfinUserID(svc)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/Users/%s/Items?IncludeItemTypes=Movie,Series&Fields=Overview,ImageTags,ProviderIds&Recursive=true&Limit=5000", userID)
+	body, err := jellyfinDo(svc, "GET", path, svc.JellyfinAPIKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("jellyfin library fetch: %w", err)
+	}
+
+	var resp struct {
+		Items []jellyfinItem `json:"Items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("jellyfin library parse: %w", err)
+	}
+
+	jellyfinCache.items = resp.Items
+	jellyfinCache.fetchedAt = time.Now()
+	slog.Info("jellyfin library cached", "component", "catalog_sync", "count", len(resp.Items))
+	return jellyfinCache.items, nil
+}
 
 // UpsertFromHook creates or updates catalog records when a download completes.
 // For episodes, it upserts the parent series and season records first,
@@ -270,50 +322,90 @@ func SyncJellyfinMetadata(db *sql.DB, svc *ServiceClients, item *CatalogItem) er
 	return nil
 }
 
-// fetchJellyfinItemMeta queries Jellyfin for an item by TMDB/TVDB provider ID.
-// Returns (jellyfinID, artworkURL, synopsis, error). Returns empty strings if not found.
-func fetchJellyfinItemMeta(svc *ServiceClients, item *CatalogItem) (string, string, string, error) {
-	var providerParam string
-	switch item.Type {
-	case "movie":
-		if item.TmdbID != 0 {
-			providerParam = fmt.Sprintf("Tmdb.%d", item.TmdbID)
-		}
-	case "series":
-		if item.TvdbID != 0 {
-			providerParam = fmt.Sprintf("Tvdb.%d", item.TvdbID)
-		} else if item.TmdbID != 0 {
-			providerParam = fmt.Sprintf("Tmdb.%d", item.TmdbID)
-		}
-	}
-	if providerParam == "" {
-		return "", "", "", nil // no provider ID to search by
+// resolveJellyfinUserID fetches and caches the pelicula-internal user ID.
+// Jellyfin's /Items endpoint only returns folder items without a user context;
+// /Users/{id}/Items?Recursive=true is required to query the actual library.
+func resolveJellyfinUserID(svc *ServiceClients) (string, error) {
+	svc.mu.RLock()
+	uid := svc.JellyfinUserID
+	svc.mu.RUnlock()
+	if uid != "" {
+		return uid, nil
 	}
 
-	path := fmt.Sprintf("/Items?AnyProviderIdEquals=%s&Fields=Overview,ImageTags&Limit=1", providerParam)
-	body, err := jellyfinDo(svc, "GET", path, svc.JellyfinAPIKey, nil)
+	body, err := jellyfinDo(svc, "GET", "/Users", svc.JellyfinAPIKey, nil)
 	if err != nil {
-		return "", "", "", fmt.Errorf("jellyfin items query: %w", err)
+		return "", fmt.Errorf("jellyfin users list: %w", err)
+	}
+	var users []struct {
+		ID   string `json:"Id"`
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal(body, &users); err != nil {
+		return "", fmt.Errorf("jellyfin users parse: %w", err)
+	}
+	// Prefer pelicula-internal; fall back to first user found.
+	for _, u := range users {
+		if u.Name == jellyfinServiceUser {
+			uid = u.ID
+			break
+		}
+	}
+	if uid == "" && len(users) > 0 {
+		uid = users[0].ID
+	}
+	if uid == "" {
+		return "", fmt.Errorf("no Jellyfin users found")
 	}
 
-	var resp struct {
-		Items []struct {
-			ID        string            `json:"Id"`
-			Overview  string            `json:"Overview"`
-			ImageTags map[string]string `json:"ImageTags"`
-		} `json:"Items"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", "", "", fmt.Errorf("jellyfin items parse: %w", err)
-	}
-	if len(resp.Items) == 0 {
-		return "", "", "", nil // not yet in Jellyfin
+	svc.mu.Lock()
+	svc.JellyfinUserID = uid
+	svc.mu.Unlock()
+	return uid, nil
+}
+
+// fetchJellyfinItemMeta looks up a catalog item in the cached Jellyfin library
+// by TMDB or TVDB provider ID. Returns (jellyfinID, artworkURL, synopsis, error).
+// Returns empty strings without error if the item is not yet in Jellyfin.
+//
+// Note: Jellyfin 10.11+ ignores AnyProviderIdEquals on user-scoped queries,
+// so we fetch the full library once (cached 5 min) and match client-side.
+func fetchJellyfinItemMeta(svc *ServiceClients, item *CatalogItem) (string, string, string, error) {
+	items, err := fetchJellyfinLibrary(svc)
+	if err != nil {
+		return "", "", "", err
 	}
 
-	jf := resp.Items[0]
-	artworkURL := ""
-	if _, ok := jf.ImageTags["Primary"]; ok {
-		artworkURL = fmt.Sprintf("%s/Items/%s/Images/Primary", jellyfinURL, jf.ID)
+	// Build target provider ID strings to match against.
+	var tmdbKey, tvdbKey string
+	if item.TmdbID != 0 {
+		tmdbKey = fmt.Sprintf("%d", item.TmdbID)
 	}
-	return jf.ID, artworkURL, jf.Overview, nil
+	if item.TvdbID != 0 {
+		tvdbKey = fmt.Sprintf("%d", item.TvdbID)
+	}
+	if tmdbKey == "" && tvdbKey == "" {
+		return "", "", "", nil // nothing to match on
+	}
+
+	for _, jf := range items {
+		matched := false
+		if tmdbKey != "" && jf.ProviderIDs["Tmdb"] == tmdbKey {
+			matched = true
+		}
+		if !matched && tvdbKey != "" && jf.ProviderIDs["Tvdb"] == tvdbKey {
+			matched = true
+		}
+		if !matched {
+			continue
+		}
+
+		artworkURL := ""
+		if _, ok := jf.ImageTags["Primary"]; ok {
+			// Root-relative so the browser loads it via nginx (/jellyfin → jellyfin:8096).
+			artworkURL = fmt.Sprintf("/jellyfin/Items/%s/Images/Primary", jf.ID)
+		}
+		return jf.ID, artworkURL, jf.Overview, nil
+	}
+	return "", "", "", nil // not yet in Jellyfin
 }

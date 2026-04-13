@@ -22,6 +22,7 @@ type ServiceClients struct {
 	ProwlarrKey    string
 	BazarrKey      string
 	JellyfinAPIKey string
+	JellyfinUserID string // pelicula-internal user ID; resolved lazily on first metadata sync
 
 	wired bool
 	mu    sync.RWMutex
