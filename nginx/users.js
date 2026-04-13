@@ -37,10 +37,15 @@
                     ? new Date(u.lastLoginDate).toLocaleDateString()
                     : 'never';
                 const adminBadge = u.isAdmin ? html`<span class="user-admin-badge">admin</span>`.str : '';
+                const disabledBadge = u.isDisabled
+                    ? '<span class="user-admin-badge" style="background:var(--danger-dim,#3a1a2a);color:var(--danger,#ff6b8a)">disabled</span>'
+                    : '';
+                const disableBtn = `<button class="user-action-btn" onclick="toggleDisableUser(this)" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`;
                 return html`<li data-user-id="${u.id}" data-user-name="${u.name}">
-                    <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
+                    <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}${raw(disabledBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
                     <div class="user-actions">
                     <button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>
+                    ${raw(disableBtn)}
                     <button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>
                     </div>
                     <form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">
@@ -140,6 +145,29 @@
         } catch (e) {
             const errEl = li.querySelector('.users-error');
             if (errEl) { errEl.textContent = 'Network error deleting user.'; errEl.classList.remove('hidden'); }
+            btn.disabled = false;
+        }
+    }
+
+    async function toggleDisableUser(btn) {
+        const li        = btn.closest('li');
+        const id        = li.dataset.userId;
+        const isDisabled = btn.dataset.disabled === 'true';
+        const action    = isDisabled ? 'enable' : 'disable';
+        const errEl     = li.querySelector('.users-error');
+        if (errEl) errEl.classList.add('hidden');
+        btn.disabled = true;
+        try {
+            const resp = await fetch('/api/pelicula/users/' + encodeURIComponent(id) + '/' + action, { method: 'POST' });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                if (errEl) { errEl.textContent = data.error || 'Failed to ' + action + ' user.'; errEl.classList.remove('hidden'); }
+                btn.disabled = false;
+                return;
+            }
+            loadUsers();
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
             btn.disabled = false;
         }
     }
@@ -690,6 +718,7 @@
     window.cancelResetPassword   = cancelResetPassword;
     window.submitResetPassword   = submitResetPassword;
     window.startDeleteUser       = startDeleteUser;
+    window.toggleDisableUser     = toggleDisableUser;
     window.openInviteModal       = openInviteModal;
     window.closeInviteModal      = closeInviteModal;
     window.submitCreateInvite    = submitCreateInvite;
