@@ -70,15 +70,11 @@ func ListBlockedReleases(db *sql.DB) ([]BlockedRelease, error) {
 func DeleteBlockedRelease(db *sql.DB, id int64) (int, error) {
 	var blocklistID int
 	err := db.QueryRow(
-		`SELECT arr_blocklist_id FROM blocked_releases WHERE id = ?`, id,
+		`DELETE FROM blocked_releases WHERE id = ? RETURNING arr_blocklist_id`, id,
 	).Scan(&blocklistID)
 	if err == sql.ErrNoRows {
 		return 0, fmt.Errorf("blocked release %d not found", id)
 	}
-	if err != nil {
-		return 0, err
-	}
-	_, err = db.Exec(`DELETE FROM blocked_releases WHERE id = ?`, id)
 	return blocklistID, err
 }
 
