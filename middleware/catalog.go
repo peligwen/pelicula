@@ -232,11 +232,15 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		if item, err := GetCatalogItemByFilePath(catalogDB, path); err == nil && item != nil {
 			synopsis = item.Synopsis
 			artworkURL = item.ArtworkURL
-			if synopsis == "" && artworkURL == "" && item.Type == "episode" {
+			if (synopsis == "" || artworkURL == "") && item.Type == "episode" {
 				if season, err := GetCatalogItemByID(catalogDB, item.ParentID); err == nil && season != nil {
 					if series, err := GetCatalogItemByID(catalogDB, season.ParentID); err == nil && series != nil {
-						synopsis = series.Synopsis
-						artworkURL = series.ArtworkURL
+						if synopsis == "" {
+							synopsis = series.Synopsis
+						}
+						if artworkURL == "" {
+							artworkURL = series.ArtworkURL
+						}
 					}
 				}
 			}
