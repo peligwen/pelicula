@@ -548,59 +548,12 @@
                 </div>
 
                 <!-- Remote Access (Peligrosa) -->
-                <div class="settings-panel admin-only">
-                    <div class="settings-panel-title" style="display:flex;align-items:center;justify-content:space-between">
-                        <span>Remote Access</span>
-                        <span id="st-remote-status" class="st-remote-badge"></span>
+                <div class="settings-panel settings-summary-row admin-only" onclick="openSettingsDrawer('remote')">
+                    <div class="summary-row-left">
+                        <div class="settings-panel-title" style="margin-bottom:0">Remote Access</div>
+                        <div class="summary-row-status" id="st-remote-summary-status"><span class="status-dot inactive"></span>Disabled</div>
                     </div>
-                    <label class="toggle-row">
-                        <span class="toggle-label">Enable remote access</span>
-                        <span class="toggle-sub">Serve the dashboard over HTTPS from a public hostname (Peligrosa). Requires a stack restart to activate.</span>
-                        <button class="toggle" id="st-remote-enabled" role="switch" onclick="toggleSetting(this)" data-key="remote_access_enabled">
-                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                        </button>
-                    </label>
-                    <div id="st-remote-opts">
-                        <div class="settings-field-row">
-                            <label class="settings-field-label" for="st-remote-hostname">Hostname</label>
-                            <span class="settings-field-hint">Bare hostname, no scheme or port (e.g. <code>jellyfin.example.com</code>)</span>
-                            <input type="text" id="st-remote-hostname" class="settings-input" placeholder="jellyfin.example.com">
-                        </div>
-                        <div class="settings-field-row">
-                            <label class="settings-field-label" for="st-remote-http-port">HTTP port</label>
-                            <input type="number" id="st-remote-http-port" class="settings-input" placeholder="80" min="1" max="65535">
-                        </div>
-                        <div class="settings-field-row">
-                            <label class="settings-field-label" for="st-remote-https-port">HTTPS port</label>
-                            <input type="number" id="st-remote-https-port" class="settings-input" placeholder="8920" min="1" max="65535">
-                        </div>
-                        <div class="settings-field-row">
-                            <label class="settings-field-label">Certificate mode</label>
-                            <div class="settings-radio-row">
-                                <label><input type="radio" name="st-cert-mode" value="letsencrypt" onchange="updateCertMode()"> Let&#x2019;s Encrypt</label>
-                                <label><input type="radio" name="st-cert-mode" value="byo" onchange="updateCertMode()"> BYO certificate</label>
-                                <label><input type="radio" name="st-cert-mode" value="self-signed" onchange="updateCertMode()"> Self-signed</label>
-                            </div>
-                        </div>
-                        <div id="st-le-opts" style="display:none">
-                            <div class="settings-field-row">
-                                <label class="settings-field-label" for="st-le-email">Let&#x2019;s Encrypt email</label>
-                                <input type="email" id="st-le-email" class="settings-input" placeholder="you@example.com">
-                            </div>
-                            <label class="toggle-row">
-                                <span class="toggle-label">Staging certificates</span>
-                                <span class="toggle-sub">Use Let&#x2019;s Encrypt staging CA (for testing; not trusted by browsers)</span>
-                                <button class="toggle" id="st-le-staging" role="switch" onclick="toggleSetting(this)" data-key="remote_le_staging">
-                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                </button>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="settings-actions" style="margin-top:0.75rem">
-                        <button class="settings-save-btn" onclick="saveRemoteAccess()">Save remote access</button>
-                        <span class="settings-save-status" id="st-remote-save-status"></span>
-                    </div>
-                    <p class="settings-field-hint" style="margin-top:0.25rem;color:var(--muted)">Changes require a stack restart: <code>pelicula restart nginx</code></p>
+                    <button class="summary-row-action" onclick="event.stopPropagation();openSettingsDrawer('remote')">Configure <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Pipeline toggles -->
@@ -630,110 +583,21 @@
                 </div>
 
                 <!-- Transcoding Profiles -->
-                <div class="settings-panel" id="st-profiles-panel">
-                    <div class="settings-panel-title" style="display:flex;align-items:center;justify-content:space-between">
-                        <span>Transcoding Profiles</span>
-                        <button class="sm-btn" onclick="installDefaultProfiles()">Install defaults</button>
+                <div class="settings-panel settings-summary-row" onclick="openSettingsDrawer('profiles')">
+                    <div class="summary-row-left">
+                        <div class="settings-panel-title" style="margin-bottom:0">Transcoding Profiles</div>
+                        <div class="summary-row-status" id="st-profiles-summary-status">No profiles configured</div>
                     </div>
-                    <div id="st-profiles-list" class="st-profiles-list">Loading…</div>
-                    <div class="settings-panel-title" style="font-size:0.78rem;margin-top:1rem;margin-bottom:0.5rem">Add / edit profile</div>
-                    <div class="st-profile-form">
-                        <input type="hidden" id="pf-edit-original-name">
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Name</label>
-                            <input type="text" id="pf-name" class="settings-input" placeholder="My Profile">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Description</label>
-                            <input type="text" id="pf-desc" class="settings-input" placeholder="Optional description">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Trigger codecs</label>
-                            <input type="text" id="pf-codecs" class="settings-input" placeholder="hevc, h265, av1  (leave blank for any)">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Min height (px)</label>
-                            <input type="number" id="pf-minheight" class="settings-input" placeholder="0 = any" min="0">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Video codec</label>
-                            <select id="pf-vcodec" class="settings-input">
-                                <option value="libx264">H.264 (libx264)</option>
-                                <option value="libx265">H.265 (libx265)</option>
-                                <option value="copy">Copy (passthrough)</option>
-                            </select>
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Preset</label>
-                            <select id="pf-preset" class="settings-input">
-                                <option value="fast">fast</option>
-                                <option value="medium" selected>medium</option>
-                                <option value="slow">slow</option>
-                            </select>
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">CRF (quality)</label>
-                            <input type="number" id="pf-crf" class="settings-input" value="20" min="0" max="51">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Max height (px)</label>
-                            <input type="number" id="pf-maxheight" class="settings-input" placeholder="0 = no limit" min="0">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Audio codec</label>
-                            <select id="pf-acodec" class="settings-input">
-                                <option value="aac">AAC</option>
-                                <option value="ac3">AC3</option>
-                                <option value="copy">Copy</option>
-                            </select>
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Audio channels</label>
-                            <input type="number" id="pf-achannels" class="settings-input" placeholder="0 = keep original" min="0" max="8">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Output suffix</label>
-                            <input type="text" id="pf-suffix" class="settings-input" placeholder="-compat">
-                        </div>
-                        <div class="st-pf-row">
-                            <label class="st-pf-label">Enabled</label>
-                            <button class="toggle" id="pf-enabled" role="switch" aria-checked="true" onclick="toggleSetting(this)">
-                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                            </button>
-                        </div>
-                        <div class="st-pf-actions">
-                            <button class="sm-btn sm-btn-primary" onclick="saveProfile()">Save profile</button>
-                            <button class="sm-btn" onclick="clearProfileForm()" id="pf-cancel-btn" style="display:none">Cancel edit</button>
-                            <span id="st-profile-status" style="font-size:0.75rem;margin-left:0.5rem"></span>
-                        </div>
-                    </div>
+                    <button class="summary-row-action" onclick="event.stopPropagation();openSettingsDrawer('profiles')">Configure <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Subtitles -->
-                <div class="settings-panel">
-                    <div class="settings-panel-title">Subtitles</div>
-                    <div class="settings-field-row">
-                        <label class="settings-field-label" for="st-sub-langs">Subtitle languages</label>
-                        <span class="settings-field-hint">Comma-separated language codes (e.g. <code>en,es</code>)</span>
-                        <input type="text" id="st-sub-langs" class="settings-input" placeholder="en">
+                <div class="settings-panel settings-summary-row" onclick="openSettingsDrawer('subs')">
+                    <div class="summary-row-left">
+                        <div class="settings-panel-title" style="margin-bottom:0">Subtitles</div>
+                        <div class="summary-row-status" id="st-subs-summary-status">en</div>
                     </div>
-                    <label class="toggle-row">
-                        <span class="toggle-label">Dual subtitles</span>
-                        <span class="toggle-sub">Generate stacked dual-language subtitle sidecars</span>
-                        <button class="toggle" id="st-dualsub" role="switch" onclick="toggleSetting(this)" data-key="dual_sub_enabled">
-                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                        </button>
-                    </label>
-                    <div class="settings-field-row" id="st-dualsub-opts">
-                        <label class="settings-field-label" for="st-dualsub-pairs">Language pairs</label>
-                        <span class="settings-field-hint">One pair per line, e.g. <code>en-es</code></span>
-                        <textarea id="st-dualsub-pairs" class="settings-input settings-textarea" rows="3"></textarea>
-                        <label class="settings-field-label" style="margin-top:0.5rem">Translator</label>
-                        <div class="settings-radio-row">
-                            <label><input type="radio" name="st-translator" value="none"> None (style only)</label>
-                            <label><input type="radio" name="st-translator" value="argos"> Argos Translate</label>
-                        </div>
-                    </div>
+                    <button class="summary-row-action" onclick="event.stopPropagation();openSettingsDrawer('subs')">Configure <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Notifications -->
@@ -985,6 +849,201 @@
         document.body.dataset.tab = 'search';
     })();
     </script>
+    <!-- Settings drawers (shared backdrop) -->
+    <div class="drawer-backdrop hidden" id="settings-drawer-backdrop"></div>
+
+    <!-- Remote Access settings drawer -->
+    <div class="drawer hidden" id="st-remote-drawer" role="dialog" aria-modal="true" aria-label="Remote access settings">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Remote Access</div>
+                <div class="drawer-sub">Peligrosa &mdash; serve the dashboard over HTTPS from a public hostname</div>
+            </div>
+            <button class="drawer-close" onclick="closeSettingsDrawer('remote')">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <label class="toggle-row">
+                <span class="toggle-label">Enable remote access</span>
+                <span class="toggle-sub">Requires a stack restart to activate.</span>
+                <button class="toggle" id="st-remote-enabled" role="switch" onclick="toggleSetting(this)" data-key="remote_access_enabled">
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </button>
+            </label>
+            <div id="st-remote-opts">
+                <div class="settings-field-row">
+                    <label class="settings-field-label" for="st-remote-hostname">Hostname</label>
+                    <span class="settings-field-hint">Bare hostname, no scheme or port (e.g. <code>jellyfin.example.com</code>)</span>
+                    <input type="text" id="st-remote-hostname" class="settings-input" placeholder="jellyfin.example.com">
+                </div>
+                <div class="settings-field-row">
+                    <label class="settings-field-label" for="st-remote-http-port">HTTP port</label>
+                    <input type="number" id="st-remote-http-port" class="settings-input" placeholder="80" min="1" max="65535">
+                </div>
+                <div class="settings-field-row">
+                    <label class="settings-field-label" for="st-remote-https-port">HTTPS port</label>
+                    <input type="number" id="st-remote-https-port" class="settings-input" placeholder="8920" min="1" max="65535">
+                </div>
+                <div class="settings-field-row">
+                    <label class="settings-field-label">Certificate mode</label>
+                    <div class="settings-radio-row">
+                        <label><input type="radio" name="st-cert-mode" value="letsencrypt" onchange="updateCertMode()"> Let&#x2019;s Encrypt</label>
+                        <label><input type="radio" name="st-cert-mode" value="byo" onchange="updateCertMode()"> BYO certificate</label>
+                        <label><input type="radio" name="st-cert-mode" value="self-signed" onchange="updateCertMode()"> Self-signed</label>
+                    </div>
+                </div>
+                <div id="st-le-opts" style="display:none">
+                    <div class="settings-field-row">
+                        <label class="settings-field-label" for="st-le-email">Let&#x2019;s Encrypt email</label>
+                        <input type="email" id="st-le-email" class="settings-input" placeholder="you@example.com">
+                    </div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Staging certificates</span>
+                        <span class="toggle-sub">Use Let&#x2019;s Encrypt staging CA (for testing; not trusted by browsers)</span>
+                        <button class="toggle" id="st-le-staging" role="switch" onclick="toggleSetting(this)" data-key="remote_le_staging">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </label>
+                </div>
+            </div>
+            <p class="settings-field-hint" style="margin-top:1rem;color:var(--muted)">Changes require a stack restart: <code>pelicula restart nginx</code></p>
+        </div>
+        <div class="drawer-footer">
+            <button class="settings-save-btn" onclick="saveRemoteAccess()">Save</button>
+            <button class="sm-btn" onclick="closeSettingsDrawer('remote')">Cancel</button>
+            <span class="settings-save-status" id="st-remote-save-status"></span>
+        </div>
+    </div>
+
+    <!-- Transcoding Profiles settings drawer -->
+    <div class="drawer hidden" id="st-profiles-drawer" role="dialog" aria-modal="true" aria-label="Transcoding profiles">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Transcoding Profiles</div>
+                <div class="drawer-sub">Define re-encoding rules for imported media</div>
+            </div>
+            <button class="drawer-close" onclick="closeSettingsDrawer('profiles')">&times;</button>
+        </div>
+        <div class="drawer-actions">
+            <button class="sm-btn" onclick="installDefaultProfiles()">Install defaults</button>
+        </div>
+        <div class="drawer-body">
+            <div id="st-profiles-list" class="st-profiles-list">Loading&hellip;</div>
+            <div class="drawer-section" style="margin-top:1.25rem">
+                <div class="drawer-section-title">Add / edit profile</div>
+                <div class="st-profile-form">
+                    <input type="hidden" id="pf-edit-original-name">
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Name</label>
+                        <input type="text" id="pf-name" class="settings-input" placeholder="My Profile">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Description</label>
+                        <input type="text" id="pf-desc" class="settings-input" placeholder="Optional description">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Trigger codecs</label>
+                        <input type="text" id="pf-codecs" class="settings-input" placeholder="hevc, h265, av1  (leave blank for any)">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Min height (px)</label>
+                        <input type="number" id="pf-minheight" class="settings-input" placeholder="0 = any" min="0">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Video codec</label>
+                        <select id="pf-vcodec" class="settings-input">
+                            <option value="libx264">H.264 (libx264)</option>
+                            <option value="libx265">H.265 (libx265)</option>
+                            <option value="copy">Copy (passthrough)</option>
+                        </select>
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Preset</label>
+                        <select id="pf-preset" class="settings-input">
+                            <option value="fast">fast</option>
+                            <option value="medium" selected>medium</option>
+                            <option value="slow">slow</option>
+                        </select>
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">CRF (quality)</label>
+                        <input type="number" id="pf-crf" class="settings-input" value="20" min="0" max="51">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Max height (px)</label>
+                        <input type="number" id="pf-maxheight" class="settings-input" placeholder="0 = no limit" min="0">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Audio codec</label>
+                        <select id="pf-acodec" class="settings-input">
+                            <option value="aac">AAC</option>
+                            <option value="ac3">AC3</option>
+                            <option value="copy">Copy</option>
+                        </select>
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Audio channels</label>
+                        <input type="number" id="pf-achannels" class="settings-input" placeholder="0 = keep original" min="0" max="8">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Output suffix</label>
+                        <input type="text" id="pf-suffix" class="settings-input" placeholder="-compat">
+                    </div>
+                    <div class="st-pf-row">
+                        <label class="st-pf-label">Enabled</label>
+                        <button class="toggle" id="pf-enabled" role="switch" aria-checked="true" onclick="toggleSetting(this)">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </button>
+                    </div>
+                    <div class="st-pf-actions">
+                        <button class="sm-btn sm-btn-primary" onclick="saveProfile()">Save profile</button>
+                        <button class="sm-btn" onclick="clearProfileForm()" id="pf-cancel-btn" style="display:none">Cancel edit</button>
+                        <span id="st-profile-status" style="font-size:0.75rem;margin-left:0.5rem"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subtitles settings drawer -->
+    <div class="drawer hidden" id="st-subs-drawer" role="dialog" aria-modal="true" aria-label="Subtitle settings">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Subtitles</div>
+                <div class="drawer-sub">Language and dual-subtitle configuration</div>
+            </div>
+            <button class="drawer-close" onclick="closeSettingsDrawer('subs')">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <div class="settings-field-row">
+                <label class="settings-field-label" for="st-sub-langs">Subtitle languages</label>
+                <span class="settings-field-hint">Comma-separated language codes (e.g. <code>en,es</code>)</span>
+                <input type="text" id="st-sub-langs" class="settings-input" placeholder="en">
+            </div>
+            <label class="toggle-row">
+                <span class="toggle-label">Dual subtitles</span>
+                <span class="toggle-sub">Generate stacked dual-language subtitle sidecars</span>
+                <button class="toggle" id="st-dualsub" role="switch" onclick="toggleSetting(this)" data-key="dual_sub_enabled">
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </button>
+            </label>
+            <div class="settings-field-row" id="st-dualsub-opts">
+                <label class="settings-field-label" for="st-dualsub-pairs">Language pairs</label>
+                <span class="settings-field-hint">One pair per line, e.g. <code>en-es</code></span>
+                <textarea id="st-dualsub-pairs" class="settings-input settings-textarea" rows="3"></textarea>
+                <label class="settings-field-label" style="margin-top:0.5rem">Translator</label>
+                <div class="settings-radio-row">
+                    <label><input type="radio" name="st-translator" value="none"> None (style only)</label>
+                    <label><input type="radio" name="st-translator" value="argos"> Argos Translate</label>
+                </div>
+            </div>
+        </div>
+        <div class="drawer-footer">
+            <button class="settings-save-btn" onclick="saveSubtitlesDrawer()">Save</button>
+            <button class="sm-btn" onclick="closeSettingsDrawer('subs')">Cancel</button>
+            <span class="settings-save-status" id="st-subs-save-status"></span>
+        </div>
+    </div>
+
     <!-- Job detail drawer -->
     <div class="drawer-backdrop hidden" id="drawer-backdrop" onclick="closeJobDrawer()"></div>
     <div class="drawer hidden" id="job-drawer" role="dialog" aria-modal="true" aria-label="Job details">
