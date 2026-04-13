@@ -11,7 +11,7 @@ const ALL_SERVICES = [
 const logsState = {
     loaded: false,
     loading: false,
-    enabled: new Set(ALL_SERVICES),
+    activeFilter: null, // null = show all; string = show only that service
     lastEntries: [],
     userScrolled: false,
 };
@@ -33,9 +33,9 @@ async function loadLogs() {
     const out = document.getElementById('logs-stream');
     if (!out) { logsState.loading = false; return; }
     out.textContent = 'Loading\u2026';
-    const enabled = Array.from(logsState.enabled).join(',');
+    const services = logsState.activeFilter || ALL_SERVICES.join(',');
     try {
-        const res = await lfetch('/api/pelicula/logs/aggregate?tail=200&services=' + encodeURIComponent(enabled));
+        const res = await lfetch('/api/pelicula/logs/aggregate?tail=200&services=' + encodeURIComponent(services));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         logsState.lastEntries = data.entries || [];
@@ -53,7 +53,7 @@ function renderLogs(out, entries) {
     const frag = document.createDocumentFragment();
     let lastDate = null;
     for (const e of entries) {
-        if (!logsState.enabled.has(e.service)) continue;
+        if (logsState.activeFilter && e.service !== logsState.activeFilter) continue;
 
         // date separator
         const ts = e.ts ? new Date(e.ts) : null;
@@ -96,17 +96,19 @@ function renderFilters() {
     const frag = document.createDocumentFragment();
     for (const svc of ALL_SERVICES) {
         const chip = document.createElement('span');
-        chip.className = 'logs-filter-chip' + (logsState.enabled.has(svc) ? ' active' : '');
+        const isActive = logsState.activeFilter === svc;
+        chip.className = 'logs-filter-chip logs-svc-' + svc + (isActive ? ' active' : '');
         chip.textContent = svc;
         chip.addEventListener('click', () => {
-            if (logsState.enabled.has(svc)) logsState.enabled.delete(svc);
-            else logsState.enabled.add(svc);
+            // clicking the active filter clears it (back to show all);
+            // clicking any other sets it as the exclusive filter
+            logsState.activeFilter = logsState.activeFilter === svc ? null : svc;
             renderFilters();
             const out = document.getElementById('logs-stream');
             if (window.sseIsActive && window.sseIsActive() && out) {
-                renderLogs(out, logsState.lastEntries); // re-render from cache
+                renderLogs(out, logsState.lastEntries);
             } else {
-                loadLogs(); // fallback: re-fetch (SSE not connected)
+                loadLogs();
             }
         });
         frag.appendChild(chip);
