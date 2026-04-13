@@ -52,18 +52,32 @@ function renderLogs(out, entries) {
     initScrollAnchor(out);
     const frag = document.createDocumentFragment();
     let lastDate = null;
+    let lastHour = null;
     for (const e of entries) {
         if (logsState.activeFilter && e.service !== logsState.activeFilter) continue;
 
-        // date separator
         const ts = e.ts ? new Date(e.ts) : null;
-        const dateStr = ts && !isNaN(ts) ? ts.toLocaleDateString('en-US', {month:'short', day:'numeric'}) : null;
+        const isValid = ts && !isNaN(ts);
+
+        // date separator — resets hour tracking so no redundant hour sep follows
+        const dateStr = isValid ? ts.toLocaleDateString('en-US', {month:'short', day:'numeric'}) : null;
         if (dateStr && dateStr !== lastDate) {
             const sep = document.createElement('div');
             sep.className = 'logs-date-sep';
             sep.textContent = dateStr;
             frag.appendChild(sep);
             lastDate = dateStr;
+            lastHour = isValid ? ts.getHours() : null;
+        } else if (isValid) {
+            // hour separator — only within the same day, skip the top-of-day hour
+            const hour = ts.getHours();
+            if (lastHour !== null && hour !== lastHour) {
+                const sep = document.createElement('div');
+                sep.className = 'logs-hour-sep';
+                sep.textContent = String(hour).padStart(2, '0') + ':00';
+                frag.appendChild(sep);
+            }
+            if (lastHour === null || hour !== lastHour) lastHour = hour;
         }
 
         const row = document.createElement('div');
@@ -83,7 +97,7 @@ function renderLogs(out, entries) {
         msg.className = 'logs-line-msg';
         msg.textContent = e.line;
 
-        row.append(svc, tsEl, msg);
+        row.append(tsEl, svc, msg);
         frag.appendChild(row);
     }
     out.replaceChildren(frag);

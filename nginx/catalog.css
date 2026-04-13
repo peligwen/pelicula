@@ -323,9 +323,15 @@
     border-bottom: 1px solid #1e2028;
     margin-bottom: 0.15rem;
 }
+.logs-hour-sep {
+    color: #333; font-size: 0.54rem;
+    padding: 0.15rem 0 0.05rem;
+    border-bottom: 1px solid #161820;
+    margin-bottom: 0.1rem;
+}
 .logs-line {
     display: grid;
-    grid-template-columns: 14ch 9ch 1fr;
+    grid-template-columns: 9ch 14ch 1fr;
     gap: 0 0.6rem;
     line-height: 1.6;
     align-items: start;
