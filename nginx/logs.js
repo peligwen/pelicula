@@ -83,7 +83,7 @@ function renderLogs(out, entries) {
         msg.className = 'logs-line-msg';
         msg.textContent = e.line;
 
-        row.append(tsEl, svc, msg);
+        row.append(svc, tsEl, msg);
         frag.appendChild(row);
     }
     out.replaceChildren(frag);

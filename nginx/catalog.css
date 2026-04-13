@@ -325,10 +325,10 @@
 }
 .logs-line {
     display: grid;
-    grid-template-columns: 9ch 14ch 1fr;
+    grid-template-columns: 14ch 9ch 1fr;
     gap: 0 0.6rem;
     line-height: 1.6;
-    align-items: baseline;
+    align-items: start;
 }
 .logs-line-ts {
     color: #555;
@@ -336,8 +336,9 @@
     white-space: nowrap;
 }
 .logs-line-svc {
+    align-self: stretch;
     background: color-mix(in srgb, currentColor 8%, transparent);
-    padding: 0 0.3rem;
+    padding: 0.1rem 0.3rem;
     border-radius: 3px;
     white-space: nowrap;
     overflow: hidden;
