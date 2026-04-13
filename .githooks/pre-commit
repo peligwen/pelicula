@@ -54,6 +54,29 @@ if [[ -n "$touched_modules" ]]; then
   done
 fi
 
+# ── Test-file quality checks ───────────────────────────────────────────────────
+
+# Collect staged *_test.go files
+staged_test_files=()
+while IFS= read -r f; do
+  [[ "$f" == *_test.go ]] && staged_test_files+=("$REPO_ROOT/$f")
+done <<< "$staged_files"
+
+if [[ ${#staged_test_files[@]} -gt 0 ]]; then
+  # Rule: use t.Cleanup() for global restores, not bare defer
+  if grep -En 'defer func\(\) \{[^}]*= [A-Za-z_]+[^}]*\}\(\)' \
+       "${staged_test_files[@]}" 2>/dev/null; then
+    echo "pre-commit: use t.Cleanup() instead of bare defer for global variable restores in tests" >&2
+    exit 1
+  fi
+
+  # Rule: don't discard json decode errors in tests
+  if grep -n '_ = json\.' "${staged_test_files[@]}" 2>/dev/null; then
+    echo "pre-commit: don't discard json decode errors in tests — check the error with t.Fatal" >&2
+    exit 1
+  fi
+fi
+
 # ── Shell checks ───────────────────────────────────────────────────────────────
 
 if ! command -v shellcheck &>/dev/null; then
