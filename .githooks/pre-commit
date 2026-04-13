@@ -75,6 +75,12 @@ if [[ ${#staged_test_files[@]} -gt 0 ]]; then
     echo "pre-commit: don't discard json decode errors in tests — check the error with t.Fatal" >&2
     exit 1
   fi
+
+  # Rule: every Test function must have at least one assertion
+  if ! (cd "$REPO_ROOT/tools/check-test-assertions" && go run . "${staged_test_files[@]}") 2>&1; then
+    echo "pre-commit: add assertions to the Test functions listed above" >&2
+    exit 1
+  fi
 fi
 
 # ── Shell checks ───────────────────────────────────────────────────────────────
