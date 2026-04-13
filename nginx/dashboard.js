@@ -98,6 +98,7 @@ function applyRole(role, username) {
             if (window._users_getUsersLoaded && !window._users_getUsersLoaded()) {
                 if (window.loadUsers) window.loadUsers();
                 if (window.loadInvites) window.loadInvites();
+                if (window.loadOperators) window.loadOperators();
                 if (window._users_setUsersLoaded) window._users_setUsersLoaded(true);
             }
         } else {

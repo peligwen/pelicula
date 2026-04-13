@@ -547,11 +547,142 @@
         };
     });
 
+    async function loadOperators() {
+        const list   = document.getElementById('operators-list');
+        const empty  = document.getElementById('operators-empty');
+        const errEl  = document.getElementById('operators-error');
+        if (!list) return;
+        try {
+            const [usersResp, rolesResp] = await Promise.all([
+                fetch('/api/pelicula/users'),
+                fetch('/api/pelicula/operators'),
+            ]);
+            if (!usersResp.ok || !rolesResp.ok) {
+                if (errEl) { errEl.textContent = 'Failed to load operators.'; errEl.classList.remove('hidden'); }
+                return;
+            }
+            const users = await usersResp.json();
+            const roles = await rolesResp.json();
+            const roleMap = {};
+            (roles || []).forEach(r => { roleMap[r.jellyfin_id] = r.role; });
+
+            if (!users || users.length === 0) {
+                if (empty) empty.classList.remove('hidden');
+                list.replaceChildren();
+                return;
+            }
+            if (empty) empty.classList.add('hidden');
+
+            const frag = document.createDocumentFragment();
+            users.forEach(u => {
+                const li = document.createElement('li');
+                li.dataset.userId   = u.id;
+                li.dataset.userName = u.name;
+                li.className = 'users-list-item';
+
+                const info = document.createElement('div');
+                info.className = 'user-info';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'user-name';
+                nameSpan.textContent = u.name;
+                info.appendChild(nameSpan);
+
+                const actions = document.createElement('div');
+                actions.className = 'user-actions';
+                actions.style.gap = '0.5rem';
+
+                const select = document.createElement('select');
+                select.className = 'operator-role-select';
+                const currentRole = roleMap[u.id] || '';
+                [['', '\u2014 no access \u2014'], ['viewer', 'viewer'], ['manager', 'manager'], ['admin', 'admin']].forEach(([val, label]) => {
+                    const opt = document.createElement('option');
+                    opt.value = val;
+                    opt.textContent = label;
+                    if (currentRole === val) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                select.addEventListener('change', () => setOperatorRole(select));
+                actions.appendChild(select);
+
+                if (currentRole) {
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'user-action-btn user-action-delete';
+                    removeBtn.title = 'Remove role';
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.addEventListener('click', () => removeOperator(removeBtn));
+                    actions.appendChild(removeBtn);
+                }
+
+                const errSpan = document.createElement('span');
+                errSpan.className = 'users-error hidden';
+
+                li.appendChild(info);
+                li.appendChild(actions);
+                li.appendChild(errSpan);
+                frag.appendChild(li);
+            });
+            list.replaceChildren(frag);
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error loading operators.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
+    async function setOperatorRole(select) {
+        const li    = select.closest('li');
+        const id    = li.dataset.userId;
+        const name  = li.dataset.userName;
+        const role  = select.value;
+        const errEl = li.querySelector('.users-error');
+        if (errEl) errEl.classList.add('hidden');
+        if (!role) {
+            await doRemoveOperator(id, name, li);
+            return;
+        }
+        try {
+            const resp = await fetch('/api/pelicula/operators/' + encodeURIComponent(id), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role, username: name }),
+            });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                if (errEl) { errEl.textContent = data.error || 'Failed to set role.'; errEl.classList.remove('hidden'); }
+                return;
+            }
+            loadOperators();
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
+    async function removeOperator(btn) {
+        const li = btn.closest('li');
+        await doRemoveOperator(li.dataset.userId, li.dataset.userName, li);
+    }
+
+    async function doRemoveOperator(id, name, li) {
+        const errEl = li ? li.querySelector('.users-error') : null;
+        try {
+            const resp = await fetch('/api/pelicula/operators/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (resp.ok || resp.status === 204) {
+                loadOperators();
+                return;
+            }
+            const data = await resp.json().catch(() => ({}));
+            if (errEl) { errEl.textContent = data.error || 'Failed to remove role for ' + name + '.'; errEl.classList.remove('hidden'); }
+        } catch (e) {
+            if (errEl) { errEl.textContent = 'Network error.'; errEl.classList.remove('hidden'); }
+        }
+    }
+
     // ── Window exports (for onclick handlers and cross-file access) ───────────
     window.loadUsers             = loadUsers;
     window.loadSessions          = loadSessions;
     window.loadRequests          = loadRequests;
     window.loadInvites           = loadInvites;
+    window.loadOperators         = loadOperators;
+    window.setOperatorRole       = setOperatorRole;
+    window.removeOperator        = removeOperator;
     // loadArrMeta + saveRequestsSettings exported by settings.js (canonical owner)
     window.approveRequest        = approveRequest;
     window.denyRequest           = denyRequest;

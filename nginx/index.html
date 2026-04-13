@@ -474,6 +474,18 @@
                         </details>
                     </div>
                 </div>
+
+                <!-- Operators (admin-only: Pelicula role assignment) -->
+                <div class="admin-only" id="operators-section" style="margin-top:1.5rem">
+                    <div class="um-lane-header" style="margin-bottom:0.5rem">
+                        <span>Operators</span>
+                        <span class="um-lane-hint">Pelicula roles for Jellyfin accounts</span>
+                    </div>
+                    <p class="users-hint">Assign roles to control dashboard access. <strong>Admin</strong>: manage everything. <strong>Manager</strong>: search + approve requests. <strong>Viewer</strong>: browse + request.</p>
+                    <ul id="operators-list" class="users-list"></ul>
+                    <p id="operators-empty" class="hidden" style="font-size:0.8rem;color:var(--muted);padding:0.5rem 0">No roles assigned yet.</p>
+                    <p id="operators-error" class="users-error hidden"></p>
+                </div>
             </div>
 
             <!-- Requests -->
