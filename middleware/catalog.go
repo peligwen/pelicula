@@ -437,3 +437,59 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, map[string]string{"status": "ok"})
 }
+
+// handleCatalogQualityProfiles returns quality profile id→name maps for Radarr and Sonarr.
+// GET /api/pelicula/catalog/qualityprofiles
+// Response: {"radarr":{"1":"HD-1080p",...},"sonarr":{"4":"HD TV",...}}
+func handleCatalogQualityProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sonarrKey, radarrKey, _ := services.Keys()
+
+	type fetch struct {
+		data []byte
+		err  error
+	}
+	rCh := make(chan fetch, 1)
+	sCh := make(chan fetch, 1)
+	go func() {
+		body, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
+		rCh <- fetch{body, err}
+	}()
+	go func() {
+		body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		sCh <- fetch{body, err}
+	}()
+
+	buildMap := func(data []byte) map[string]string {
+		var profiles []map[string]any
+		m := map[string]string{}
+		if json.Unmarshal(data, &profiles) != nil {
+			return m
+		}
+		for _, p := range profiles {
+			if id, ok := p["id"].(float64); ok {
+				if name, ok := p["name"].(string); ok {
+					m[fmt.Sprintf("%.0f", id)] = name
+				}
+			}
+		}
+		return m
+	}
+
+	radarrMap := map[string]string{}
+	sonarrMap := map[string]string{}
+	if rr := <-rCh; rr.err == nil {
+		radarrMap = buildMap(rr.data)
+	}
+	if sr := <-sCh; sr.err == nil {
+		sonarrMap = buildMap(sr.data)
+	}
+
+	httputil.WriteJSON(w, map[string]any{
+		"radarr": radarrMap,
+		"sonarr": sonarrMap,
+	})
+}

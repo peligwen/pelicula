@@ -286,3 +286,46 @@ func TestHandleActionsRegistryCached(t *testing.T) {
 		t.Errorf("procula hits = %d, want 1 (cache should serve the rest)", hits)
 	}
 }
+
+func TestHandleCatalogQualityProfiles(t *testing.T) {
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/qualityprofile" {
+			w.Write([]byte(`[{"id":1,"name":"HD-1080p"},{"id":2,"name":"Any"}]`))
+		}
+	}))
+	defer radarr.Close()
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/qualityprofile" {
+			w.Write([]byte(`[{"id":4,"name":"HD TV"}]`))
+		}
+	}))
+	defer sonarr.Close()
+
+	origR, origS := radarrURL, sonarrURL
+	radarrURL, sonarrURL = radarr.URL, sonarr.URL
+	services = &ServiceClients{RadarrKey: "k", SonarrKey: "k"}
+	services.client = &http.Client{}
+	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/qualityprofiles", nil)
+	w := httptest.NewRecorder()
+	handleCatalogQualityProfiles(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Radarr map[string]string `json:"radarr"`
+		Sonarr map[string]string `json:"sonarr"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Radarr["1"] != "HD-1080p" {
+		t.Errorf("radarr profile 1 = %q, want HD-1080p", resp.Radarr["1"])
+	}
+	if resp.Sonarr["4"] != "HD TV" {
+		t.Errorf("sonarr profile 4 = %q, want HD TV", resp.Sonarr["4"])
+	}
+}
