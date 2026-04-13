@@ -22,7 +22,7 @@ func TestBuildFFmpegArgs(t *testing.T) {
 				Suffix:        ".x264",
 			},
 		}
-		args := buildFFmpegArgs("/input/movie.mkv", "/output/movie.x264.mkv", p)
+		args := buildFFmpegArgs("/input/movie.mkv", "/output/movie.x264.mkv", p, nil)
 		mustContainSeq(t, args, "-i", "/input/movie.mkv")
 		mustContain(t, args, "-y")
 		mustContainSeq(t, args, "-c:v", "libx264")
@@ -42,7 +42,7 @@ func TestBuildFFmpegArgs(t *testing.T) {
 				AudioCodec: "copy",
 			},
 		}
-		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p)
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, nil)
 		mustNotContain(t, args, "-crf")
 		mustNotContain(t, args, "-preset")
 		mustNotContain(t, args, "-vf")
@@ -57,7 +57,7 @@ func TestBuildFFmpegArgs(t *testing.T) {
 				AudioCodec: "copy",
 			},
 		}
-		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p)
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, nil)
 		mustNotContain(t, args, "-crf")
 	})
 
@@ -70,7 +70,7 @@ func TestBuildFFmpegArgs(t *testing.T) {
 				AudioCodec: "copy",
 			},
 		}
-		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p)
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, nil)
 		mustNotContain(t, args, "-vf")
 	})
 
@@ -82,7 +82,7 @@ func TestBuildFFmpegArgs(t *testing.T) {
 				AudioChannels: 0,
 			},
 		}
-		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p)
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, nil)
 		mustNotContain(t, args, "-ac")
 	})
 
@@ -90,9 +90,65 @@ func TestBuildFFmpegArgs(t *testing.T) {
 		p := &TranscodeProfile{
 			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
 		}
-		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p)
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, nil)
 		mustContainSeq(t, args, "-c:s", "copy")
 		mustEndWith(t, args, "/out.mkv")
+	})
+
+	t.Run("nil codecs: -map present but no -disposition flags", func(t *testing.T) {
+		p := &TranscodeProfile{
+			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
+		}
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, nil)
+		mustContainSeq(t, args, "-map", "0:v")
+		mustNotContain(t, args, "-disposition:a")
+	})
+
+	t.Run("with codecs: -map flags are present", func(t *testing.T) {
+		p := &TranscodeProfile{
+			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
+		}
+		codecs := &CodecInfo{
+			AudioTracks: []AudioTrack{
+				{Index: 1, Codec: "ac3", Language: "ita"},
+				{Index: 2, Codec: "eac3", Language: "eng"},
+			},
+		}
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, codecs)
+		mustContainSeq(t, args, "-map", "0:v")
+		mustContainSeq(t, args, "-map", "0:a")
+		mustContainSeq(t, args, "-map", "0:s?")
+	})
+
+	t.Run("preferred lang matches second track: disposition set correctly", func(t *testing.T) {
+		t.Setenv("PELICULA_AUDIO_LANG", "eng")
+		p := &TranscodeProfile{
+			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
+		}
+		codecs := &CodecInfo{
+			AudioTracks: []AudioTrack{
+				{Index: 1, Codec: "ac3", Language: "ita"},
+				{Index: 2, Codec: "eac3", Language: "eng"},
+			},
+		}
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, codecs)
+		mustContainSeq(t, args, "-disposition:a", "0")
+		mustContainSeq(t, args, "-disposition:a:1", "default")
+	})
+
+	t.Run("preferred lang not found: no disposition flags", func(t *testing.T) {
+		t.Setenv("PELICULA_AUDIO_LANG", "eng")
+		p := &TranscodeProfile{
+			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
+		}
+		codecs := &CodecInfo{
+			AudioTracks: []AudioTrack{
+				{Index: 1, Codec: "ac3", Language: "ita"},
+				{Index: 2, Codec: "aac", Language: "spa"},
+			},
+		}
+		args := buildFFmpegArgs("/in.mkv", "/out.mkv", p, codecs)
+		mustNotContain(t, args, "-disposition:a")
 	})
 }
 

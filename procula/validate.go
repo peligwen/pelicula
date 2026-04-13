@@ -33,6 +33,7 @@ type ffprobeStream struct {
 	CodecName string            `json:"codec_name"`
 	Width     int               `json:"width"`
 	Height    int               `json:"height"`
+	Channels  int               `json:"channels"`
 	Tags      map[string]string `json:"tags"`
 }
 
@@ -138,6 +139,16 @@ func extractCodecs(probe *ffprobeOutput) CodecInfo {
 			if info.Audio == "" {
 				info.Audio = s.CodecName
 			}
+			lang := ""
+			if s.Tags != nil {
+				lang = s.Tags["language"]
+			}
+			info.AudioTracks = append(info.AudioTracks, AudioTrack{
+				Index:    s.Index,
+				Codec:    s.CodecName,
+				Language: lang,
+				Channels: s.Channels,
+			})
 		case "subtitle":
 			lang := ""
 			if s.Tags != nil {

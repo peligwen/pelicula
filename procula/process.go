@@ -50,7 +50,11 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 		}
 	}()
 
-	args := buildFFmpegArgs(input, partialPath, profile)
+	var codecs *CodecInfo
+	if job.Validation != nil {
+		codecs = job.Validation.Checks.Codecs
+	}
+	args := buildFFmpegArgs(input, partialPath, profile, codecs)
 	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", finalPath, "profile", profile.Name)
 
 	cmd := exec.CommandContext(ctx, ffmpegCommand, args...)
@@ -127,11 +131,27 @@ func resolveOutputPath(input, suffix, processingDir string) string {
 	return outputPath
 }
 
-func buildFFmpegArgs(input, output string, p *TranscodeProfile) []string {
+// preferredAudioLang returns the normalized (ISO 639-1) preferred audio language
+// from PELICULA_AUDIO_LANG, defaulting to "en".
+func preferredAudioLang() string {
+	lang := strings.TrimSpace(os.Getenv("PELICULA_AUDIO_LANG"))
+	if lang == "" {
+		return "en"
+	}
+	return normalizeLangCode(lang)
+}
+
+func buildFFmpegArgs(input, output string, p *TranscodeProfile, codecs *CodecInfo) []string {
 	args := []string{
 		"-y", // overwrite output without prompting
 		"-i", input,
 	}
+
+	// Explicit stream mapping: preserve all video, audio, and subtitle streams.
+	// Without -map, FFmpeg picks only one "best" stream per type — dropping all
+	// other audio tracks (e.g., keeping only Italian when English is also present).
+	// The ? on subtitles makes it optional so files without subtitle streams don't fail.
+	args = append(args, "-map", "0:v", "-map", "0:a", "-map", "0:s?")
 
 	// Video
 	args = append(args, "-c:v", p.Output.VideoCodec)
@@ -152,6 +172,19 @@ func buildFFmpegArgs(input, output string, p *TranscodeProfile) []string {
 	args = append(args, "-c:a", p.Output.AudioCodec)
 	if p.Output.AudioCodec != "copy" && p.Output.AudioChannels > 0 {
 		args = append(args, "-ac", strconv.Itoa(p.Output.AudioChannels))
+	}
+
+	// Set default audio disposition on the preferred language track.
+	if codecs != nil && len(codecs.AudioTracks) > 0 {
+		preferred := preferredAudioLang()
+		for i, track := range codecs.AudioTracks {
+			if normalizeLangCode(track.Language) == preferred {
+				// Clear default on all audio tracks, then set it on the preferred one.
+				args = append(args, "-disposition:a", "0")
+				args = append(args, fmt.Sprintf("-disposition:a:%d", i), "default")
+				break
+			}
+		}
 	}
 
 	// Subtitles — always copy through

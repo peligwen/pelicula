@@ -47,12 +47,20 @@ type JobSource struct {
 	ExpectedRuntimeMinutes int    `json:"expected_runtime_minutes"`
 }
 
+type AudioTrack struct {
+	Index    int    `json:"index"` // ffprobe absolute stream index
+	Codec    string `json:"codec"`
+	Language string `json:"language"`
+	Channels int    `json:"channels,omitempty"`
+}
+
 type CodecInfo struct {
-	Video     string   `json:"video"`
-	Audio     string   `json:"audio"`
-	Subtitles []string `json:"subtitles"`
-	Width     int      `json:"width,omitempty"`
-	Height    int      `json:"height,omitempty"`
+	Video       string       `json:"video"`
+	Audio       string       `json:"audio"`                  // first track codec (backward compat)
+	AudioTracks []AudioTrack `json:"audio_tracks,omitempty"` // all audio tracks
+	Subtitles   []string     `json:"subtitles"`
+	Width       int          `json:"width,omitempty"`
+	Height      int          `json:"height,omitempty"`
 }
 
 type ValidationChecks struct {

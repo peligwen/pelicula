@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"strings"
@@ -268,6 +269,21 @@ func wireJellyfin(s *ServiceClients) {
 
 	wireJellyfinLibrary(s, token, "Movies", "movies", "/data/movies")
 	wireJellyfinLibrary(s, token, "TV Shows", "tvshows", "/data/tv")
+
+	// Set the service user's preferred audio language so Jellyfin defaults to
+	// the right track on playback (handles multi-audio files like Silo where
+	// the first track is a foreign language but English is also present).
+	svcUserData, err := jellyfinGet(s, "/Users/Me", token)
+	if err != nil {
+		slog.Warn("could not fetch service user for audio pref", "component", "autowire", "error", err)
+	} else {
+		var svcUser map[string]any
+		if jsonErr := json.Unmarshal(svcUserData, &svcUser); jsonErr == nil {
+			if svcUserID, _ := svcUser["Id"].(string); svcUserID != "" {
+				setJellyfinAudioPref(s, token, svcUserID)
+			}
+		}
+	}
 }
 
 // promoteJellyfinAdmin promotes userID to Jellyfin administrator.
@@ -296,6 +312,39 @@ func promoteJellyfinAdmin(s *ServiceClients, token, userID, username string) {
 		return
 	}
 	slog.Info("operator admin promoted to Jellyfin administrator", "component", "autowire", "username", username)
+}
+
+// setJellyfinAudioPref sets the user's preferred audio language in Jellyfin.
+// Jellyfin uses ISO 639-2 three-letter codes (e.g. "eng") for AudioLanguagePreference.
+// Uses the same GET-merge-POST pattern as promoteJellyfinAdmin to avoid zeroing
+// out other configuration fields.
+func setJellyfinAudioPref(s *ServiceClients, token, userID string) {
+	lang := os.Getenv("PELICULA_AUDIO_LANG")
+	if lang == "" {
+		lang = "eng"
+	}
+
+	userData, err := jellyfinGet(s, "/Users/"+userID, token)
+	if err != nil {
+		slog.Warn("could not fetch user for audio pref", "component", "autowire", "userId", userID, "error", err)
+		return
+	}
+	var user map[string]any
+	if jsonErr := json.Unmarshal(userData, &user); jsonErr != nil {
+		slog.Warn("could not parse user data for audio pref", "component", "autowire", "userId", userID, "error", jsonErr)
+		return
+	}
+	config, _ := user["Configuration"].(map[string]any)
+	if config == nil {
+		config = map[string]any{}
+	}
+	config["AudioLanguagePreference"] = lang
+	config["PlayDefaultAudioTrack"] = false // honour AudioLanguagePreference, not just "first track"
+	if _, cfgErr := jellyfinPost(s, "/Users/"+userID+"/Configuration", token, config); cfgErr != nil {
+		slog.Warn("could not set Jellyfin audio language preference", "component", "autowire", "userId", userID, "lang", lang, "error", cfgErr)
+		return
+	}
+	slog.Info("Jellyfin audio language preference set", "component", "autowire", "userId", userID, "lang", lang)
 }
 
 // completeJellyfinWizard runs the Jellyfin startup wizard and returns a session
@@ -789,6 +838,10 @@ func CreateJellyfinUser(s *ServiceClients, username, password string) (string, e
 		return "", fmt.Errorf("%s (user was removed): %w", msg, err)
 	}
 	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
+
+	// Set preferred audio language on the new user.
+	setJellyfinAudioPref(s, token, id)
+
 	return id, nil
 }
 
