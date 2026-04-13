@@ -722,6 +722,42 @@ func TestDetectSubVariant(t *testing.T) {
 	}
 }
 
+// ── parseDualSubPairs with sub_index ─────────────────────────────────────────
+
+func TestParseTrackPairWithSubIndex(t *testing.T) {
+	// Simulate the JSON payload parsing logic from runDualSubAction
+	raw := []any{
+		map[string]any{"top_file": "/movies/Movie/Movie.en.srt", "bottom_file": "/movies/Movie/Movie.es.srt"},
+		map[string]any{"top_sub_index": float64(0), "bottom_sub_index": float64(1)},
+		map[string]any{"top_file": "/movies/Movie/Movie.en.srt", "bottom_sub_index": float64(2)},
+	}
+	pairs := parseDualSubPairs(raw)
+	if len(pairs) != 3 {
+		t.Fatalf("expected 3 pairs, got %d", len(pairs))
+	}
+	// Pair 0: both files
+	if pairs[0].TopFile != "/movies/Movie/Movie.en.srt" {
+		t.Errorf("pair[0].TopFile = %q", pairs[0].TopFile)
+	}
+	if pairs[0].TopSubIndex != -1 {
+		t.Errorf("pair[0].TopSubIndex = %d, want -1", pairs[0].TopSubIndex)
+	}
+	// Pair 1: both embedded
+	if pairs[1].TopSubIndex != 0 {
+		t.Errorf("pair[1].TopSubIndex = %d, want 0", pairs[1].TopSubIndex)
+	}
+	if pairs[1].BottomSubIndex != 1 {
+		t.Errorf("pair[1].BottomSubIndex = %d, want 1", pairs[1].BottomSubIndex)
+	}
+	// Pair 2: mixed — file top, embedded bottom
+	if pairs[2].TopFile != "/movies/Movie/Movie.en.srt" {
+		t.Errorf("pair[2].TopFile = %q", pairs[2].TopFile)
+	}
+	if pairs[2].BottomSubIndex != 2 {
+		t.Errorf("pair[2].BottomSubIndex = %d, want 2", pairs[2].BottomSubIndex)
+	}
+}
+
 // ── handleSubtitleTracks embedded field ──────────────────────────────────────
 
 func TestHandleSubtitleTracksEmbeddedField(t *testing.T) {

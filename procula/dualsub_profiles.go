@@ -24,10 +24,14 @@ type DualSubJob struct {
 	Pairs   []TrackPair `json:"pairs"`
 }
 
-// TrackPair identifies the two subtitle files to combine for one output sidecar.
+// TrackPair identifies the two subtitle sources to combine for one output sidecar.
+// Each side is either a sidecar file path or an embedded stream index.
+// A SubIndex of -1 means "use the file path"; >= 0 means "use embedded stream N".
 type TrackPair struct {
-	TopFile    string `json:"top_file"`    // e.g. "Movie.en.srt"
-	BottomFile string `json:"bottom_file"` // e.g. "Movie.es.srt"
+	TopFile        string `json:"top_file"`         // sidecar file path (empty if using embedded)
+	BottomFile     string `json:"bottom_file"`      // sidecar file path (empty if using embedded)
+	TopSubIndex    int    `json:"top_sub_index"`    // embedded stream index (-1 = not used)
+	BottomSubIndex int    `json:"bottom_sub_index"` // embedded stream index (-1 = not used)
 }
 
 func builtinDualSubProfiles() []DualSubProfile {
