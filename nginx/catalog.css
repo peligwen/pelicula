@@ -327,7 +327,6 @@
 .logs-line-ts {
     color: #555;
     text-align: right;
-    flex-shrink: 0;
 }
 .logs-line-svc {
     background: color-mix(in srgb, currentColor 8%, transparent);
