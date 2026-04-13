@@ -25,8 +25,8 @@ func TestHandleStorageProxy(t *testing.T) {
 	old := proculaURL
 	origSvc := services
 	proculaURL = fake.URL
-	t.Cleanup(func() { proculaURL = old; services = origSvc })
 	services = NewServiceClients("/config")
+	t.Cleanup(func() { proculaURL = old; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
 	w := httptest.NewRecorder()
@@ -50,8 +50,8 @@ func TestHandleUpdatesProxy(t *testing.T) {
 	old := proculaURL
 	origSvc := services
 	proculaURL = fake.URL
-	t.Cleanup(func() { proculaURL = old; services = origSvc })
 	services = NewServiceClients("/config")
+	t.Cleanup(func() { proculaURL = old; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)
 	w := httptest.NewRecorder()
