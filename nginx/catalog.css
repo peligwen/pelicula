@@ -311,7 +311,7 @@
     border-color: color-mix(in srgb, currentColor 70%, transparent);
 }
 .logs-stream {
-    max-height: 78vh; overflow-y: auto;
+    max-height: 78vh; overflow-y: auto; overflow-anchor: none;
     background: #0c0e13; padding: 0.5rem; border-radius: 8px;
     font-family: ui-monospace, Menlo, monospace; font-size: 0.62rem;
     word-break: break-word;

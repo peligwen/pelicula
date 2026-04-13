@@ -22,8 +22,8 @@ function initScrollAnchor(out) {
     if (out._scrollListenerAttached) return;
     out._scrollListenerAttached = true;
     out.addEventListener('scroll', () => {
-        const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
-        logsState.userScrolled = !atBottom;
+        const atTop = out.scrollTop < 30;
+        logsState.userScrolled = !atTop;
     });
 }
 
@@ -101,7 +101,7 @@ function renderLogs(out, entries) {
         frag.appendChild(row);
     }
     out.replaceChildren(frag);
-    if (!logsState.userScrolled) out.scrollTop = out.scrollHeight;
+    if (!logsState.userScrolled) out.scrollTop = 0;
 }
 
 function renderFilters() {
@@ -130,6 +130,12 @@ function renderFilters() {
     wrap.replaceChildren(frag);
 }
 
+// logsRefresh is called by the refresh button in the header.
+window.logsRefresh = function() {
+    logsState.userScrolled = false;
+    loadLogs();
+};
+
 // renderLogsFromSSE is called by sse.js on each 'logs' SSE event.
 window.renderLogsFromSSE = function(data) {
     const out = document.getElementById('logs-stream');
@@ -140,6 +146,7 @@ window.renderLogsFromSSE = function(data) {
 };
 
 PeliculaFW.onTab('logs', function () {
+    logsState.userScrolled = false;
     renderFilters();
     if (window.sseIsActive && window.sseIsActive()) {
         // SSE is active — render from cache immediately if we have it,
