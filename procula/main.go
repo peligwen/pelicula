@@ -624,11 +624,15 @@ func (s *Server) handleDeleteBlockedRelease(w http.ResponseWriter, r *http.Reque
 			nil)
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
-		if err != nil || resp.StatusCode >= 400 {
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				slog.Warn("failed to remove *arr blocklist entry", "component", "replace",
+					"blocklist_id", blocklistID)
+			}
+		} else {
 			slog.Warn("failed to remove *arr blocklist entry", "component", "replace",
 				"blocklist_id", blocklistID)
-		} else {
-			resp.Body.Close()
 		}
 	}
 
