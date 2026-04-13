@@ -63,6 +63,7 @@ var migrations = []migration{
 	{version: 4, up: migrate4},
 	{version: 5, up: migrate5},
 	{version: 6, up: migrate6},
+	{version: 7, up: migrate7},
 }
 
 // runMigrations reads the current schema version and applies all pending
@@ -159,6 +160,22 @@ func migrate6(tx *sql.Tx) error {
 	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS dualsub_profiles (
 		name TEXT PRIMARY KEY,
 		data TEXT NOT NULL
+	)`)
+	return err
+}
+
+// migrate7 creates the blocked_releases table for tracking releases that have
+// been blocked and removed from the *arr queue.
+func migrate7(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS blocked_releases (
+		id               INTEGER PRIMARY KEY AUTOINCREMENT,
+		arr_app          TEXT    NOT NULL,
+		arr_blocklist_id INTEGER NOT NULL DEFAULT 0,
+		arr_item_id      INTEGER NOT NULL,
+		display_title    TEXT    NOT NULL,
+		file_path        TEXT    NOT NULL,
+		blocked_at       TEXT    NOT NULL,
+		reason           TEXT    NOT NULL DEFAULT ''
 	)`)
 	return err
 }
