@@ -89,4 +89,4 @@ Remote Jellyfin access (Peligrosa) is opt-in — see docs/PELIGROSA.md.
 - [PELIGROSA.md](docs/PELIGROSA.md) — user interaction safety layer: threat model, auth, users, invites, request queue, webhook secret, CSRF, remote vhost hardening, known limitations
 - [PROCULA.md](docs/PROCULA.md) — processing pipeline internals (queue, validate, transcode, catalog, storage)
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure policy (threat model and known limitations are in docs/PELIGROSA.md)
-- [ROADMAP.md](docs/ROADMAP.md) — active work (Bazarr, invite flow, Go CLI) and deferred items
+- [ROADMAP.md](docs/ROADMAP.md) — shipped features, deferred items, and project history
