@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"pelicula-api/httputil"
 	"time"
 )
@@ -122,8 +123,17 @@ var gluetunControlURL = envOr("GLUETUN_CONTROL_URL", "http://gluetun:8000")
 
 // gluetunGet makes a GET request to the Gluetun control API and returns the
 // response body. Returns (nil, false) on any error or non-200 status.
+// Includes HTTP Basic Auth when GLUETUN_HTTP_PASS is set.
 func gluetunGet(client *http.Client, path string) ([]byte, bool) {
-	resp, err := client.Get(gluetunControlURL + path)
+	req, err := http.NewRequest("GET", gluetunControlURL+path, nil)
+	if err != nil {
+		return nil, false
+	}
+	if pass := os.Getenv("GLUETUN_HTTP_PASS"); pass != "" {
+		user := envOr("GLUETUN_HTTP_USER", "pelicula")
+		req.SetBasicAuth(user, pass)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, false
 	}

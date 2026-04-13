@@ -28,6 +28,8 @@ services:
       # through the VPN tunnel for speed diagnostics.
       - HTTPPROXY=on
       - HTTPPROXY_LISTENING_ADDRESS=:8888
+      - HTTP_CONTROL_SERVER_USERNAME=${GLUETUN_HTTP_USER:-pelicula}
+      - HTTP_CONTROL_SERVER_PASSWORD=${GLUETUN_HTTP_PASS}
     ports:
       # Torrent incoming connections
       - "6881:6881"
@@ -254,6 +256,8 @@ services:
       - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
       - PELICULA_AUDIO_LANG=${PELICULA_AUDIO_LANG:-eng}
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - GLUETUN_HTTP_USER=${GLUETUN_HTTP_USER:-pelicula}
+      - GLUETUN_HTTP_PASS=${GLUETUN_HTTP_PASS}
       - GLUETUN_PROXY_URL=${GLUETUN_PROXY_URL:-http://gluetun:8888}
     volumes:
       - ./.env:/project/.env

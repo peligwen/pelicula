@@ -20,6 +20,8 @@ var envKeyOrder = []string{
 	"TZ",
 	"WIREGUARD_PRIVATE_KEY",
 	"SERVER_COUNTRIES",
+	"GLUETUN_HTTP_USER",
+	"GLUETUN_HTTP_PASS",
 	"PELICULA_PORT",
 	"JELLYFIN_ADMIN_USER",
 	"JELLYFIN_PASSWORD",
@@ -169,6 +171,16 @@ func MigrateEnv(path string) (bool, error) {
 	// Migration 3: default JELLYFIN_ADMIN_USER for pre-existing installs
 	if _, ok := m["JELLYFIN_ADMIN_USER"]; !ok {
 		m["JELLYFIN_ADMIN_USER"] = "admin"
+		changed = true
+	}
+
+	// Migration 4: generate gluetun control server credentials for pre-existing installs
+	if _, ok := m["GLUETUN_HTTP_USER"]; !ok {
+		m["GLUETUN_HTTP_USER"] = "pelicula"
+		changed = true
+	}
+	if _, ok := m["GLUETUN_HTTP_PASS"]; !ok {
+		m["GLUETUN_HTTP_PASS"] = generateAPIKey()
 		changed = true
 	}
 
