@@ -13,9 +13,19 @@ const logsState = {
     loading: false,
     enabled: new Set(ALL_SERVICES),
     lastEntries: [],
+    userScrolled: false,
 };
 
 function lfetch(url) { return fetch(url, { credentials: 'same-origin' }); }
+
+function initScrollAnchor(out) {
+    if (out._scrollListenerAttached) return;
+    out._scrollListenerAttached = true;
+    out.addEventListener('scroll', () => {
+        const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
+        logsState.userScrolled = !atBottom;
+    });
+}
 
 async function loadLogs() {
     if (logsState.loading) return;
