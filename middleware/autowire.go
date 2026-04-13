@@ -564,11 +564,13 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 			}
 			switch field["name"] {
 			case "prowlarrUrl":
-				if v, _ := field["value"].(string); v != prowlarrURL {
+				if v, _ := field["value"].(string); normalizeURL(v) != normalizeURL(prowlarrURL) {
+					slog.Debug("prowlarr app URL mismatch", "component", "autowire", "app", appName, "have", v, "want", prowlarrURL)
 					needsUpdate = true
 				}
 			case "apiKey":
 				if v, _ := field["value"].(string); v != appAPIKey {
+					slog.Debug("prowlarr app key mismatch", "component", "autowire", "app", appName)
 					needsUpdate = true
 				}
 			}
@@ -626,4 +628,17 @@ func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool 
 
 	slog.Info("connected Prowlarr app", "component", "autowire", "app", appName)
 	return true
+}
+
+// normalizeURL strips trailing slashes and lowercases scheme+host so that
+// URL comparisons are not sensitive to Prowlarr's normalization behavior.
+func normalizeURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return strings.TrimRight(raw, "/")
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String()
 }
