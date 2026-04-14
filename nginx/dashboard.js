@@ -217,27 +217,6 @@ async function checkNotifications() {
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
-// ── Activity feed ─────────────────────────
-function renderActivity(events) {
-    const section = document.getElementById('activity-section');
-    const list = document.getElementById('activity-list');
-    if (!section || !list) return;
-    if (!Array.isArray(events) || !events.length) {
-        list.innerHTML = html`<div class="activity-empty">No recent activity yet.</div>`.str;
-        return;
-    }
-    list.innerHTML = events.slice(0, 15).map(e => {
-        const icon = notifIcon(e.type);
-        const cls = notifClass(e.type);
-        const time = formatNotifTime(e.timestamp);
-        return html`<div class="activity-item ${cls}">
-            <span class="activity-icon">${raw(icon)}</span>
-            <span class="activity-msg">${e.message}</span>
-            <span class="activity-time">${time}</span>
-        </div>`.str;
-    }).join('');
-}
-
 // ── Storage Management ────────────────────
 async function checkStorage() {
     try {
@@ -888,6 +867,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', fun
 document.addEventListener('DOMContentLoaded', function() {
     PeliculaFW.mount('search', document.getElementById('search-section'));
     PeliculaFW.mount('downloads', document.getElementById('pipeline-section'));
+    PeliculaFW.mount('activity', document.getElementById('activity-section'));
     PeliculaFW.mount('pipeline', document.getElementById('pipeline-section'));
     PeliculaFW.mount('notifications', document.getElementById('bell-wrap'));
     PeliculaFW.mount('settings', document.getElementById('settings-section'));
