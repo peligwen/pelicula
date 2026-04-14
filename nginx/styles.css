@@ -1497,11 +1497,11 @@ details[open] .add-user-summary::before { content: '− '; }
     line-height: 1;
     transition: right 0.2s, background 0.15s, color 0.15s;
 }
-.side-toggle::after { content: '‹'; }
+.side-toggle::after { content: '›'; }
 .side-toggle:hover { background: var(--pink-l); color: var(--pink); border-color: rgba(240,96,168,0.4); }
 
 body.side-collapsed .side-toggle { right: 0; border-right: 1px solid var(--border2); border-radius: 6px 0 0 6px; }
-body.side-collapsed .side-toggle::after { content: '›'; }
+body.side-collapsed .side-toggle::after { content: '‹'; }
 body.side-collapsed .pane-side { display: none; }
 body.side-collapsed .main { grid-template-columns: 1fr; }
 
