@@ -123,7 +123,7 @@ async function checkStatus() {
         const data = await res.json();
         const statusBar = document.getElementById('indexer-status');
         const hint = document.getElementById('footer-hint');
-        if (data.indexers === 0) {
+        if (data.indexers != null && data.indexers === 0) {
             if (statusBar) statusBar.classList.add('visible');
             if (hint) hint.textContent = 'Prowlarr needs an indexer';
         } else {
@@ -174,14 +174,14 @@ function initSidePanelState() {
     setSidePanelCollapsed(_isMobileViewport());
 }
 
-// Strip click opens the panel.
+// Toggle button opens/closes the panel.
 document.addEventListener('DOMContentLoaded', () => {
     initSidePanelState();
-    const strip = document.getElementById('side-strip');
-    if (strip) {
-        strip.addEventListener('click', (e) => {
+    const toggle = document.getElementById('side-toggle');
+    if (toggle) {
+        toggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            setSidePanelCollapsed(false);
+            toggleSidePanel();
         });
     }
 });
@@ -195,8 +195,8 @@ document.addEventListener('click', (e) => {
     if (document.querySelector('.modal-overlay:not(.hidden)')) return;
     const paneSide = document.querySelector('.pane-side');
     if (!paneSide || paneSide.contains(e.target)) return;
-    const strip = document.getElementById('side-strip');
-    if (strip && strip.contains(e.target)) return;
+    const toggle = document.getElementById('side-toggle');
+    if (toggle && toggle.contains(e.target)) return;
     setSidePanelCollapsed(true);
 });
 

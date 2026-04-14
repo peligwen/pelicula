@@ -253,13 +253,14 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	prowlarrKey := services.ProwlarrKey
 	services.mu.RUnlock()
 
-	indexerCount := 0
+	var indexerCount *int
 	if prowlarrKey != "" {
 		data, err := services.ArrGet(prowlarrURL, prowlarrKey, "/api/v1/indexer")
 		if err == nil {
 			var indexers []map[string]any
 			if json.Unmarshal(data, &indexers) == nil {
-				indexerCount = len(indexers)
+				n := len(indexers)
+				indexerCount = &n
 			}
 		}
 	}
