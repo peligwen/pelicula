@@ -312,8 +312,10 @@ func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
 type dashNotif struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"` // "content_ready", "download_failed", "validation_failed"
+	Type      string    `json:"type"` // "content_ready", "download_failed", "validation_failed", "transcode_failed"
 	Message   string    `json:"message"`
+	Detail    string    `json:"detail,omitempty"` // error text / release info for drawer
+	JobID     string    `json:"job_id,omitempty"` // procula job ID; enables Retry action
 }
 
 // handleNotificationsProxy merges Procula's notification feed with recent
@@ -347,11 +349,20 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 			Timestamp time.Time `json:"timestamp"`
 			Type      string    `json:"type"`
 			Message   string    `json:"message"`
+			Detail    string    `json:"detail"`
+			JobID     string    `json:"job_id"`
 		}
 		if json.NewDecoder(resp.Body).Decode(&events) == nil {
 			mu.Lock()
 			for _, e := range events {
-				all = append(all, dashNotif{ID: e.ID, Timestamp: e.Timestamp, Type: e.Type, Message: e.Message})
+				all = append(all, dashNotif{
+					ID:        e.ID,
+					Timestamp: e.Timestamp,
+					Type:      e.Type,
+					Message:   e.Message,
+					Detail:    e.Detail,
+					JobID:     e.JobID,
+				})
 			}
 			mu.Unlock()
 		}
@@ -431,9 +442,17 @@ func fetchArrHistory(baseURL, apiKey, arrType string) []dashNotif {
 		default:
 			continue
 		}
+		detail := strVal(rec, "sourceTitle")
+		if nType == "download_failed" {
+			if data, ok := rec["data"].(map[string]any); ok {
+				if reason := strVal(data, "reason"); reason != "" {
+					detail += " · " + reason
+				}
+			}
+		}
 		id := fmt.Sprintf("%s:%v", arrType, rec["id"])
 		ts := parseArrDate(strVal(rec, "date"))
-		notifs = append(notifs, dashNotif{ID: id, Timestamp: ts, Type: nType, Message: msg})
+		notifs = append(notifs, dashNotif{ID: id, Timestamp: ts, Type: nType, Message: msg, Detail: detail})
 	}
 	return notifs
 }

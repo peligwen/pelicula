@@ -397,6 +397,43 @@ func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
 
 // ── handleBrowse symlink escape ───────────────────────────────────────────────
 
+func TestHandleNotificationsProxy_PassesThroughDetailAndJobID(t *testing.T) {
+	proculaBody := `[{"id":"notif_1","timestamp":"2026-04-14T10:00:00Z","type":"validation_failed","message":"Validation failed: Dune","detail":"FFmpeg error: codec not supported","job_id":"abc12345"}]`
+	fake := newFakeProcula(t, "/api/procula/notifications", proculaBody)
+	defer fake.Close()
+
+	old := proculaURL
+	origSvc := services
+	proculaURL = fake.URL
+	services = NewServiceClients("/config")
+	t.Cleanup(func() { proculaURL = old; services = origSvc })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/notifications", nil)
+	w := httptest.NewRecorder()
+	handleNotificationsProxy(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var events []struct {
+		ID     string `json:"id"`
+		Detail string `json:"detail"`
+		JobID  string `json:"job_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &events); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+	if events[0].Detail != "FFmpeg error: codec not supported" {
+		t.Errorf("Detail = %q, want %q", events[0].Detail, "FFmpeg error: codec not supported")
+	}
+	if events[0].JobID != "abc12345" {
+		t.Errorf("JobID = %q, want %q", events[0].JobID, "abc12345")
+	}
+}
+
 func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {
 	// Create a symlink inside /tmp pointing to /etc, then try to browse via
 	// a path that resolves outside the allowed roots. We use a temp dir to
