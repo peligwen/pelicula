@@ -8,7 +8,7 @@ Auth levels: **Admin** = session with admin role; **Manager+** = manager or admi
 
 ## Stability Policy
 
-**Stable since v1.0.** All endpoints below are part of the public API contract:
+**Stable since v0.1.** All endpoints below are part of the public API contract:
 
 - **Fields are additive only** — response fields are never removed or renamed
 - **New endpoints may be added** in minor releases

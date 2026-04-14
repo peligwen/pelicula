@@ -11,7 +11,6 @@ Pelicula is the media stack I always wanted. There are many ambitious features a
 Use at your risk, and keep it LAN only - see the testing coverage table.
 
 Please, only use this for legal purposes. There are plenty of indexers that deal in LEGAL content only.
-TODO: Provide a default set of legal indexers in the wizard
 
 ## Quick Start
 

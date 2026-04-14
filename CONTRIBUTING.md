@@ -1,6 +1,12 @@
 # Contributing to Pelicula
 
-Pelicula is a LAN-first, clone-and-run media stack for personal use. It is a hobby project, not an enterprise product. Contributions are welcome, but keep that context in mind: changes should stay simple, self-contained, and easy for a solo maintainer to reason about at 11pm.
+Pelicula is a solo project — one developer, maintained in personal time. The repo is public for transparency and as a reference, not as a call for contributors. Issues and bug reports are welcome; PRs are unlikely to be merged without prior discussion.
+
+If you want to adapt Pelicula for your own setup, the AGPL-3.0 license permits that. If you want to propose a change, open an issue first.
+
+---
+
+Pelicula is a LAN-first, clone-and-run media stack for personal use. It is a hobby project, not an enterprise product. Any contributions should stay simple, self-contained, and easy for a solo maintainer to reason about at 11pm.
 
 ## Scope
 
@@ -30,11 +36,11 @@ make test-cover
 make e2e
 ```
 
-Go modules are stdlib-only. Neither `middleware/go.mod` nor `procula/go.mod` has external `require` entries — keep it that way.
+The one permitted external dependency is `modernc.org/sqlite` (pure-Go SQLite driver, no CGO). No other external dependencies are accepted.
 
 ## Code Conventions
 
-- **Go**: standard library only. No external dependencies. `go vet ./...` must pass clean.
+- **Go**: `modernc.org/sqlite` is the only permitted external dependency. `go vet ./...` must pass clean.
 - **Bash**: `tests/e2e.sh` is the end-to-end test runner. Shellcheck (`-S warning`) must pass.
 - **Tests**: every new Go function that makes a decision should have a unit test. Table-driven tests are preferred. Do not mock the database (there isn't one — use temp dirs).
 - **Commit messages**: `type(scope): short description` in imperative form. Types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`. Examples from history: `feat(procula): dual-subtitle stacking pipeline stage`, `refactor(cli): reset-config all regenerates .env`.

@@ -358,55 +358,6 @@ procula/
 }
 ```
 
-## Implementation Order
-
-Build in this order — each stage is independently useful:
-
-### Phase 1: Skeleton + Validate (most immediate value)
-1. Create `procula/` directory with Dockerfile, go.mod, main.go
-2. Implement JSON file job queue (queue.go)
-3. Implement validation stage (validate.go) — FFprobe checks
-4. Add webhook receiver to pelicula-api (`/api/pelicula/hooks/import`)
-5. Add Procula to compose/docker-compose.yml
-6. Add nginx proxy rule
-7. Wire health check into dashboard service grid
-8. **Result:** Bad downloads get auto-blocklisted and re-searched
-
-### Phase 2: Storage monitoring (quick win, high visibility)
-1. Implement storage.go — disk usage, growth rate, time-to-full
-2. Add storage endpoint to Procula API
-3. Add storage bar widget to dashboard
-4. **Result:** Users see disk usage at a glance, get warned before running out
-
-### Phase 3: Catalog + Notifications
-1. Implement catalog.go — Jellyfin refresh + verification
-2. Add notification support (webhook POST to configured URLs)
-3. Add "Processing" section to dashboard with job cards
-4. Proxy Procula status through pelicula-api
-5. **Result:** Users get notified when content is ready; dashboard shows pipeline status
-
-### Phase 4: Subtitles (Bazarr) *(Planned)*
-1. Add Bazarr to compose/docker-compose.yml
-2. Seed Bazarr config (UrlBase)
-3. Auto-wire Bazarr to Sonarr/Radarr in middleware
-4. Add nginx proxy rule
-5. Add to dashboard service grid
-6. Subtitle check in Procula validation stage
-7. **Result:** Subtitles auto-download for all content
-
-### Phase 5: Transcoding
-1. Implement process.go — FFmpeg invocation with progress tracking
-2. Implement profiles.go — profile CRUD API
-3. Add profile management to dashboard (or document API-only for now)
-4. Scratch volume for processing (`/processing`)
-5. **Result:** Multi-quality library from single downloads
-
-### Phase 6: Advanced storage (retention, dedup, tiering)
-1. Retention policies with Jellyfin watched-status integration
-2. Dedup detection and reporting
-3. Tiered storage moves
-4. **Result:** Storage manages itself; library stays clean
-
 ## Dual Subtitles
 
 ### Relationship to Bazarr
@@ -483,7 +434,7 @@ All settings are also exposed in the Procula dashboard under **Settings → Dual
 
 ```
 /config/procula/
-  jobs/                    # One JSON file per job
+  jobs/                    # Legacy — migrated to SQLite (procula.db)
   profiles/                # Transcode profile JSON files
   dualsub-cache/           # Translator cue cache (SHA-256-keyed .txt files)
   notifications.json       # Webhook URLs and preferences

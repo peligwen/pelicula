@@ -21,8 +21,8 @@ Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no C
 
 | Service | Database | Tables |
 |---------|----------|--------|
-| middleware | `/config/pelicula/pelicula.db` | roles, invites, redemptions, requests, request_events, sessions, dismissed_jobs, rate_limits |
-| procula | `/config/procula/procula.db` | jobs, settings |
+| middleware | `/config/pelicula/pelicula.db` | roles, invites, redemptions, requests, request_events, sessions, rate_limits |
+| procula | `/config/procula/procula.db` | jobs, settings, catalog_flags, dualsub_profiles, blocked_releases |
 
 **Schema versioning:** `PRAGMA user_version` tracks the current migration level. Migrations run in transactions on startup. WAL mode + `MaxOpenConns(1)` for safe concurrent access.
 

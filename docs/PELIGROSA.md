@@ -177,7 +177,7 @@ Enable via `the Settings UI → 8) Remote access`.
 
 ## Roadmap
 
-See [ROADMAP.md — Peligrosa initiative](ROADMAP.md#peligrosa-initiative) for the full backlog. Active items:
+See [ROADMAP.md — Shipped](ROADMAP.md#shipped) for the full backlog. Active items:
 
 - **HMAC invite tokens** — sign tokens so validity is verifiable without a DB read
 - ~~**Central CSRF middleware**~~ — shipped: `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`

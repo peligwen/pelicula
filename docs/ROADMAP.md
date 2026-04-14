@@ -6,6 +6,8 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 ## Active
 
+_Nothing in active development — v0.1 scope is complete._
+
 ---
 
 ## Deferred
