@@ -138,11 +138,19 @@ func appendToFeed(configDir string, event NotificationEvent) {
 		json.Unmarshal(data, &events) //nolint:errcheck
 	}
 
-	// Prepend new event, cap at maxFeedEvents
+	// Prepend new event, prune events older than 7 days, cap at maxFeedEvents.
 	events = append([]NotificationEvent{event}, events...)
-	if len(events) > maxFeedEvents {
-		events = events[:maxFeedEvents]
+	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	pruned := events[:0]
+	for _, e := range events {
+		if e.Timestamp.After(cutoff) {
+			pruned = append(pruned, e)
+		}
 	}
+	if len(pruned) > maxFeedEvents {
+		pruned = pruned[:maxFeedEvents]
+	}
+	events = pruned
 
 	data, err := json.MarshalIndent(events, "", "  ")
 	if err != nil {

@@ -221,6 +221,50 @@ func TestStorageNotificationMessage(t *testing.T) {
 	}
 }
 
+func TestAppendToFeed_PrunesEventsOlderThan7Days(t *testing.T) {
+	dir := t.TempDir()
+
+	old := NotificationEvent{
+		ID:        "old-event",
+		Timestamp: time.Now().UTC().Add(-8 * 24 * time.Hour), // 8 days ago
+		Type:      "content_ready",
+		Message:   "old movie",
+	}
+	recent := NotificationEvent{
+		ID:        "recent-event",
+		Timestamp: time.Now().UTC().Add(-1 * time.Hour),
+		Type:      "content_ready",
+		Message:   "new movie",
+	}
+
+	appendToFeed(dir, old)
+	appendToFeed(dir, recent)
+
+	feedPath := filepath.Join(dir, "procula", "notifications_feed.json")
+	data, err := os.ReadFile(feedPath)
+	if err != nil {
+		t.Fatalf("feed file not created: %v", err)
+	}
+	var events []NotificationEvent
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	for _, ev := range events {
+		if ev.ID == "old-event" {
+			t.Error("old event (8 days ago) should have been pruned")
+		}
+	}
+	found := false
+	for _, ev := range events {
+		if ev.ID == "recent-event" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("recent event should still be present")
+	}
+}
+
 func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
 	job := &Job{
 		ID: "abc12345",
