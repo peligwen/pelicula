@@ -223,8 +223,7 @@ func TestStorageNotificationMessage(t *testing.T) {
 
 func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
 	job := &Job{
-		ID:    "abc12345",
-		Error: "FFmpeg error: codec not supported",
+		ID: "abc12345",
 		Source: JobSource{
 			Title: "Dune Part Two",
 			Year:  2024,
@@ -233,7 +232,7 @@ func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
 	}
 
 	// Failure event: detail and job_id should be set
-	ev := buildEvent(job, "validation_failed", "Validation failed: Dune Part Two")
+	ev := buildEvent(job, "validation_failed", "Validation failed: Dune Part Two", "FFmpeg error: codec not supported")
 	if ev.JobID != "abc12345" {
 		t.Errorf("JobID = %q, want %q", ev.JobID, "abc12345")
 	}
@@ -242,8 +241,7 @@ func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
 	}
 
 	// content_ready: detail should be empty (don't leak error text for successful imports)
-	job.Error = "should not appear"
-	ev2 := buildEvent(job, "content_ready", "Movie ready: Dune Part Two (2024)")
+	ev2 := buildEvent(job, "content_ready", "Movie ready: Dune Part Two (2024)", "")
 	if ev2.Detail != "" {
 		t.Errorf("content_ready Detail = %q, want empty", ev2.Detail)
 	}

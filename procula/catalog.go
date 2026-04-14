@@ -51,7 +51,7 @@ func CatalogEarly(job *Job, configDir, peliculaAPI string) {
 	}
 
 	// Write "content ready" notification to the dashboard feed
-	event := buildEvent(job, "content_ready", contentReadyMessage(job))
+	event := buildEvent(job, "content_ready", contentReadyMessage(job), "")
 	appendToFeed(configDir, event)
 
 	emitEvent(PipelineEvent{
@@ -82,7 +82,7 @@ func CatalogLate(job *Job, peliculaAPI string) {
 // WriteValidationFailedNotification writes a failed notification from the pipeline.
 func WriteValidationFailedNotification(job *Job, configDir, reason string) {
 	msg := fmt.Sprintf("Validation failed: %s — %s", job.Source.Title, reason)
-	event := buildEvent(job, "validation_failed", msg)
+	event := buildEvent(job, "validation_failed", msg, reason)
 	appendToFeed(configDir, event)
 }
 
@@ -90,7 +90,7 @@ func WriteValidationFailedNotification(job *Job, configDir, reason string) {
 // The job continues with the original file; this is informational.
 func WriteTranscodeFailedNotification(job *Job, configDir, reason string) {
 	msg := fmt.Sprintf("Transcode failed: %s — %s", job.Source.Title, reason)
-	event := buildEvent(job, "transcode_failed", msg)
+	event := buildEvent(job, "transcode_failed", msg, reason)
 	appendToFeed(configDir, event)
 }
 
@@ -104,14 +104,10 @@ func contentReadyMessage(job *Job) string {
 	return fmt.Sprintf("Episode ready: %s", job.Source.Title)
 }
 
-func buildEvent(job *Job, eventType, message string) NotificationEvent {
+func buildEvent(job *Job, eventType, message, detail string) NotificationEvent {
 	suffix := job.ID
 	if len(suffix) > 8 {
 		suffix = suffix[:8]
-	}
-	detail := ""
-	if eventType != "content_ready" {
-		detail = job.Error
 	}
 	return NotificationEvent{
 		ID:        fmt.Sprintf("notif_%d_%s", time.Now().UnixNano(), suffix),
