@@ -19,11 +19,13 @@ var feedMu sync.Mutex
 type NotificationEvent struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"` // "content_ready", "validation_failed"
+	Type      string    `json:"type"` // "content_ready", "validation_failed", "transcode_failed"
 	Title     string    `json:"title"`
 	Year      int       `json:"year,omitempty"`
 	MediaType string    `json:"media_type"` // "movie" or "episode"
 	Message   string    `json:"message"`
+	Detail    string    `json:"detail,omitempty"` // error text for drawer; empty for content_ready
+	JobID     string    `json:"job_id,omitempty"` // procula job ID; enables Retry action
 }
 
 const maxFeedEvents = 50
@@ -107,6 +109,10 @@ func buildEvent(job *Job, eventType, message string) NotificationEvent {
 	if len(suffix) > 8 {
 		suffix = suffix[:8]
 	}
+	detail := ""
+	if eventType != "content_ready" {
+		detail = job.Error
+	}
 	return NotificationEvent{
 		ID:        fmt.Sprintf("notif_%d_%s", time.Now().UnixNano(), suffix),
 		Timestamp: time.Now().UTC(),
@@ -115,6 +121,8 @@ func buildEvent(job *Job, eventType, message string) NotificationEvent {
 		Year:      job.Source.Year,
 		MediaType: job.Source.Type,
 		Message:   message,
+		Detail:    detail,
+		JobID:     job.ID,
 	}
 }
 

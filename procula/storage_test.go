@@ -220,3 +220,34 @@ func TestStorageNotificationMessage(t *testing.T) {
 		t.Errorf("message contains duplicate label pattern: %q", events[0].Message)
 	}
 }
+
+func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
+	job := &Job{
+		ID:    "abc12345",
+		Error: "FFmpeg error: codec not supported",
+		Source: JobSource{
+			Title: "Dune Part Two",
+			Year:  2024,
+			Type:  "movie",
+		},
+	}
+
+	// Failure event: detail and job_id should be set
+	ev := buildEvent(job, "validation_failed", "Validation failed: Dune Part Two")
+	if ev.JobID != "abc12345" {
+		t.Errorf("JobID = %q, want %q", ev.JobID, "abc12345")
+	}
+	if ev.Detail != "FFmpeg error: codec not supported" {
+		t.Errorf("Detail = %q, want %q", ev.Detail, "FFmpeg error: codec not supported")
+	}
+
+	// content_ready: detail should be empty (don't leak error text for successful imports)
+	job.Error = "should not appear"
+	ev2 := buildEvent(job, "content_ready", "Movie ready: Dune Part Two (2024)")
+	if ev2.Detail != "" {
+		t.Errorf("content_ready Detail = %q, want empty", ev2.Detail)
+	}
+	if ev2.JobID != "abc12345" {
+		t.Errorf("content_ready JobID = %q, want %q", ev2.JobID, "abc12345")
+	}
+}
