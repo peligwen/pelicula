@@ -738,3 +738,41 @@ func TestApplyGroupKey_DifferentEpisodes_NotDups(t *testing.T) {
 		t.Errorf("ep2 group key = %q, want %q", k2, "series:888:s1e2")
 	}
 }
+
+func TestHandleJobRetry_ProxiesToProcula(t *testing.T) {
+	var gotPath string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer fake.Close()
+
+	old := proculaURL
+	origSvc := services
+	proculaURL = fake.URL
+	services = NewServiceClients("/config")
+	t.Cleanup(func() { proculaURL = old; services = origSvc })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/procula/jobs/abc123/retry", nil)
+	req.SetPathValue("id", "abc123")
+	w := httptest.NewRecorder()
+	handleJobRetry(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if gotPath != "/api/procula/jobs/abc123/retry" {
+		t.Errorf("proxied to %q, want /api/procula/jobs/abc123/retry", gotPath)
+	}
+}
+
+func TestHandleJobRetry_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/procula/jobs/abc123/retry", nil)
+	req.SetPathValue("id", "abc123")
+	w := httptest.NewRecorder()
+	handleJobRetry(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}

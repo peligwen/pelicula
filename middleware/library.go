@@ -1344,6 +1344,37 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body) //nolint:errcheck
 }
 
+// handleJobRetry proxies POST /api/procula/jobs/{id}/retry — re-queues
+// a failed procula job for processing.
+func handleJobRetry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		httputil.WriteError(w, "job id required", http.StatusBadRequest)
+		return
+	}
+	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/jobs/"+url.PathEscape(id)+"/retry", nil)
+	if err != nil {
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		upstream.Header.Set("X-API-Key", key)
+	}
+	resp, err := services.client.Do(upstream)
+	if err != nil {
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body) //nolint:errcheck
+}
+
 // handleLibraryResub looks up a media file in Radarr/Sonarr by path and
 // triggers Bazarr subtitle search via Procula.
 // Accepts POST with body {"path": "/movies/..."}.
