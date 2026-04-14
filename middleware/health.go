@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,12 +11,25 @@ import (
 	"time"
 )
 
+// WatchdogInfo carries watchdog diagnostic fields surfaced in the health
+// response. Only included when the watchdog is active.
+type WatchdogInfo struct {
+	Status            string    `json:"status"`
+	ConsecutiveZero   int       `json:"consecutive_zero,omitempty"`
+	GraceRemaining    int       `json:"grace_remaining,omitempty"`
+	CooldownRemaining int       `json:"cooldown_remaining,omitempty"`
+	RestartAttempts   int       `json:"restart_attempts,omitempty"`
+	LastTransition    time.Time `json:"last_transition,omitempty"`
+	TunnelStatus      string    `json:"tunnel_status,omitempty"`
+}
+
 type VPNStatus struct {
-	Status     string `json:"status"`       // "healthy", "unhealthy", "unknown"
-	IP         string `json:"ip,omitempty"` // public IP via gluetun
-	Country    string `json:"country,omitempty"`
-	Port       int    `json:"port,omitempty"`        // forwarded port, 0 if not active
-	PortStatus string `json:"port_status,omitempty"` // "ok" or "degraded"
+	Status     string        `json:"status"`       // "healthy", "unhealthy", "unknown"
+	IP         string        `json:"ip,omitempty"` // public IP via gluetun
+	Country    string        `json:"country,omitempty"`
+	Port       int           `json:"port,omitempty"`        // forwarded port, 0 if not active
+	PortStatus string        `json:"port_status,omitempty"` // "ok" or "degraded"
+	Watchdog   *WatchdogInfo `json:"watchdog,omitempty"`    // watchdog internals; nil when VPN not configured
 }
 
 type HealthResponse struct {
@@ -81,7 +95,7 @@ func queryVPNStatus() VPNStatus {
 	vpn := VPNStatus{Status: "unknown"}
 
 	// Public IP and country
-	if body, ok := gluetunGet(client, "/v1/publicip/ip"); ok {
+	if body, err := gluetunGet(client, "/v1/publicip/ip"); err == nil {
 		var data struct {
 			PublicIP string `json:"public_ip"`
 			Country  string `json:"country"`
@@ -91,16 +105,20 @@ func queryVPNStatus() VPNStatus {
 			vpn.Country = data.Country
 			vpn.Status = "healthy"
 		}
+	} else {
+		slog.Debug("gluetun public IP unavailable", "component", "health", "error", err)
 	}
 
 	// Forwarded port
-	if body, ok := gluetunGet(client, "/v1/openvpn/portforwarded"); ok {
+	if body, err := gluetunGet(client, "/v1/openvpn/portforwarded"); err == nil {
 		var data struct {
 			Port int `json:"port"`
 		}
 		if json.Unmarshal(body, &data) == nil {
 			vpn.Port = data.Port
 		}
+	} else {
+		slog.Debug("gluetun port forward status unavailable", "component", "health", "error", err)
 	}
 
 	// Annotate port_status from watchdog state. The watchdog is the authority —
@@ -115,6 +133,19 @@ func queryVPNStatus() VPNStatus {
 		}
 	}
 
+	// Populate watchdog diagnostics when the watchdog is active.
+	if ws.PortForwardStatus != "" {
+		vpn.Watchdog = &WatchdogInfo{
+			Status:            ws.PortForwardStatus,
+			ConsecutiveZero:   ws.ConsecutiveZero,
+			GraceRemaining:    ws.GraceRemaining,
+			CooldownRemaining: ws.CooldownRemaining,
+			RestartAttempts:   ws.RestartAttempts,
+			LastTransition:    ws.LastTransitionAt,
+			TunnelStatus:      ws.VPNTunnelStatus,
+		}
+	}
+
 	return vpn
 }
 
@@ -122,12 +153,12 @@ func queryVPNStatus() VPNStatus {
 var gluetunControlURL = envOr("GLUETUN_CONTROL_URL", "http://gluetun:8000")
 
 // gluetunGet makes a GET request to the Gluetun control API and returns the
-// response body. Returns (nil, false) on any error or non-200 status.
-// Includes HTTP Basic Auth when GLUETUN_HTTP_PASS is set.
-func gluetunGet(client *http.Client, path string) ([]byte, bool) {
+// response body. Returns a descriptive error on transport failures or non-200
+// responses. Includes HTTP Basic Auth when GLUETUN_HTTP_PASS is set.
+func gluetunGet(client *http.Client, path string) ([]byte, error) {
 	req, err := http.NewRequest("GET", gluetunControlURL+path, nil)
 	if err != nil {
-		return nil, false
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	if pass := os.Getenv("GLUETUN_HTTP_PASS"); pass != "" {
 		user := envOr("GLUETUN_HTTP_USER", "pelicula")
@@ -135,15 +166,15 @@ func gluetunGet(client *http.Client, path string) ([]byte, bool) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, false
+		return nil, fmt.Errorf("connect: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, false
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, path)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false
+		return nil, fmt.Errorf("read body: %w", err)
 	}
-	return body, true
+	return body, nil
 }

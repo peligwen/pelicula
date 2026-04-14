@@ -54,6 +54,12 @@ type VPNWatchdogState struct {
 	ForwardedPort     int
 	LastSyncedAt      time.Time
 	RestartAttempts   int
+	// Diagnostic fields surfaced in the health API.
+	ConsecutiveZero   int
+	GraceRemaining    int // polls remaining in grace period (gracePolls - consecutiveZero)
+	CooldownRemaining int // ticks remaining in post-restart cooldown
+	LastTransitionAt  time.Time
+	VPNTunnelStatus   string // last known gluetun tunnel status ("running", "stopped", "unknown")
 }
 
 var (
@@ -153,6 +159,7 @@ func StartVPNWatchdog(s *ServiceClients) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	internal := wdInternalState{status: wdUnknown}
+	prevStatus := wdUnknown
 
 	// Publish initial state so health endpoint never returns an empty string.
 	watchdogMu.Lock()
@@ -162,22 +169,77 @@ func StartVPNWatchdog(s *ServiceClients) {
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
 	for range ticker.C {
-		port, ok := fetchForwardedPort(client)
-		if !ok {
+		port, err := fetchForwardedPort(client)
+		if err != nil {
 			slog.Warn("failed to query gluetun port forwarding — skipping tick",
-				"component", "vpn_watchdog")
+				"component", "vpn_watchdog", "error", err)
 			continue
+		}
+
+		slog.Debug("watchdog tick",
+			"component", "vpn_watchdog",
+			"port", port,
+			"status", internal.status,
+			"consecutive_zero", internal.consecutiveZero,
+			"cooldown", internal.restartCooldown)
+
+		// When port is 0, also fetch tunnel status to distinguish NAT-PMP
+		// failure (tunnel up, port=0) from VPN not yet connected (tunnel down).
+		tunnelStatus := ""
+		if port == 0 {
+			tunnelStatus = fetchTunnelStatus(client)
+			if tunnelStatus != "" {
+				slog.Debug("gluetun tunnel status",
+					"component", "vpn_watchdog", "tunnel", tunnelStatus)
+			}
 		}
 
 		prevPort := internal.lastKnownPort
 		newInternal, action := wdTick(port, internal)
+
+		// Log state transitions.
+		if newInternal.status != prevStatus {
+			slog.Info("watchdog state transition",
+				"component", "vpn_watchdog",
+				"from", prevStatus,
+				"to", newInternal.status,
+				"port", port)
+			prevStatus = newInternal.status
+		}
+
+		// Log grace period progress when port is 0.
+		if port == 0 && newInternal.status == wdGrace {
+			remaining := gracePolls - newInternal.consecutiveZero
+			slog.Warn("port forwarding unavailable",
+				"component", "vpn_watchdog",
+				"consecutive_zero", newInternal.consecutiveZero,
+				"grace_remaining", remaining,
+				"tunnel", tunnelStatus)
+		}
+
 		internal = newInternal
 
+		// Compute derived fields for public state.
+		graceRemaining := 0
+		if internal.status == wdGrace {
+			graceRemaining = gracePolls - internal.consecutiveZero
+		}
+
 		// Publish state for health endpoint.
+		now := time.Now()
 		watchdogMu.Lock()
+		if string(internal.status) != watchdogState.PortForwardStatus {
+			watchdogState.LastTransitionAt = now
+		}
 		watchdogState.PortForwardStatus = string(internal.status)
 		watchdogState.ForwardedPort = internal.lastKnownPort
 		watchdogState.RestartAttempts = internal.restartAttempts
+		watchdogState.ConsecutiveZero = internal.consecutiveZero
+		watchdogState.GraceRemaining = graceRemaining
+		watchdogState.CooldownRemaining = internal.restartCooldown
+		if tunnelStatus != "" {
+			watchdogState.VPNTunnelStatus = tunnelStatus
+		}
 		watchdogMu.Unlock()
 
 		switch action {
@@ -192,7 +254,7 @@ func StartVPNWatchdog(s *ServiceClients) {
 			}
 		case wdActRestart:
 			slog.Warn("port forwarding unavailable after grace period — restarting VPN containers",
-				"component", "vpn_watchdog")
+				"component", "vpn_watchdog", "tunnel", tunnelStatus)
 			for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
 				if !isAllowedContainer(svc) {
 					continue
@@ -207,18 +269,35 @@ func StartVPNWatchdog(s *ServiceClients) {
 }
 
 // fetchForwardedPort queries gluetun for the currently forwarded port.
-// Returns (port, true) on success — port may be 0 if forwarding is inactive.
-// Returns (0, false) on any transport/JSON error.
-func fetchForwardedPort(client *http.Client) (int, bool) {
-	body, ok := gluetunGet(client, "/v1/portforward")
-	if !ok {
-		return 0, false
+// Returns (port, nil) on success — port may be 0 if forwarding is inactive.
+// Returns (0, err) on any transport/JSON error.
+func fetchForwardedPort(client *http.Client) (int, error) {
+	body, err := gluetunGet(client, "/v1/portforward")
+	if err != nil {
+		return 0, err
 	}
 	var data struct {
 		Port int `json:"port"`
 	}
 	if json.Unmarshal(body, &data) != nil {
-		return 0, false
+		return 0, fmt.Errorf("parse portforward response")
 	}
-	return data.Port, true
+	return data.Port, nil
+}
+
+// fetchTunnelStatus queries gluetun for the VPN tunnel connection status.
+// Returns the status string (e.g. "running", "stopped") or "" on any error.
+// This is best-effort — callers should treat "" as unknown.
+func fetchTunnelStatus(client *http.Client) string {
+	body, err := gluetunGet(client, "/v1/openvpn/status")
+	if err != nil {
+		return ""
+	}
+	var data struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(body, &data) != nil {
+		return ""
+	}
+	return data.Status
 }

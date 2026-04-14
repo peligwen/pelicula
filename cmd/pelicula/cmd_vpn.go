@@ -64,7 +64,28 @@ func cmdCheckVPN(_ []string) {
 	if vpnPort > 0 {
 		pass(fmt.Sprintf("Port forwarding: port %.0f", vpnPort))
 	} else {
-		fail("Port forwarding: not active")
+		// Pull watchdog diagnostic details if available.
+		wd, _ := vpn["watchdog"].(map[string]interface{})
+		wdStatus, _ := wd["status"].(string)
+		wdTunnel, _ := wd["tunnel_status"].(string)
+		wdCooldown, _ := wd["cooldown_remaining"].(float64)
+		wdConsec, _ := wd["consecutive_zero"].(float64)
+		wdGrace, _ := wd["grace_remaining"].(float64)
+
+		switch wdStatus {
+		case "grace":
+			minsLeft := int(wdGrace) / 2 // 30s polls → rough minutes at 2 polls/min
+			fail(fmt.Sprintf("Port forwarding: not active (grace period, %.0f/10 polls, ~%d min to restart)", wdConsec, minsLeft))
+		case "restarting":
+			fail(fmt.Sprintf("Port forwarding: not active (restarting, cooldown %.0f ticks remaining)", wdCooldown))
+		case "degraded":
+			fail("Port forwarding: not active (degraded — manual restart required)")
+		default:
+			fail("Port forwarding: not active")
+		}
+		if wdTunnel != "" {
+			info(fmt.Sprintf("VPN tunnel status: %s", wdTunnel))
+		}
 	}
 
 	// Service checks
