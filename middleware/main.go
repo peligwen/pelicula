@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,7 +24,44 @@ var (
 	sseHub         *SSEHub
 	ssePoller      *SSEPoller
 	catalogDB      *sql.DB
+	indexerCount   indexerCountCache
 )
+
+// indexerCountCache caches the Prowlarr indexer count so handleStatus doesn't
+// hit /api/v1/indexer on every 15-second dashboard poll.
+type indexerCountCache struct {
+	mu        sync.Mutex
+	count     *int
+	fetchedAt time.Time
+}
+
+const indexerCountTTL = 5 * time.Minute
+
+func (c *indexerCountCache) get(prowlarrURL, prowlarrKey string) *int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.count != nil && time.Since(c.fetchedAt) < indexerCountTTL {
+		return c.count
+	}
+	data, err := services.ArrGet(prowlarrURL, prowlarrKey, "/api/v1/indexer")
+	if err != nil {
+		return c.count // serve stale value (or nil) on error
+	}
+	var indexers []map[string]any
+	if json.Unmarshal(data, &indexers) != nil {
+		return c.count
+	}
+	n := len(indexers)
+	c.count = &n
+	c.fetchedAt = time.Now()
+	return c.count
+}
+
+func (c *indexerCountCache) invalidate() {
+	c.mu.Lock()
+	c.fetchedAt = time.Time{}
+	c.mu.Unlock()
+}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -240,28 +278,21 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check indexer count from Prowlarr
+	// Check indexer count from Prowlarr (cached; TTL = 5 min)
 	services.mu.RLock()
 	prowlarrKey := services.ProwlarrKey
 	services.mu.RUnlock()
 
-	var indexerCount *int
+	var idxCount *int
 	if prowlarrKey != "" {
-		data, err := services.ArrGet(prowlarrURL, prowlarrKey, "/api/v1/indexer")
-		if err == nil {
-			var indexers []map[string]any
-			if json.Unmarshal(data, &indexers) == nil {
-				n := len(indexers)
-				indexerCount = &n
-			}
-		}
+		idxCount = indexerCount.get(prowlarrURL, prowlarrKey)
 	}
 
 	status := map[string]any{
 		"status":         "ok",
 		"services":       services.CheckHealth(),
 		"wired":          services.IsWired(),
-		"indexers":       indexerCount,
+		"indexers":       idxCount,
 		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",
 	}
 	httputil.WriteJSON(w, status)

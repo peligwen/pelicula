@@ -72,6 +72,7 @@ func AutoWire(s *ServiceClients) error {
 
 	if sonarrWired && radarrWired && prowlarrWired {
 		s.SetWired(true)
+		indexerCount.invalidate() // fresh indexer count after wiring
 		slog.Info("all services wired successfully", "component", "autowire")
 		// Force health re-check so stale "connection refused" errors clear from the *arr UI.
 		triggerHealthCheck(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")

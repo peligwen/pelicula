@@ -6,10 +6,56 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
+	"time"
+
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
-	"sync"
 )
+
+// indexerSearchCache caches raw Prowlarr /api/v1/search responses to avoid
+// hammering indexer APIs on every keypress when SEARCH_MODE=indexer.
+var indexerSearchCache = struct {
+	mu      sync.Mutex
+	entries map[string]indexerSearchEntry
+}{entries: make(map[string]indexerSearchEntry)}
+
+type indexerSearchEntry struct {
+	data      []byte
+	fetchedAt time.Time
+}
+
+const indexerSearchTTL = 2 * time.Minute
+
+func cachedIndexerSearch(prowlarrURL, prowlarrKey, query string) ([]byte, error) {
+	key := strings.ToLower(strings.TrimSpace(query))
+
+	indexerSearchCache.mu.Lock()
+	if e, ok := indexerSearchCache.entries[key]; ok && time.Since(e.fetchedAt) < indexerSearchTTL {
+		indexerSearchCache.mu.Unlock()
+		return e.data, nil
+	}
+	indexerSearchCache.mu.Unlock()
+
+	path := "/api/v1/search?query=" + url.QueryEscape(query) + "&type=search&limit=100"
+	data, err := services.ArrGet(prowlarrURL, prowlarrKey, path)
+	if err != nil {
+		return nil, err
+	}
+
+	indexerSearchCache.mu.Lock()
+	// Evict stale entries (lazy eviction — avoid unbounded growth)
+	for k, e := range indexerSearchCache.entries {
+		if time.Since(e.fetchedAt) >= indexerSearchTTL {
+			delete(indexerSearchCache.entries, k)
+		}
+	}
+	indexerSearchCache.entries[key] = indexerSearchEntry{data: data, fetchedAt: time.Now()}
+	indexerSearchCache.mu.Unlock()
+
+	return data, nil
+}
 
 type SearchResult struct {
 	Type     string `json:"type"` // "movie" or "series"
@@ -219,8 +265,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			path := "/api/v1/search?query=" + encoded + "&type=search&limit=100"
-			data, err := services.ArrGet(prowlarrURL, prowlarrKey, path)
+			data, err := cachedIndexerSearch(prowlarrURL, prowlarrKey, q)
 			if err != nil {
 				slog.Warn("prowlarr search unavailable, degrading to unfiltered results", "component", "search", "error", err)
 				return // nil maps = no filtering

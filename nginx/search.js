@@ -235,7 +235,7 @@
                     return;
                 }
                 searchFilters.classList.add('visible');
-                searchTimeout = setTimeout(function() { doSearch(q); }, 400);
+                searchTimeout = setTimeout(function() { doSearch(q); }, 600);
             });
 
             // Escape blurs the search input (hides results without clearing query)
