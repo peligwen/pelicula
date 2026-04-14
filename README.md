@@ -6,11 +6,12 @@ The rest is Pelicula.
 
 ## Statement from the Fleshie
 
-Pelicula is the media stack I always wanted. Technology has advanced to the point that I can make software that I used to dream of.
-
-There are many ambitious features that will take time to flesh out properly, but the core functionality of multi-user search->download->verify->catalog->watch is there. 
+Pelicula is the media stack I always wanted. There are many ambitious features and improvements that will take time to flesh out properly, but the core functionality of search->download->verify->catalog->watch is there. 
 
 Use at your risk, and keep it LAN only - see the testing coverage table.
+
+Please, only use this for legal purposes. There are plenty of indexers that deal in LEGAL content only.
+TODO: Provide a default set of legal indexers in the wizard
 
 ## Quick Start
 
