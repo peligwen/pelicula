@@ -1472,31 +1472,38 @@ details[open] .add-user-summary::before { content: '− '; }
 
 /* ── Collapsible side panel ────────────────────────────────────────────── */
 
-/* Edge strip — a thin fixed-position button that lives on the right edge
-   of the viewport. Visible only when the panel is collapsed. */
-.side-strip {
-    display: none;
+/* Toggle tab — a pill-shaped button that sits flush with the sidebar's left
+   edge and is always visible, regardless of collapsed state. Slides with the
+   panel via a right-position transition. Chevron flips to show direction. */
+.side-toggle {
     position: fixed;
-    top: 94px;       /* match header height */
-    bottom: 54px;    /* match footer height */
-    right: 0;
-    width: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    right: 300px;     /* flush with sidebar left edge when open */
+    width: 22px;
+    height: 44px;
     padding: 0;
-    border: none;
-    background: var(--border);
+    border: 1px solid var(--border2);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    background: var(--panel);
+    color: var(--muted);
     cursor: pointer;
-    z-index: 50;
-    transition: background 0.2s, width 0.15s;
+    z-index: 101;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
+    transition: right 0.2s, background 0.15s, color 0.15s;
 }
-.side-strip:hover { width: 12px; background: var(--border2); }
+.side-toggle::after { content: '‹'; }
+.side-toggle:hover { background: var(--pink-l); color: var(--pink); border-color: rgba(240,96,168,0.4); }
 
-body.side-collapsed .side-strip { display: block; }
+body.side-collapsed .side-toggle { right: 0; border-right: 1px solid var(--border2); border-radius: 6px 0 0 6px; }
+body.side-collapsed .side-toggle::after { content: '›'; }
 body.side-collapsed .pane-side { display: none; }
 body.side-collapsed .main { grid-template-columns: 1fr; }
-
-/* Desktop collapse button — a small × inside the Services header. Hidden
-   on mobile (the strip handles opening and click-outside handles closing). */
-#side-collapse-btn { display: inline-flex; }
 
 /* Mobile layout: single column, pane-side floats over main content when open. */
 @media (max-width: 768px) {
@@ -1511,7 +1518,9 @@ body.side-collapsed .main { grid-template-columns: 1fr; }
         overflow-y: auto;
         box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
     }
-    #side-collapse-btn { display: none; }
+    /* On mobile the sidebar overlays, so tab aligns to sidebar width when open */
+    .side-toggle { right: min(300px, 85vw); }
+    body.side-collapsed .side-toggle { right: 0; }
     .tabbar { flex-wrap: wrap; padding: 0 0.75rem; gap: 0; }
     .tab { padding: 0.5rem 0.75rem; font-size: 0.65rem; }
     .masthead { padding: 0 1rem; }
@@ -1523,31 +1532,34 @@ body.side-collapsed .main { grid-template-columns: 1fr; }
     .masthead-right .register-btn { display: none; }
 }
 
-/* ── Alert glow on collapsed strip ─────── */
+/* ── Alert glow on collapsed toggle ─────── */
 /* When the panel is collapsed AND something is unhealthy, pulse the
-   edge strip yellow so the user notices. Uses a gentle 1.4s animation
+   toggle tab yellow so the user notices. Uses a gentle 1.4s animation
    — deliberately subdued, not strobing, to avoid being anxiety-inducing. */
 @keyframes peli-side-alert-pulse {
     0%, 100% {
         background: #ffcb3d;
         box-shadow: -4px 0 12px rgba(255, 203, 61, 0.35);
+        color: #7a5a00;
     }
     50% {
         background: #ffe08a;
         box-shadow: -8px 0 24px rgba(255, 203, 61, 0.7);
+        color: #7a5a00;
     }
 }
 
-body.side-collapsed.panel-alert .side-strip {
+body.side-collapsed.panel-alert .side-toggle {
     animation: peli-side-alert-pulse 1.4s ease-in-out infinite;
 }
 
 /* Respect users with motion sensitivity: hold a static yellow glow
    instead of pulsing, so the alert signal is still conveyed. */
 @media (prefers-reduced-motion: reduce) {
-    body.side-collapsed.panel-alert .side-strip {
+    body.side-collapsed.panel-alert .side-toggle {
         animation: none;
         background: #ffcb3d;
         box-shadow: -4px 0 12px rgba(255, 203, 61, 0.5);
+        color: #7a5a00;
     }
 }
