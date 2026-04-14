@@ -59,6 +59,7 @@
             try {
                 var data = JSON.parse(e.data);
                 if (window.renderNotifications) window.renderNotifications(data);
+                if (window.renderActivity) window.renderActivity(data);
             } catch(err) { console.warn('[sse] notifications parse error', err); }
         });
 

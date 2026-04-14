@@ -39,13 +39,13 @@
         const actions = [];
         if (e.type === 'validation_failed' || e.type === 'transcode_failed') {
             if (e.job_id) {
-                actions.push(html`<button class="act-btn act-btn-primary" onclick="actRetry('${e.job_id}')">Retry</button>`);
-                actions.push(html`<button class="act-btn" onclick="actJumpToJob('${e.job_id}')">Jump to job</button>`);
+                actions.push(html`<button class="act-btn act-btn-primary" onclick="event.stopPropagation();actRetry('${e.job_id}')">Retry</button>`);
+                actions.push(html`<button class="act-btn" onclick="event.stopPropagation();actJumpToJob('${e.job_id}')">Jump to job</button>`);
             }
         } else if (e.type === 'storage_warning' || e.type === 'storage_critical') {
-            actions.push(html`<button class="act-btn act-btn-primary" onclick="actGoToStorage()">Go to storage</button>`);
+            actions.push(html`<button class="act-btn act-btn-primary" onclick="event.stopPropagation();actGoToStorage()">Go to storage</button>`);
         }
-        actions.push(html`<button class="act-btn" onclick="actDismiss('${e.id}')">Dismiss</button>`);
+        actions.push(html`<button class="act-btn" onclick="event.stopPropagation();actDismiss('${e.id}')">Dismiss</button>`);
 
         const detail = e.detail ? html`<div class="act-detail">${e.detail}</div>` : raw('');
         return html`<div class="act-drawer">${detail}<div class="act-actions">${actions}</div></div>`;
