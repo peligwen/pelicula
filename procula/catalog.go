@@ -19,11 +19,13 @@ var feedMu sync.Mutex
 type NotificationEvent struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"` // "content_ready", "validation_failed"
+	Type      string    `json:"type"` // "content_ready", "validation_failed", "transcode_failed"
 	Title     string    `json:"title"`
 	Year      int       `json:"year,omitempty"`
 	MediaType string    `json:"media_type"` // "movie" or "episode"
 	Message   string    `json:"message"`
+	Detail    string    `json:"detail,omitempty"` // error text for drawer; empty for content_ready
+	JobID     string    `json:"job_id,omitempty"` // procula job ID; enables Retry action
 }
 
 const maxFeedEvents = 50
@@ -49,7 +51,7 @@ func CatalogEarly(job *Job, configDir, peliculaAPI string) {
 	}
 
 	// Write "content ready" notification to the dashboard feed
-	event := buildEvent(job, "content_ready", contentReadyMessage(job))
+	event := buildEvent(job, "content_ready", contentReadyMessage(job), "")
 	appendToFeed(configDir, event)
 
 	emitEvent(PipelineEvent{
@@ -80,7 +82,7 @@ func CatalogLate(job *Job, peliculaAPI string) {
 // WriteValidationFailedNotification writes a failed notification from the pipeline.
 func WriteValidationFailedNotification(job *Job, configDir, reason string) {
 	msg := fmt.Sprintf("Validation failed: %s — %s", job.Source.Title, reason)
-	event := buildEvent(job, "validation_failed", msg)
+	event := buildEvent(job, "validation_failed", msg, reason)
 	appendToFeed(configDir, event)
 }
 
@@ -88,7 +90,7 @@ func WriteValidationFailedNotification(job *Job, configDir, reason string) {
 // The job continues with the original file; this is informational.
 func WriteTranscodeFailedNotification(job *Job, configDir, reason string) {
 	msg := fmt.Sprintf("Transcode failed: %s — %s", job.Source.Title, reason)
-	event := buildEvent(job, "transcode_failed", msg)
+	event := buildEvent(job, "transcode_failed", msg, reason)
 	appendToFeed(configDir, event)
 }
 
@@ -102,7 +104,7 @@ func contentReadyMessage(job *Job) string {
 	return fmt.Sprintf("Episode ready: %s", job.Source.Title)
 }
 
-func buildEvent(job *Job, eventType, message string) NotificationEvent {
+func buildEvent(job *Job, eventType, message, detail string) NotificationEvent {
 	suffix := job.ID
 	if len(suffix) > 8 {
 		suffix = suffix[:8]
@@ -115,6 +117,8 @@ func buildEvent(job *Job, eventType, message string) NotificationEvent {
 		Year:      job.Source.Year,
 		MediaType: job.Source.Type,
 		Message:   message,
+		Detail:    detail,
+		JobID:     job.ID,
 	}
 }
 
@@ -134,11 +138,19 @@ func appendToFeed(configDir string, event NotificationEvent) {
 		json.Unmarshal(data, &events) //nolint:errcheck
 	}
 
-	// Prepend new event, cap at maxFeedEvents
+	// Prepend new event, prune events older than 7 days, cap at maxFeedEvents.
 	events = append([]NotificationEvent{event}, events...)
-	if len(events) > maxFeedEvents {
-		events = events[:maxFeedEvents]
+	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	pruned := events[:0]
+	for _, e := range events {
+		if e.Timestamp.After(cutoff) {
+			pruned = append(pruned, e)
+		}
 	}
+	if len(pruned) > maxFeedEvents {
+		pruned = pruned[:maxFeedEvents]
+	}
+	events = pruned
 
 	data, err := json.MarshalIndent(events, "", "  ")
 	if err != nil {

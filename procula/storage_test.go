@@ -220,3 +220,76 @@ func TestStorageNotificationMessage(t *testing.T) {
 		t.Errorf("message contains duplicate label pattern: %q", events[0].Message)
 	}
 }
+
+func TestAppendToFeed_PrunesEventsOlderThan7Days(t *testing.T) {
+	dir := t.TempDir()
+
+	old := NotificationEvent{
+		ID:        "old-event",
+		Timestamp: time.Now().UTC().Add(-8 * 24 * time.Hour), // 8 days ago
+		Type:      "content_ready",
+		Message:   "old movie",
+	}
+	recent := NotificationEvent{
+		ID:        "recent-event",
+		Timestamp: time.Now().UTC().Add(-1 * time.Hour),
+		Type:      "content_ready",
+		Message:   "new movie",
+	}
+
+	appendToFeed(dir, old)
+	appendToFeed(dir, recent)
+
+	feedPath := filepath.Join(dir, "procula", "notifications_feed.json")
+	data, err := os.ReadFile(feedPath)
+	if err != nil {
+		t.Fatalf("feed file not created: %v", err)
+	}
+	var events []NotificationEvent
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	for _, ev := range events {
+		if ev.ID == "old-event" {
+			t.Error("old event (8 days ago) should have been pruned")
+		}
+	}
+	found := false
+	for _, ev := range events {
+		if ev.ID == "recent-event" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("recent event should still be present")
+	}
+}
+
+func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
+	job := &Job{
+		ID: "abc12345",
+		Source: JobSource{
+			Title: "Dune Part Two",
+			Year:  2024,
+			Type:  "movie",
+		},
+	}
+
+	// Failure event: detail and job_id should be set
+	ev := buildEvent(job, "validation_failed", "Validation failed: Dune Part Two", "FFmpeg error: codec not supported")
+	if ev.JobID != "abc12345" {
+		t.Errorf("JobID = %q, want %q", ev.JobID, "abc12345")
+	}
+	if ev.Detail != "FFmpeg error: codec not supported" {
+		t.Errorf("Detail = %q, want %q", ev.Detail, "FFmpeg error: codec not supported")
+	}
+
+	// content_ready: detail should be empty (don't leak error text for successful imports)
+	ev2 := buildEvent(job, "content_ready", "Movie ready: Dune Part Two (2024)", "")
+	if ev2.Detail != "" {
+		t.Errorf("content_ready Detail = %q, want empty", ev2.Detail)
+	}
+	if ev2.JobID != "abc12345" {
+		t.Errorf("content_ready JobID = %q, want %q", ev2.JobID, "abc12345")
+	}
+}
