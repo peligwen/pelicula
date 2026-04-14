@@ -117,6 +117,8 @@
                 const mode = ms.notifications_mode || 'internal';
                 document.querySelectorAll('input[name="st-notif"]').forEach(r => { r.checked = r.value === mode; });
                 setToggle('st-open-registration', ms.open_registration === 'true' || ms.open_registration === true);
+                const searchMode = ms.search_mode || 'tmdb';
+                document.querySelectorAll('input[name="search_mode"]').forEach(r => { r.checked = r.value === searchMode; });
 
                 // Remote access
                 setToggle('st-remote-enabled', ms.remote_access_enabled === 'true');
@@ -152,6 +154,7 @@
             const middlewarePayload = {
                 notifications_mode: document.querySelector('input[name="st-notif"]:checked')?.value || 'internal',
                 open_registration:  document.getElementById('st-open-registration')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
+                search_mode:        document.querySelector('input[name="search_mode"]:checked')?.value || 'tmdb',
             };
             const [r1, r2] = await Promise.all([
                 tfetch('/api/pelicula/procula-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(procPayload) }),

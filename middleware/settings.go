@@ -50,6 +50,8 @@ type SettingsResponse struct {
 	RequestsRadarrRoot      string `json:"requests_radarr_root"`
 	RequestsSonarrProfileID string `json:"requests_sonarr_profile_id"`
 	RequestsSonarrRoot      string `json:"requests_sonarr_root"`
+	// Search
+	SearchMode string `json:"search_mode"` // "tmdb" (default) or "indexer"
 }
 
 // parseEnvFile reads a .env file and returns a key→value map.
@@ -108,6 +110,7 @@ func writeEnvFile(path string, vars map[string]string) error {
 		"REMOTE_HTTP_PORT", "REMOTE_HTTPS_PORT",
 		"REMOTE_CERT_MODE", "REMOTE_LE_EMAIL", "REMOTE_LE_STAGING",
 		"SEEDING_REMOVE_ON_COMPLETE",
+		"SEARCH_MODE",
 	}
 	inOrder := make(map[string]bool, len(order))
 	for _, k := range order {
@@ -207,6 +210,7 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		RequestsRadarrRoot:      vars["REQUESTS_RADARR_ROOT"],
 		RequestsSonarrProfileID: vars["REQUESTS_SONARR_PROFILE_ID"],
 		RequestsSonarrRoot:      vars["REQUESTS_SONARR_ROOT"],
+		SearchMode:              vars["SEARCH_MODE"],
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -369,6 +373,15 @@ func handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RequestsSonarrRoot != "" {
 		vars["REQUESTS_SONARR_ROOT"] = req.RequestsSonarrRoot
+	}
+	if req.SearchMode != "" {
+		switch req.SearchMode {
+		case "tmdb", "indexer":
+			vars["SEARCH_MODE"] = req.SearchMode
+		default:
+			http.Error(w, "search_mode must be tmdb or indexer", http.StatusBadRequest)
+			return
+		}
 	}
 
 	if err := writeEnvFile(envPath, vars); err != nil {

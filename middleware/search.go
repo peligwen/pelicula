@@ -48,7 +48,12 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, prowlarrKey := services.Keys()
+
+	envMu.Lock()
+	envVars, _ := parseEnvFile(envPath)
+	envMu.Unlock()
+	searchMode := envVars["SEARCH_MODE"] // "" or "tmdb" = TMDB/TVDB; "indexer" = filter by Prowlarr
 
 	// Search Radarr (movies)
 	if typeFilter != "series" {
@@ -207,7 +212,61 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// Search Prowlarr indexers (indexer mode only)
+	var availTmdbIDs map[int]bool // nil = don't filter (error or not in indexer mode)
+	var availTvdbIDs map[int]bool
+	if searchMode == "indexer" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path := "/api/v1/search?query=" + encoded + "&type=search&limit=100"
+			data, err := services.ArrGet(prowlarrURL, prowlarrKey, path)
+			if err != nil {
+				slog.Warn("prowlarr search unavailable, degrading to unfiltered results", "component", "search", "error", err)
+				return // nil maps = no filtering
+			}
+			var releases []map[string]any
+			if json.Unmarshal(data, &releases) != nil {
+				return
+			}
+			tmdbSet := make(map[int]bool)
+			tvdbSet := make(map[int]bool)
+			for _, rel := range releases {
+				if id, ok := rel["tmdbId"].(float64); ok && id > 0 {
+					tmdbSet[int(id)] = true
+				}
+				if id, ok := rel["tvdbId"].(float64); ok && id > 0 {
+					tvdbSet[int(id)] = true
+				}
+			}
+			mu.Lock()
+			availTmdbIDs = tmdbSet
+			availTvdbIDs = tvdbSet
+			mu.Unlock()
+		}()
+	}
+
 	wg.Wait()
+
+	// Filter to indexer availability when in indexer mode
+	if searchMode == "indexer" && availTmdbIDs != nil {
+		filtered := movies[:0]
+		for _, m := range movies {
+			if availTmdbIDs[m.TmdbID] {
+				filtered = append(filtered, m)
+			}
+		}
+		movies = filtered
+	}
+	if searchMode == "indexer" && availTvdbIDs != nil {
+		filtered := series[:0]
+		for _, s := range series {
+			if availTvdbIDs[s.TvdbID] {
+				filtered = append(filtered, s)
+			}
+		}
+		series = filtered
+	}
 
 	// Interleave movies and series so both types appear in top results
 	results := make([]SearchResult, 0, len(movies)+len(series))
