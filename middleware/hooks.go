@@ -8,7 +8,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -117,9 +116,6 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, map[string]string{"status": "queued"})
-	if ssePoller != nil {
-		go ssePoller.TriggerImmediate(context.Background(), "pipeline")
-	}
 }
 
 // normalizeHookPayload converts a Radarr or Sonarr webhook body into a JobSource.
@@ -609,8 +605,5 @@ func proxyProculaMutate(path string) http.HandlerFunc {
 
 // handleUpdatesProxy proxies Procula's update check result for the dashboard footer.
 var handleUpdatesProxy = proxyProcula("/api/procula/updates")
-
-// handleEventsProxy proxies Procula's event log, forwarding pagination/filter query params.
-var handleEventsProxy = proxyProcula("/api/procula/events", true)
 
 var proculaURL = envOr("PROCULA_URL", "http://procula:8282")

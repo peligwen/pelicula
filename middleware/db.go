@@ -164,11 +164,6 @@ func migrate1(tx *sql.Tx) error {
 			expires_at TEXT NOT NULL
 		)`,
 
-		// Dismissed jobs: Procula failed-job dismiss list.
-		`CREATE TABLE IF NOT EXISTS dismissed_jobs (
-			job_id TEXT PRIMARY KEY
-		)`,
-
 		// Rate limits: failed login attempt tracking per IP.
 		`CREATE TABLE IF NOT EXISTS rate_limits (
 			ip           TEXT PRIMARY KEY,

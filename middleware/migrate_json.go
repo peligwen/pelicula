@@ -21,7 +21,6 @@ func migrateAllJSON(db *sql.DB, configDir string) {
 	migrateRolesJSON(db, filepath.Join(configDir, "roles.json"))
 	migrateInvitesJSON(db, filepath.Join(configDir, "invites.json"))
 	migrateRequestsJSON(db, filepath.Join(configDir, "requests.json"))
-	migrateDismissedJSON(db, filepath.Join(configDir, "dismissed.json"))
 }
 
 // truncToken returns the first 8 characters of a token for logging, or the full token if shorter.
@@ -191,37 +190,5 @@ func migrateRequestsJSON(db *sql.DB, jsonPath string) {
 	}
 
 	slog.Info("requests migration complete", "component", "migrate", "count", len(requests))
-	markMigrated(jsonPath)
-}
-
-// migrateDismissedJSON reads dismissed.json and inserts job IDs.
-func migrateDismissedJSON(db *sql.DB, jsonPath string) {
-	data, err := os.ReadFile(jsonPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
-		}
-		// Non-NotExist error: log and retry next startup.
-		slog.Warn("dismissed migration: cannot read file, will retry next startup", "component", "migrate", "path", jsonPath, "error", err)
-		return
-	}
-
-	var ids []string
-	if err := json.Unmarshal(data, &ids); err != nil {
-		slog.Warn("dismissed migration: corrupt JSON, renaming to .corrupt", "component", "migrate", "path", jsonPath, "error", err)
-		if renameErr := os.Rename(jsonPath, jsonPath+".corrupt"); renameErr != nil {
-			slog.Warn("dismissed migration: could not rename corrupt file", "component", "migrate", "path", jsonPath, "error", renameErr)
-		}
-		return
-	}
-
-	for _, id := range ids {
-		if _, err := db.Exec(`INSERT OR IGNORE INTO dismissed_jobs (job_id) VALUES (?)`, id); err != nil {
-			slog.Warn("dismissed migration: failed to insert job_id",
-				"component", "migrate", "job_id", id, "error", err)
-		}
-	}
-
-	slog.Info("dismissed migration complete", "component", "migrate", "count", len(ids))
 	markMigrated(jsonPath)
 }

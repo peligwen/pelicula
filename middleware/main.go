@@ -20,7 +20,6 @@ var (
 	authMiddleware *peligrosa.Auth
 	inviteStore    *peligrosa.InviteStore
 	requestStore   *peligrosa.RequestStore
-	dismissedStore *DismissedStore
 	sseHub         *SSEHub
 	ssePoller      *SSEPoller
 	catalogDB      *sql.DB
@@ -66,14 +65,13 @@ func main() {
 	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, services)
 
 	inviteStore = peligrosa.NewInviteStore(db, jellyfinClient)
-	dismissedStore = NewDismissedStore(db)
 	requestStore = peligrosa.NewRequestStore(db, NewArrFulfiller())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	sseHub = NewSSEHub()
-	ssePoller = NewSSEPoller(sseHub, services, dismissedStore)
+	ssePoller = NewSSEPoller(sseHub, services)
 	go ssePoller.Run(ctx)
 	go RunQueuePoller(ctx, catalogDB, services)
 
@@ -119,11 +117,6 @@ func main() {
 	// Jellyfin refresh is called by Procula internally — no session auth needed.
 	mux.HandleFunc("/api/pelicula/jellyfin/refresh", handleJellyfinRefresh)
 
-	// viewer+: pipeline board (unified downloads + processing view)
-	mux.Handle("/api/pelicula/pipeline", auth.Guard(http.HandlerFunc(handlePipelineGet)))
-	// admin only: dismiss a failed job from the needs-attention lane
-	mux.Handle("/api/pelicula/pipeline/dismiss", auth.GuardAdmin(http.HandlerFunc(handlePipelineDismiss)))
-
 	// viewer+: SSE stream for real-time dashboard updates
 	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(sseHub.HandleSSE)))
 
@@ -138,7 +131,6 @@ func main() {
 	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(handleProculaSettingsProxy))
 	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(handleStorageScanProxy)))
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(handleUpdatesProxy)))
-	mux.Handle("/api/pelicula/events", auth.Guard(http.HandlerFunc(handleEventsProxy)))
 
 	// admin only: *arr metadata for settings dropdowns
 	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(handleArrMeta)))

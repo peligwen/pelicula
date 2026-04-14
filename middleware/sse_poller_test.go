@@ -61,7 +61,7 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 
 	hub := NewSSEHub()
 	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc, nil)
+	poller := NewSSEPoller(hub, svc)
 
 	// Register a buffered client so we can inspect received messages.
 	c := &sseClient{
@@ -147,7 +147,7 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 
 	hub := NewSSEHub()
 	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc, nil)
+	poller := NewSSEPoller(hub, svc)
 
 	// Register a test client.
 	c := &sseClient{
@@ -242,7 +242,7 @@ func TestFetchLogsTimestampedAndSorted(t *testing.T) {
 func TestSSEPollerUnknownEventType(t *testing.T) {
 	hub := NewSSEHub()
 	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc, nil)
+	poller := NewSSEPoller(hub, svc)
 
 	c := &sseClient{
 		events: make(chan SSEMessage, 4),

@@ -20,20 +20,18 @@ const pollInterval = 5 * time.Second
 // SSEPoller polls backend data sources every pollInterval and broadcasts SSE
 // events on change (detected via SHA-256 hash comparison).
 type SSEPoller struct {
-	hub       *SSEHub
-	svc       *ServiceClients
-	dismissed *DismissedStore
-	hashes    map[string][32]byte
-	mu        sync.Mutex
+	hub    *SSEHub
+	svc    *ServiceClients
+	hashes map[string][32]byte
+	mu     sync.Mutex
 }
 
 // NewSSEPoller creates an SSEPoller that will broadcast to hub using svc.
-func NewSSEPoller(hub *SSEHub, svc *ServiceClients, dismissed *DismissedStore) *SSEPoller {
+func NewSSEPoller(hub *SSEHub, svc *ServiceClients) *SSEPoller {
 	return &SSEPoller{
-		hub:       hub,
-		svc:       svc,
-		dismissed: dismissed,
-		hashes:    make(map[string][32]byte),
+		hub:    hub,
+		svc:    svc,
+		hashes: make(map[string][32]byte),
 	}
 }
 
@@ -67,7 +65,6 @@ func (p *SSEPoller) pollOnce(ctx context.Context) {
 	}
 
 	fetches := []namedFetch{
-		{"pipeline", p.fetchPipeline},
 		{"services", wrapFetch(p.fetchServices)},
 		{"downloads", wrapFetch(p.fetchDownloads)},
 		{"storage", wrapFetch(p.fetchStorage)},
@@ -128,8 +125,6 @@ func wrapFetch(fn func(context.Context) ([]byte, error)) func(context.Context) (
 func (p *SSEPoller) TriggerImmediate(ctx context.Context, eventType string) {
 	var fn func(context.Context) ([]byte, []byte, error)
 	switch eventType {
-	case "pipeline":
-		fn = p.fetchPipeline
 	case "services":
 		fn = wrapFetch(p.fetchServices)
 	case "downloads":
@@ -161,27 +156,6 @@ func (p *SSEPoller) TriggerImmediate(ctx context.Context, eventType string) {
 		Event: eventType,
 		Data:  broadcastData,
 	})
-}
-
-// fetchPipeline builds the pipeline response and returns two byte slices:
-// hashBytes has a zeroed GeneratedAt so the hash is stable across polls,
-// broadcastBytes carries a real timestamp for clients.
-func (p *SSEPoller) fetchPipeline(ctx context.Context) (hashBytes []byte, broadcastBytes []byte, err error) {
-	resp, err := BuildPipelineResponse(p.svc, p.dismissed)
-	if err != nil {
-		return nil, nil, err
-	}
-	// For hash: zero out the timestamp to avoid spurious change detection.
-	hashResp := resp
-	hashResp.GeneratedAt = time.Time{}
-	hashBytes, err = json.Marshal(hashResp)
-	if err != nil {
-		return nil, nil, err
-	}
-	// For broadcast: real timestamp.
-	resp.GeneratedAt = time.Now().UTC()
-	broadcastBytes, err = json.Marshal(resp)
-	return hashBytes, broadcastBytes, err
 }
 
 // fetchServices builds a lightweight service-status map and marshals it to JSON.

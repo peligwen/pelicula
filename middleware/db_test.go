@@ -35,7 +35,7 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 	tables := []string{
 		"roles", "invites", "redemptions",
 		"requests", "request_events",
-		"sessions", "dismissed_jobs", "rate_limits",
+		"sessions", "rate_limits",
 	}
 	for _, table := range tables {
 		var name string
