@@ -81,7 +81,6 @@
         <button class="tab active" data-tab="search" role="tab" aria-selected="true" tabindex="0" onclick="switchTab('search')">search</button>
         <button class="tab" data-tab="catalog" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('catalog')">catalog</button>
         <button class="tab" data-tab="jobs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('jobs')">jobs</button>
-        <button class="tab admin-only" data-tab="logs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('logs')">logs</button>
         <button class="tab" data-tab="storage" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('storage')">storage</button>
         <button class="tab" data-tab="users" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('users')">users</button>
         <button class="tab" data-tab="settings" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">settings</button>
@@ -154,20 +153,6 @@
                     <p class="um-hero-sub">All pipeline and action jobs, every state</p>
                 </div>
                 <div id="jobs-groups"></div>
-            </div>
-
-            <!-- Logs -->
-            <div class="section hidden admin-only" id="logs-section">
-                <div class="um-hero">
-                    <div class="um-hero-title-row">
-                        <span class="um-hero-icon">&#128220;</span>
-                        <h2 class="um-hero-title">Logs</h2>
-                        <button class="section-action" onclick="logsRefresh()">&#8635;</button>
-                    </div>
-                    <p class="um-hero-sub">Live log lines aggregated from every service</p>
-                </div>
-                <div class="logs-filters" id="logs-filters"></div>
-                <div id="logs-stream" class="logs-stream"></div>
             </div>
 
             <!-- Storage Management -->
@@ -521,6 +506,15 @@
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </label>
+                </div>
+
+                <!-- Service Logs -->
+                <div class="settings-panel settings-summary-row admin-only" onclick="openLogsSheet()">
+                    <div class="summary-row-left">
+                        <div class="settings-panel-title" style="margin-bottom:0">Service Logs</div>
+                        <div class="summary-row-status">Live log stream from all containers</div>
+                    </div>
+                    <button class="summary-row-action" onclick="event.stopPropagation();openLogsSheet()">View <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Transcoding Profiles -->
@@ -1001,6 +995,18 @@
         </div>
         <div class="drawer-actions" id="drawer-actions"></div>
         <div class="drawer-body" id="drawer-body"></div>
+    </div>
+
+    <!-- Logs bottom sheet -->
+    <div class="modal-backdrop hidden" id="logs-sheet-backdrop" onclick="closeLogsSheet()"></div>
+    <div class="logs-sheet hidden" id="logs-sheet" role="dialog" aria-modal="true" aria-label="Service Logs">
+        <div class="logs-sheet-handle-row"><div class="logs-sheet-handle"></div></div>
+        <div class="logs-sheet-header">
+            <span class="logs-sheet-title">&#128220; Service Logs</span>
+            <button class="logs-sheet-close" onclick="closeLogsSheet()" aria-label="Close">&#x2715;</button>
+        </div>
+        <div class="logs-filters" id="logs-filters"></div>
+        <div id="logs-stream" class="logs-stream"></div>
     </div>
 
     <!-- Catalog detail modal -->

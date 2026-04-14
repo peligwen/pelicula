@@ -184,7 +184,6 @@ body[data-tab] #storage-explorer-section,
 body[data-tab] #users-section,
 body[data-tab] #requests-section,
 body[data-tab] #jobs-section,
-body[data-tab] #logs-section,
 body[data-tab] #settings-section { display: none !important; }
 
 /* search: search + activity feed */
@@ -200,8 +199,6 @@ body[data-tab="users"] #users-section,
 body[data-tab="users"] #requests-section,
 /* jobs: job list */
 body[data-tab="jobs"] #jobs-section,
-/* logs: aggregated log stream */
-body[data-tab="logs"] #logs-section,
 /* settings: config panel */
 body[data-tab="settings"] #settings-section { display: block !important; }
 
@@ -770,6 +767,33 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     display: flex; flex-direction: column; overflow: hidden;
 }
 .drawer.hidden { display: none; }
+
+/* ── Logs bottom sheet ─────────────────────────────────────────────────── */
+.logs-sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 74vh;
+    background: var(--panel); border-top: 1.5px solid var(--border2);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column; overflow: hidden;
+    z-index: 400;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+}
+.logs-sheet:not(.hidden) { transform: translateY(0); }
+.logs-sheet.hidden { transform: translateY(100%); }
+.logs-sheet-handle-row { display: flex; justify-content: center; padding: 8px 0 4px; flex-shrink: 0; }
+.logs-sheet-handle { width: 32px; height: 3px; background: var(--border2); border-radius: 2px; }
+.logs-sheet-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 1.25rem 0.75rem; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.logs-sheet-title { font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800; font-size: 1rem; color: var(--ink); }
+.logs-sheet-close {
+    background: none; border: none; font-size: 1.4rem; line-height: 1;
+    color: var(--muted); cursor: pointer; padding: 0;
+}
+.logs-sheet-close:hover { color: var(--pink); }
 
 /* Centered modal (catalog detail, subtitle request) */
 .modal-backdrop {

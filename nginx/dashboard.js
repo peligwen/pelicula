@@ -759,7 +759,7 @@ window.closeJobDrawer = function() {
 // ── Tab routing (hash-based) ─────────────
 // switchTab updates the DOM + hash; router.listen drives back/forward.
 
-const _validTabs = new Set(['search', 'catalog', 'jobs', 'logs', 'storage', 'users', 'settings']);
+const _validTabs = new Set(['search', 'catalog', 'jobs', 'storage', 'users', 'settings']);
 
 window.switchTab = function(tab, fromHash) {
     if (!_validTabs.has(tab)) tab = 'search';

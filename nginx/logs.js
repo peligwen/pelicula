@@ -145,12 +145,17 @@ window.renderLogsFromSSE = function(data) {
     logsState.loaded = true;
 };
 
-PeliculaFW.onTab('logs', function () {
+window.openLogsSheet = function () {
+    const sheet = document.getElementById('logs-sheet');
+    const backdrop = document.getElementById('logs-sheet-backdrop');
+    if (!sheet || !backdrop) return;
+    backdrop.classList.remove('hidden');
+    sheet.classList.remove('hidden');
     logsState.userScrolled = false;
     renderFilters();
     if (window.sseIsActive && window.sseIsActive()) {
         // SSE is active — render from cache immediately if we have it,
-        // otherwise fall through to a one-time fetch so the tab isn't blank.
+        // otherwise fall through to a one-time fetch so the sheet isn't blank.
         if (logsState.lastEntries.length > 0) {
             const out = document.getElementById('logs-stream');
             if (out) renderLogs(out, logsState.lastEntries);
@@ -158,6 +163,13 @@ PeliculaFW.onTab('logs', function () {
         }
     }
     loadLogs();
-});
+};
+
+window.closeLogsSheet = function () {
+    const sheet = document.getElementById('logs-sheet');
+    const backdrop = document.getElementById('logs-sheet-backdrop');
+    if (sheet) sheet.classList.add('hidden');
+    if (backdrop) backdrop.classList.add('hidden');
+};
 
 })();
