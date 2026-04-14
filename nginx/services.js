@@ -311,12 +311,7 @@
         });
         banner.appendChild(dismissBtn);
 
-        const pipelineSection = document.getElementById('pipeline-section');
-        if (pipelineSection) {
-            pipelineSection.insertAdjacentElement('beforebegin', banner);
-        } else {
-            (document.querySelector('.main-content') || document.body).prepend(banner);
-        }
+        (document.querySelector('.pane-main') || document.body).prepend(banner);
     }
 
     async function restartVPN(btn) {

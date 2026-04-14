@@ -30,15 +30,6 @@
             }
         };
 
-        // pipeline event: same shape as /api/pelicula/pipeline
-        // renderPipeline(data) is exported by pipeline.js
-        source.addEventListener('pipeline', function(e) {
-            try {
-                var data = JSON.parse(e.data);
-                if (window.renderPipeline) window.renderPipeline(data);
-            } catch(err) { console.warn('[sse] pipeline parse error', err); }
-        });
-
         // services event: same shape as /api/pelicula/status
         // updateServicesFromData(data) is exported by services.js
         source.addEventListener('services', function(e) {
@@ -80,7 +71,6 @@
     }
 
     function disablePollers() {
-        if (window.plPoller && window.plPoller.stop) window.plPoller.stop();
         if (window.svcPoller && window.svcPoller.stop) window.svcPoller.stop();
         if (window._refreshInterval) {
             clearInterval(window._refreshInterval);
@@ -89,7 +79,6 @@
     }
 
     function enablePollers() {
-        if (window.plPoller && window.plPoller.start) window.plPoller.start();
         if (window.svcPoller && window.svcPoller.start) window.svcPoller.start();
         if (!window._refreshInterval && window.refresh) {
             window._refreshInterval = setInterval(window.refresh, 15000);

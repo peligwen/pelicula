@@ -178,7 +178,6 @@ body {
    overrides dashboard.js calls to classList.remove('hidden'). */
 body[data-tab] #search-section,
 body[data-tab] #activity-section,
-body[data-tab] #pipeline-section,
 body[data-tab] #catalog-section,
 body[data-tab] #storage-section,
 body[data-tab] #storage-explorer-section,
@@ -191,9 +190,6 @@ body[data-tab] #settings-section { display: none !important; }
 /* search: search + activity feed */
 body[data-tab="search"] #search-section,
 body[data-tab="search"] #activity-section,
-/* coming (pipeline tab): pipeline board only */
-body[data-tab="coming"] #pipeline-section,
-
 /* catalog: library browser */
 body[data-tab="catalog"] #catalog-section,
 /* storage: storage + explorer */

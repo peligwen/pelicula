@@ -79,7 +79,6 @@
     <!-- Tabbar -->
     <nav class="tabbar" id="tabbar" role="tablist" aria-label="Dashboard sections">
         <button class="tab active" data-tab="search" role="tab" aria-selected="true" tabindex="0" onclick="switchTab('search')">search</button>
-        <button class="tab" data-tab="coming" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('coming')">pipeline</button>
         <button class="tab" data-tab="catalog" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('catalog')">catalog</button>
         <button class="tab" data-tab="jobs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('jobs')">jobs</button>
         <button class="tab admin-only" data-tab="logs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('logs')">logs</button>
@@ -112,64 +111,6 @@
                 </div>
                 <div class="search-results" id="search-results" data-testid="search-results"></div>
             </div><!-- /.search-section -->
-
-            <!-- Pipeline Board -->
-            <div class="section" id="pipeline-section" data-testid="pipeline-section">
-                <div class="section-header">
-                    <span>On the way</span>
-                    <span id="pipeline-stats"></span>
-                    <div class="svc-header-actions">
-                        <button class="section-action" id="pl-refresh-btn" title="Refresh now" onclick="manualRefreshPipeline()">&#8635;</button>
-                    </div>
-                </div>
-                <!-- Needs attention banner (failed jobs) -->
-                <div id="pipeline-attention" style="display:none">
-                    <div class="pl-lane-header pl-lane-header-alert">Needs attention</div>
-                    <div id="pipeline-attention-list"></div>
-                </div>
-                <!-- Active lanes -->
-                <div class="pl-lane pl-lane-downloading" id="pipeline-lane-downloading" data-testid="pipeline-lane-downloading">
-                    <div class="pl-lane-header">Downloading</div>
-                    <div id="pipeline-cards-downloading"></div>
-                </div>
-                <div class="pl-lane pl-lane-imported" id="pipeline-lane-imported" data-testid="pipeline-lane-imported">
-                    <div class="pl-lane-header">Imported</div>
-                    <div id="pipeline-cards-imported"></div>
-                </div>
-                <div class="pl-lane pl-lane-validating" id="pipeline-lane-validating" data-testid="pipeline-lane-validating">
-                    <div class="pl-lane-header">Validating</div>
-                    <div id="pipeline-cards-validating"></div>
-                </div>
-                <div class="pl-lane pl-lane-processing" id="pipeline-lane-processing" data-testid="pipeline-lane-processing">
-                    <div class="pl-lane-header">Processing</div>
-                    <div id="pipeline-cards-processing"></div>
-                </div>
-                <div class="pl-lane pl-lane-cataloging" id="pipeline-lane-cataloging" data-testid="pipeline-lane-cataloging">
-                    <div class="pl-lane-header">Cataloging</div>
-                    <div id="pipeline-cards-cataloging"></div>
-                </div>
-                <!-- Completed tail -->
-                <div id="pipeline-completed-wrap" style="display:none">
-                    <div class="pl-lane-header pl-lane-header-done">Recently completed</div>
-                    <div id="pipeline-cards-completed" data-testid="pipeline-cards-completed"></div>
-                </div>
-                <!-- Event log (admin only, lazy-loaded) -->
-                <details class="pl-event-log admin-only" id="pl-event-log-details" onToggle="onEventLogToggle(this)">
-                    <summary class="pl-lane-header pl-lane-header-log">
-                        <span>Event log</span>
-                        <span class="um-lane-hint">expand</span>
-                    </summary>
-                    <div class="pl-event-filter" id="pl-event-filter">
-                        <button class="pl-chip pl-chip-active" data-filter="" onclick="setEventFilter(this,'')">All</button>
-                        <button class="pl-chip" data-filter="validate" onclick="setEventFilter(this,'validate')">Validation</button>
-                        <button class="pl-chip" data-filter="transcode" onclick="setEventFilter(this,'transcode')">Transcode</button>
-                        <button class="pl-chip" data-filter="catalog" onclick="setEventFilter(this,'catalog')">Catalog</button>
-                        <button class="pl-chip" data-filter="action" onclick="setEventFilter(this,'action')">Actions</button>
-                    </div>
-                    <div id="pl-event-list"></div>
-                    <div class="pl-event-pager" id="pl-event-pager"></div>
-                </details>
-            </div>
 
             <!-- Catalog -->
             <div class="section hidden" id="catalog-section">
@@ -769,7 +710,6 @@
     <div class="footer" id="footer">
         <span>PELICULA</span>
         <span id="footer-update"></span>
-        <span id="footer-pipeline-count" class="footer-count"></span>
         <span id="footer-hint" class="hi"></span>
         <span class="statusbar-right" id="footer-version"></span>
     </div>
@@ -1244,7 +1184,6 @@
     <script src="/downloads.js" defer></script>
     <script src="/notifications.js" defer></script>
     <script src="/activity.js" defer></script>
-    <script src="/pipeline.js" defer></script>
     <script src="/settings.js" defer></script>
     <script src="/users.js" defer></script>
     <script src="/services.js" defer></script>

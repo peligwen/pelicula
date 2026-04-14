@@ -1,6 +1,6 @@
 // nginx/downloads.js
 // Downloads component — registered with PeliculaFW; mounted by dashboard.js.
-// Depends on: framework.js (PeliculaFW), dashboard.js (tfetch, store, checkPipeline,
+// Depends on: framework.js (PeliculaFW), dashboard.js (tfetch, store, checkDownloads,
 //             formatSpeed, formatSize, formatETA).
 
 'use strict';
@@ -29,7 +29,8 @@
     function renderDownloads(data) {
         const list = document.getElementById('downloads-list');
         const statsEl = document.getElementById('dl-stats');
-        if (data.stats) { statsEl.textContent = data.stats.active + ' active / ' + data.stats.queued + ' queued'; }
+        if (data.stats && statsEl) { statsEl.textContent = data.stats.active + ' active / ' + data.stats.queued + ' queued'; }
+        if (!list) return;
         const shown = (data.torrents || []).filter(t => ['downloading','stalledDL','forcedDL','queuedDL','uploading','stalledUP','pausedDL','pausedUP','stoppedDL','stoppedUP','forcedUP'].includes(t.state));
         if (!shown.length) { list.innerHTML = html`<div class="no-items">No active downloads</div>`.str; return; }
         const role = document.body.dataset.role || store.get('role');
@@ -73,7 +74,7 @@
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({hash, paused})
             });
-            setTimeout(checkPipeline, 500);
+            setTimeout(checkDownloads, 500);
         } catch (e) { console.warn('[pelicula] error:', e); }
     }
 
@@ -84,7 +85,7 @@
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({hash, category, blocklist, reason: reason || ''})
             });
-            setTimeout(checkPipeline, 500);
+            setTimeout(checkDownloads, 500);
         } catch (e) { console.warn('[pelicula] error:', e); }
     }
 

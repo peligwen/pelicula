@@ -106,7 +106,7 @@ function applyRole(role, username) {
         }
     }
 
-    // Store role on body for use by dynamically rendered download/pipeline cards
+    // Store role on body for use by dynamically rendered download cards
     document.body.dataset.role = role;
 
     // Start SSE connection — guard lives inside sse.js (_started flag)
@@ -137,7 +137,7 @@ async function checkStatus() {
 // Downloads code is in downloads.js (PeliculaFW component 'downloads').
 // Both are mounted below after DOMContentLoaded.
 
-// data-* bridge helpers for pipeline cards — keep user-controlled strings out of JS string literals in onclick
+// data-* bridge helpers for download action buttons — keep user-controlled strings out of JS string literals in onclick
 // dlPauseFromBtn, dlCancelFromBtn, openBlocklistFromBtn are defined in downloads.js.
 function retryFromBtn(btn) { retryJob(btn.dataset.jobId); }
 function formatSpeed(bps) { if (bps > 1048576) return (bps/1048576).toFixed(1)+' MB/s'; if (bps > 1024) return (bps/1024).toFixed(0)+' KB/s'; if (bps > 0) return bps+' B/s'; return 'idle'; }
@@ -552,14 +552,14 @@ function renderJobCard(j) {
 async function retryJob(id) {
     try {
         await fetch(`/api/procula/jobs/${id}/retry`, {method: 'POST'});
-        setTimeout(checkPipeline, 500);
+        setTimeout(checkDownloads, 500);
     } catch (e) { console.warn('[pelicula] retry error:', e); }
 }
 
 async function cancelJob(id) {
     try {
         await fetch(`/api/procula/jobs/${id}/cancel`, {method: 'POST'});
-        setTimeout(checkPipeline, 500);
+        setTimeout(checkDownloads, 500);
     } catch (e) { console.warn('[pelicula] cancel error:', e); }
 }
 
@@ -574,16 +574,12 @@ async function resubJob(id) {
 
 function resubFromBtn(btn) { resubJob(btn.dataset.jobId); }
 
-// ── Pipeline board ────────────────────────
-// Moved to pipeline.js (PeliculaFW component). checkPipeline() is on window.*.
-
-
 let lastRefreshAt = 0;
 
 async function refresh() {
     console.log('[pelicula] refresh start');
     const results = await Promise.allSettled([
-        checkServices(), checkVPN(), checkPipeline(), checkStatus(),
+        checkServices(), checkVPN(), checkDownloads(), checkStatus(),
         checkNotifications(), checkStorage(), loadSessions(), checkHost()
     ]);
     const failed = results.filter(r => r.status === 'rejected').length;
@@ -763,7 +759,7 @@ window.closeJobDrawer = function() {
 // ── Tab routing (hash-based) ─────────────
 // switchTab updates the DOM + hash; router.listen drives back/forward.
 
-const _validTabs = new Set(['search', 'coming', 'catalog', 'jobs', 'logs', 'storage', 'users', 'settings']);
+const _validTabs = new Set(['search', 'catalog', 'jobs', 'logs', 'storage', 'users', 'settings']);
 
 window.switchTab = function(tab, fromHash) {
     if (!_validTabs.has(tab)) tab = 'search';
@@ -808,9 +804,6 @@ document.getElementById('tabbar').addEventListener('keydown', function(e) {
 // Settings functions are in settings.js (PeliculaFW component 'settings').
 // loadSettingsTab, saveSettingsTab, toggleSetting, updateNotifMode, clearProfileForm,
 // saveProfile, installDefaultProfiles, saveRequestsSettings, loadArrMeta on window.*.
-
-// ── Event log ─────────────────────────────
-// Moved to pipeline.js (PeliculaFW component). onEventLogToggle/setEventFilter/loadEventLog on window.*.
 
 // ── Theme ─────────────────────────────────────────────────────────────────
 function _isDarkActive() {
@@ -866,9 +859,8 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', fun
 // DOMContentLoaded fires after all deferred scripts have executed).
 document.addEventListener('DOMContentLoaded', function() {
     PeliculaFW.mount('search', document.getElementById('search-section'));
-    PeliculaFW.mount('downloads', document.getElementById('pipeline-section'));
+    PeliculaFW.mount('downloads', null);
     PeliculaFW.mount('activity', document.getElementById('activity-section'));
-    PeliculaFW.mount('pipeline', document.getElementById('pipeline-section'));
     PeliculaFW.mount('notifications', document.getElementById('bell-wrap'));
     PeliculaFW.mount('settings', document.getElementById('settings-section'));
     PeliculaFW.mount('users', document.getElementById('users-section'));
