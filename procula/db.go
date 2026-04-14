@@ -55,7 +55,12 @@ type migration struct {
 	up      func(tx *sql.Tx) error
 }
 
-// migrations is the ordered list of all schema migrations.
+// schemaVersion is the current schema version. Bump this when adding new migrations.
+const schemaVersion = 7
+
+// migrations is the ordered list of incremental schema migrations for existing installs.
+// New installs bypass these via migrateBaseline (see runMigrations).
+// These steps will be removed in a future release once no installs pre-date v0.1.
 var migrations = []migration{
 	{version: 1, up: migrate1},
 	{version: 2, up: migrate2},
@@ -66,12 +71,35 @@ var migrations = []migration{
 	{version: 7, up: migrate7},
 }
 
-// runMigrations reads the current schema version and applies all pending
-// migrations in order.
+// runMigrations reads the current schema version and applies all pending migrations.
+// Fresh installs (user_version == 0) use migrateBaseline to reach the current schema
+// in a single transaction. Existing installs replay only the incremental steps they
+// have not yet applied.
 func runMigrations(db *sql.DB) error {
 	ver, err := currentVersion(db)
 	if err != nil {
 		return fmt.Errorf("read user_version: %w", err)
+	}
+
+	if ver == 0 {
+		slog.Info("applying DB baseline schema", "component", "db", "version", schemaVersion)
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin baseline migration: %w", err)
+		}
+		if err := migrateBaseline(tx); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return fmt.Errorf("baseline migration: %w", err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return fmt.Errorf("set user_version %d: %w", schemaVersion, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit baseline migration: %w", err)
+		}
+		slog.Info("DB baseline schema applied", "component", "db", "version", schemaVersion)
+		return nil
 	}
 
 	for _, m := range migrations {
@@ -98,6 +126,73 @@ func runMigrations(db *sql.DB) error {
 			return fmt.Errorf("commit migration %d: %w", m.version, err)
 		}
 		slog.Info("DB migration applied", "component", "db", "version", m.version)
+	}
+	return nil
+}
+
+// migrateBaseline creates the full v0.1 schema in a single pass for fresh installs.
+// It consolidates all incremental migrations (migrate1–migrate7) into one DDL block.
+// Existing installs with user_version > 0 use the incremental migration path instead.
+func migrateBaseline(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS jobs (
+			id                 TEXT    PRIMARY KEY,
+			created_at         TEXT    NOT NULL,
+			updated_at         TEXT    NOT NULL,
+			state              TEXT    NOT NULL,
+			stage              TEXT    NOT NULL,
+			progress           REAL    NOT NULL DEFAULT 0,
+			source             TEXT    NOT NULL,
+			validation         TEXT,
+			missing_subs       TEXT,
+			error              TEXT    NOT NULL DEFAULT '',
+			retry_count        INTEGER NOT NULL DEFAULT 0,
+			manual_profile     TEXT    NOT NULL DEFAULT '',
+			dualsub_outputs    TEXT,
+			dualsub_error      TEXT    NOT NULL DEFAULT '',
+			transcode_profile  TEXT    NOT NULL DEFAULT '',
+			transcode_decision TEXT    NOT NULL DEFAULT '',
+			transcode_outputs  TEXT,
+			transcode_error    TEXT    NOT NULL DEFAULT '',
+			transcode_eta      REAL    NOT NULL DEFAULT 0,
+			subs_acquired      TEXT,
+			action_type        TEXT    NOT NULL DEFAULT 'pipeline',
+			params             TEXT,
+			result             TEXT,
+			catalog            TEXT,
+			flags              TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS catalog_flags (
+			path       TEXT PRIMARY KEY,
+			flags      TEXT NOT NULL,
+			severity   TEXT NOT NULL,
+			job_id     TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_catalog_flags_severity ON catalog_flags(severity)`,
+		`CREATE TABLE IF NOT EXISTS dualsub_profiles (
+			name TEXT PRIMARY KEY,
+			data TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS blocked_releases (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			arr_app          TEXT    NOT NULL,
+			arr_blocklist_id INTEGER NOT NULL DEFAULT 0,
+			arr_item_id      INTEGER NOT NULL,
+			display_title    TEXT    NOT NULL,
+			file_path        TEXT    NOT NULL,
+			blocked_at       TEXT    NOT NULL,
+			reason           TEXT    NOT NULL DEFAULT ''
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
+		}
 	}
 	return nil
 }
