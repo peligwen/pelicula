@@ -6,6 +6,14 @@ NEWEST=$(find cmd/pelicula -name '*.go' -newer "$BIN" -print -quit 2>/dev/null)
 if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
     echo "Building pelicula CLI..." >&2
     mkdir -p bin
-    ( cd cmd/pelicula && go build -o ../../bin/pelicula . )
+    if command -v go &>/dev/null; then
+        ( cd cmd/pelicula && go build -o ../../bin/pelicula . )
+    else
+        docker run --rm \
+            -v "$(pwd):/src" \
+            -w /src/cmd/pelicula \
+            golang:1.23-alpine \
+            go build -o /src/bin/pelicula .
+    fi
 fi
 exec "$BIN" "$@"

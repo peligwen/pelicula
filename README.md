@@ -25,7 +25,7 @@ Open `http://localhost:7354` — that's it. On first run, a browser-based setup 
 ## Prerequisites
 
 - **Docker** with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine on Linux)
-- **Go 1.23+** (the wrapper script auto-builds the CLI on first run)
+- **Go 1.23+** _(optional)_ — if not installed, the wrapper script builds the CLI via Docker automatically
 - **ProtonVPN** paid plan (Plus or higher) with a Wireguard private key
 - **bash** (macOS, Linux, WSL, Synology NAS — the CLI auto-detects your platform and uses the right default paths; no manual folder creation needed on Synology)
 
