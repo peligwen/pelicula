@@ -184,7 +184,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		setupLibs.Libraries = append(setupLibs.Libraries, lib)
 	}
-	peliculaCfgDir := strings.TrimSuffix(req.ConfigDir, "/") + "/pelicula"
+	peliculaCfgDir := setupContainerConfigDir(req.ConfigDir)
 	if err := os.MkdirAll(peliculaCfgDir, 0755); err != nil {
 		slog.Warn("setup: could not create pelicula config dir", "component", "setup", "error", err)
 	} else if err := writeLibraries(peliculaCfgDir, setupLibs); err != nil {
@@ -195,6 +195,38 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// setupContainerConfigDir maps the host config dir to a path writable from
+// inside the setup container. The setup container mounts the project root at
+// /project, but req.ConfigDir is a HOST path (e.g. /volume1/docker/pelicula/config).
+//
+// Strategy: use the last path component of the host config dir and resolve it
+// under /project. This is correct for the common case where config is a
+// direct subdirectory of the project root (the default on all platforms).
+// For fully-external config dirs the path won't match what the CLI expects,
+// but readOrCreateLibraries in the CLI creates defaults when the file is
+// absent anyway, so it degrades gracefully.
+func setupContainerConfigDir(hostConfigDir string) string {
+	clean := strings.TrimSuffix(strings.TrimSpace(hostConfigDir), "/")
+	if clean == "" {
+		clean = "config"
+	}
+	// Relative path — strip leading ./ and resolve under /project
+	if !strings.HasPrefix(clean, "/") {
+		rel := strings.TrimPrefix(clean, "./")
+		return "/project/" + rel + "/pelicula"
+	}
+	// Absolute path — use only the last component so we stay under /project.
+	// filepath.Base("/volume1/docker/pelicula/config") == "config"
+	base := clean
+	if idx := strings.LastIndex(clean, "/"); idx >= 0 {
+		base = clean[idx+1:]
+	}
+	if base == "" {
+		base = "config"
+	}
+	return "/project/" + base + "/pelicula"
 }
 
 func envOr(key, fallback string) string {
