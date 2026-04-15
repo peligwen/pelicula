@@ -31,10 +31,37 @@ func setupDirs(configDir, libraryDir, workDir string) error {
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", d, err)
+			return &dirCreateError{path: d, err: err}
 		}
 	}
 	return nil
+}
+
+// dirCreateError wraps a directory creation failure with actionable guidance.
+type dirCreateError struct {
+	path string
+	err  error
+}
+
+func (e *dirCreateError) Error() string {
+	return fmt.Sprintf("mkdir %s: %s", e.path, e.err)
+}
+
+func (e *dirCreateError) Unwrap() error { return e.err }
+
+// firstExistingAncestor walks up from path and returns the deepest ancestor
+// that already exists on the filesystem, or "" if none found.
+func firstExistingAncestor(path string) string {
+	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			break // reached filesystem root
+		}
+	}
+	return ""
 }
 
 // writeEnvFile writes a fresh .env file with the given parameters.

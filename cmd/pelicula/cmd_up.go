@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -125,6 +126,20 @@ func cmdUp(_ []string) {
 	// Create directory structure
 	progress("Setting up directories...")
 	if err := setupDirs(configDir, libraryDir, workDir); err != nil {
+		var dce *dirCreateError
+		if errors.As(err, &dce) && os.IsPermission(dce.err) {
+			ancestor := firstExistingAncestor(dce.path)
+			if ancestor == "" {
+				ancestor = filepath.Dir(dce.path)
+			}
+			fmt.Fprintf(os.Stderr, "%s✗ Permission denied creating %s%s\n", colorRed, dce.path, colorReset)
+			fmt.Fprintf(os.Stderr, "  The directory %s%s%s exists but is not writable.\n", colorBold, ancestor, colorReset)
+			fmt.Fprintf(os.Stderr, "  Create the required folder first, then re-run %s:\n\n", bold("pelicula up"))
+			fmt.Fprintf(os.Stderr, "    sudo mkdir -p %s\n", filepath.Dir(dce.path))
+			fmt.Fprintf(os.Stderr, "    sudo chown %d:%d %s\n\n", plat.UID, plat.GID, filepath.Dir(dce.path))
+			fmt.Fprintf(os.Stderr, "  On Synology: create the shared folder in DSM File Station instead.\n\n")
+			os.Exit(1)
+		}
 		fatal("Failed to create directories: " + err.Error())
 	}
 
