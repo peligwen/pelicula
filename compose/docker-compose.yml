@@ -322,7 +322,7 @@ services:
       - ./nginx/search.js:/usr/share/nginx/html/search.js:ro
       - ./nginx/downloads.js:/usr/share/nginx/html/downloads.js:ro
       - ./nginx/notifications.js:/usr/share/nginx/html/notifications.js:ro
-      - ./nginx/pipeline.js:/usr/share/nginx/html/pipeline.js:ro
+      - ./nginx/activity.js:/usr/share/nginx/html/activity.js:ro
       - ./nginx/settings.js:/usr/share/nginx/html/settings.js:ro
       - ./nginx/users.js:/usr/share/nginx/html/users.js:ro
       - ./nginx/services.js:/usr/share/nginx/html/services.js:ro
