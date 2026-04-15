@@ -107,6 +107,54 @@
                 Downloading disabled. Import, processing, and streaming still work. Add VPN later in Settings.
             </div>
 
+            <!-- Optional: Additional Libraries -->
+            <details id="setup-libraries-details" style="margin-top:1.5rem">
+                <summary style="cursor:pointer;font-weight:600;font-size:.95rem">Additional Libraries <span style="font-weight:400;color:#888;font-size:.85rem">(optional)</span></summary>
+                <p class="field-help" style="margin-top:.5rem">Movies and TV Shows are always included. Add custom libraries here if needed.</p>
+
+                <div id="setup-lib-defaults" style="margin-top:.75rem">
+                    <div class="setup-lib-row setup-lib-builtin">
+                        <span class="setup-lib-name">Movies</span>
+                        <span class="setup-lib-meta">movies &middot; radarr &middot; full</span>
+                        <span class="setup-lib-badge">Built-in</span>
+                    </div>
+                    <div class="setup-lib-row setup-lib-builtin">
+                        <span class="setup-lib-name">TV Shows</span>
+                        <span class="setup-lib-meta">tvshows &middot; sonarr &middot; full</span>
+                        <span class="setup-lib-badge">Built-in</span>
+                    </div>
+                </div>
+
+                <div id="setup-lib-custom-list"></div>
+
+                <div style="margin-top:.75rem;padding:.75rem;border:1px solid var(--border,#ddd);border-radius:6px">
+                    <div style="font-weight:600;font-size:.85rem;margin-bottom:.5rem">Add Library</div>
+                    <input type="text" id="setup-lib-name" placeholder="Name (e.g. Anime)" style="width:100%;box-sizing:border-box;margin-bottom:.4rem" oninput="setupLibAutoSlug()">
+                    <input type="text" id="setup-lib-slug" placeholder="Slug (auto-generated)" style="width:100%;box-sizing:border-box;margin-bottom:.4rem">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-bottom:.4rem">
+                        <select id="setup-lib-type">
+                            <option value="movies">Movies</option>
+                            <option value="tvshows">TV Shows</option>
+                            <option value="mixed">Mixed</option>
+                            <option value="other" selected>Other</option>
+                        </select>
+                        <select id="setup-lib-arr">
+                            <option value="none" selected>No Arr</option>
+                            <option value="radarr">Radarr</option>
+                            <option value="sonarr">Sonarr</option>
+                        </select>
+                    </div>
+                    <select id="setup-lib-processing" style="width:100%;box-sizing:border-box;margin-bottom:.4rem">
+                        <option value="audit" selected>Audit (default)</option>
+                        <option value="full">Full</option>
+                        <option value="off">Off</option>
+                    </select>
+                    <input type="text" id="setup-lib-path" placeholder="External host path (optional)" style="width:100%;box-sizing:border-box;margin-bottom:.4rem">
+                    <button type="button" onclick="setupAddLibrary()" style="width:100%">Add Library</button>
+                    <div id="setup-lib-error" style="color:#c00;font-size:.8rem;margin-top:.3rem"></div>
+                </div>
+            </details>
+
             <div class="error-msg hidden" id="setup-error"></div>
 
             <div class="step-nav">
@@ -136,6 +184,7 @@ let mode = 'setup';
 let detected = {};
 let currentSettings = {};
 let vpnSkipped = false;
+let setupCustomLibraries = []; // custom libraries added during setup
 
 (async function init() {
     try {
@@ -291,6 +340,87 @@ function rowHTML(label, html) {
     return '<tr><td class="sum-label">' + PeliculaFW.esc(label) + '</td><td>' + html + '</td></tr>';
 }
 
+function setupLibAutoSlug() {
+    const nameEl = document.getElementById('setup-lib-name');
+    const slugEl = document.getElementById('setup-lib-slug');
+    if (!nameEl || !slugEl) return;
+    if (slugEl.dataset.manual === 'true') return;
+    slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+}
+
+function setupAddLibrary() {
+    const nameEl = document.getElementById('setup-lib-name');
+    const slugEl = document.getElementById('setup-lib-slug');
+    const errEl  = document.getElementById('setup-lib-error');
+    if (errEl) errEl.textContent = '';
+    const name = (nameEl?.value || '').trim();
+    const slug = (slugEl?.value || '').trim();
+    if (!name) { if (errEl) errEl.textContent = 'Name is required'; return; }
+    if (!slug) { if (errEl) errEl.textContent = 'Slug is required'; return; }
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) { if (errEl) errEl.textContent = 'Slug must be lowercase letters, numbers, hyphens'; return; }
+    // Prevent duplicates with builtins
+    if (slug === 'movies' || slug === 'tv') { if (errEl) errEl.textContent = 'Slug conflicts with a built-in library'; return; }
+    if (setupCustomLibraries.find(function(l) { return l.slug === slug; })) { if (errEl) errEl.textContent = 'Slug already used'; return; }
+
+    const lib = {
+        name: name,
+        slug: slug,
+        type: document.getElementById('setup-lib-type')?.value || 'other',
+        arr:  document.getElementById('setup-lib-arr')?.value || 'none',
+        processing: document.getElementById('setup-lib-processing')?.value || 'audit',
+        path: (document.getElementById('setup-lib-path')?.value || '').trim(),
+        builtin: false,
+    };
+    setupCustomLibraries.push(lib);
+    renderSetupLibList();
+    // Clear form
+    if (nameEl) nameEl.value = '';
+    if (slugEl) { slugEl.value = ''; slugEl.dataset.manual = ''; }
+    const pathEl = document.getElementById('setup-lib-path');
+    if (pathEl) pathEl.value = '';
+}
+
+function renderSetupLibList() {
+    const listEl = document.getElementById('setup-lib-custom-list');
+    if (!listEl) return;
+    listEl.replaceChildren();
+    setupCustomLibraries.forEach(function(lib, i) {
+        const row = document.createElement('div');
+        row.className = 'setup-lib-row';
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.35rem 0;border-bottom:1px solid #eee';
+
+        const info = document.createElement('div');
+        info.style.cssText = 'flex:1;min-width:0';
+        const nm = document.createElement('span');
+        nm.style.fontWeight = '500';
+        nm.textContent = lib.name;
+        info.appendChild(nm);
+        const meta = document.createElement('span');
+        meta.style.cssText = 'margin-left:.4rem;font-size:.75rem;color:#888';
+        const parts = [lib.slug, lib.type, lib.arr !== 'none' ? lib.arr : null, lib.processing].filter(Boolean);
+        meta.textContent = parts.join(' \u00b7 ');
+        info.appendChild(meta);
+        row.appendChild(info);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'Remove';
+        btn.style.cssText = 'font-size:.75rem;padding:.2rem .5rem';
+        btn.addEventListener('click', function() {
+            setupCustomLibraries.splice(i, 1);
+            renderSetupLibList();
+        });
+        row.appendChild(btn);
+        listEl.appendChild(row);
+    });
+}
+
+// Wire up manual-edit detection for setup-lib-slug
+document.addEventListener('DOMContentLoaded', function() {
+    var slugEl = document.getElementById('setup-lib-slug');
+    if (slugEl) slugEl.addEventListener('input', function() { slugEl.dataset.manual = 'true'; });
+});
+
 async function submitSetup() {
     const btn = document.getElementById('btn-submit');
     btn.disabled = true;
@@ -316,6 +446,11 @@ async function submitSetup() {
         vpn_skipped: vpnSkipped,
         lan_url: publishedURL,
     };
+
+    // Include custom libraries if any were added during setup
+    if (mode === 'setup' && setupCustomLibraries.length > 0) {
+        body.libraries = setupCustomLibraries;
+    }
 
     const endpoint = mode === 'settings' ? '/api/pelicula/settings' : '/api/pelicula/setup';
 

@@ -519,8 +519,13 @@ func isUnderPrefixes(p string, prefixes []string) bool {
 
 // isAllowedWebhookPath checks that the path from a webhook payload is under a
 // known media directory, preventing path traversal to arbitrary filesystem locations.
+// All library paths are under /media/, so we allow /downloads, /processing, and /media/.
 func isAllowedWebhookPath(p string) bool {
-	return isUnderPrefixes(p, []string{"/downloads", "/movies", "/tv", "/processing"})
+	if isUnderPrefixes(p, []string{"/downloads", "/processing"}) {
+		return true
+	}
+	clean := filepath.Clean(p)
+	return clean == "/media" || strings.HasPrefix(clean, "/media/")
 }
 
 // proxyProcula returns an http.HandlerFunc that forwards a GET to the given

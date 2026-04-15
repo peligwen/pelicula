@@ -418,6 +418,8 @@ func importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu 
 	// Tag label → id (creating missing tags)
 	tagMap, _ := ensureTags(radarrURL, apiKey, collectMovieTags(movies))
 
+	radarrRoot := firstLibraryPath("radarr", "/media/movies")
+
 	for _, m := range movies {
 		if m.TmdbID == 0 {
 			mu.Lock()
@@ -441,7 +443,7 @@ func importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu 
 			"title":            m.Title,
 			"year":             m.Year,
 			"qualityProfileId": profileID,
-			"rootFolderPath":   "/movies",
+			"rootFolderPath":   radarrRoot,
 			"monitored":        m.Monitored,
 			"tags":             tagIDs,
 			"addOptions": map[string]any{
@@ -472,6 +474,8 @@ func importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu
 
 	// Tag label → id (creating missing tags)
 	tagMap, _ := ensureTags(sonarrURL, apiKey, collectSeriesTags(series))
+
+	sonarrRoot := firstLibraryPath("sonarr", "/media/tv")
 
 	for _, s := range series {
 		if s.TvdbID == 0 {
@@ -504,7 +508,7 @@ func importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu
 			"title":            s.Title,
 			"year":             s.Year,
 			"qualityProfileId": profileID,
-			"rootFolderPath":   "/tv",
+			"rootFolderPath":   sonarrRoot,
 			"monitored":        s.Monitored,
 			"seasonFolder":     true,
 			"tags":             tagIDs,

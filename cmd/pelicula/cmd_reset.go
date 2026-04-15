@@ -219,8 +219,15 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 		fatal("Failed to wipe config dir: " + err.Error())
 	}
 
-	// Rebuild directory structure and TLS cert
-	if err := setupDirs(configDir, libraryDir, workDir); err != nil {
+	// Rebuild directory structure and TLS cert.
+	// After a hard reset configDir is wiped, so readOrCreateLibraries will
+	// recreate the default libraries.json and return the built-in slugs.
+	resetLibs, err := readOrCreateLibraries(filepath.Join(configDir, "pelicula"))
+	if err != nil {
+		warn("Failed to seed libraries.json after reset: " + err.Error())
+		resetLibs = defaultLibraries().Libraries
+	}
+	if err := setupDirs(configDir, libraryDir, workDir, resetLibs); err != nil {
 		fatal("Failed to recreate directories: " + err.Error())
 	}
 	if err := SetupCert(configDir); err != nil {

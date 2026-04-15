@@ -88,6 +88,10 @@ func main() {
 	// Seed default transcode profiles on first startup (no-op if profiles exist).
 	SeedDefaultProfiles(configDir)
 
+	// Load library registry from pelicula-api. Falls back to built-in defaults
+	// (movies + tv) if the API is not yet reachable.
+	loadLibraries(peliculaAPI)
+
 	// Single worker processes jobs sequentially
 	registerBuiltinActions()
 	go RunWorker(q, configDir, peliculaAPI)
@@ -428,7 +432,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleManualTranscode creates a transcoding-only job for an existing library file.
-// The file must already be under /movies or /tv (not /downloads).
+// The file must already be under /media/ (not /downloads).
 func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
@@ -447,7 +451,7 @@ func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
 	// Manual transcode is only valid for files already in the library.
 	clean := filepath.Clean(req.Path)
 	if !isLibraryPath(clean) {
-		writeError(w, "path must be under /movies or /tv", http.StatusBadRequest)
+		writeError(w, "path must be under /media/", http.StatusBadRequest)
 		return
 	}
 
@@ -463,9 +467,20 @@ func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Derive a human-readable title from the parent directory (Plex-style naming).
+	// Skip the parent if it is a known library root slug (e.g. "movies", "tv", "anime") —
+	// in that case the filename itself is the best available title.
 	title := strings.TrimSuffix(fi.Name(), filepath.Ext(fi.Name()))
-	if parent := filepath.Base(filepath.Dir(clean)); parent != "movies" && parent != "tv" {
-		title = parent
+	if parent := filepath.Base(filepath.Dir(clean)); parent != "" {
+		isLibraryRoot := false
+		for _, lib := range getProculaLibraries() {
+			if parent == lib.Slug {
+				isLibraryRoot = true
+				break
+			}
+		}
+		if !isLibraryRoot {
+			title = parent
+		}
 	}
 
 	source := JobSource{
@@ -696,7 +711,7 @@ func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	clean := filepath.Clean(path)
 	if !isLibraryPath(clean) {
-		writeError(w, "path must be under /movies or /tv", http.StatusBadRequest)
+		writeError(w, "path must be under /media/", http.StatusBadRequest)
 		return
 	}
 	tracks := subtitleTracksForPath(clean)
@@ -728,7 +743,7 @@ func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteDualSubSidecar removes a single dual-sub ASS sidecar file.
 // The caller passes the exact sidecar file path (from the dualsubs list returned
-// by handleSubtitleTracks). Only paths under /movies or /tv are accepted.
+// by handleSubtitleTracks). Only paths under /media/ are accepted.
 func (s *Server) handleDeleteDualSubSidecar(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		File string `json:"file"`
@@ -739,7 +754,7 @@ func (s *Server) handleDeleteDualSubSidecar(w http.ResponseWriter, r *http.Reque
 	}
 	clean := filepath.Clean(body.File)
 	if !isLibraryPath(clean) {
-		writeError(w, "path must be under /movies or /tv", http.StatusBadRequest)
+		writeError(w, "path must be under /media/", http.StatusBadRequest)
 		return
 	}
 	if !strings.HasSuffix(clean, ".ass") {
@@ -758,15 +773,10 @@ func (s *Server) handleDeleteDualSubSidecar(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, map[string]any{"deleted": clean})
 }
 
-// isLibraryPath returns true only for paths under /movies or /tv.
-// Used to restrict manual transcode to already-imported library files.
+// isLibraryPath returns true for any path under /media/ (the library root).
+// Used to restrict manual transcode and subtitle ops to already-imported library files.
 func isLibraryPath(path string) bool {
-	for _, prefix := range []string{"/movies", "/tv"} {
-		if path == prefix || strings.HasPrefix(path, prefix+"/") {
-			return true
-		}
-	}
-	return false
+	return path == "/media" || strings.HasPrefix(path, "/media/")
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

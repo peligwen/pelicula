@@ -122,21 +122,21 @@ func TestIsAllowedWebhookPath(t *testing.T) {
 		want bool
 	}{
 		{"/downloads/file.mkv", true},
-		{"/movies/folder/file.mkv", true},
-		{"/tv/show/s01/e01.mkv", true},
+		{"/media/movies/folder/file.mkv", true},
+		{"/media/tv/show/s01/e01.mkv", true},
 		{"/processing/out.mkv", true},
 		{"/etc/passwd", false},
 		// Exact directory match is allowed
 		{"/downloads", true},
-		{"/movies", true},
+		{"/media/movies", true},
 		{"/download/file.mkv", false}, // partial prefix doesn't match
 		{"", false},
 		{"/var/downloads/file.mkv", false},
 		// Path traversal attempts must be blocked
 		{"/downloads/../etc/passwd", false},
-		{"/movies/../../etc/shadow", false},
-		{"/tv/../../../root/.ssh/id_rsa", false},
-		{"/processing/../movies/../etc/passwd", false},
+		{"/media/movies/../../etc/shadow", false},
+		{"/media/tv/../../../root/.ssh/id_rsa", false},
+		{"/processing/../../etc/passwd", false},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 				"id":    float64(42),
 			},
 			"movieFile": map[string]any{
-				"path": "/movies/Alien (1979)/alien.mkv",
+				"path": "/media/movies/Alien (1979)/alien.mkv",
 				"size": float64(5_000_000_000),
 				"mediaInfo": map[string]any{
 					"runTimeSeconds": float64(6960), // 116 minutes
@@ -186,7 +186,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 		if source.ArrID != 42 {
 			t.Errorf("ArrID = %d, want 42", source.ArrID)
 		}
-		if source.Path != "/movies/Alien (1979)/alien.mkv" {
+		if source.Path != "/media/movies/Alien (1979)/alien.mkv" {
 			t.Errorf("Path = %q", source.Path)
 		}
 		if source.Size != 5_000_000_000 {
@@ -216,7 +216,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 				},
 			},
 			"episodeFile": map[string]any{
-				"path": "/tv/Breaking Bad/Season 01/s01e01.mkv",
+				"path": "/media/tv/Breaking Bad/Season 01/s01e01.mkv",
 				"size": float64(1_500_000_000),
 				"mediaInfo": map[string]any{
 					"runTimeSeconds": float64(2700), // 45 minutes
@@ -320,7 +320,7 @@ func newRadarrPayload() []byte {
 			"id":    float64(1),
 		},
 		"movieFile": map[string]any{
-			"path": "/movies/Alien/alien.mkv",
+			"path": "/media/movies/Alien/alien.mkv",
 			"size": float64(1_000_000),
 		},
 	}

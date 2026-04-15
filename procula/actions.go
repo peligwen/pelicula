@@ -128,20 +128,6 @@ func registerBuiltinActions() {
 	})
 }
 
-func arrTypeFromPath(p string) string {
-	if strings.HasPrefix(p, "/tv/") || p == "/tv" {
-		return "sonarr"
-	}
-	return "radarr"
-}
-
-func mediaTypeFromPath(p string) string {
-	if strings.HasPrefix(p, "/tv/") || p == "/tv" {
-		return "episode"
-	}
-	return "movie"
-}
-
 // runValidateAction builds a synthetic Job and calls Validate.
 func runValidateAction(ctx context.Context, q *Queue, job *Job) (map[string]any, error) {
 	path, _ := job.Params["path"].(string)

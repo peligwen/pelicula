@@ -538,6 +538,136 @@
         }
     }
 
+    // ── Libraries ────────────────────────────────────────────────────────────────
+
+    async function loadLibraries() {
+        const listEl = document.getElementById('st-libraries-list');
+        if (!listEl) return;
+        listEl.textContent = 'Loading\u2026';
+        try {
+            const res = await tfetch('/api/pelicula/libraries');
+            if (!res.ok) { listEl.textContent = 'Failed to load libraries'; return; }
+            const libs = await res.json();
+            renderLibraries(libs || []);
+        } catch (e) { listEl.textContent = 'Error loading libraries'; }
+    }
+
+    function renderLibraries(libs) {
+        const listEl = document.getElementById('st-libraries-list');
+        if (!listEl) return;
+        if (!libs.length) {
+            listEl.textContent = 'No libraries configured.';
+            return;
+        }
+        listEl.replaceChildren();
+        libs.forEach(function(lib) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)';
+
+            const info = document.createElement('div');
+            info.style.cssText = 'flex:1;min-width:0';
+
+            const title = document.createElement('div');
+            title.style.cssText = 'font-size:.85rem;font-weight:500';
+            title.textContent = lib.name;
+            if (lib.builtin) {
+                const badge = document.createElement('span');
+                badge.style.cssText = 'display:inline-block;margin-left:.4rem;padding:.1rem .35rem;font-size:.65rem;background:var(--border);border-radius:3px;color:var(--muted);vertical-align:middle';
+                badge.textContent = 'Built-in';
+                title.appendChild(badge);
+            }
+            info.appendChild(title);
+
+            const meta = document.createElement('div');
+            meta.style.cssText = 'font-size:.72rem;color:var(--muted);margin-top:.15rem';
+            const parts = [lib.slug, lib.type, lib.arr !== 'none' ? lib.arr : null, lib.processing].filter(Boolean);
+            meta.textContent = parts.join(' \u00b7 ');
+            info.appendChild(meta);
+
+            if (lib.path) {
+                const pathNote = document.createElement('div');
+                pathNote.style.cssText = 'font-size:.7rem;color:var(--muted);margin-top:.1rem;font-style:italic';
+                pathNote.textContent = lib.path + ' \u2014 Requires stack restart to take effect';
+                info.appendChild(pathNote);
+            }
+
+            row.appendChild(info);
+
+            if (!lib.builtin) {
+                const btn = document.createElement('button');
+                btn.textContent = 'Delete';
+                btn.style.cssText = 'flex-shrink:0;padding:.3rem .7rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.75rem;cursor:pointer';
+                btn.addEventListener('click', function() { deleteLibrary(lib.slug, lib.name); });
+                row.appendChild(btn);
+            }
+
+            listEl.appendChild(row);
+        });
+    }
+
+    function libAutoSlug() {
+        const nameEl = document.getElementById('lib-name');
+        const slugEl = document.getElementById('lib-slug');
+        if (!nameEl || !slugEl) return;
+        // Only auto-fill if the user hasn't manually edited the slug
+        if (slugEl.dataset.manual === 'true') return;
+        slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+    }
+
+    async function addLibrary() {
+        const statusEl = document.getElementById('st-lib-status');
+        const name = (document.getElementById('lib-name')?.value || '').trim();
+        const slug = (document.getElementById('lib-slug')?.value || '').trim();
+        if (!name) { if (statusEl) statusEl.textContent = 'Name is required'; return; }
+        if (!slug) { if (statusEl) statusEl.textContent = 'Slug is required'; return; }
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+            if (statusEl) statusEl.textContent = 'Slug must start with a letter or number and contain only lowercase letters, numbers, and hyphens';
+            return;
+        }
+
+        const lib = {
+            name: name,
+            slug: slug,
+            type: document.getElementById('lib-type')?.value || 'other',
+            arr:  document.getElementById('lib-arr')?.value || 'none',
+            processing: document.getElementById('lib-processing')?.value || 'audit',
+            path: (document.getElementById('lib-path')?.value || '').trim(),
+        };
+
+        if (statusEl) statusEl.textContent = 'Saving\u2026';
+        try {
+            const res = await tfetch('/api/pelicula/libraries', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(lib),
+            });
+            if (res.ok) {
+                if (statusEl) { statusEl.textContent = 'Added \u2713'; setTimeout(function() { if (statusEl) statusEl.textContent = ''; }, 3000); }
+                // Clear form
+                ['lib-name', 'lib-slug', 'lib-path'].forEach(function(id) { const el = document.getElementById(id); if (el) el.value = ''; });
+                const slugEl = document.getElementById('lib-slug');
+                if (slugEl) slugEl.dataset.manual = '';
+                loadLibraries();
+            } else {
+                const data = await res.json().catch(function() { return {}; });
+                if (statusEl) statusEl.textContent = 'Failed: ' + (data.error || res.status);
+            }
+        } catch (e) { if (statusEl) statusEl.textContent = 'Save failed'; }
+    }
+
+    async function deleteLibrary(slug, name) {
+        if (!confirm('Delete library \u201c' + name + '\u201d? This cannot be undone.')) return;
+        try {
+            const res = await tfetch('/api/pelicula/libraries/' + encodeURIComponent(slug), { method: 'DELETE' });
+            if (res.ok || res.status === 204) {
+                loadLibraries();
+            } else {
+                const data = await res.json().catch(function() { return {}; });
+                alert('Delete failed: ' + (data.error || res.status));
+            }
+        } catch (e) { alert('Delete failed'); }
+    }
+
     // ── Settings drawer helpers ───────────────────────────────────────────────
 
     const _settingsDrawers = {
@@ -574,10 +704,16 @@
             loadProfilesPanel();
             if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }
             loadBlockedReleases();
+            loadLibraries();
         }
 
         function init() {
             PeliculaFW.onTab('settings', onTabChanged);
+            // Track manual edits to lib-slug so auto-fill stops overriding user input
+            var slugEl = document.getElementById('lib-slug');
+            if (slugEl) {
+                slugEl.addEventListener('input', function() { slugEl.dataset.manual = 'true'; });
+            }
         }
 
         function destroy() {
@@ -605,6 +741,8 @@
     window.saveProfile            = saveProfile;
     window.installDefaultProfiles = installDefaultProfiles;
     window.saveRequestsSettings   = saveRequestsSettings;
+    window.addLibrary             = addLibrary;
+    window.libAutoSlug            = libAutoSlug;
     // loadArrMeta is called from applyRole() in dashboard.js; the flag lives here.
     window.loadArrMeta = function () {
         if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }

@@ -267,8 +267,13 @@ func wireJellyfin(s *ServiceClients) {
 		}
 	}
 
-	wireJellyfinLibrary(s, token, "Movies", "movies", "/data/movies")
-	wireJellyfinLibrary(s, token, "TV Shows", "tvshows", "/data/tv")
+	for _, lib := range GetLibraries() {
+		collectionType := lib.Type
+		if collectionType == "other" {
+			collectionType = "mixed"
+		}
+		wireJellyfinLibrary(s, token, lib.Name, collectionType, lib.ContainerPath())
+	}
 
 	// Set the service user's preferred audio language so Jellyfin defaults to
 	// the right track on playback (handles multi-audio files like Silo where

@@ -127,7 +127,10 @@ var skipDirs = map[string]bool{
 
 // browseRoots returns the allowed top-level browse directories.
 func browseRoots() []string {
-	roots := []string{"/movies", "/tv", "/downloads"}
+	roots := []string{"/downloads"}
+	for _, lib := range GetLibraries() {
+		roots = append(roots, lib.ContainerPath())
+	}
 	if src := strings.TrimSpace(os.Getenv("IMPORT_SOURCE_DIR")); src != "" {
 		roots = append(roots, "/import-source")
 	}
@@ -233,7 +236,11 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		allowedSrcRoots = browseRoots()
 	}
 	if allowedDstRoots == nil {
-		allowedDstRoots = []string{"/movies", "/tv"}
+		libs := GetLibraries()
+		allowedDstRoots = make([]string, 0, len(libs))
+		for _, lib := range libs {
+			allowedDstRoots = append(allowedDstRoots, lib.ContainerPath())
+		}
 	}
 
 	for i := range items {
@@ -1019,14 +1026,16 @@ func suggestedMoviePath(title string, year int, filename string) string {
 	if year > 0 {
 		folder = fmt.Sprintf("%s (%d)", title, year)
 	}
-	return "/movies/" + folder + "/" + filepath.Base(filename)
+	root := firstLibraryPath("radarr", "/media/movies")
+	return root + "/" + folder + "/" + filepath.Base(filename)
 }
 
 func suggestedTVPath(title string, season int, filename string) string {
+	root := firstLibraryPath("sonarr", "/media/tv")
 	if season > 0 {
-		return fmt.Sprintf("/tv/%s/Season %02d/%s", title, season, filepath.Base(filename))
+		return fmt.Sprintf("%s/%s/Season %02d/%s", root, title, season, filepath.Base(filename))
 	}
-	return fmt.Sprintf("/tv/%s/%s", title, filepath.Base(filename))
+	return fmt.Sprintf("%s/%s/%s", root, title, filepath.Base(filename))
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
@@ -1120,7 +1129,7 @@ func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
 	// rootFolderPath from the item (set by the CLI based on strategy)
 	root := item.RootFolderPath
 	if root == "" {
-		root = "/movies"
+		root = firstLibraryPath("radarr", "/media/movies")
 	}
 
 	payload := map[string]any{
@@ -1155,7 +1164,7 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 	profileID := resolveProfileID("", profMap)
 	root := item.RootFolderPath
 	if root == "" {
-		root = "/tv"
+		root = firstLibraryPath("sonarr", "/media/tv")
 	}
 
 	payload := map[string]any{
@@ -1259,7 +1268,7 @@ func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
 
 // handleLibraryRetranscode accepts a list of library file paths and a profile
 // name, then enqueues a manual transcode job in Procula for each file.
-// Only paths under /movies or /tv are accepted.
+// Only paths under a registered library container path are accepted.
 func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1276,12 +1285,17 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	libs := GetLibraries()
+	libRoots := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		libRoots = append(libRoots, lib.ContainerPath())
+	}
 	result := RetranscodeResult{}
 	for _, path := range req.Files {
 		clean := filepath.Clean(path)
-		if !isUnderPrefixes(clean, []string{"/movies", "/tv"}) {
+		if !isUnderPrefixes(clean, libRoots) {
 			result.Failed++
-			result.Errors = append(result.Errors, path+": not under /movies or /tv")
+			result.Errors = append(result.Errors, path+": not under a library path")
 			continue
 		}
 		body, _ := json.Marshal(map[string]string{"path": clean, "profile": req.Profile})
@@ -1377,7 +1391,7 @@ func handleJobRetry(w http.ResponseWriter, r *http.Request) {
 
 // handleLibraryResub looks up a media file in Radarr/Sonarr by path and
 // triggers Bazarr subtitle search via Procula.
-// Accepts POST with body {"path": "/movies/..."}.
+// Accepts POST with body {"path": "/media/..."}.
 func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1392,8 +1406,13 @@ func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clean := filepath.Clean(req.Path)
-	if !isUnderPrefixes(clean, []string{"/movies", "/tv"}) {
-		httputil.WriteError(w, "path not under /movies or /tv", http.StatusBadRequest)
+	resubLibs := GetLibraries()
+	resubRoots := make([]string, 0, len(resubLibs))
+	for _, lib := range resubLibs {
+		resubRoots = append(resubRoots, lib.ContainerPath())
+	}
+	if !isUnderPrefixes(clean, resubRoots) {
+		httputil.WriteError(w, "path not under a library path", http.StatusBadRequest)
 		return
 	}
 

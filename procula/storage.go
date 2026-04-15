@@ -38,13 +38,13 @@ type StorageReport struct {
 }
 
 // monitoredVolumes is the set of paths to watch. Overridable in tests.
+// /media covers all library subdirectories (previously separate /movies and /tv mounts).
 var monitoredVolumes = []struct {
 	label string
 	path  string
 }{
 	{"Downloads", "/downloads"},
-	{"Movies", "/movies"},
-	{"TV", "/tv"},
+	{"Media", "/media"},
 	{"Processing", "/processing"},
 }
 

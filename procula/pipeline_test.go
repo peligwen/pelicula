@@ -592,7 +592,7 @@ func TestRunManualTranscode_ProfileNotFound(t *testing.T) {
 
 // TestRunManualTranscode_SkipsValidation confirms that a manual transcode job
 // starts transcoding even when the file path wouldn't pass normal job path checks.
-// The manual endpoint already restricts to /movies + /tv at creation time.
+// The manual endpoint already restricts to /media/ at creation time.
 func TestRunManualTranscode_SkipsValidation(t *testing.T) {
 	cfgDir := t.TempDir()
 
@@ -702,17 +702,17 @@ func TestDeleteOnFailure_True_DisallowedPath_Skipped(t *testing.T) {
 	}
 }
 
-// TestDeleteOnFailure_True_MoviesPath confirms that a file under /movies is
-// never deleted — /movies was removed from isAllowedPath to prevent an
-// attacker-controlled webhook from deleting imported media.
-func TestDeleteOnFailure_True_MoviesPath_Refused(t *testing.T) {
-	// isAllowedPath should return false for /movies — verify the function.
+// TestDeleteOnFailure_True_MediaPath_Refused confirms that files under /media/
+// (the library root) are never deleted — library paths are excluded from
+// isAllowedPath to prevent an attacker-controlled webhook from deleting imported media.
+func TestDeleteOnFailure_True_MediaPath_Refused(t *testing.T) {
+	// isAllowedPath should return false for /media/ paths — verify the function.
 	// (The end-to-end file deletion is tested via isAllowedPath unit test.)
-	if isAllowedPath("/movies/Alien/alien.mkv") {
-		t.Error("isAllowedPath should return false for /movies paths — security regression")
+	if isAllowedPath("/media/movies/Alien/alien.mkv") {
+		t.Error("isAllowedPath should return false for /media/movies paths — security regression")
 	}
-	if isAllowedPath("/tv/show/s01e01.mkv") {
-		t.Error("isAllowedPath should return false for /tv paths — security regression")
+	if isAllowedPath("/media/tv/show/s01e01.mkv") {
+		t.Error("isAllowedPath should return false for /media/tv paths — security regression")
 	}
 	// Downloads and processing must remain allowed.
 	if !isAllowedPath("/downloads/alien.mkv") {
