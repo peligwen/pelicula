@@ -55,7 +55,7 @@ services:
       - WEBUI_PORT=8080
     volumes:
       - ${CONFIG_DIR}/qbittorrent:/config
-      - ${WORK_DIR}/downloads:/downloads
+      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     depends_on:
       gluetun:
         condition: service_healthy
@@ -104,8 +104,8 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/sonarr:/config
-      - ${LIBRARY_DIR}:/media
-      - ${WORK_DIR}/downloads:/downloads
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8989/ping || exit 1"]
       interval: 30s
@@ -126,8 +126,8 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/radarr:/config
-      - ${LIBRARY_DIR}:/media
-      - ${WORK_DIR}/downloads:/downloads
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ping || exit 1"]
       interval: 30s
@@ -150,7 +150,7 @@ services:
       - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
-      - ${LIBRARY_DIR}:/media
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8096/health || exit 1"]
       interval: 30s
@@ -181,9 +181,9 @@ services:
     volumes:
       - ${CONFIG_DIR}/procula:/config
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
-      - ${WORK_DIR}/downloads:/downloads:ro
-      - ${LIBRARY_DIR}:/media
-      - ${WORK_DIR}/processing:/processing
+      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+      - ${WORK_DIR:?WORK_DIR not set in .env}/processing:/processing
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8282/ping || exit 1"]
       interval: 30s
@@ -203,7 +203,7 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/bazarr:/config
-      - ${LIBRARY_DIR}:/media
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:6767/bazarr/ || exit 1"]
       interval: 30s
@@ -264,8 +264,8 @@ services:
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${CONFIG_DIR}/pelicula:/config/pelicula
-      - ${LIBRARY_DIR}:/media
-      - ${WORK_DIR}/downloads:/downloads:ro
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
     networks:
       default: {}
       pelicula:
