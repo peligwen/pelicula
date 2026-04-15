@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-// libraryEntry matches the JSON shape written by the middleware's library registry.
+// libraryEntry matches the on-disk shape of a single entry in libraries.json.
+// It is a subset of cliLibrary, used only for generating the compose override.
 type libraryEntry struct {
 	Slug string `json:"slug"`
 	Path string `json:"path"`
@@ -31,10 +32,14 @@ func generateLibrariesOverride(configPeliculaDir, outputPath string) error {
 		return fmt.Errorf("read libraries.json: %w", err)
 	}
 
-	var libraries []libraryEntry
-	if err := json.Unmarshal(data, &libraries); err != nil {
+	// libraries.json uses the same {"libraries":[...]} envelope as the middleware.
+	var cfg struct {
+		Libraries []libraryEntry `json:"libraries"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse libraries.json: %w", err)
 	}
+	libraries := cfg.Libraries
 
 	safeSlug := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 

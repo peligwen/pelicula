@@ -122,9 +122,17 @@ func cmdUp(_ []string) {
 
 	info("Starting stack...")
 
+	// Ensure libraries.json exists (migrates old installs to the library registry).
+	configPeliculaDir := filepath.Join(configDir, "pelicula")
+	libs, err := readOrCreateLibraries(configPeliculaDir)
+	if err != nil {
+		warn("Failed to read libraries.json: " + err.Error())
+		libs = defaultLibraries().Libraries
+	}
+
 	// Create directory structure
 	progress("Setting up directories...")
-	if err := setupDirs(configDir, libraryDir, workDir); err != nil {
+	if err := setupDirs(configDir, libraryDir, workDir, libs); err != nil {
 		fatal("Failed to create directories: " + err.Error())
 	}
 
@@ -169,7 +177,6 @@ func cmdUp(_ []string) {
 	}
 
 	// Regenerate the external-libraries compose override before starting.
-	configPeliculaDir := filepath.Join(configDir, "pelicula")
 	librariesOverridePath := filepath.Join(scriptDir, "compose", "docker-compose.libraries.yml")
 	if err := generateLibrariesOverride(configPeliculaDir, librariesOverridePath); err != nil {
 		warn("Failed to generate libraries override: " + err.Error())
