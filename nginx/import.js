@@ -5,6 +5,7 @@ const state = {
     scanResults: [],        // from /library/scan
     dismissed: new Set(),
     groupSelections: {},    // groupKey → chosen file path (for dup groups)
+    libraries: [],          // fetched from /api/pelicula/libraries
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -657,7 +658,7 @@ async function doApply() {
             year: r.match.year || 0,
             season: r.match.season || 0,
             episode: r.match.episode || 0,
-            rootFolderPath: r.match.type === 'movie' ? '/movies' : '/tv',
+            rootFolderPath: getLibraryPathForType(r.match.type),
             monitored: strategy !== 'keep',
             sourcePath: r.file,
             destPath: r.suggestedPath || '',
@@ -674,7 +675,7 @@ async function doApply() {
             year: r.match.year || 0,
             season: r.match.season || 0,
             episode: r.match.episode || 0,
-            rootFolderPath: r.match.type === 'movie' ? '/movies' : '/tv',
+            rootFolderPath: getLibraryPathForType(r.match.type),
             monitored: false,
             sourcePath: r.file,
             destPath: r.suggestedPath || '',
@@ -756,8 +757,52 @@ function renderApplyResult(result, validate) {
     content.innerHTML = html;
 }
 
+// ── Library helpers ──────────────────────────────────────────────────────────
+
+async function loadImportLibraries() {
+    try {
+        const res = await apiFetch('/api/pelicula/libraries');
+        if (!res.ok) return;
+        state.libraries = await res.json() || [];
+        populateLibrarySelect();
+    } catch (e) { /* non-fatal */ }
+}
+
+function populateLibrarySelect() {
+    const sel = document.getElementById('import-library-select');
+    if (!sel || !state.libraries.length) return;
+    sel.replaceChildren();
+    state.libraries.forEach(function(lib) {
+        const opt = document.createElement('option');
+        opt.value = '/media/' + lib.slug;
+        opt.textContent = lib.name + ' (/media/' + lib.slug + ')';
+        opt.dataset.arr = lib.arr;
+        sel.appendChild(opt);
+    });
+}
+
+// getLibraryPathForType returns the ContainerPath for the best library match
+// given a match type ('movie' or 'series'). Falls back to the first option if
+// no match is found.
+function getLibraryPathForType(type) {
+    const sel = document.getElementById('import-library-select');
+    if (!sel) return type === 'movie' ? '/movies' : '/tv';
+    const arr = type === 'movie' ? 'radarr' : 'sonarr';
+    // If the user has actively chosen a library, use that selection.
+    if (sel.value) return sel.value;
+    // Otherwise pick the first library matching the arr integration.
+    for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].dataset.arr === arr) {
+            return sel.options[i].value;
+        }
+    }
+    // Final fallback: whatever is first in the list.
+    return sel.options.length ? sel.options[0].value : (type === 'movie' ? '/movies' : '/tv');
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 // On the dashboard this script is loaded on demand by openStorageExplorer()
 // in dashboard.js. Auto-init the browse tree immediately.
 loadBrowseRoots();
+loadImportLibraries();
