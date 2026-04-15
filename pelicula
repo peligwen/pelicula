@@ -24,7 +24,7 @@ if [[ ! -d "cmd/pelicula" ]]; then
     exit 1
 fi
 
-NEWEST=$(find cmd/pelicula -name '*.go' -newer "$BIN" -print -quit 2>/dev/null)
+NEWEST=$(find cmd/pelicula -name '*.go' -newer "$BIN" -print 2>/dev/null | head -1)
 if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
     echo "Building pelicula CLI..." >&2
     mkdir -p bin
