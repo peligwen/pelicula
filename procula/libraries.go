@@ -66,7 +66,56 @@ func loadLibraries(peliculaAPI string) {
 		return
 	}
 
+	if len(libs) == 0 {
+		slog.Warn("pelicula-api returned empty library list, using defaults", "component", "libraries")
+		setLibraries(defaultLibraries())
+		return
+	}
+
 	slog.Info("loaded libraries from pelicula-api", "component", "libraries", "count", len(libs))
+	setLibraries(libs)
+
+	// Start a background goroutine to refresh the library cache every 5 minutes
+	// so that library changes made via the dashboard are picked up without a restart.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			refreshLibraries(peliculaAPI)
+		}
+	}()
+}
+
+// refreshLibraries fetches the library list from pelicula-api and updates the
+// cache on success. On failure or empty response it logs a warning and keeps
+// the existing cache unchanged (never falls back to defaults during a refresh).
+func refreshLibraries(peliculaAPI string) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	url := peliculaAPI + "/api/pelicula/libraries"
+	resp, err := client.Get(url)
+	if err != nil {
+		slog.Warn("library refresh: could not reach pelicula-api, keeping existing cache", "component", "libraries", "error", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("library refresh: non-200 response, keeping existing cache", "component", "libraries", "status", resp.StatusCode)
+		return
+	}
+
+	var libs []ProculaLibrary
+	if err := json.NewDecoder(resp.Body).Decode(&libs); err != nil {
+		slog.Warn("library refresh: could not decode response, keeping existing cache", "component", "libraries", "error", err)
+		return
+	}
+
+	if len(libs) == 0 {
+		slog.Warn("library refresh: empty library list, keeping existing cache", "component", "libraries")
+		return
+	}
+
+	slog.Info("library cache refreshed", "component", "libraries", "count", len(libs))
 	setLibraries(libs)
 }
 

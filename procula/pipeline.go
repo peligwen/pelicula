@@ -221,6 +221,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	// ── Stage 3: Dual Subtitles ──────────────────────────────────────────
 	// Generate stacked ASS sidecar files (e.g. Movie.en-es.ass) before
 	// transcoding so Jellyfin picks them up in the late catalog refresh.
+	// Skipped in audit mode because writing .ass sidecars modifies the library.
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
@@ -229,7 +230,9 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Progress = 0.42
 	})
 	job, _ = q.Get(id)
-	if settings.DualSubEnabled {
+	if procMode == "audit" {
+		slog.Info("audit mode: skipping dual-sub generation", "component", "pipeline", "job_id", id, "path", job.Source.Path)
+	} else if settings.DualSubEnabled {
 		dualSubStart := time.Now()
 		outputs, firstErr := GenerateDualSubs(ctx, job, settings, configDir)
 		if len(outputs) > 0 {
