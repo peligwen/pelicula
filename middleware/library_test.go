@@ -128,15 +128,16 @@ func TestScoreMatch(t *testing.T) {
 }
 
 func TestSuggestedMoviePath(t *testing.T) {
+	// Default registry (empty) falls back to /media/movies.
 	cases := []struct {
 		title    string
 		year     int
 		filename string
 		want     string
 	}{
-		{"Alien", 1979, "alien.1979.mkv", "/movies/Alien (1979)/alien.1979.mkv"},
-		{"Alien", 0, "alien.mkv", "/movies/Alien/alien.mkv"},
-		{"The Dark Knight", 2008, "the.dark.knight.mkv", "/movies/The Dark Knight (2008)/the.dark.knight.mkv"},
+		{"Alien", 1979, "alien.1979.mkv", "/media/movies/Alien (1979)/alien.1979.mkv"},
+		{"Alien", 0, "alien.mkv", "/media/movies/Alien/alien.mkv"},
+		{"The Dark Knight", 2008, "the.dark.knight.mkv", "/media/movies/The Dark Knight (2008)/the.dark.knight.mkv"},
 	}
 	for _, c := range cases {
 		t.Run(c.title, func(t *testing.T) {
@@ -150,15 +151,16 @@ func TestSuggestedMoviePath(t *testing.T) {
 }
 
 func TestSuggestedTVPath(t *testing.T) {
+	// Default registry (empty) falls back to /media/tv.
 	cases := []struct {
 		title    string
 		season   int
 		filename string
 		want     string
 	}{
-		{"Breaking Bad", 1, "s01e01.mkv", "/tv/Breaking Bad/Season 01/s01e01.mkv"},
-		{"Breaking Bad", 12, "s12e01.mkv", "/tv/Breaking Bad/Season 12/s12e01.mkv"},
-		{"Show", 0, "episode.mkv", "/tv/Show/episode.mkv"},
+		{"Breaking Bad", 1, "s01e01.mkv", "/media/tv/Breaking Bad/Season 01/s01e01.mkv"},
+		{"Breaking Bad", 12, "s12e01.mkv", "/media/tv/Breaking Bad/Season 12/s12e01.mkv"},
+		{"Show", 0, "episode.mkv", "/media/tv/Show/episode.mkv"},
 	}
 	for _, c := range cases {
 		t.Run(c.title, func(t *testing.T) {

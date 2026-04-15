@@ -374,7 +374,7 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 
 // addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.
 // If profileID is 0 the first available quality profile is used.
-// If rootPath is "" the default "/movies" path is used.
+// If rootPath is "" the first radarr library's container path is used.
 func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 	_, radarrKey, _ := services.Keys()
 	data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
@@ -401,7 +401,13 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = "/movies"
+		rootPath = "/media/movies"
+		for _, lib := range GetLibraries() {
+			if lib.Arr == "radarr" {
+				rootPath = lib.ContainerPath()
+				break
+			}
+		}
 	}
 
 	payload := map[string]any{
@@ -425,7 +431,7 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 
 // addSeriesInternal adds a series to Sonarr and returns the Sonarr internal ID.
 // If profileID is 0 the first available quality profile is used.
-// If rootPath is "" the default "/tv" path is used.
+// If rootPath is "" the first sonarr library's container path is used.
 func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 	sonarrKey, _, _ := services.Keys()
 	data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
@@ -453,7 +459,13 @@ func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = "/tv"
+		rootPath = "/media/tv"
+		for _, lib := range GetLibraries() {
+			if lib.Arr == "sonarr" {
+				rootPath = lib.ContainerPath()
+				break
+			}
+		}
 	}
 
 	payload := map[string]any{

@@ -436,12 +436,19 @@ func importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu 
 		profileID := resolveProfileID(m.QualityProfile, profMap)
 		tagIDs := resolveTagIDs(m.Tags, tagMap)
 
+		radarrRoot := "/media/movies"
+		for _, lib := range GetLibraries() {
+			if lib.Arr == "radarr" {
+				radarrRoot = lib.ContainerPath()
+				break
+			}
+		}
 		payload := map[string]any{
 			"tmdbId":           m.TmdbID,
 			"title":            m.Title,
 			"year":             m.Year,
 			"qualityProfileId": profileID,
-			"rootFolderPath":   "/movies",
+			"rootFolderPath":   radarrRoot,
 			"monitored":        m.Monitored,
 			"tags":             tagIDs,
 			"addOptions": map[string]any{
@@ -499,12 +506,19 @@ func importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu
 			})
 		}
 
+		sonarrRoot := "/media/tv"
+		for _, lib := range GetLibraries() {
+			if lib.Arr == "sonarr" {
+				sonarrRoot = lib.ContainerPath()
+				break
+			}
+		}
 		payload := map[string]any{
 			"tvdbId":           s.TvdbID,
 			"title":            s.Title,
 			"year":             s.Year,
 			"qualityProfileId": profileID,
-			"rootFolderPath":   "/tv",
+			"rootFolderPath":   sonarrRoot,
 			"monitored":        s.Monitored,
 			"seasonFolder":     true,
 			"tags":             tagIDs,

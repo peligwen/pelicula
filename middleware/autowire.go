@@ -57,8 +57,14 @@ func AutoWire(s *ServiceClients) error {
 	}
 
 	// Root folders are needed regardless of VPN (for library management + import)
-	wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "/tv")
-	wireRootFolder(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "/movies")
+	for _, lib := range GetLibraries() {
+		switch lib.Arr {
+		case "sonarr":
+			wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", lib.ContainerPath())
+		case "radarr":
+			wireRootFolder(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", lib.ContainerPath())
+		}
+	}
 
 	// Wire Procula import webhooks (useful even without VPN, for manual imports)
 	wireImportWebhook(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
