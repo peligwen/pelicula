@@ -5,16 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
-
-// libraryEntry matches the on-disk shape of a single entry in libraries.json.
-// It is a subset of cliLibrary, used only for generating the compose override.
-type libraryEntry struct {
-	Slug string `json:"slug"`
-	Path string `json:"path"`
-}
 
 // generateLibrariesOverride reads libraries.json from configPeliculaDir, and if
 // any libraries have an external host path set, writes a docker-compose.libraries.yml
@@ -32,22 +24,16 @@ func generateLibrariesOverride(configPeliculaDir, outputPath string) error {
 		return fmt.Errorf("read libraries.json: %w", err)
 	}
 
-	// libraries.json uses the same {"libraries":[...]} envelope as the middleware.
-	var cfg struct {
-		Libraries []libraryEntry `json:"libraries"`
-	}
+	var cfg cliLibraryConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse libraries.json: %w", err)
 	}
-	libraries := cfg.Libraries
-
-	safeSlug := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 	// Collect only external libraries (those with an explicit host path).
-	var external []libraryEntry
-	for _, lib := range libraries {
+	var external []cliLibrary
+	for _, lib := range cfg.Libraries {
 		if lib.Path != "" && lib.Slug != "" {
-			if !safeSlug.MatchString(lib.Slug) {
+			if !safeSlugRe.MatchString(lib.Slug) {
 				warn(fmt.Sprintf("skipping library with unsafe slug %q (must match [a-z0-9][a-z0-9-]*)", lib.Slug))
 				continue
 			}

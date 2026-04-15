@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+// safeSlugRe matches valid library slugs. Used in setupDirs and generateLibrariesOverride.
+var safeSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // cliLibrary is a minimal representation of a library entry used by the CLI
 // to create directories and generate compose overrides.
@@ -94,9 +98,20 @@ func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
 		filepath.Join(workDir, "processing"),
 	}
 
+	if len(libs) == 0 {
+		warn("no libraries configured — media directories will not be created")
+	}
+
 	// Create a directory under libraryDir for each managed library (no external path).
 	for _, lib := range libs {
-		if lib.Slug != "" && lib.Path == "" {
+		if lib.Slug == "" {
+			continue
+		}
+		if !safeSlugRe.MatchString(lib.Slug) {
+			warn(fmt.Sprintf("skipping library with unsafe slug %q (must match [a-z0-9][a-z0-9-]*)", lib.Slug))
+			continue
+		}
+		if lib.Path == "" {
 			dirs = append(dirs, filepath.Join(libraryDir, lib.Slug))
 		}
 	}
