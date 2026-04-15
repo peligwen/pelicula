@@ -73,17 +73,20 @@ func TestValidateActionHandler(t *testing.T) {
 }
 
 func TestTranscodeActionDetectsTVFromPath(t *testing.T) {
-	if got := arrTypeFromPath("/tv/Show/S01/ep.mkv"); got != "sonarr" {
-		t.Errorf("arrTypeFromPath(/tv/...) = %q, want sonarr", got)
+	// Seed the library registry with defaults so lookups work without a live API.
+	setLibraries(defaultLibraries())
+
+	if got := arrTypeFromPath("/media/tv/Show/S01/ep.mkv"); got != "sonarr" {
+		t.Errorf("arrTypeFromPath(/media/tv/...) = %q, want sonarr", got)
 	}
-	if got := arrTypeFromPath("/movies/Foo/foo.mkv"); got != "radarr" {
-		t.Errorf("arrTypeFromPath(/movies/...) = %q, want radarr", got)
+	if got := arrTypeFromPath("/media/movies/Foo/foo.mkv"); got != "radarr" {
+		t.Errorf("arrTypeFromPath(/media/movies/...) = %q, want radarr", got)
 	}
-	if got := mediaTypeFromPath("/tv/Show/ep.mkv"); got != "episode" {
-		t.Errorf("mediaTypeFromPath(/tv/...) = %q, want episode", got)
+	if got := mediaTypeFromPath("/media/tv/Show/ep.mkv"); got != "episode" {
+		t.Errorf("mediaTypeFromPath(/media/tv/...) = %q, want episode", got)
 	}
-	if got := mediaTypeFromPath("/movies/foo.mkv"); got != "movie" {
-		t.Errorf("mediaTypeFromPath(/movies/...) = %q, want movie", got)
+	if got := mediaTypeFromPath("/media/movies/foo.mkv"); got != "movie" {
+		t.Errorf("mediaTypeFromPath(/media/movies/...) = %q, want movie", got)
 	}
 }
 

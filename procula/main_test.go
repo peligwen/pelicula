@@ -89,7 +89,7 @@ func TestHandleCreateJob(t *testing.T) {
 		Type:    "movie",
 		Title:   "Alien",
 		Year:    1979,
-		Path:    "/movies/Alien (1979)/alien.mkv",
+		Path:    "/media/movies/Alien (1979)/alien.mkv",
 		Size:    5_000_000_000,
 		ArrType: "radarr",
 	}
