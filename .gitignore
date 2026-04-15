@@ -3,6 +3,7 @@
 .env
 config/
 compose/docker-compose.override.yml
+compose/docker-compose.libraries.yml
 compose/docker-compose.remote.yml
 nginx/remote.conf
 *.tar.gz

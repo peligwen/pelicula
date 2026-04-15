@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -18,7 +20,7 @@ type libraryEntry struct {
 // override at outputPath that mounts each one into every relevant service.
 // If no external libraries exist the override file is removed (if present).
 func generateLibrariesOverride(configPeliculaDir, outputPath string) error {
-	librariesFile := fmt.Sprintf("%s/libraries.json", configPeliculaDir)
+	librariesFile := filepath.Join(configPeliculaDir, "libraries.json")
 
 	data, err := os.ReadFile(librariesFile)
 	if err != nil {
@@ -34,10 +36,16 @@ func generateLibrariesOverride(configPeliculaDir, outputPath string) error {
 		return fmt.Errorf("parse libraries.json: %w", err)
 	}
 
+	safeSlug := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
 	// Collect only external libraries (those with an explicit host path).
 	var external []libraryEntry
 	for _, lib := range libraries {
 		if lib.Path != "" && lib.Slug != "" {
+			if !safeSlug.MatchString(lib.Slug) {
+				warn(fmt.Sprintf("skipping library with unsafe slug %q (must match [a-z0-9][a-z0-9-]*)", lib.Slug))
+				continue
+			}
 			external = append(external, lib)
 		}
 	}
@@ -57,7 +65,7 @@ func generateLibrariesOverride(configPeliculaDir, outputPath string) error {
 		b.WriteString(fmt.Sprintf("  %s:\n", svc))
 		b.WriteString("    volumes:\n")
 		for _, lib := range external {
-			b.WriteString(fmt.Sprintf("      - %s:/media/%s\n", lib.Path, lib.Slug))
+			b.WriteString(fmt.Sprintf("      - \"%s:/media/%s\"\n", lib.Path, lib.Slug))
 		}
 	}
 
