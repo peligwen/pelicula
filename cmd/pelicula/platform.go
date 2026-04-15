@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Platform holds detected host environment info.
@@ -185,15 +187,20 @@ func detectSudo() bool {
 	if runtime.GOOS == "windows" {
 		return false
 	}
+	const timeout = 5 * time.Second
 	// Try docker info without sudo
-	cmd := exec.Command("docker", "info")
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "info")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Run(); err == nil {
 		return false
 	}
 	// Try with sudo (-n = non-interactive: fail immediately if a password prompt would appear)
-	cmd2 := exec.Command("sudo", "-n", "docker", "info")
+	ctx2, cancel2 := context.WithTimeout(context.Background(), timeout)
+	defer cancel2()
+	cmd2 := exec.CommandContext(ctx2, "sudo", "-n", "docker", "info")
 	cmd2.Stdout = nil
 	cmd2.Stderr = nil
 	if err := cmd2.Run(); err == nil {

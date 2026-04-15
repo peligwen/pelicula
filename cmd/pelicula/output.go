@@ -8,6 +8,9 @@ import (
 // verboseMode gates debug-level output. Set from main.go when -v is passed.
 var verboseMode bool
 
+// debugMode enables detailed diagnostic output. Set from main.go when --debug is passed.
+var debugMode bool
+
 // isTTY is true when stdout is a terminal. Detected once at startup via isTerminal (tty.go).
 var isTTY = isTerminal(os.Stdout)
 
@@ -58,4 +61,18 @@ func fatal(msg string) {
 
 func bold(s string) string {
 	return colorBold + s + colorReset
+}
+
+// progress always prints a short milestone line, regardless of verboseMode.
+// Used to give a visible breadcrumb trail during startup so failed steps are locatable.
+func progress(msg string) {
+	fmt.Printf("%s▸%s %s\n", colorCyan, colorReset, msg)
+}
+
+// debug prints a diagnostic line only when --debug is active.
+func debug(msg string) {
+	if !debugMode {
+		return
+	}
+	fmt.Printf("%s[debug]%s %s\n", colorYellow, colorReset, msg)
 }

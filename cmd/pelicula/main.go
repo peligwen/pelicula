@@ -5,20 +5,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 var version = "dev" // set via -ldflags at build time
 
 func main() {
-	// Strip -v/--verbose flag from args
+	// Strip -v/--verbose/--debug flags from args
 	var args []string
 	for _, a := range os.Args[1:] {
 		switch a {
 		case "-v", "--verbose":
 			verboseMode = true
+		case "--debug":
+			debugMode = true
+			verboseMode = true
 		default:
 			args = append(args, a)
 		}
+	}
+
+	if debugMode {
+		printDiagnostics()
 	}
 
 	if len(args) == 0 {
@@ -75,6 +83,47 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		usage()
 		os.Exit(1)
+	}
+}
+
+func printDiagnostics() {
+	exe, _ := os.Executable()
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		resolved = exe + " (symlink resolve failed: " + err.Error() + ")"
+	}
+	scriptDir := getScriptDir()
+	envFile := filepath.Join(scriptDir, ".env")
+	_, envErr := os.Stat(envFile)
+
+	debug("pelicula version: " + version)
+	debug("GOOS: " + runtime.GOOS + " GOARCH: " + runtime.GOARCH)
+	debug("binary: " + resolved)
+	debug("script dir: " + scriptDir)
+	if envErr == nil {
+		debug(".env: " + envFile + " (found)")
+	} else {
+		debug(".env: " + envFile + " (not found)")
+	}
+
+	plat := Detect(scriptDir)
+	debug(fmt.Sprintf("platform: %s (synology=%v, wsl=%v, needsSudo=%v, uid=%d, gid=%d)",
+		plat.PlatformLabel(), plat.IsSynology, plat.IsWSL, plat.NeedsSudo, plat.UID, plat.GID))
+	debug("TZ: " + plat.TZ)
+	debug("default config dir: " + plat.DefaultConfigDir)
+	debug("default library dir: " + plat.DefaultLibraryDir)
+
+	composeFile := filepath.Join(scriptDir, "compose", "docker-compose.yml")
+	if _, err := os.Stat(composeFile); err == nil {
+		debug("compose file: " + composeFile + " (found)")
+	} else {
+		debug("compose file: " + composeFile + " (NOT FOUND)")
+	}
+
+	if out, err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Output(); err == nil {
+		debug("docker server: " + string(out))
+	} else {
+		debug("docker: " + err.Error())
 	}
 }
 

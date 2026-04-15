@@ -97,6 +97,7 @@ func cmdUp(_ []string) {
 	}
 
 	// Load and migrate .env
+	progress("Loading configuration...")
 	env, err := ParseEnv(envFile)
 	if err != nil {
 		fatal("Failed to read .env: " + err.Error())
@@ -116,11 +117,13 @@ func cmdUp(_ []string) {
 	port := envDefault(env, "PELICULA_PORT", "7354")
 
 	plat := Detect(scriptDir)
+	progress("Detected: " + plat.PlatformLabel())
 	c := NewCompose(scriptDir, plat.NeedsSudo)
 
 	info("Starting stack...")
 
 	// Create directory structure
+	progress("Setting up directories...")
 	if err := setupDirs(configDir, libraryDir, workDir); err != nil {
 		fatal("Failed to create directories: " + err.Error())
 	}
@@ -165,6 +168,7 @@ func cmdUp(_ []string) {
 		c.profiles = append(c.profiles, "apprise")
 	}
 
+	progress("Starting containers...")
 	if err := c.Run("up", "-d", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}

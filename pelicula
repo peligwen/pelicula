@@ -1,19 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# Pass --debug through to the Go binary as -v, and enable bash tracing
+DEBUG=0
+ARGS=()
+for arg in "$@"; do
+    if [[ "$arg" == "--debug" ]]; then
+        DEBUG=1
+    else
+        ARGS+=("$arg")
+    fi
+done
+if [[ $DEBUG -eq 1 ]]; then
+    set -x
+    ARGS=("--debug" "${ARGS[@]+"${ARGS[@]}"}")
+fi
+
 BIN=./bin/pelicula
+
+if [[ ! -d "cmd/pelicula" ]]; then
+    echo "error: cmd/pelicula/ not found — are you running from the pelicula directory?" >&2
+    exit 1
+fi
+
 NEWEST=$(find cmd/pelicula -name '*.go' -newer "$BIN" -print -quit 2>/dev/null)
 if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
     echo "Building pelicula CLI..." >&2
     mkdir -p bin
     if command -v go &>/dev/null; then
-        ( cd cmd/pelicula && go build -o ../../bin/pelicula . )
+        ( cd cmd/pelicula && go build -o ../../bin/pelicula . ) || {
+            echo "error: Go build failed" >&2
+            exit 1
+        }
     else
         docker run --rm \
             -v "$(pwd):/src" \
             -w /src/cmd/pelicula \
             golang:1.23-alpine \
-            go build -o /src/bin/pelicula .
+            go build -o /src/bin/pelicula . || {
+            echo "error: Docker-based Go build failed" >&2
+            exit 1
+        }
     fi
 fi
-exec "$BIN" "$@"
+
+if [[ ! -x "$BIN" ]]; then
+    echo "error: binary not found at $BIN after build" >&2
+    exit 1
+fi
+
+exec "$BIN" "${ARGS[@]+"${ARGS[@]}"}"
