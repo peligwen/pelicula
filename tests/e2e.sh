@@ -832,7 +832,7 @@ assert 'Movies' in names and 'TV Shows' in names
         fi
 
         # Fixture 2: Night of the Living Dead for subtitle-acquisition spec.
-        # Place the file in /movies (Jellyfin's library root) so the Jellyfin refresh
+        # Place the file in /media/movies (Jellyfin's library root) so the Jellyfin refresh
         # fired by CatalogEarly actually makes the movie visible in the library.
         local pw_notld_dir="$test_library_dir/movies/Night of the Living Dead (1968)"
         local pw_notld_file="$pw_notld_dir/Night.of.the.Living.Dead.1968.mkv"
@@ -1028,7 +1028,7 @@ assert 'Movies' in names and 'TV Shows' in names
             # Pre-fire Night of the Living Dead import webhook from inside Docker
             # (nginx IP-restricts /api/pelicula/hooks/import to internal networks;
             # Playwright runs on the host and can't call it directly through nginx)
-            # Path uses /movies so CatalogEarly's Jellyfin refresh picks it up.
+            # Path uses /media/movies so CatalogEarly's Jellyfin refresh picks it up.
             info "Pre-firing Night of the Living Dead import webhook..."
             $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
                 --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/media/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/media/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
