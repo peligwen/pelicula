@@ -28,6 +28,7 @@ var (
 	libraryMu    sync.RWMutex
 	cachedLibs   []ProculaLibrary
 	libraryReady bool
+	refreshOnce  sync.Once
 )
 
 // defaultLibraries returns the two built-in libraries used as a fallback when
@@ -77,13 +78,17 @@ func loadLibraries(peliculaAPI string) {
 
 	// Start a background goroutine to refresh the library cache every 5 minutes
 	// so that library changes made via the dashboard are picked up without a restart.
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			refreshLibraries(peliculaAPI)
-		}
-	}()
+	// refreshOnce ensures we never start more than one ticker even if loadLibraries
+	// were somehow called multiple times.
+	refreshOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				refreshLibraries(peliculaAPI)
+			}
+		}()
+	})
 }
 
 // refreshLibraries fetches the library list from pelicula-api and updates the

@@ -320,7 +320,7 @@ func newRadarrPayload() []byte {
 			"id":    float64(1),
 		},
 		"movieFile": map[string]any{
-			"path": "/movies/Alien/alien.mkv",
+			"path": "/media/movies/Alien/alien.mkv",
 			"size": float64(1_000_000),
 		},
 	}

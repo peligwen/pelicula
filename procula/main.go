@@ -467,9 +467,20 @@ func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Derive a human-readable title from the parent directory (Plex-style naming).
+	// Skip the parent if it is a known library root slug (e.g. "movies", "tv", "anime") —
+	// in that case the filename itself is the best available title.
 	title := strings.TrimSuffix(fi.Name(), filepath.Ext(fi.Name()))
-	if parent := filepath.Base(filepath.Dir(clean)); parent != "movies" && parent != "tv" {
-		title = parent
+	if parent := filepath.Base(filepath.Dir(clean)); parent != "" {
+		isLibraryRoot := false
+		for _, lib := range getProculaLibraries() {
+			if parent == lib.Slug {
+				isLibraryRoot = true
+				break
+			}
+		}
+		if !isLibraryRoot {
+			title = parent
+		}
 	}
 
 	source := JobSource{

@@ -160,6 +160,10 @@ func TestSaveLibrary_Validation(t *testing.T) {
 			name: "invalid arr",
 			lib:  Library{Slug: "ok", Type: "movies", Arr: "lidarr"},
 		},
+		{
+			name: "invalid processing",
+			lib:  Library{Slug: "ok", Type: "movies", Arr: "radarr", Processing: "banana"},
+		},
 	}
 
 	for _, tc := range cases {

@@ -79,6 +79,13 @@ var validLibraryArrs = map[string]bool{
 	"none":   true,
 }
 
+// validLibraryProcessing is the set of accepted Library.Processing values.
+var validLibraryProcessing = map[string]bool{
+	"full":  true,
+	"audit": true,
+	"off":   true,
+}
+
 // validateLibrary returns an error if lib contains invalid field values.
 func validateLibrary(lib Library) error {
 	if lib.Slug == "" {
@@ -92,6 +99,9 @@ func validateLibrary(lib Library) error {
 	}
 	if !validLibraryArrs[lib.Arr] {
 		return fmt.Errorf("library arr %q is invalid: must be one of radarr, sonarr, none", lib.Arr)
+	}
+	if !validLibraryProcessing[lib.Processing] {
+		return fmt.Errorf("library processing %q is invalid: must be one of full, audit, off", lib.Processing)
 	}
 	return nil
 }
