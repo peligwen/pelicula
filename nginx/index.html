@@ -308,6 +308,11 @@
                                     </label>
                                 </div>
                             </div>
+                            <div class="config-group" id="import-library-group">
+                                <label class="config-label" for="import-library-select">Library</label>
+                                <select id="import-library-select" class="settings-input" style="width:100%;max-width:360px"></select>
+                                <div class="config-hint">Where to import movies and TV shows (sets the root folder path in Radarr/Sonarr)</div>
+                            </div>
                             <div class="config-group">
                                 <label class="config-label">
                                     <input type="checkbox" id="validate-toggle" checked>
@@ -587,6 +592,56 @@
                         <span class="settings-save-status" id="requests-settings-save-status"></span>
                     </div>
                     <p class="requests-settings-note">Changes take effect after restarting the pelicula-api container.</p>
+                </div>
+
+                <!-- Libraries -->
+                <div class="settings-panel admin-only" id="st-libraries-panel">
+                    <div class="settings-panel-title">Libraries</div>
+                    <div id="st-libraries-list" style="margin-top:.5rem"></div>
+                    <div class="drawer-section" style="margin-top:1.25rem">
+                        <div class="drawer-section-title">Add Library</div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="lib-name">Name</label>
+                            <input type="text" id="lib-name" class="settings-input" placeholder="e.g. Anime" oninput="libAutoSlug()">
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="lib-slug">Slug</label>
+                            <input type="text" id="lib-slug" class="settings-input" placeholder="e.g. anime">
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="lib-type">Type</label>
+                            <select id="lib-type" class="settings-input">
+                                <option value="movies">Movies</option>
+                                <option value="tvshows">TV Shows</option>
+                                <option value="mixed">Mixed</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="lib-arr">Arr Integration</label>
+                            <select id="lib-arr" class="settings-input">
+                                <option value="none">None</option>
+                                <option value="radarr">Radarr</option>
+                                <option value="sonarr">Sonarr</option>
+                            </select>
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="lib-processing">Processing</label>
+                            <select id="lib-processing" class="settings-input">
+                                <option value="audit">Audit (default)</option>
+                                <option value="full">Full</option>
+                                <option value="off">Off</option>
+                            </select>
+                        </div>
+                        <div class="settings-field-row">
+                            <label class="settings-field-label" for="lib-path">External Host Path</label>
+                            <input type="text" id="lib-path" class="settings-input" placeholder="Optional — defaults to LIBRARY_DIR/&lt;slug&gt;">
+                        </div>
+                        <div class="settings-actions" style="margin-top:.75rem">
+                            <button class="settings-save-btn" onclick="addLibrary()">Add Library</button>
+                            <span class="settings-save-status" id="st-lib-status"></span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Blocked Releases -->
