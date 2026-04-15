@@ -73,8 +73,8 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.locator('[data-testid="btn-configure"]').click();
         await page.waitForSelector('#step-configure:not(.hidden)', { timeout: 5_000 });
 
-        // Select "migrate" strategy
-        await page.locator('input[name="strategy"][value="migrate"]').check();
+        // Select "import" strategy (move files into library)
+        await page.locator('input[name="strategy"][value="import"]').check();
         // Leave validate-toggle checked (default) — Procula's validation_enabled=false
         // setting (set by e2e.sh Stage 3) prevents FFprobe from running on the
         // synthetic file, but the toggle must stay on to queue a Procula job.

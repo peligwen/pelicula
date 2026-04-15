@@ -44,6 +44,7 @@ function importGoToStep(step) {
 
     if (step === 'configure') {
         updateStrategyExamples();
+        updateHardlinkToggle();
     }
 }
 
@@ -58,9 +59,16 @@ function updateStrategyExamples() {
     const fwd = src + ' \u2192 ' + dst;
     const bwd = dst + ' \u2192 ' + src;
     const el = id => document.getElementById(id);
-    if (el('strategy-example-hardlink')) el('strategy-example-hardlink').textContent = fwd;
-    if (el('strategy-example-migrate'))  el('strategy-example-migrate').textContent  = fwd;
-    if (el('strategy-example-symlink'))  el('strategy-example-symlink').textContent  = bwd;
+    if (el('strategy-example-import')) el('strategy-example-import').textContent = fwd;
+    if (el('strategy-example-link'))   el('strategy-example-link').textContent   = bwd;
+}
+
+// updateHardlinkToggle shows/hides the hardlink sub-option based on strategy.
+function updateHardlinkToggle() {
+    const strategyEl = document.querySelector('input[name="strategy"]:checked');
+    const toggleGroup = document.getElementById('hardlink-toggle-group');
+    if (!toggleGroup) return;
+    toggleGroup.style.display = (strategyEl && strategyEl.value === 'link') ? '' : 'none';
 }
 
 // ── Browse tree ──────────────────────────────────────────────────────────────
@@ -635,7 +643,10 @@ async function doApply() {
     content.innerHTML = '<div class="apply-progress"><div class="apply-spinner"></div><span>Applying import...</span></div>';
 
     const strategyEl = document.querySelector('input[name="strategy"]:checked');
-    const strategy = strategyEl ? strategyEl.value : 'keep';
+    const strategyBase = strategyEl ? strategyEl.value : 'register';
+    // For "link", check whether the user wants hardlinks.
+    const hardlinkEl = document.getElementById('hardlink-toggle');
+    const strategy = (strategyBase === 'link' && hardlinkEl && hardlinkEl.checked) ? 'hardlink' : strategyBase;
     const validateEl = document.getElementById('validate-toggle');
     const validate = validateEl ? validateEl.checked : false;
 
@@ -659,12 +670,12 @@ async function doApply() {
             season: r.match.season || 0,
             episode: r.match.episode || 0,
             rootFolderPath: getLibraryPathForType(r.match.type),
-            monitored: strategy !== 'keep',
+            monitored: strategy !== 'register',
             sourcePath: r.file,
             destPath: r.suggestedPath || '',
         }));
 
-    // In-place items need registration but no FS operation — always use "keep".
+    // In-place items need registration but no FS operation — always use "register".
     const inPlaceItems = state.scanResults
         .filter(r => r.status === 'in_place' && r.match)
         .map(r => ({
@@ -693,7 +704,7 @@ async function doApply() {
         const res = await apiFetch('/api/pelicula/library/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items, strategy: newItems.length === 0 ? 'keep' : strategy, validate }),
+            body: JSON.stringify({ items, strategy: newItems.length === 0 ? 'register' : strategy, validate }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
@@ -808,6 +819,11 @@ function getLibraryPathForType(type) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
+
+// Wire strategy radio changes to show/hide the hardlink toggle.
+document.querySelectorAll('input[name="strategy"]').forEach(function(radio) {
+    radio.addEventListener('change', updateHardlinkToggle);
+});
 
 // On the dashboard this script is loaded on demand by openStorageExplorer()
 // in dashboard.js. Auto-init the browse tree immediately.

@@ -276,35 +276,33 @@
                                 <label class="config-label">Strategy</label>
                                 <div class="strategy-options">
                                     <label class="strategy-option">
-                                        <input type="radio" name="strategy" value="hardlink" checked>
+                                        <input type="radio" name="strategy" value="import" checked>
                                         <div class="strategy-card">
-                                            <div class="strategy-name">Hardlink</div>
-                                            <div class="strategy-desc"><strong>Same file, two names.</strong> Zero extra disk use. Deleting the original doesn't free space until both names are gone. Requires source and library on the same volume.</div>
-                                            <div class="strategy-example" id="strategy-example-hardlink">/downloads/The.Batman.2022.mkv &rarr; /movies/The Batman (2022)/The Batman (2022).mkv</div>
+                                            <div class="strategy-name">Import</div>
+                                            <div class="strategy-desc"><strong>Moves</strong> files into the selected library with the standard folder layout. The original location is freed.</div>
+                                            <div class="strategy-example" id="strategy-example-import">/downloads/The.Batman.2022.mkv &rarr; /media/movies/The Batman (2022)/The Batman (2022).mkv</div>
                                         </div>
                                     </label>
                                     <label class="strategy-option">
-                                        <input type="radio" name="strategy" value="migrate">
+                                        <input type="radio" name="strategy" value="link">
                                         <div class="strategy-card">
-                                            <div class="strategy-name">Migrate</div>
-                                            <div class="strategy-desc"><strong>Moves</strong> the file to your library. The original location is freed.</div>
-                                            <div class="strategy-example" id="strategy-example-migrate">/downloads/The.Batman.2022.mkv &rarr; /movies/The Batman (2022)/The Batman (2022).mkv</div>
+                                            <div class="strategy-name">Link</div>
+                                            <div class="strategy-desc"><strong>Creates links</strong> in the library directory. Originals stay untouched. Use for alpha-folder or externally managed layouts.</div>
+                                            <div class="strategy-example" id="strategy-example-link">/media/movies/The Batman (2022)/The Batman (2022).mkv &rarr; /downloads/The.Batman.2022.mkv</div>
                                         </div>
                                     </label>
                                     <label class="strategy-option">
-                                        <input type="radio" name="strategy" value="symlink">
+                                        <input type="radio" name="strategy" value="register">
                                         <div class="strategy-card">
-                                            <div class="strategy-name">Soft link</div>
-                                            <div class="strategy-desc"><strong>Library path points to the original.</strong> Works across volumes. If the source is moved or deleted, the library entry breaks.</div>
-                                            <div class="strategy-example" id="strategy-example-symlink">/movies/The Batman (2022)/The Batman (2022).mkv &rarr; /downloads/The.Batman.2022.mkv</div>
+                                            <div class="strategy-name">Register</div>
+                                            <div class="strategy-desc"><strong>Registers</strong> files with Sonarr/Radarr without touching the filesystem. Files must already be in a compatible layout under a library root.</div>
                                         </div>
                                     </label>
-                                    <label class="strategy-option">
-                                        <input type="radio" name="strategy" value="keep">
-                                        <div class="strategy-card">
-                                            <div class="strategy-name">Keep</div>
-                                            <div class="strategy-desc"><strong>Registers</strong> in Sonarr/Radarr without touching files. Use when an external tool already manages your layout.</div>
-                                        </div>
+                                </div>
+                                <div id="hardlink-toggle-group" class="config-hint" style="display:none;margin-top:.5rem">
+                                    <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                                        <input type="checkbox" id="hardlink-toggle">
+                                        Use hardlinks instead of symlinks (same filesystem only — zero extra disk use)
                                     </label>
                                 </div>
                             </div>

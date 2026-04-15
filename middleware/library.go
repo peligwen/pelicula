@@ -65,7 +65,7 @@ type MediaMatch struct {
 
 type ApplyRequest struct {
 	Items    []ApplyItem `json:"items"`
-	Strategy string      `json:"strategy"` // migrate / symlink / keep
+	Strategy string      `json:"strategy"` // import / link / register (also accepts legacy: migrate / symlink / hardlink / keep)
 	Validate bool        `json:"validate"` // forward to Procula for validation after apply
 }
 
@@ -225,11 +225,25 @@ func moveFile(src, dst string) error {
 }
 
 // applyFSOps iterates items and performs the filesystem operation dictated by
-// strategy ("migrate", "symlink", or "keep") for each item that has a SourcePath.
+// strategy for each item that has a SourcePath. Accepted strategy values:
+//   - "import" (alias: "migrate")  — move the file into the library
+//   - "link"   (alias: "symlink")  — create a symlink in the library
+//   - "hardlink"                   — create a hard link in the library
+//   - "register" (alias: "keep")   — no-op; files are already in place
+//
 // Items are modified in place: SourcePath and DestPath are updated on success.
 // allowedSrcRoots and allowedDstRoots default to the production values when nil.
 func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string) {
-	if strategy == "keep" {
+	// Normalise legacy strategy names to canonical ones.
+	switch strategy {
+	case "migrate":
+		strategy = "import"
+	case "symlink":
+		strategy = "link"
+	case "keep":
+		strategy = "register"
+	}
+	if strategy == "register" {
 		return
 	}
 	if allowedSrcRoots == nil {
@@ -272,7 +286,7 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		}
 
 		switch strategy {
-		case "migrate":
+		case "import":
 			if err := moveFile(src, dst); err != nil {
 				slog.Warn("import: move failed", "component", "library",
 					"src", src, "dst", dst, "error", err)
@@ -289,7 +303,7 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 					item.DestPath = dst
 				}
 			}
-		case "symlink":
+		case "link":
 			if _, err := os.Lstat(dst); os.IsNotExist(err) {
 				if err := os.Symlink(src, dst); err != nil {
 					slog.Warn("import: symlink failed", "component", "library",
@@ -588,9 +602,9 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	movieProfiles, _ := loadProfileNameMap(radarrURL, radarrKey)
 	seriesProfiles, _ := loadProfileNameMap(sonarrURL, sonarrKey)
 
-	// ── Filesystem operations (migrate / symlink) ────────────────────────────
+	// ── Filesystem operations (import / link) ───────────────────────────────
 	// Perform FS ops before *arr registration so that if a move fails we don't
-	// register a path that doesn't exist yet.  "keep" skips this section.
+	// register a path that doesn't exist yet.  "register" skips this section.
 	applyFSOps(req.Items, req.Strategy, nil, nil)
 
 	// Deduplicate *arr registration by (type, id) — when multiple episodes of
@@ -638,7 +652,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 
 		fsOp := "kept"
 		switch req.Strategy {
-		case "migrate":
+		case "import", "migrate":
 			if item.DestPath != "" {
 				fsOp = "moved"
 			}
@@ -646,7 +660,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			if item.DestPath != "" {
 				fsOp = "hardlinked"
 			}
-		case "symlink":
+		case "link", "symlink":
 			if item.DestPath != "" {
 				fsOp = "symlinked"
 			}
