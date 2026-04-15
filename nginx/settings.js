@@ -648,11 +648,74 @@
                 const slugEl = document.getElementById('lib-slug');
                 if (slugEl) slugEl.dataset.manual = '';
                 loadLibraries();
+                // If the user supplied an external path and wired it to an arr, offer scan & register.
+                if (lib.path && lib.arr !== 'none') {
+                    scanAndRegisterLibrary(lib.slug, lib.arr, statusEl);
+                }
             } else {
                 const data = await res.json().catch(function() { return {}; });
                 if (statusEl) statusEl.textContent = 'Failed: ' + (data.error || res.status);
             }
         } catch (e) { if (statusEl) statusEl.textContent = 'Save failed'; }
+    }
+
+    // scanAndRegisterLibrary: after a library with an external path is created,
+    // offer to scan the library directory and register its contents with Radarr/Sonarr.
+    // This is a convenience shortcut for the common "adopt existing library" flow.
+    async function scanAndRegisterLibrary(slug, arr, statusEl) {
+        const containerPath = '/media/' + slug;
+        if (!confirm('Scan \u201c' + containerPath + '\u201d and register existing media with ' + (arr === 'radarr' ? 'Radarr' : 'Sonarr') + '?\n\nFiles must already be in a compatible layout (Title (Year)/ for movies, Title/Season XX/ for TV). No files will be moved.')) {
+            return;
+        }
+        if (statusEl) statusEl.textContent = 'Scanning\u2026';
+        try {
+            const scanRes = await tfetch('/api/pelicula/library/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folders: [containerPath] }),
+            });
+            if (!scanRes.ok) {
+                const err = await scanRes.json().catch(function() { return {}; });
+                if (statusEl) statusEl.textContent = 'Scan failed: ' + (err.error || scanRes.status);
+                return;
+            }
+            const scanData = await scanRes.json();
+            const items = (scanData || [])
+                .filter(function(r) { return r.status === 'new' && r.match; })
+                .map(function(r) {
+                    return {
+                        type: r.match.type === 'series' ? 'series' : 'movie',
+                        tmdbId: r.match.tmdbId || 0,
+                        tvdbId: r.match.tvdbId || 0,
+                        title: r.match.title,
+                        year: r.match.year || 0,
+                        season: r.match.season || 0,
+                        episode: r.match.episode || 0,
+                        rootFolderPath: containerPath,
+                        monitored: false,
+                        sourcePath: r.file,
+                        destPath: r.suggestedPath || '',
+                    };
+                });
+            if (!items.length) {
+                if (statusEl) { statusEl.textContent = 'Nothing new to register \u2713'; setTimeout(function() { if (statusEl) statusEl.textContent = ''; }, 3000); }
+                return;
+            }
+            if (statusEl) statusEl.textContent = 'Registering ' + items.length + ' item(s)\u2026';
+            const applyRes = await tfetch('/api/pelicula/library/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: items, strategy: 'register', validate: false }),
+            });
+            if (applyRes.ok) {
+                const result = await applyRes.json().catch(function() { return {}; });
+                const added = result.added || 0;
+                if (statusEl) { statusEl.textContent = 'Registered ' + added + ' item(s) \u2713'; setTimeout(function() { if (statusEl) statusEl.textContent = ''; }, 4000); }
+            } else {
+                const err = await applyRes.json().catch(function() { return {}; });
+                if (statusEl) statusEl.textContent = 'Register failed: ' + (err.error || applyRes.status);
+            }
+        } catch (e) { if (statusEl) statusEl.textContent = 'Scan & register failed'; }
     }
 
     async function deleteLibrary(slug, name) {
