@@ -117,6 +117,17 @@ func cmdUp(_ []string) {
 	workDir := env["WORK_DIR"]
 	port := envDefault(env, "PELICULA_PORT", "7354")
 
+	// Validate critical path vars — empty values produce cryptic Docker Compose errors.
+	for _, check := range []struct{ key, val string }{
+		{"CONFIG_DIR", configDir},
+		{"LIBRARY_DIR", libraryDir},
+		{"WORK_DIR", workDir},
+	} {
+		if check.val == "" {
+			fatal(check.key + ` is empty in .env — set it manually or run: pelicula reset-config`)
+		}
+	}
+
 	plat := Detect(scriptDir)
 	progress("Detected: " + plat.PlatformLabel())
 	c := NewCompose(scriptDir, plat.NeedsSudo)
