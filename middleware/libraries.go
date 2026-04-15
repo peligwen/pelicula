@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,11 @@ import (
 
 	"pelicula-api/httputil"
 )
+
+// Sentinel errors returned by DeleteLibrary so callers can distinguish failure
+// modes without a second registry lookup.
+var errLibraryNotFound = errors.New("library not found")
+var errLibraryBuiltIn = errors.New("cannot delete built-in library")
 
 // ── Library registry ──────────────────────────────────────────────────────────
 
@@ -216,10 +222,6 @@ const peliculaConfigDir = "/config/pelicula"
 // handleListLibraries handles GET /api/pelicula/libraries.
 // No auth required — same convention as other read-only dashboard endpoints.
 func handleListLibraries(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	httputil.WriteJSON(w, GetLibraries())
 }
 
@@ -227,10 +229,6 @@ func handleListLibraries(w http.ResponseWriter, r *http.Request) {
 // Admin auth required. Decodes the request body, validates, saves, and (when
 // no external Path is provided) creates the media directory on disk.
 func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var lib Library
 	if err := json.NewDecoder(r.Body).Decode(&lib); err != nil {
@@ -255,7 +253,6 @@ func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	httputil.WriteJSON(w, lib)
 }
@@ -264,10 +261,6 @@ func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
 // Admin auth required. Merges the request body fields onto the existing
 // library (preserving BuiltIn), then saves.
 func handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	slug := r.PathValue("slug")
 	if slug == "" {
 		httputil.WriteError(w, "slug required", http.StatusBadRequest)
@@ -316,10 +309,6 @@ func handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 // handleDeleteLibrary handles DELETE /api/pelicula/libraries/{slug}.
 // Admin auth required. Rejects built-in libraries.
 func handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	slug := r.PathValue("slug")
 	if slug == "" {
 		httputil.WriteError(w, "slug required", http.StatusBadRequest)
@@ -327,8 +316,7 @@ func handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := DeleteLibrary(peliculaConfigDir, slug); err != nil {
-		// Distinguish not-found from built-in-rejection for proper status codes.
-		if _, lookupErr := GetLibraryBySlug(slug); lookupErr != nil {
+		if errors.Is(err, errLibraryNotFound) {
 			httputil.WriteError(w, "library not found", http.StatusNotFound)
 		} else {
 			httputil.WriteError(w, err.Error(), http.StatusConflict)
@@ -354,10 +342,10 @@ func DeleteLibrary(configPeliculaDir string, slug string) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("library %q not found", slug)
+		return errLibraryNotFound
 	}
 	if existing[idx].BuiltIn {
-		return fmt.Errorf("library %q is built-in and cannot be deleted", slug)
+		return errLibraryBuiltIn
 	}
 
 	// Build the new slice without touching the global yet.
