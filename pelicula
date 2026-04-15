@@ -34,7 +34,14 @@ if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
             exit 1
         }
     else
-        docker run --rm \
+        # Synology's Docker Compose fork fails when HOME's parent dir is a symlink
+        # (/var/services/homes -> /volume1/@fake_home_link). Override HOME to a
+        # real directory so docker run doesn't hit the same bug.
+        DOCKER_HOME="$HOME"
+        if [[ -L "$(dirname "$HOME")" ]]; then
+            DOCKER_HOME="$(pwd)"
+        fi
+        HOME="$DOCKER_HOME" docker run --rm \
             -v "$(pwd):/src" \
             -w /src/cmd/pelicula \
             golang:1.23-alpine \

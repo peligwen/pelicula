@@ -11,6 +11,7 @@ type Compose struct {
 	projectDir string
 	envFile    string
 	needsSudo  bool
+	isSynology bool
 	profiles   []string // active profiles (e.g. "vpn", "apprise")
 }
 
@@ -20,15 +21,47 @@ func NewCompose(scriptDir string, needsSudo bool) *Compose {
 		projectDir: scriptDir,
 		envFile:    filepath.Join(scriptDir, ".env"),
 		needsSudo:  needsSudo,
+		isSynology: isSynologyHost(),
 	}
+}
+
+// isSynologyHost returns true when running on a Synology NAS.
+func isSynologyHost() bool {
+	if _, err := os.Stat("/proc/syno_platform"); err == nil {
+		return true
+	}
+	_, err := os.Stat("/volume1")
+	return err == nil
+}
+
+// synologyEnv returns a copy of the current environment with HOME replaced
+// by the script directory. Synology's Docker Compose fork tries to mkdir the
+// parent of $HOME (/var/services/homes), which is a symlink and causes
+// "file exists" errors. Using a real directory avoids this.
+func (c *Compose) synologyEnv() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if len(e) >= 5 && e[:5] == "HOME=" {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "HOME="+c.projectDir)
 }
 
 // dockerCmd returns an exec.Cmd for "docker <args...>", prefixed with sudo if needed.
 func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if c.needsSudo {
-		return exec.Command("sudo", append([]string{"docker"}, args...)...)
+		cmd = exec.Command("sudo", append([]string{"docker"}, args...)...)
+	} else {
+		cmd = exec.Command("docker", args...)
 	}
-	return exec.Command("docker", args...)
+	if c.isSynology {
+		cmd.Env = c.synologyEnv()
+	}
+	return cmd
 }
 
 // args builds the full docker compose argument list.
@@ -103,6 +136,17 @@ func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
 // with the given environment variables.
 func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
 	cmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "up", "-d", "--build")
+	// Start from caller-supplied env; strip HOME and re-add a safe one on Synology.
+	if c.isSynology {
+		out := make([]string, 0, len(env)+1)
+		for _, e := range env {
+			if len(e) >= 5 && e[:5] == "HOME=" {
+				continue
+			}
+			out = append(out, e)
+		}
+		env = append(out, "HOME="+c.projectDir)
+	}
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
