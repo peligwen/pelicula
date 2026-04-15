@@ -772,6 +772,11 @@ function populateLibrarySelect() {
     const sel = document.getElementById('import-library-select');
     if (!sel || !state.libraries.length) return;
     sel.replaceChildren();
+    // Prepend the "Auto" option so mixed batches route per item type by default.
+    const autoOpt = document.createElement('option');
+    autoOpt.value = '';
+    autoOpt.textContent = 'Auto (per type)';
+    sel.appendChild(autoOpt);
     state.libraries.forEach(function(lib) {
         const opt = document.createElement('option');
         opt.value = '/media/' + lib.slug;
@@ -779,25 +784,27 @@ function populateLibrarySelect() {
         opt.dataset.arr = lib.arr;
         sel.appendChild(opt);
     });
+    sel.value = ''; // ensure Auto is selected
 }
 
 // getLibraryPathForType returns the ContainerPath for the best library match
-// given a match type ('movie' or 'series'). Falls back to the first option if
-// no match is found.
+// given a match type ('movie' or 'series'). When the user has picked a specific
+// library override, that path is used for all items. In Auto mode (sel.value === ""),
+// items are routed to the first library whose arr integration matches the type.
 function getLibraryPathForType(type) {
     const sel = document.getElementById('import-library-select');
-    if (!sel) return type === 'movie' ? '/movies' : '/tv';
+    if (!sel) return type === 'movie' ? '/media/movies' : '/media/tv';
+    // User picked a specific library — apply it to all items in the batch.
+    if (sel.value !== '') return sel.value;
+    // Auto mode: find the first library whose arr integration matches the type.
     const arr = type === 'movie' ? 'radarr' : 'sonarr';
-    // If the user has actively chosen a library, use that selection.
-    if (sel.value) return sel.value;
-    // Otherwise pick the first library matching the arr integration.
     for (let i = 0; i < sel.options.length; i++) {
         if (sel.options[i].dataset.arr === arr) {
             return sel.options[i].value;
         }
     }
-    // Final fallback: whatever is first in the list.
-    return sel.options.length ? sel.options[0].value : (type === 'movie' ? '/movies' : '/tv');
+    // Final fallback if no matching library is configured.
+    return type === 'movie' ? '/media/movies' : '/media/tv';
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────

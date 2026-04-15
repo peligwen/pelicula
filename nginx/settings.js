@@ -611,7 +611,7 @@
         if (!nameEl || !slugEl) return;
         // Only auto-fill if the user hasn't manually edited the slug
         if (slugEl.dataset.manual === 'true') return;
-        slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+        slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
     }
 
     async function addLibrary() {
@@ -620,6 +620,10 @@
         const slug = (document.getElementById('lib-slug')?.value || '').trim();
         if (!name) { if (statusEl) statusEl.textContent = 'Name is required'; return; }
         if (!slug) { if (statusEl) statusEl.textContent = 'Slug is required'; return; }
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+            if (statusEl) statusEl.textContent = 'Slug must start with a letter or number and contain only lowercase letters, numbers, and hyphens';
+            return;
+        }
 
         const lib = {
             name: name,

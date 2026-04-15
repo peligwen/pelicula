@@ -345,7 +345,7 @@ function setupLibAutoSlug() {
     const slugEl = document.getElementById('setup-lib-slug');
     if (!nameEl || !slugEl) return;
     if (slugEl.dataset.manual === 'true') return;
-    slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
 }
 
 function setupAddLibrary() {
