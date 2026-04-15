@@ -12,10 +12,13 @@ import (
 // to create directories and generate compose overrides.
 // It mirrors the on-disk schema in libraries.json (written by middleware).
 type cliLibrary struct {
-	Name    string `json:"name"`
-	Slug    string `json:"slug"`
-	Path    string `json:"path,omitempty"` // host path; empty = LIBRARY_DIR/slug
-	BuiltIn bool   `json:"builtin,omitempty"`
+	Name       string `json:"name"`
+	Slug       string `json:"slug"`
+	Path       string `json:"path,omitempty"` // host path; empty = LIBRARY_DIR/slug
+	Type       string `json:"type"`
+	Arr        string `json:"arr"`
+	Processing string `json:"processing"`
+	BuiltIn    bool   `json:"builtin,omitempty"`
 }
 
 // cliLibraryConfig is the top-level on-disk schema for libraries.json.
@@ -27,8 +30,8 @@ type cliLibraryConfig struct {
 func defaultLibraries() cliLibraryConfig {
 	return cliLibraryConfig{
 		Libraries: []cliLibrary{
-			{Name: "Movies", Slug: "movies", BuiltIn: true},
-			{Name: "TV Shows", Slug: "tv", BuiltIn: true},
+			{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full", BuiltIn: true},
+			{Name: "TV Shows", Slug: "tv", Type: "tvshows", Arr: "sonarr", Processing: "full", BuiltIn: true},
 		},
 	}
 }
