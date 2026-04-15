@@ -38,7 +38,7 @@ type SubtitleTrack struct {
 
 // DualSubSidecar describes an existing dual-subtitle ASS file alongside a media item.
 type DualSubSidecar struct {
-	File string `json:"file"` // full path, e.g. /movies/Foo/Foo.en-es.ass
+	File string `json:"file"` // full path, e.g. /media/movies/Foo/Foo.en-es.ass
 	Pair string `json:"pair"` // e.g. "en-es"
 }
 
@@ -548,7 +548,7 @@ func fmtASS(d time.Duration) string {
 }
 
 // dualSubPath returns the sidecar path for the given pair alongside the media.
-// e.g. /movies/Foo (2020)/Foo.mkv + "en-es" → /movies/Foo (2020)/Foo.en-es.ass
+// e.g. /media/movies/Foo (2020)/Foo.mkv + "en-es" → /media/movies/Foo (2020)/Foo.en-es.ass
 func dualSubPath(mediaPath, pair string) string {
 	base := strings.TrimSuffix(mediaPath, filepath.Ext(mediaPath))
 	return base + "." + pair + ".ass"

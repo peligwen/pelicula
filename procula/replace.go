@@ -98,7 +98,7 @@ func runReplaceAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 	}
 	path = filepath.Clean(path)
 	if !isLibraryPath(path) {
-		return nil, fmt.Errorf("replace: path must be under /movies or /tv")
+		return nil, fmt.Errorf("replace: path must be under /media/")
 	}
 	arrType, _ := job.Params["arr_type"].(string)
 	arrIDf, _ := job.Params["arr_id"].(float64)

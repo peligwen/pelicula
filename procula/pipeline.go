@@ -63,13 +63,24 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		return
 	}
 
+	// Check the library processing mode before doing any work.
+	procMode := processingModeForPath(job.Source.Path)
+	if procMode == "off" {
+		slog.Info("job skipped: library processing is off", "component", "pipeline", "job_id", id, "path", job.Source.Path)
+		_ = q.Update(id, func(j *Job) {
+			j.State = StateCancelled
+			j.Error = "library processing disabled"
+		})
+		return
+	}
+
 	// Create a cancellable context so Cancel() can kill a running FFmpeg
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	q.registerCancel(id, cancel)
 	defer q.unregisterCancel(id)
 
-	slog.Info("starting job", "component", "pipeline", "job_id", id, "title", job.Source.Title, "type", job.Source.Type)
+	slog.Info("starting job", "component", "pipeline", "job_id", id, "title", job.Source.Title, "type", job.Source.Type, "processing_mode", procMode)
 
 	// Mark as processing
 	_ = q.Update(id, func(j *Job) {
@@ -267,7 +278,10 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		j.Progress = 0.5
 	})
 	job, _ = q.Get(id)
-	if err := maybeTranscode(ctx, q, job, configDir); err != nil {
+	if procMode == "audit" {
+		// Audit mode: validate-only. Skip transcoding and file modification.
+		slog.Info("audit mode: skipping transcoding", "component", "pipeline", "job_id", id, "path", job.Source.Path)
+	} else if err := maybeTranscode(ctx, q, job, configDir); err != nil {
 		slog.Warn("transcoding failed, proceeding with original", "component", "pipeline", "job_id", id, "error", err)
 		job, _ = q.Get(id)
 		WriteTranscodeFailedNotification(job, configDir, err.Error())
@@ -581,19 +595,23 @@ func runActionJob(ctx context.Context, q *Queue, job *Job) {
 // Used at job-creation time to prevent arbitrary paths from being submitted.
 func isAllowedJobPath(path string) bool {
 	clean := filepath.Clean(path)
-	for _, prefix := range []string{"/downloads", "/movies", "/tv", "/processing"} {
+	for _, prefix := range []string{"/downloads", "/processing"} {
 		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return true
 		}
+	}
+	// Allow any path under /media/ (library root introduced in multi-library support).
+	if clean == "/media" || strings.HasPrefix(clean, "/media/") {
+		return true
 	}
 	return false
 }
 
 // isAllowedPath checks that path is under a directory where deletion on
-// validation failure is safe. /movies and /tv are intentionally excluded —
-// files there are already imported; deleting them in response to a failed
-// validation job would be destructive, and an attacker with control over the
-// webhook path could trigger it.
+// validation failure is safe. Library paths (under /media/) are intentionally
+// excluded — files there are already imported; deleting them in response to a
+// failed validation job would be destructive, and an attacker with control over
+// the webhook path could trigger it.
 func isAllowedPath(path string) bool {
 	clean := filepath.Clean(path)
 	for _, prefix := range []string{"/downloads", "/processing"} {

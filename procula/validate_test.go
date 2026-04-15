@@ -175,17 +175,17 @@ func TestFormatBytes(t *testing.T) {
 
 func TestIsAllowedPath(t *testing.T) {
 	// isAllowedPath is the delete-gate: only /downloads and /processing are safe
-	// to delete from on validation failure. /movies and /tv are excluded by design
-	// to prevent an attacker-controlled webhook path from deleting imported media.
+	// to delete from on validation failure. Library paths under /media/ are excluded
+	// by design to prevent an attacker-controlled webhook path from deleting imported media.
 	cases := []struct {
 		path string
 		want bool
 	}{
 		{"/downloads/movie.mkv", true},
 		{"/processing/out.mkv", true},
-		{"/downloads", true},               // exact prefix match via filepath.Clean
-		{"/movies/Alien/alien.mkv", false}, // imported media — never delete
-		{"/tv/show/s01e01.mkv", false},     // imported media — never delete
+		{"/downloads", true},                     // exact prefix match via filepath.Clean
+		{"/media/movies/Alien/alien.mkv", false}, // imported media — never delete
+		{"/media/tv/show/s01e01.mkv", false},     // imported media — never delete
 		{"/etc/passwd", false},
 		{"/home/user/file.mkv", false},
 		{"", false},
@@ -209,8 +209,9 @@ func TestIsAllowedJobPath(t *testing.T) {
 		want bool
 	}{
 		{"/downloads/movie.mkv", true},
-		{"/movies/Alien/alien.mkv", true},
-		{"/tv/show/s01e01.mkv", true},
+		{"/media/movies/Alien/alien.mkv", true},
+		{"/media/tv/show/s01e01.mkv", true},
+		{"/media/custom/file.mkv", true},
 		{"/processing/out.mkv", true},
 		{"/etc/passwd", false},
 		{"/home/user/file.mkv", false},
