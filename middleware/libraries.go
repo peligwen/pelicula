@@ -3,10 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
+
+	"pelicula-api/httputil"
 )
 
 // ── Library registry ──────────────────────────────────────────────────────────
@@ -201,6 +205,136 @@ func SaveLibrary(configPeliculaDir string, lib Library) error {
 	// Write succeeded — update global.
 	libraryRegistry = newCfg
 	return nil
+}
+
+// ── HTTP handlers ─────────────────────────────────────────────────────────────
+
+// peliculaConfigDir is the runtime path to the pelicula config directory
+// inside the container, used by the library HTTP handlers.
+const peliculaConfigDir = "/config/pelicula"
+
+// handleListLibraries handles GET /api/pelicula/libraries.
+// No auth required — same convention as other read-only dashboard endpoints.
+func handleListLibraries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	httputil.WriteJSON(w, GetLibraries())
+}
+
+// handleAddLibrary handles POST /api/pelicula/libraries.
+// Admin auth required. Decodes the request body, validates, saves, and (when
+// no external Path is provided) creates the media directory on disk.
+func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var lib Library
+	if err := json.NewDecoder(r.Body).Decode(&lib); err != nil {
+		httputil.WriteError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Prevent callers from injecting the built-in flag.
+	lib.BuiltIn = false
+
+	if err := SaveLibrary(peliculaConfigDir, lib); err != nil {
+		httputil.WriteError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// If no external path is configured, create the media directory so it is
+	// ready to receive files when the volume mount is wired up (Task 5).
+	if lib.Path == "" {
+		if err := os.MkdirAll("/media/"+lib.Slug, 0755); err != nil {
+			// Non-fatal: log and continue — the directory may already exist or
+			// the volume may not be mounted in this environment.
+			slog.Warn("libraries: create media dir", "component", "libraries", "slug", lib.Slug, "error", err)
+		}
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	httputil.WriteJSON(w, lib)
+}
+
+// handleUpdateLibrary handles PUT /api/pelicula/libraries/{slug}.
+// Admin auth required. Merges the request body fields onto the existing
+// library (preserving BuiltIn), then saves.
+func handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	slug := r.PathValue("slug")
+	if slug == "" {
+		httputil.WriteError(w, "slug required", http.StatusBadRequest)
+		return
+	}
+
+	existing, err := GetLibraryBySlug(slug)
+	if err != nil {
+		httputil.WriteError(w, "library not found", http.StatusNotFound)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var updates Library
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		httputil.WriteError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Merge: apply non-zero update fields onto the existing library.
+	// BuiltIn and Slug are immutable.
+	merged := existing
+	if updates.Name != "" {
+		merged.Name = updates.Name
+	}
+	if updates.Type != "" {
+		merged.Type = updates.Type
+	}
+	if updates.Arr != "" {
+		merged.Arr = updates.Arr
+	}
+	if updates.Processing != "" {
+		merged.Processing = updates.Processing
+	}
+	// Path may be cleared (set to "") to switch from external to managed;
+	// always apply it from the update.
+	merged.Path = updates.Path
+
+	if err := SaveLibrary(peliculaConfigDir, merged); err != nil {
+		httputil.WriteError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	httputil.WriteJSON(w, merged)
+}
+
+// handleDeleteLibrary handles DELETE /api/pelicula/libraries/{slug}.
+// Admin auth required. Rejects built-in libraries.
+func handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	slug := r.PathValue("slug")
+	if slug == "" {
+		httputil.WriteError(w, "slug required", http.StatusBadRequest)
+		return
+	}
+
+	if err := DeleteLibrary(peliculaConfigDir, slug); err != nil {
+		// Distinguish not-found from built-in-rejection for proper status codes.
+		if _, lookupErr := GetLibraryBySlug(slug); lookupErr != nil {
+			httputil.WriteError(w, "library not found", http.StatusNotFound)
+		} else {
+			httputil.WriteError(w, err.Error(), http.StatusConflict)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // DeleteLibrary removes the library with the given slug and persists the

@@ -212,6 +212,15 @@ func main() {
 	// viewer+: active Jellyfin sessions for the now-playing card.
 	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(handleSessions)))
 
+	// GET /api/pelicula/libraries — no auth (read-only list)
+	mux.HandleFunc("GET /api/pelicula/libraries", handleListLibraries)
+	// POST /api/pelicula/libraries — admin only (add library)
+	mux.Handle("POST /api/pelicula/libraries", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleAddLibrary))))
+	// PUT /api/pelicula/libraries/{slug} — admin only (update library)
+	mux.Handle("PUT /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleUpdateLibrary))))
+	// DELETE /api/pelicula/libraries/{slug} — admin only (remove custom library)
+	mux.Handle("DELETE /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleDeleteLibrary))))
+
 	// admin only: library import scan + apply + browse
 	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(handleBrowse)))
 	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(handleLibraryScan)))
