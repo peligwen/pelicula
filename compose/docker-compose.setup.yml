@@ -29,6 +29,8 @@ services:
       - ./nginx/nginx-setup.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
       - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
+      - ./nginx/theme.css:/usr/share/nginx/html/theme.css:ro
+      - ./nginx/framework.js:/usr/share/nginx/html/framework.js:ro
     ports:
       - "7354:80"
     depends_on:
