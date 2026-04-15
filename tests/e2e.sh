@@ -372,7 +372,7 @@ EOPROFILE
             -f lavfi -i "sine=frequency=1000:duration=10:sample_rate=44100" \
             -c:v libx264 -preset ultrafast -crf 28 \
             -c:a aac -b:a 64k \
-            "/movies/Test Movie (2024)/Test.Movie.2024.mkv" 2>/dev/null; then
+            "/media/movies/Test Movie (2024)/Test.Movie.2024.mkv" 2>/dev/null; then
             ffmpeg_ok=true
         fi
     fi
@@ -405,10 +405,10 @@ EOPROFILE
                 \"id\": 1,
                 \"title\": \"Test Movie\",
                 \"year\": 2024,
-                \"folderPath\": \"/movies/Test Movie (2024)\"
+                \"folderPath\": \"/media/movies/Test Movie (2024)\"
             },
             \"movieFile\": {
-                \"path\": \"/movies/Test Movie (2024)/Test.Movie.2024.mkv\",
+                \"path\": \"/media/movies/Test Movie (2024)/Test.Movie.2024.mkv\",
                 \"relativePath\": \"Test.Movie.2024.mkv\",
                 \"size\": ${file_size},
                 \"mediaInfo\": { \"runTimeSeconds\": 10 }
@@ -493,7 +493,7 @@ except Exception as e:
         t_pass "Transcoded sidecar created (Jellyfin alternate version)"
     else
         # Non-fatal: sidecar may be inside the container volume only
-        local container_sidecar="/movies/Test Movie (2024)/Test.Movie.2024.test.mkv"
+        local container_sidecar="/media/movies/Test Movie (2024)/Test.Movie.2024.test.mkv"
         if $NEEDS_SUDO docker exec pelicula-test-procula test -f "$container_sidecar" 2>/dev/null; then
             t_pass "Transcoded sidecar created (inside container volume)"
         else
@@ -664,7 +664,142 @@ except Exception:
         t_fail "Dashboard missing no-store cache header"
     fi
 
-    # ── Stage 9: Playwright UI Tests ─────────────────
+    # ── Stage 9: Library Registry API ────────────────
+
+    info "Testing library registry API..."
+
+    # Re-login: the auth stage above logs out at the end, so we need a fresh
+    # session cookie for the admin-only POST/DELETE endpoints.
+    local lib_cookies="$test_dir/lib-cookies.txt"
+    pelicula_login "http://localhost:${test_port}" admin test-jellyfin-pw "$lib_cookies" 2>/dev/null
+
+    # GET /api/pelicula/libraries — no auth required; should return at least 2
+    # built-in libraries (movies + tv) on a fresh stack.
+    local libs_resp
+    libs_resp="$(curl -sf --max-time 5 \
+        "http://localhost:${test_port}/api/pelicula/libraries" 2>/dev/null || echo "[]")"
+
+    local libs_count
+    libs_count="$(echo "$libs_resp" | python3 -c "
+import json, sys
+try:
+    print(len(json.loads(sys.stdin.read())))
+except Exception:
+    print(0)
+" 2>/dev/null || echo "0")"
+
+    if [[ "$libs_count" -ge 2 ]]; then
+        t_pass "Library registry returns at least 2 libraries on fresh stack"
+    else
+        t_fail "Library registry returned ${libs_count} libraries (expected ≥ 2)"
+    fi
+
+    # Both built-in slugs must be present.
+    if echo "$libs_resp" | python3 -c "
+import json, sys
+libs = json.loads(sys.stdin.read())
+slugs = {l['slug'] for l in libs}
+assert 'movies' in slugs and 'tv' in slugs
+" 2>/dev/null; then
+        t_pass "Default libraries include slugs 'movies' and 'tv'"
+    else
+        t_fail "Default libraries missing 'movies' or 'tv' slug"
+    fi
+
+    # POST /api/pelicula/libraries — add a custom library.
+    # Requires admin auth + local Origin header (RequireLocalOriginStrict).
+    local add_resp add_code
+    add_resp="$(curl -s -w '\n%{http_code}' --max-time 5 \
+        -b "$lib_cookies" \
+        -X POST "http://localhost:${test_port}/api/pelicula/libraries" \
+        -H "Content-Type: application/json" \
+        -H "Origin: http://localhost:${test_port}" \
+        -d '{"name":"Anime","slug":"anime","type":"tvshows","arr":"sonarr","processing":"audit"}' \
+        2>/dev/null)"
+    add_code="${add_resp##*$'\n'}"
+    if [[ "$add_code" == "201" ]]; then
+        t_pass "POST /api/pelicula/libraries returns 201 for new library"
+    else
+        t_fail "POST /api/pelicula/libraries returned $add_code (expected 201)"
+    fi
+
+    # GET /api/pelicula/libraries — anime should now be in the list.
+    libs_resp="$(curl -sf --max-time 5 \
+        "http://localhost:${test_port}/api/pelicula/libraries" 2>/dev/null || echo "[]")"
+    if echo "$libs_resp" | python3 -c "
+import json, sys
+libs = json.loads(sys.stdin.read())
+assert any(l['slug'] == 'anime' for l in libs)
+" 2>/dev/null; then
+        t_pass "Custom library 'anime' appears in GET /api/pelicula/libraries"
+    else
+        t_fail "Custom library 'anime' not found after POST"
+    fi
+
+    # DELETE /api/pelicula/libraries/movies — built-in; should return 409.
+    local del_builtin_code
+    del_builtin_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+        -b "$lib_cookies" \
+        -X DELETE "http://localhost:${test_port}/api/pelicula/libraries/movies" \
+        -H "Origin: http://localhost:${test_port}" \
+        2>/dev/null)"
+    if [[ "$del_builtin_code" == "409" ]]; then
+        t_pass "DELETE built-in library returns 409"
+    else
+        t_fail "DELETE built-in library returned $del_builtin_code (expected 409)"
+    fi
+
+    # DELETE /api/pelicula/libraries/anime — custom library; should return 204.
+    local del_code
+    del_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+        -b "$lib_cookies" \
+        -X DELETE "http://localhost:${test_port}/api/pelicula/libraries/anime" \
+        -H "Origin: http://localhost:${test_port}" \
+        2>/dev/null)"
+    if [[ "$del_code" == "204" ]]; then
+        t_pass "DELETE custom library 'anime' returns 204"
+    else
+        t_fail "DELETE custom library returned $del_code (expected 204)"
+    fi
+
+    # GET /api/pelicula/libraries — anime should be gone.
+    libs_resp="$(curl -sf --max-time 5 \
+        "http://localhost:${test_port}/api/pelicula/libraries" 2>/dev/null || echo "[]")"
+    if echo "$libs_resp" | python3 -c "
+import json, sys
+libs = json.loads(sys.stdin.read())
+assert not any(l['slug'] == 'anime' for l in libs)
+" 2>/dev/null; then
+        t_pass "Custom library 'anime' removed from registry after DELETE"
+    else
+        t_fail "Custom library 'anime' still present after DELETE"
+    fi
+
+    # Verify Jellyfin library wiring: autowire should have created a "Movies"
+    # and a "TV Shows" virtual folder pointing at the /media/movies and /media/tv
+    # paths. We can check this via the Jellyfin admin API using the token obtained
+    # in Stage 6.
+    if [[ -n "$jf_token" ]]; then
+        local jf_folders_resp
+        jf_folders_resp="$(curl -sf --max-time 10 \
+            "http://localhost:${test_port}/jellyfin/Library/VirtualFolders" \
+            -H "X-Emby-Authorization: MediaBrowser Client=\"PeliculaTest\", Device=\"e2e\", DeviceId=\"pelicula-e2e-test\", Version=\"1.0\", Token=\"${jf_token}\"" \
+            2>/dev/null || echo "[]")"
+        if echo "$jf_folders_resp" | python3 -c "
+import json, sys
+folders = json.loads(sys.stdin.read())
+names = {f['Name'] for f in folders}
+assert 'Movies' in names and 'TV Shows' in names
+" 2>/dev/null; then
+            t_pass "Jellyfin has 'Movies' and 'TV Shows' libraries after autowire"
+        else
+            t_fail "Jellyfin missing 'Movies' or 'TV Shows' library after autowire"
+        fi
+    else
+        warn "Skipping Jellyfin library wiring check (no Jellyfin token — Stage 6 auth failed)"
+    fi
+
+    # ── Stage 10: Playwright UI Tests ────────────────
 
     if command -v npx &>/dev/null && npx playwright --version &>/dev/null 2>&1; then
         info "Seeding Playwright test fixtures..."
@@ -691,7 +826,7 @@ except Exception:
                 -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                 -c:v libx264 -preset ultrafast -crf 28 \
                 -c:a aac -b:a 64k \
-                "/movies/Sintel (2010)/Sintel.2010.mkv" 2>/dev/null; then
+                "/media/movies/Sintel (2010)/Sintel.2010.mkv" 2>/dev/null; then
                 pw_ffmpeg_ok=true
             fi
         fi
@@ -720,7 +855,7 @@ except Exception:
                     -c:a aac -b:a 64k \
                     -metadata title="Night of the Living Dead" \
                     -metadata year="1968" \
-                    "/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv" 2>/dev/null || pw_ffmpeg_ok=false
+                    "/media/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv" 2>/dev/null || pw_ffmpeg_ok=false
             fi
         fi
 
@@ -751,7 +886,7 @@ except Exception:
                         -c:v libx264 -preset ultrafast -crf 28 \
                         -c:a aac -b:a 64k \
                         -metadata title="Pelicula Timeout Fixture" -metadata year="2099" \
-                        "/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv" 2>/dev/null; then
+                        "/media/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv" 2>/dev/null; then
                     pw_timeout_ok=true
                 fi
             fi
@@ -812,17 +947,17 @@ except Exception:
                             -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                             -c:v libx264 -preset ultrafast -crf 28 \
                             -c:a aac -b:a 64k \
-                            "/movies/Dualsub Happy (2024)/base.mkv" 2>/dev/null && \
+                            "/media/movies/Dualsub Happy (2024)/base.mkv" 2>/dev/null && \
                     $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
-                            -i "/movies/Dualsub Happy (2024)/base.mkv" \
-                            -i "/movies/Dualsub Happy (2024)/en.srt" \
-                            -i "/movies/Dualsub Happy (2024)/es.srt" \
+                            -i "/media/movies/Dualsub Happy (2024)/base.mkv" \
+                            -i "/media/movies/Dualsub Happy (2024)/en.srt" \
+                            -i "/media/movies/Dualsub Happy (2024)/es.srt" \
                             -map 0:v -map 0:a -map 1 -map 2 \
                             -c:v copy -c:a copy -c:s srt \
                             -metadata:s:s:0 language=eng \
                             -metadata:s:s:1 language=spa \
                             -metadata title="Dualsub Happy" -metadata year="2024" \
-                            "/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv" 2>/dev/null; then
+                            "/media/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv" 2>/dev/null; then
                     pw_happy_ok=true
                 fi
             fi
@@ -867,15 +1002,15 @@ except Exception:
                             -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                             -c:v libx264 -preset ultrafast -crf 28 \
                             -c:a aac -b:a 64k \
-                            "/movies/Dualsub Failed (2024)/base.mkv" 2>/dev/null && \
+                            "/media/movies/Dualsub Failed (2024)/base.mkv" 2>/dev/null && \
                     $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
-                            -i "/movies/Dualsub Failed (2024)/base.mkv" \
-                            -i "/movies/Dualsub Failed (2024)/en.srt" \
+                            -i "/media/movies/Dualsub Failed (2024)/base.mkv" \
+                            -i "/media/movies/Dualsub Failed (2024)/en.srt" \
                             -map 0:v -map 0:a -map 1 \
                             -c:v copy -c:a copy -c:s srt \
                             -metadata:s:s:0 language=eng \
                             -metadata title="Dualsub Failed" -metadata year="2024" \
-                            "/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv" 2>/dev/null; then
+                            "/media/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv" 2>/dev/null; then
                     pw_failed_ok=true
                 fi
             fi
@@ -896,7 +1031,7 @@ except Exception:
             # Path uses /movies so CatalogEarly's Jellyfin refresh picks it up.
             info "Pre-firing Night of the Living Dead import webhook..."
             $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
-                --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
+                --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/media/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/media/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
                 --header='Content-Type: application/json' \
                 'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
 
@@ -918,7 +1053,7 @@ except Exception:
                     'http://localhost:8282/api/procula/settings' 2>/dev/null || true
                 info "Pre-firing Sub Timeout import webhook..."
                 $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
-                    --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
+                    --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/media/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/media/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
                     --header='Content-Type: application/json' \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
                 # Brief wait so the worker has picked up the job and read validation=true.
@@ -935,7 +1070,7 @@ except Exception:
             if [[ -f "$pw_happy_file" ]]; then
                 info "Pre-firing Dualsub Happy import webhook..."
                 $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
-                    --post-data='{"eventType":"Download","movie":{"id":2024,"title":"Dualsub Happy","year":2024,"folderPath":"/movies/Dualsub Happy (2024)"},"movieFile":{"path":"/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv","relativePath":"Dualsub.Happy.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-happy-test"}' \
+                    --post-data='{"eventType":"Download","movie":{"id":2024,"title":"Dualsub Happy","year":2024,"folderPath":"/media/movies/Dualsub Happy (2024)"},"movieFile":{"path":"/media/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv","relativePath":"Dualsub.Happy.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-happy-test"}' \
                     --header='Content-Type: application/json' \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
             fi
@@ -944,7 +1079,7 @@ except Exception:
             if [[ -f "$pw_failed_file" ]]; then
                 info "Pre-firing Dualsub Failed import webhook..."
                 $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
-                    --post-data='{"eventType":"Download","movie":{"id":2025,"title":"Dualsub Failed","year":2024,"folderPath":"/movies/Dualsub Failed (2024)"},"movieFile":{"path":"/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv","relativePath":"Dualsub.Failed.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-failed-test"}' \
+                    --post-data='{"eventType":"Download","movie":{"id":2025,"title":"Dualsub Failed","year":2024,"folderPath":"/media/movies/Dualsub Failed (2024)"},"movieFile":{"path":"/media/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv","relativePath":"Dualsub.Failed.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-failed-test"}' \
                     --header='Content-Type: application/json' \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
             fi
