@@ -168,6 +168,13 @@ func cmdUp(_ []string) {
 		c.profiles = append(c.profiles, "apprise")
 	}
 
+	// Regenerate the external-libraries compose override before starting.
+	configPeliculaDir := filepath.Join(configDir, "pelicula")
+	librariesOverridePath := filepath.Join(scriptDir, "compose", "docker-compose.libraries.yml")
+	if err := generateLibrariesOverride(configPeliculaDir, librariesOverridePath); err != nil {
+		warn("Failed to generate libraries override: " + err.Error())
+	}
+
 	progress("Starting containers...")
 	if err := c.Run("up", "-d", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())

@@ -104,7 +104,7 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/sonarr:/config
-      - ${LIBRARY_DIR}/tv:/tv
+      - ${LIBRARY_DIR}:/media
       - ${WORK_DIR}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8989/ping || exit 1"]
@@ -126,7 +126,7 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/radarr:/config
-      - ${LIBRARY_DIR}/movies:/movies
+      - ${LIBRARY_DIR}:/media
       - ${WORK_DIR}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ping || exit 1"]
@@ -150,8 +150,7 @@ services:
       - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
-      - ${LIBRARY_DIR}/tv:/data/tv
-      - ${LIBRARY_DIR}/movies:/data/movies
+      - ${LIBRARY_DIR}:/media
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8096/health || exit 1"]
       interval: 30s
@@ -183,8 +182,7 @@ services:
       - ${CONFIG_DIR}/procula:/config
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${WORK_DIR}/downloads:/downloads:ro
-      - ${LIBRARY_DIR}/movies:/movies
-      - ${LIBRARY_DIR}/tv:/tv
+      - ${LIBRARY_DIR}:/media
       - ${WORK_DIR}/processing:/processing
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8282/ping || exit 1"]
@@ -205,8 +203,7 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/bazarr:/config
-      - ${LIBRARY_DIR}/movies:/movies
-      - ${LIBRARY_DIR}/tv:/tv
+      - ${LIBRARY_DIR}:/media
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:6767/bazarr/ || exit 1"]
       interval: 30s
@@ -267,8 +264,7 @@ services:
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${CONFIG_DIR}/pelicula:/config/pelicula
-      - ${LIBRARY_DIR}/movies:/movies
-      - ${LIBRARY_DIR}/tv:/tv
+      - ${LIBRARY_DIR}:/media
       - ${WORK_DIR}/downloads:/downloads:ro
     networks:
       default: {}

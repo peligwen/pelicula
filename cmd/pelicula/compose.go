@@ -85,6 +85,11 @@ func (c *Compose) buildArgs(extra ...string) []string {
 		args = append(args, "-f", remote)
 	}
 
+	libraries := filepath.Join(c.projectDir, "compose", "docker-compose.libraries.yml")
+	if _, err := os.Stat(libraries); err == nil {
+		args = append(args, "-f", libraries)
+	}
+
 	// Profiles must come before the subcommand
 	for _, p := range c.profiles {
 		args = append(args, "--profile", p)
