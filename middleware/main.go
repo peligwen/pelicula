@@ -88,6 +88,15 @@ func main() {
 
 	services = NewServiceClients("/config")
 
+	cfg, err := loadLibraries("/config/pelicula")
+	if err != nil {
+		slog.Warn("library registry", "component", "main", "error", err)
+	}
+	libraryRegistryMu.Lock()
+	libraryRegistry = cfg
+	libraryRegistryMu.Unlock()
+	slog.Info("library registry loaded", "component", "main", "count", len(cfg.Libraries))
+
 	db, err := OpenDB("/config/pelicula/pelicula.db")
 	if err != nil {
 		slog.Error("failed to open database", "component", "main", "error", err)
