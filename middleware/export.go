@@ -418,6 +418,8 @@ func importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu 
 	// Tag label → id (creating missing tags)
 	tagMap, _ := ensureTags(radarrURL, apiKey, collectMovieTags(movies))
 
+	radarrRoot := firstLibraryPath("radarr", "/media/movies")
+
 	for _, m := range movies {
 		if m.TmdbID == 0 {
 			mu.Lock()
@@ -436,13 +438,6 @@ func importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu 
 		profileID := resolveProfileID(m.QualityProfile, profMap)
 		tagIDs := resolveTagIDs(m.Tags, tagMap)
 
-		radarrRoot := "/media/movies"
-		for _, lib := range GetLibraries() {
-			if lib.Arr == "radarr" {
-				radarrRoot = lib.ContainerPath()
-				break
-			}
-		}
 		payload := map[string]any{
 			"tmdbId":           m.TmdbID,
 			"title":            m.Title,
@@ -480,6 +475,8 @@ func importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu
 	// Tag label → id (creating missing tags)
 	tagMap, _ := ensureTags(sonarrURL, apiKey, collectSeriesTags(series))
 
+	sonarrRoot := firstLibraryPath("sonarr", "/media/tv")
+
 	for _, s := range series {
 		if s.TvdbID == 0 {
 			mu.Lock()
@@ -506,13 +503,6 @@ func importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu
 			})
 		}
 
-		sonarrRoot := "/media/tv"
-		for _, lib := range GetLibraries() {
-			if lib.Arr == "sonarr" {
-				sonarrRoot = lib.ContainerPath()
-				break
-			}
-		}
 		payload := map[string]any{
 			"tvdbId":           s.TvdbID,
 			"title":            s.Title,

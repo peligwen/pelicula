@@ -154,6 +154,18 @@ func writeLibraries(configPeliculaDir string, cfg LibraryConfig) error {
 	return nil
 }
 
+// firstLibraryPath returns the ContainerPath of the first library managed by
+// the given arr type ("radarr" or "sonarr"). Falls back to defaultPath if none
+// found.
+func firstLibraryPath(arr, defaultPath string) string {
+	for _, lib := range GetLibraries() {
+		if lib.Arr == arr {
+			return lib.ContainerPath()
+		}
+	}
+	return defaultPath
+}
+
 // GetLibraries returns a snapshot of the current library registry.
 func GetLibraries() []Library {
 	libraryRegistryMu.RLock()

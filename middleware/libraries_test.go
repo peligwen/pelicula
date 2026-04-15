@@ -189,6 +189,55 @@ func TestDeleteLibrary_BuiltIn(t *testing.T) {
 	}
 }
 
+// TestFirstLibraryPath checks the firstLibraryPath helper.
+func TestFirstLibraryPath(t *testing.T) {
+	resetRegistry()
+	libraryRegistryMu.Lock()
+	libraryRegistry = LibraryConfig{
+		Libraries: []Library{
+			{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full", BuiltIn: true},
+			{Name: "TV Shows", Slug: "tv", Type: "tvshows", Arr: "sonarr", Processing: "full", BuiltIn: true},
+		},
+	}
+	libraryRegistryMu.Unlock()
+
+	t.Run("match radarr", func(t *testing.T) {
+		got := firstLibraryPath("radarr", "/media/movies")
+		if got != "/media/movies" {
+			t.Errorf("got %q, want %q", got, "/media/movies")
+		}
+	})
+
+	t.Run("match sonarr", func(t *testing.T) {
+		got := firstLibraryPath("sonarr", "/media/tv")
+		if got != "/media/tv" {
+			t.Errorf("got %q, want %q", got, "/media/tv")
+		}
+	})
+
+	t.Run("no match returns default", func(t *testing.T) {
+		got := firstLibraryPath("lidarr", "/media/music")
+		if got != "/media/music" {
+			t.Errorf("got %q, want %q", got, "/media/music")
+		}
+	})
+
+	t.Run("custom slug returned", func(t *testing.T) {
+		resetRegistry()
+		libraryRegistryMu.Lock()
+		libraryRegistry = LibraryConfig{
+			Libraries: []Library{
+				{Name: "Films", Slug: "films", Type: "movies", Arr: "radarr", Processing: "full"},
+			},
+		}
+		libraryRegistryMu.Unlock()
+		got := firstLibraryPath("radarr", "/media/movies")
+		if got != "/media/films" {
+			t.Errorf("got %q, want %q", got, "/media/films")
+		}
+	})
+}
+
 // TestDeleteLibrary_Custom checks that a custom library can be deleted.
 func TestDeleteLibrary_Custom(t *testing.T) {
 	dir := t.TempDir()

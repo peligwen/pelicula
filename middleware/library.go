@@ -1026,24 +1026,12 @@ func suggestedMoviePath(title string, year int, filename string) string {
 	if year > 0 {
 		folder = fmt.Sprintf("%s (%d)", title, year)
 	}
-	root := "/media/movies"
-	for _, lib := range GetLibraries() {
-		if lib.Arr == "radarr" {
-			root = lib.ContainerPath()
-			break
-		}
-	}
+	root := firstLibraryPath("radarr", "/media/movies")
 	return root + "/" + folder + "/" + filepath.Base(filename)
 }
 
 func suggestedTVPath(title string, season int, filename string) string {
-	root := "/media/tv"
-	for _, lib := range GetLibraries() {
-		if lib.Arr == "sonarr" {
-			root = lib.ContainerPath()
-			break
-		}
-	}
+	root := firstLibraryPath("sonarr", "/media/tv")
 	if season > 0 {
 		return fmt.Sprintf("%s/%s/Season %02d/%s", root, title, season, filepath.Base(filename))
 	}
@@ -1141,13 +1129,7 @@ func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
 	// rootFolderPath from the item (set by the CLI based on strategy)
 	root := item.RootFolderPath
 	if root == "" {
-		root = "/media/movies"
-		for _, lib := range GetLibraries() {
-			if lib.Arr == "radarr" {
-				root = lib.ContainerPath()
-				break
-			}
-		}
+		root = firstLibraryPath("radarr", "/media/movies")
 	}
 
 	payload := map[string]any{
@@ -1182,13 +1164,7 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 	profileID := resolveProfileID("", profMap)
 	root := item.RootFolderPath
 	if root == "" {
-		root = "/media/tv"
-		for _, lib := range GetLibraries() {
-			if lib.Arr == "sonarr" {
-				root = lib.ContainerPath()
-				break
-			}
-		}
+		root = firstLibraryPath("sonarr", "/media/tv")
 	}
 
 	payload := map[string]any{

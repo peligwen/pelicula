@@ -401,13 +401,7 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = "/media/movies"
-		for _, lib := range GetLibraries() {
-			if lib.Arr == "radarr" {
-				rootPath = lib.ContainerPath()
-				break
-			}
-		}
+		rootPath = firstLibraryPath("radarr", "/media/movies")
 	}
 
 	payload := map[string]any{
@@ -459,13 +453,7 @@ func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = "/media/tv"
-		for _, lib := range GetLibraries() {
-			if lib.Arr == "sonarr" {
-				rootPath = lib.ContainerPath()
-				break
-			}
-		}
+		rootPath = firstLibraryPath("sonarr", "/media/tv")
 	}
 
 	payload := map[string]any{
