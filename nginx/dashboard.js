@@ -505,7 +505,7 @@ async function submitAddLibraryFromStorage(path) {
         const res = await tfetch('/api/pelicula/libraries', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, slug, type, arr, processing: 'audit', path })
+            body: JSON.stringify({ name, slug, type, arr, processing: 'audit' })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

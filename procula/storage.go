@@ -47,11 +47,18 @@ type monitoredVolume struct {
 	slug       string // library slug; empty for non-library dirs
 }
 
+// monitoredVolumesOverride, when non-nil, replaces the dynamic discovery in
+// getMonitoredVolumes. Set only in tests to inject controlled paths.
+var monitoredVolumesOverride []monitoredVolume
+
 // getMonitoredVolumes dynamically builds the list of paths to watch.
 // It always includes the system dirs /downloads and /processing, adds one
 // entry per registered library, then discovers any unregistered subdirectories
 // under /media.
 func getMonitoredVolumes() []monitoredVolume {
+	if monitoredVolumesOverride != nil {
+		return monitoredVolumesOverride
+	}
 	vols := []monitoredVolume{
 		{label: "Downloads", path: "/downloads", registered: true},
 		{label: "Processing", path: "/processing", registered: true},
