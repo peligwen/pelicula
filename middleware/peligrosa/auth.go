@@ -50,12 +50,12 @@ type loginAttempts struct {
 // loopback X-Real-IP + loopback Host) get admin automatically via
 // loopbackAutoSession — see loopback.go.
 //
-// When db is non-nil, sessions and rate-limit data are persisted to SQLite so
-// they survive process restarts. When db is nil (e.g. in tests created with
-// newTestAuth), the in-memory maps are used exclusively.
+// Sessions and rate-limit data are persisted to SQLite so they survive process
+// restarts. Unit tests that do not exercise HandleLogin construct Auth directly
+// via newTestAuth() (which bypasses NewAuth) and omit db/rolesStore.
 type Auth struct {
-	db         *sql.DB                // non-nil in production; nil in tests that don't need persistence
-	rolesStore *RolesStore            // non-nil when db is non-nil
+	db         *sql.DB                // always non-nil (NewAuth panics if DB is nil)
+	rolesStore *RolesStore            // always non-nil (initialised from db in NewAuth)
 	jellyfin   clients.JellyfinClient // used for Jellyfin auth calls
 	sessions   map[string]session
 	failures   map[string]*loginAttempts // IP → recent failure timestamps
@@ -64,30 +64,33 @@ type Auth struct {
 
 // AuthConfig holds parameters for NewAuth.
 type AuthConfig struct {
-	DB       *sql.DB // for session + rate-limit persistence (nil = in-memory only)
+	DB       *sql.DB // required — NewAuth panics if nil
 	Jellyfin clients.JellyfinClient
 }
 
 func NewAuth(cfg AuthConfig) *Auth {
+	if cfg.DB == nil {
+		// DB is required in production. nil is only permitted in unit tests that
+		// construct Auth directly via newTestAuth() and never exercise HandleLogin.
+		// Any call to NewAuth without a DB in production is a programming error.
+		panic("peligrosa.NewAuth: AuthConfig.DB must not be nil — rolesStore cannot be initialised")
+	}
 	a := &Auth{
 		db:       cfg.DB,
 		sessions: make(map[string]session),
 		failures: make(map[string]*loginAttempts),
 		jellyfin: cfg.Jellyfin,
 	}
-	if cfg.DB != nil {
-		a.rolesStore = NewRolesStore(cfg.DB)
-	}
+	a.rolesStore = NewRolesStore(cfg.DB)
 	slog.Info("auth: Jellyfin credentials required for login", "component", "auth")
 	// Restore persisted sessions from DB into the in-memory map on startup.
-	if cfg.DB != nil {
-		a.loadSessionsFromDB()
-	}
+	a.loadSessionsFromDB()
 	go a.cleanupSessions()
 	return a
 }
 
-// Roles returns the roles store, or nil when db is nil (e.g. in tests).
+// Roles returns the roles store. Returns nil when a is nil (e.g. tests using
+// newTestAuth that never touch the DB).
 // Used by the main-package export/import backup codepath.
 func (a *Auth) Roles() *RolesStore {
 	if a == nil {
