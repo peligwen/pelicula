@@ -73,8 +73,19 @@ function updateHardlinkToggle() {
 
 // ── Browse tree ──────────────────────────────────────────────────────────────
 
+function isMediaChild(path) {
+    // /media/something with no further slashes
+    return /^\/media\/[^/]+$/.test(path);
+}
+
+function libraryForPath(path) {
+    return state.libraries.find(lib => '/media/' + lib.slug === path) || null;
+}
+
 async function loadBrowseRoots() {
     try {
+        // Ensure libraries are loaded before rendering (needed for /media annotations)
+        if (!state.libraries.length) await loadImportLibraries();
         const res = await apiFetch('/api/pelicula/browse');
         if (!res.ok) throw new Error('Failed to load directories');
         const data = await res.json();
@@ -128,6 +139,32 @@ function createBrowseEntry(entry, depth) {
         hint.className = 'browse-size';
         hint.textContent = 'folder';
         row.appendChild(hint);
+
+        // Annotate /media immediate children with library status
+        if (isMediaChild(entry.path)) {
+            const lib = libraryForPath(entry.path);
+            if (lib) {
+                // Registered library — show a badge
+                const badge = document.createElement('span');
+                badge.className = 'browse-lib-badge';
+                badge.textContent = lib.name;
+                badge.title = lib.type + ' · ' + lib.arr;
+                row.appendChild(badge);
+            } else {
+                // Unregistered — show "Add as Library" button (admin only)
+                const addBtn = document.createElement('button');
+                addBtn.className = 'browse-add-lib admin-only';
+                addBtn.textContent = '+ Library';
+                addBtn.title = 'Add as library';
+                addBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // don't trigger dir expand
+                    if (typeof addLibraryFromStorage === 'function') {
+                        addLibraryFromStorage(entry.path);
+                    }
+                });
+                row.appendChild(addBtn);
+            }
+        }
 
         // Children container
         const children = document.createElement('div');

@@ -179,3 +179,32 @@
 
 /* Folder checkbox */
 .browse-entry input[type="checkbox"].browse-checkbox { margin-right: 0.35rem; flex-shrink: 0; accent-color: var(--pink, #f060a8); }
+
+/* Library status annotations in browse tree */
+.browse-lib-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    background: var(--accent-l, rgba(112,128,232,0.12));
+    color: var(--accent, #7080e8);
+    margin-left: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.browse-add-lib {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    margin-left: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.browse-add-lib:hover {
+    border-color: var(--pink, #f060a8);
+    color: var(--pink, #f060a8);
+}
