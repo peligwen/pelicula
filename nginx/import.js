@@ -84,8 +84,6 @@ function libraryForPath(path) {
 
 async function loadBrowseRoots() {
     try {
-        // Ensure libraries are loaded before rendering (needed for /media annotations)
-        if (!state.libraries.length) await loadImportLibraries();
         const res = await apiFetch('/api/pelicula/browse');
         if (!res.ok) throw new Error('Failed to load directories');
         const data = await res.json();
@@ -174,6 +172,7 @@ function createBrowseEntry(entry, depth) {
 
         row.addEventListener('click', (e) => {
             if (e.target.classList.contains('browse-checkbox')) return;
+            if (e.target.closest('.browse-add-lib')) return;
             toggleDir(expand, children, entry.path);
         });
 
@@ -864,5 +863,5 @@ document.querySelectorAll('input[name="strategy"]').forEach(function(radio) {
 
 // On the dashboard this script is loaded on demand by openStorageExplorer()
 // in dashboard.js. Auto-init the browse tree immediately.
-loadBrowseRoots();
-loadImportLibraries();
+// Load libraries first so /media directory annotations are ready when the tree renders.
+loadImportLibraries().then(loadBrowseRoots);
