@@ -95,7 +95,6 @@ const (
 
 // migrations is the ordered list of incremental schema migrations for existing installs.
 // New installs bypass these via migrateBaseline (see runMigrations).
-// These steps will be removed in a future release once no installs pre-date v0.1.
 var migrations = []migration{
 	{version: 1, up: migrate1},
 	{version: 2, up: migrate2},
