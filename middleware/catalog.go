@@ -357,6 +357,18 @@ func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 
+// arrTarget captures the per-arr-type parameters used by handleCatalogCommand.
+type arrTarget struct {
+	baseURL      string
+	apiKey       string
+	itemPath     string // e.g. "/api/v3/movie" or "/api/v3/series"
+	searchCmd    string // e.g. "MoviesSearch" or "SeriesSearch"
+	searchIDKey  string // e.g. "movieIds" (slice) or "seriesId" (scalar)
+	searchIDList bool   // true when the ID value is []int rather than int
+	rescanCmd    string // e.g. "RescanMovie" or "RescanSeries"
+	rescanIDKey  string // e.g. "movieId" or "seriesId"
+}
+
 // handleCatalogCommand proxies force-search and unmonitor commands to Radarr/Sonarr.
 // POST /api/pelicula/catalog/command
 // Body: {"arr_type":"radarr"|"sonarr","arr_id":N,"command":"search"|"unmonitor"}
@@ -380,72 +392,70 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	sonarrKey, radarrKey, _ := services.Keys()
 
+	// Dispatch table keyed by arr_type — only the names and paths differ.
+	targets := map[string]arrTarget{
+		"radarr": {
+			baseURL:      radarrURL,
+			apiKey:       radarrKey,
+			itemPath:     "/api/v3/movie",
+			searchCmd:    "MoviesSearch",
+			searchIDKey:  "movieIds",
+			searchIDList: true,
+			rescanCmd:    "RescanMovie",
+			rescanIDKey:  "movieId",
+		},
+		"sonarr": {
+			baseURL:      sonarrURL,
+			apiKey:       sonarrKey,
+			itemPath:     "/api/v3/series",
+			searchCmd:    "SeriesSearch",
+			searchIDKey:  "seriesId",
+			searchIDList: false,
+			rescanCmd:    "RescanSeries",
+			rescanIDKey:  "seriesId",
+		},
+	}
+	t := targets[req.ArrType]
+
 	switch req.Command {
 	case "search":
-		if req.ArrType == "radarr" {
-			if _, err := services.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
-				"name": "MoviesSearch", "movieIds": []int{req.ArrID},
-			}); err != nil {
-				httputil.WriteError(w, "radarr search failed", http.StatusBadGateway)
-				return
-			}
+		var searchID any
+		if t.searchIDList {
+			searchID = []int{req.ArrID}
 		} else {
-			if _, err := services.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
-				"name": "SeriesSearch", "seriesId": req.ArrID,
-			}); err != nil {
-				httputil.WriteError(w, "sonarr search failed", http.StatusBadGateway)
-				return
-			}
+			searchID = req.ArrID
+		}
+		if _, err := services.ArrPost(t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
+			"name":        t.searchCmd,
+			t.searchIDKey: searchID,
+		}); err != nil {
+			httputil.WriteError(w, req.ArrType+" search failed", http.StatusBadGateway)
+			return
 		}
 	case "rescan":
-		if req.ArrType == "radarr" {
-			if _, err := services.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
-				"name": "RescanMovie", "movieId": req.ArrID,
-			}); err != nil {
-				httputil.WriteError(w, "radarr rescan failed", http.StatusBadGateway)
-				return
-			}
-		} else {
-			if _, err := services.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
-				"name": "RescanSeries", "seriesId": req.ArrID,
-			}); err != nil {
-				httputil.WriteError(w, "sonarr rescan failed", http.StatusBadGateway)
-				return
-			}
+		if _, err := services.ArrPost(t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
+			"name":        t.rescanCmd,
+			t.rescanIDKey: req.ArrID,
+		}); err != nil {
+			httputil.WriteError(w, req.ArrType+" rescan failed", http.StatusBadGateway)
+			return
 		}
 	case "unmonitor":
-		if req.ArrType == "radarr" {
-			body, err := services.ArrGet(radarrURL, radarrKey, fmt.Sprintf("/api/v3/movie/%d", req.ArrID))
-			if err != nil {
-				httputil.WriteError(w, "radarr fetch failed", http.StatusBadGateway)
-				return
-			}
-			var movie map[string]any
-			if err := json.Unmarshal(body, &movie); err != nil {
-				httputil.WriteError(w, "invalid radarr response", http.StatusBadGateway)
-				return
-			}
-			movie["monitored"] = false
-			if _, err := services.ArrPut(radarrURL, radarrKey, fmt.Sprintf("/api/v3/movie/%d", req.ArrID), movie); err != nil {
-				httputil.WriteError(w, "radarr update failed", http.StatusBadGateway)
-				return
-			}
-		} else {
-			body, err := services.ArrGet(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/series/%d", req.ArrID))
-			if err != nil {
-				httputil.WriteError(w, "sonarr fetch failed", http.StatusBadGateway)
-				return
-			}
-			var series map[string]any
-			if err := json.Unmarshal(body, &series); err != nil {
-				httputil.WriteError(w, "invalid sonarr response", http.StatusBadGateway)
-				return
-			}
-			series["monitored"] = false
-			if _, err := services.ArrPut(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/series/%d", req.ArrID), series); err != nil {
-				httputil.WriteError(w, "sonarr update failed", http.StatusBadGateway)
-				return
-			}
+		itemURL := fmt.Sprintf("%s/%d", t.itemPath, req.ArrID)
+		body, err := services.ArrGet(t.baseURL, t.apiKey, itemURL)
+		if err != nil {
+			httputil.WriteError(w, req.ArrType+" fetch failed", http.StatusBadGateway)
+			return
+		}
+		var item map[string]any
+		if err := json.Unmarshal(body, &item); err != nil {
+			httputil.WriteError(w, "invalid "+req.ArrType+" response", http.StatusBadGateway)
+			return
+		}
+		item["monitored"] = false
+		if _, err := services.ArrPut(t.baseURL, t.apiKey, itemURL, item); err != nil {
+			httputil.WriteError(w, req.ArrType+" update failed", http.StatusBadGateway)
+			return
 		}
 	default:
 		httputil.WriteError(w, "unknown command", http.StatusBadRequest)
