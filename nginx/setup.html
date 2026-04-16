@@ -302,41 +302,37 @@ function goStep(n, skipValidation) {
 }
 
 function buildSummary() {
+    const { html, raw } = PeliculaFW;
     const config = document.getElementById('path-config').value;
     const media = document.getElementById('path-media').value;
-    const key = document.getElementById('vpn-key').value.trim();
-
-    let html = '<table>';
-    html += row('Config', config);
-    html += row('Media', media);
 
     // Show advanced paths if expanded
     const libEl = document.getElementById('path-library');
     const workEl = document.getElementById('path-work');
-    if (libEl.value.trim() && libEl.value.trim() !== media) {
-        html += row('Library', libEl.value.trim());
-    }
-    if (workEl.value.trim() && workEl.value.trim() !== media) {
-        html += row('Work', workEl.value.trim());
-    }
+    const libVal = libEl.value.trim();
+    const workVal = workEl.value.trim();
+
+    const vpnCell = vpnSkipped
+        ? raw('<span style="color:#FF9800">Skipped</span>')
+        : raw('<span style="color:#4CAF50">Netherlands ✓</span>');
+
+    const extraRows = [
+        libVal && libVal !== media ? html`<tr><td class="sum-label">Library</td><td>${libVal}</td></tr>`.str : '',
+        workVal && workVal !== media ? html`<tr><td class="sum-label">Work</td><td>${workVal}</td></tr>`.str : '',
+    ].join('');
+
+    document.getElementById('summary').innerHTML = html`<table>
+        <tr><td class="sum-label">Config</td><td>${config}</td></tr>
+        <tr><td class="sum-label">Media</td><td>${media}</td></tr>
+        ${raw(extraRows)}
+        <tr><td class="sum-label">VPN</td><td>${vpnCell}</td></tr>
+    </table>`.str;
 
     if (vpnSkipped) {
-        html += rowHTML('VPN', '<span style="color:#FF9800">Skipped</span>');
         document.getElementById('vpn-skipped-notice').classList.remove('hidden');
     } else {
-        html += rowHTML('VPN', '<span style="color:#4CAF50">Netherlands ✓</span>');
         document.getElementById('vpn-skipped-notice').classList.add('hidden');
     }
-    html += '</table>';
-    document.getElementById('summary').innerHTML = html;
-}
-
-function row(label, value) {
-    return '<tr><td class="sum-label">' + PeliculaFW.esc(label) + '</td><td>' + PeliculaFW.esc(value) + '</td></tr>';
-}
-
-function rowHTML(label, html) {
-    return '<tr><td class="sum-label">' + PeliculaFW.esc(label) + '</td><td>' + html + '</td></tr>';
 }
 
 function _setupDeriveSlug(name) {

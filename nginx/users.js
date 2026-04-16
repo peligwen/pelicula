@@ -40,14 +40,14 @@
                 const disabledBadge = u.isDisabled
                     ? '<span class="user-admin-badge" style="background:var(--danger-dim,#3a1a2a);color:var(--danger,#ff6b8a)">disabled</span>'
                     : '';
-                const disableBtn = `<button class="user-action-btn" onclick="toggleDisableUser(this)" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`;
+                const disableBtn = html`<button class="user-action-btn" onclick="toggleDisableUser(this)" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`.str;
                 const moviesOn = u.enableAllFolders || false;
                 const tvOn     = u.enableAllFolders || false;
                 // TODO: when enableAllFolders is false, check u.enabledFolders to
                 // pre-tick the correct boxes. Requires the frontend to know the Movies/
                 // TV Shows folder IDs (not returned by the API yet). For now, partial
                 // access shows both unchecked; saving applies the chosen coarse access.
-                const libraryRow = `<div class="user-library-row" style="font-size:0.8rem;padding:0.25rem 0;display:flex;gap:1rem;align-items:center"><label><input type="checkbox" class="user-lib-movies"${moviesOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> Movies</label><label><input type="checkbox" class="user-lib-tv"${tvOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> TV Shows</label></div>`;
+                const libraryRow = html`<div class="user-library-row" style="font-size:0.8rem;padding:0.25rem 0;display:flex;gap:1rem;align-items:center"><label><input type="checkbox" class="user-lib-movies"${moviesOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> Movies</label><label><input type="checkbox" class="user-lib-tv"${tvOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> TV Shows</label></div>`.str;
                 return html`<li data-user-id="${u.id}" data-user-name="${u.name}">
                     <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}${raw(disabledBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
                     <div class="user-actions">

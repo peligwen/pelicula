@@ -64,17 +64,7 @@ func main() {
 	case "import":
 		cmdImport(args[1:])
 	case "test":
-		testScript := filepath.Join(getScriptDir(), "tests", "e2e.sh")
-		cmd := exec.Command("bash", append([]string{testScript}, args[1:]...)...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				os.Exit(exitErr.ExitCode())
-			}
-			os.Exit(1)
-		}
+		cmdTest(args[1:])
 	case "--version", "-V":
 		fmt.Println("pelicula", version)
 	case "-h", "--help", "help":
