@@ -120,7 +120,7 @@ func waitForServices(s *ServiceClients) error {
 				allReady = false
 				break
 			}
-			notReady := resp.StatusCode >= 500
+			notReady := resp.StatusCode < 200 || resp.StatusCode >= 300
 			resp.Body.Close()
 			if notReady {
 				allReady = false
