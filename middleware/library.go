@@ -183,24 +183,29 @@ func walkVideoFiles(dir string, out []ScanFile, cap int) ([]ScanFile, int) {
 }
 
 // copyFile copies src to dst using a buffered io.Copy, removing dst on error.
+// The destination file is closed explicitly (not via defer) so that a flush
+// error at close time is detected and the partial file is cleaned up.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
+		in.Close()
 		return err
 	}
-	defer out.Close()
 
 	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		in.Close()
 		os.Remove(dst)
 		return err
 	}
+	// Close dst first: this is where write-back errors (fsync) surface.
 	if err := out.Close(); err != nil {
+		in.Close()
 		os.Remove(dst)
 		return err
 	}
@@ -221,6 +226,12 @@ func moveFile(src, dst string) error {
 	return os.Remove(src)
 }
 
+// fsOpResult records the outcome of a single filesystem operation.
+type fsOpResult struct {
+	op  string // "moved", "hardlinked", "symlinked", "kept", "skipped", "failed"
+	err string // non-empty only when op == "failed"
+}
+
 // applyFSOps iterates items and performs the filesystem operation dictated by
 // strategy for each item that has a SourcePath. Accepted strategy values:
 //   - "import" (alias: "migrate")  — move the file into the library
@@ -230,7 +241,15 @@ func moveFile(src, dst string) error {
 //
 // Items are modified in place: SourcePath and DestPath are updated on success.
 // allowedSrcRoots and allowedDstRoots default to the production values when nil.
-func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string) {
+// Returns a slice of per-item results parallel to items. Items that are skipped
+// because their path is not under an allowed prefix are included with op="skipped"
+// and a non-empty err reason.
+func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string) []fsOpResult {
+	results := make([]fsOpResult, len(items))
+	for i := range results {
+		results[i] = fsOpResult{op: "kept"}
+	}
+
 	// Normalise legacy strategy names to canonical ones.
 	switch strategy {
 	case "migrate":
@@ -241,7 +260,7 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		strategy = "register"
 	}
 	if strategy == "register" {
-		return
+		return results
 	}
 	if allowedSrcRoots == nil {
 		allowedSrcRoots = browseRoots()
@@ -261,6 +280,7 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		}
 		src := filepath.Clean(item.SourcePath)
 		if !isUnderPrefixes(src, allowedSrcRoots) {
+			results[i] = fsOpResult{op: "skipped", err: "path not allowed"}
 			continue
 		}
 
@@ -274,11 +294,13 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		}
 		dst = filepath.Clean(dst)
 		if !isUnderPrefixes(dst, allowedDstRoots) {
+			results[i] = fsOpResult{op: "skipped", err: "destination path not allowed"}
 			continue
 		}
 
 		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 			slog.Warn("import: mkdir failed", "component", "library", "dst", dst, "error", err)
+			results[i] = fsOpResult{op: "failed", err: err.Error()}
 			continue
 		}
 
@@ -287,30 +309,45 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 			if err := moveFile(src, dst); err != nil {
 				slog.Warn("import: move failed", "component", "library",
 					"src", src, "dst", dst, "error", err)
+				results[i] = fsOpResult{op: "failed", err: err.Error()}
 			} else {
 				item.SourcePath = dst
 				item.DestPath = dst
+				results[i] = fsOpResult{op: "moved"}
 			}
 		case "hardlink":
 			if _, err := os.Lstat(dst); os.IsNotExist(err) {
 				if err := os.Link(src, dst); err != nil {
 					slog.Warn("import: hardlink failed", "component", "library",
 						"src", src, "dst", dst, "error", err)
+					results[i] = fsOpResult{op: "failed", err: err.Error()}
 				} else {
 					item.DestPath = dst
+					results[i] = fsOpResult{op: "hardlinked"}
 				}
+			} else {
+				// dst already exists — treat as success (idempotent)
+				item.DestPath = dst
+				results[i] = fsOpResult{op: "hardlinked"}
 			}
 		case "link":
 			if _, err := os.Lstat(dst); os.IsNotExist(err) {
 				if err := os.Symlink(src, dst); err != nil {
 					slog.Warn("import: symlink failed", "component", "library",
 						"src", src, "dst", dst, "error", err)
+					results[i] = fsOpResult{op: "failed", err: err.Error()}
 				} else {
 					item.DestPath = dst
+					results[i] = fsOpResult{op: "symlinked"}
 				}
+			} else {
+				// dst already exists — treat as success (idempotent)
+				item.DestPath = dst
+				results[i] = fsOpResult{op: "symlinked"}
 			}
 		}
 	}
+	return results
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -602,7 +639,8 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	// ── Filesystem operations (import / link) ───────────────────────────────
 	// Perform FS ops before *arr registration so that if a move fails we don't
 	// register a path that doesn't exist yet.  "register" skips this section.
-	applyFSOps(req.Items, req.Strategy, nil, nil)
+	// fsResults is parallel to req.Items and records the actual per-item outcome.
+	fsResults := applyFSOps(req.Items, req.Strategy, nil, nil)
 
 	// Deduplicate *arr registration by (type, id) — when multiple episodes of
 	// the same series are imported, applySeries only needs to be called once.
@@ -619,7 +657,21 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	// Semaphore: max 5 concurrent Radarr/Sonarr add calls.
 	sem := make(chan struct{}, 5)
 
-	for _, item := range req.Items {
+	for idx, item := range req.Items {
+		fsResult := fsResults[idx]
+
+		// Items skipped by applyFSOps (path not under allowed prefix) are
+		// propagated directly to the response without *arr registration.
+		if fsResult.op == "skipped" {
+			mu.Lock()
+			result.Skipped++
+			result.Items = append(result.Items, ApplyItemResult{
+				Title: item.Title, Src: item.SourcePath, FSOp: "skipped", Error: fsResult.err,
+			})
+			mu.Unlock()
+			continue
+		}
+
 		var k dedupeKey
 		switch item.Type {
 		case "movie":
@@ -647,25 +699,9 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		fsOp := "kept"
-		switch req.Strategy {
-		case "import", "migrate":
-			if item.DestPath != "" {
-				fsOp = "moved"
-			}
-		case "hardlink":
-			if item.DestPath != "" {
-				fsOp = "hardlinked"
-			}
-		case "link", "symlink":
-			if item.DestPath != "" {
-				fsOp = "symlinked"
-			}
-		}
-
 		sem <- struct{}{}
 		wg.Add(1)
-		go func(it ApplyItem, op string) {
+		go func(it ApplyItem, fsRes fsOpResult) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			var err error
@@ -686,11 +722,17 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			} else {
 				result.Added++
 				addedItems = append(addedItems, it)
+				// Use the actual FS op result so callers see "failed"/"skipped"
+				// rather than a pre-computed guess when the FS step did not succeed.
+				reportedOp := fsRes.op
+				if reportedOp == "" {
+					reportedOp = "kept"
+				}
 				result.Items = append(result.Items, ApplyItemResult{
-					Title: it.Title, Src: it.SourcePath, Dest: it.DestPath, FSOp: op,
+					Title: it.Title, Src: it.SourcePath, Dest: it.DestPath, FSOp: reportedOp,
 				})
 			}
-		}(item, fsOp)
+		}(item, fsResult)
 	}
 	wg.Wait()
 
