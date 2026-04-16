@@ -31,6 +31,7 @@ type cliLibraryConfig struct {
 }
 
 // defaultLibraries returns the built-in two-library default config.
+// SYNC: keep slug/name/type/arr/processing in sync with defaultLibraries() in procula/libraries.go.
 func defaultLibraries() cliLibraryConfig {
 	return cliLibraryConfig{
 		Libraries: []cliLibrary{

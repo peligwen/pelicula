@@ -33,6 +33,7 @@ var (
 
 // defaultLibraries returns the two built-in libraries used as a fallback when
 // the pelicula-api is unreachable at startup.
+// SYNC: keep slug/name/type/arr/processing in sync with defaultLibraries() in cmd/pelicula/dirs.go.
 func defaultLibraries() []ProculaLibrary {
 	return []ProculaLibrary{
 		{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full"},
