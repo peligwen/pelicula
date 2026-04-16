@@ -644,9 +644,11 @@ func SetJellyfinUserPassword(s *ServiceClients, id, newPw string) error {
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	_, _ = jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
+	if _, resetErr := jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
 		"ResetPassword": true,
-	})
+	}); resetErr != nil {
+		slog.Error("password reset step failed", "component", "jellyfin", "userId", id, "error", resetErr)
+	}
 	body, err := jellyfinPost(s, "/Users/"+id+"/Password", token, map[string]any{
 		"CurrentPw": "",
 		"NewPw":     newPw,

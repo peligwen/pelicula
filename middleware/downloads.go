@@ -185,6 +185,9 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 		baseURL, apiKey, apiVer = radarrURL, radarrKey, "/api/v3"
 	case "sonarr":
 		baseURL, apiKey, apiVer = sonarrURL, sonarrKey, "/api/v3"
+	default:
+		httputil.WriteError(w, "unknown download category", http.StatusUnprocessableEntity)
+		return
 	}
 
 	// Unmonitor before removing from queue (unmonitor needs the queue entry to find the item ID)

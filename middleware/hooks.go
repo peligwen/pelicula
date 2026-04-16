@@ -78,8 +78,8 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path, "episode_id", source.EpisodeID)
 
 	// Forward to Procula
-	proculaURL := proculaURL + "/api/procula/jobs"
-	if err := forwardToProcula(proculaURL, source); err != nil {
+	jobsURL := proculaURL + "/api/procula/jobs"
+	if err := forwardToProcula(jobsURL, source); err != nil {
 		slog.Error("failed to forward to Procula", "component", "hooks", "error", err)
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
 		httputil.WriteJSON(w, map[string]string{"status": "queued", "warning": err.Error()})

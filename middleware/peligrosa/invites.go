@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"pelicula-api/clients"
@@ -341,9 +342,9 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 	// Phase 3: record the audit entry (BEGIN tx).
 	tx2, err := s.db.Begin()
 	if err != nil {
-		slog.Warn("invite slot used but audit record may be lost — could not begin tx",
+		slog.Error("invite slot used but audit record lost — could not begin tx",
 			"component", "invites", "username", username, "error", err)
-		return nil
+		return fmt.Errorf("audit record failed: %w", err)
 	}
 	_, err = tx2.Exec(
 		`INSERT INTO redemptions (invite_token, username, jellyfin_id, redeemed_at) VALUES (?, ?, ?, ?)`,
@@ -351,9 +352,9 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 	)
 	if err != nil {
 		tx2.Rollback() //nolint:errcheck
-		slog.Warn("invite redeemed but audit record lost", "component", "invites",
+		slog.Error("invite redeemed but audit record lost", "component", "invites",
 			"username", username, "error", err)
-		return nil
+		return fmt.Errorf("audit record failed: %w", err)
 	}
 	return tx2.Commit()
 }
