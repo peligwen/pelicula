@@ -497,7 +497,7 @@ function renderLibrariesLane(storageData, libraries) {
     const seenPaths = new Set();
     for (const fs of (storageData.filesystems || [])) {
         for (const f of (fs.folders || [])) {
-            if (f.registered === false && f.has_media === true && !seenPaths.has(f.path)) {
+            if (f.registered === false && !seenPaths.has(f.path)) {
                 seenPaths.add(f.path);
                 discovered.push(f);
             }
