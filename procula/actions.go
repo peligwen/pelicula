@@ -159,7 +159,7 @@ func runTranscodeAction(ctx context.Context, q *Queue, job *Job) (map[string]any
 	arrType := arrTypeFromPath(path)
 	mediaType := mediaTypeFromPath(path)
 	title := strings.TrimSuffix(fi.Name(), filepath.Ext(fi.Name()))
-	if parent := filepath.Base(filepath.Dir(path)); parent != "movies" && parent != "tv" {
+	if parent := filepath.Base(filepath.Dir(path)); !isLibrarySlug(parent) {
 		title = parent
 	}
 

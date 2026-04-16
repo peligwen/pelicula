@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,17 @@ import (
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
 )
+
+// searchMode is read once at startup from the .env file and used by handleSearch
+// to decide whether to run the Prowlarr indexer filter pass.
+// Value is "" or "tmdb" for standard TMDB/TVDB search; "indexer" for Prowlarr filtering.
+var searchMode string
+
+func initSearchMode() {
+	if vars, err := parseEnvFile(envPath); err == nil {
+		searchMode = vars["SEARCH_MODE"]
+	}
+}
 
 // indexerSearchCache caches raw Prowlarr /api/v1/search responses to avoid
 // hammering indexer APIs on every keypress when SEARCH_MODE=indexer.
@@ -96,10 +108,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	sonarrKey, radarrKey, prowlarrKey := services.Keys()
 
-	envMu.Lock()
-	envVars, _ := parseEnvFile(envPath)
-	envMu.Unlock()
-	searchMode := envVars["SEARCH_MODE"] // "" or "tmdb" = TMDB/TVDB; "indexer" = filter by Prowlarr
+	// searchMode is initialised once at startup (see initSearchMode); no per-request
+	// .env read needed — the value is stable for the lifetime of the process.
 
 	// Search Radarr (movies)
 	if typeFilter != "series" {
@@ -132,45 +142,15 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			for _, m := range rawMovies {
 				tmdbID := int(floatVal(m, "tmdbId"))
-				poster := ""
-				if images, ok := m["images"].([]any); ok {
-					for _, img := range images {
-						if imgMap, ok := img.(map[string]any); ok {
-							if imgMap["coverType"] == "poster" {
-								poster = strVal(imgMap, "remoteUrl")
-								break
-							}
-						}
-					}
-				}
 				sr := SearchResult{
-					Type:          "movie",
-					Title:         strVal(m, "title"),
-					Year:          int(floatVal(m, "year")),
-					Overview:      strVal(m, "overview"),
-					Poster:        poster,
-					TmdbID:        tmdbID,
-					Added:         existingIDs[tmdbID],
-					Certification: strVal(m, "certification"),
-					Runtime:       int(floatVal(m, "runtime")),
+					Type:     "movie",
+					Title:    strVal(m, "title"),
+					Year:     int(floatVal(m, "year")),
+					Overview: strVal(m, "overview"),
+					TmdbID:   tmdbID,
+					Added:    existingIDs[tmdbID],
 				}
-				if genres, ok := m["genres"].([]any); ok {
-					for _, g := range genres {
-						if s, ok := g.(string); ok {
-							sr.Genres = append(sr.Genres, s)
-						}
-					}
-				}
-				if ratings, ok := m["ratings"].(map[string]any); ok {
-					if imdb, ok := ratings["imdb"].(map[string]any); ok {
-						sr.Rating = floatVal(imdb, "value")
-					}
-					if sr.Rating == 0 {
-						if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
-							sr.Rating = floatVal(tmdbR, "value")
-						}
-					}
-				}
+				enrichSearchResult(&sr, m)
 				movies = append(movies, sr)
 			}
 			mu.Unlock()
@@ -208,47 +188,17 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			for _, s := range shows {
 				tvdbID := int(floatVal(s, "tvdbId"))
 				tmdbID := int(floatVal(s, "tmdbId")) // present in Sonarr for many shows
-				poster := ""
-				if images, ok := s["images"].([]any); ok {
-					for _, img := range images {
-						if imgMap, ok := img.(map[string]any); ok {
-							if imgMap["coverType"] == "poster" {
-								poster = strVal(imgMap, "remoteUrl")
-								break
-							}
-						}
-					}
-				}
 				sr := SearchResult{
-					Type:          "series",
-					Title:         strVal(s, "title"),
-					Year:          int(floatVal(s, "year")),
-					Overview:      strVal(s, "overview"),
-					Poster:        poster,
-					TvdbID:        tvdbID,
-					TmdbID:        tmdbID,
-					Added:         existingIDs[tvdbID],
-					Certification: strVal(s, "certification"),
-					Runtime:       int(floatVal(s, "runtime")),
-					Network:       strVal(s, "network"),
+					Type:     "series",
+					Title:    strVal(s, "title"),
+					Year:     int(floatVal(s, "year")),
+					Overview: strVal(s, "overview"),
+					TvdbID:   tvdbID,
+					TmdbID:   tmdbID,
+					Added:    existingIDs[tvdbID],
+					Network:  strVal(s, "network"),
 				}
-				if genres, ok := s["genres"].([]any); ok {
-					for _, g := range genres {
-						if gs, ok := g.(string); ok {
-							sr.Genres = append(sr.Genres, gs)
-						}
-					}
-				}
-				if ratings, ok := s["ratings"].(map[string]any); ok {
-					if imdb, ok := ratings["imdb"].(map[string]any); ok {
-						sr.Rating = floatVal(imdb, "value")
-					}
-					if sr.Rating == 0 {
-						if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
-							sr.Rating = floatVal(tmdbR, "value")
-						}
-					}
-				}
+				enrichSearchResult(&sr, s)
 				if stats, ok := s["statistics"].(map[string]any); ok {
 					sr.SeasonCount = int(floatVal(stats, "seasonCount"))
 				}
@@ -349,17 +299,24 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the same request profile env vars that handleRequestApprove uses,
+	// so both add paths honour REQUESTS_RADARR_PROFILE_ID / REQUESTS_RADARR_ROOT.
+	radarrProfileID := envIntOr("REQUESTS_RADARR_PROFILE_ID", 0)
+	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
+	sonarrProfileID := envIntOr("REQUESTS_SONARR_PROFILE_ID", 0)
+	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
+
 	var arrID int
 	var err error
 	switch req.Type {
 	case "movie":
-		arrID, err = addMovieInternal(req.TmdbID, 0, "")
+		arrID, err = addMovieInternal(req.TmdbID, radarrProfileID, radarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	case "series":
-		arrID, err = addSeriesInternal(req.TvdbID, 0, "")
+		arrID, err = addSeriesInternal(req.TvdbID, sonarrProfileID, sonarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 			return
@@ -542,6 +499,48 @@ func handleArrMeta(w http.ResponseWriter, r *http.Request) {
 			RootFolders:     fetchRoots(sonarrURL, sonarrKey),
 		},
 	})
+}
+
+// extractPoster returns the remoteUrl of the first poster image in an *arr
+// images array, or "" if none is found.
+func extractPoster(raw map[string]any) string {
+	if images, ok := raw["images"].([]any); ok {
+		for _, img := range images {
+			if imgMap, ok := img.(map[string]any); ok {
+				if imgMap["coverType"] == "poster" {
+					return strVal(imgMap, "remoteUrl")
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// enrichSearchResult fills in common metadata fields (poster, certification,
+// runtime, genres, rating) from a raw *arr lookup item.  Movie-specific fields
+// (TmdbID, Added) and series-specific fields (TvdbID, Network, SeasonCount)
+// are set by the caller.
+func enrichSearchResult(sr *SearchResult, raw map[string]any) {
+	sr.Poster = extractPoster(raw)
+	sr.Certification = strVal(raw, "certification")
+	sr.Runtime = int(floatVal(raw, "runtime"))
+	if genres, ok := raw["genres"].([]any); ok {
+		for _, g := range genres {
+			if s, ok := g.(string); ok {
+				sr.Genres = append(sr.Genres, s)
+			}
+		}
+	}
+	if ratings, ok := raw["ratings"].(map[string]any); ok {
+		if imdb, ok := ratings["imdb"].(map[string]any); ok {
+			sr.Rating = floatVal(imdb, "value")
+		}
+		if sr.Rating == 0 {
+			if tmdbR, ok := ratings["tmdb"].(map[string]any); ok {
+				sr.Rating = floatVal(tmdbR, "value")
+			}
+		}
+	}
 }
 
 func itoa(i int) string {

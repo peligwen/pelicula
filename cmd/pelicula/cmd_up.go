@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -59,7 +60,12 @@ func cmdUp(_ []string) {
 		openBrowser("http://localhost:7354/")
 
 		info("Waiting for setup to complete (Ctrl+C to abort)...")
-		const maxWait = 150
+		maxWait := 150
+		if v := os.Getenv("PELICULA_SETUP_TIMEOUT"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				maxWait = n
+			}
+		}
 		completed := false
 		for i := 0; i < maxWait; i++ {
 			select {

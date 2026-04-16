@@ -133,6 +133,13 @@ var (
 	folderHasMedia = map[string]bool{}  // path → has video file
 )
 
+// folderMtimeCache records the mtime of each folder at the time its size was
+// last computed, so we can skip re-walking directories that have not changed.
+var (
+	folderMtimeMu    sync.Mutex
+	folderMtimeCache = map[string]time.Time{} // path → mtime at last walk
+)
+
 // fsIDForPath returns a stable string identifying the filesystem a path lives on.
 // Uses the device number from syscall.Stat — the same device number means the
 // same underlying filesystem. This works on Linux and macOS without build tags.
@@ -170,11 +177,57 @@ func getCachedFolderHasMedia() map[string]bool {
 // For unregistered volumes it also sets a flag if any video file is found.
 // Results are stored in the package-level cache. This is called from the
 // background monitor goroutine — never from the API handler.
+//
+// Mtime optimisation: if the directory's mtime matches the cached mtime from
+// the previous walk, the walk is skipped and the cached size is reused.
+// This avoids a full WalkDir every 5 minutes on large, stable libraries.
 func computeFolderSizes() {
 	vols := getMonitoredVolumes()
+
+	// Snapshot current cached sizes so we can reuse them for unchanged dirs.
+	folderSizeMu.RLock()
+	prevSizes := make(map[string]int64, len(folderSizes))
+	prevHasMedia := make(map[string]bool, len(folderHasMedia))
+	for k, v := range folderSizes {
+		prevSizes[k] = v
+	}
+	for k, v := range folderHasMedia {
+		prevHasMedia[k] = v
+	}
+	folderSizeMu.RUnlock()
+
+	folderMtimeMu.Lock()
+	prevMtimes := make(map[string]time.Time, len(folderMtimeCache))
+	for k, v := range folderMtimeCache {
+		prevMtimes[k] = v
+	}
+	folderMtimeMu.Unlock()
+
 	result := make(map[string]int64, len(vols))
 	hasMedia := make(map[string]bool, len(vols))
+	newMtimes := make(map[string]time.Time, len(vols))
+
 	for _, v := range vols {
+		// Check whether the top-level directory mtime has changed since the
+		// last walk. If it hasn't, reuse the cached value and skip WalkDir.
+		// Note: mtime only changes when direct children are added/removed, not
+		// when files are modified deep in the tree; this is a best-effort
+		// optimisation for large stable libraries.
+		if info, err := os.Lstat(v.path); err == nil {
+			mtime := info.ModTime()
+			if prev, ok := prevMtimes[v.path]; ok && mtime.Equal(prev) {
+				if sz, ok := prevSizes[v.path]; ok {
+					result[v.path] = sz
+					newMtimes[v.path] = mtime
+					if !v.registered {
+						hasMedia[v.path] = prevHasMedia[v.path]
+					}
+					continue
+				}
+			}
+			newMtimes[v.path] = mtime
+		}
+
 		var total int64
 		found := false
 		_ = filepath.WalkDir(v.path, func(path string, d fs.DirEntry, err error) error {
@@ -199,6 +252,11 @@ func computeFolderSizes() {
 			hasMedia[v.path] = found
 		}
 	}
+
+	folderMtimeMu.Lock()
+	folderMtimeCache = newMtimes
+	folderMtimeMu.Unlock()
+
 	folderSizeMu.Lock()
 	folderSizes = result
 	folderHasMedia = hasMedia

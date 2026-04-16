@@ -27,6 +27,10 @@ var (
 	indexerCount   indexerCountCache
 )
 
+// statusCache caches the result of services.CheckHealth() with a 5-second TTL
+// so that the 15-second dashboard polling loop doesn't hammer every service.
+var statusCache = ttlCache[map[string]string]{ttl: 5 * time.Second}
+
 // indexerCountCache caches the Prowlarr indexer count so handleStatus doesn't
 // hit /api/v1/indexer on every 15-second dashboard poll.
 type indexerCountCache struct {
@@ -87,6 +91,7 @@ func main() {
 	}
 
 	services = NewServiceClients("/config")
+	initSearchMode()
 
 	cfg, err := loadLibraries("/config/pelicula")
 	if err != nil {
@@ -212,8 +217,8 @@ func main() {
 	// viewer+: active Jellyfin sessions for the now-playing card.
 	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(handleSessions)))
 
-	// GET /api/pelicula/libraries — no auth (read-only list)
-	mux.HandleFunc("GET /api/pelicula/libraries", handleListLibraries)
+	// GET /api/pelicula/libraries — viewer+ (library metadata should not be public)
+	mux.Handle("GET /api/pelicula/libraries", auth.Guard(http.HandlerFunc(handleListLibraries)))
 	// POST /api/pelicula/libraries — admin only (add library)
 	mux.Handle("POST /api/pelicula/libraries", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleAddLibrary))))
 	// PUT /api/pelicula/libraries/{slug} — admin only (update library)
@@ -306,9 +311,12 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		idxCount = indexerCount.get(prowlarrURL, prowlarrKey)
 	}
 
+	svcHealth, _ := statusCache.Get(func() (map[string]string, error) {
+		return services.CheckHealth(), nil
+	})
 	status := map[string]any{
 		"status":         "ok",
-		"services":       services.CheckHealth(),
+		"services":       svcHealth,
 		"wired":          services.IsWired(),
 		"indexers":       idxCount,
 		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",

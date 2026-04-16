@@ -99,7 +99,7 @@ func cmdCheckVPN(_ []string) {
 		sort.Strings(names)
 		for _, name := range names {
 			status, _ := services[name].(string)
-			label := string([]byte{name[0] - 32}) + name[1:] // capitalize
+			label := capitalize(name)
 			if status == "up" {
 				pass(label + ": reachable")
 			} else {

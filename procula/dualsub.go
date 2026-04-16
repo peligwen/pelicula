@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -330,6 +331,7 @@ func extractEmbeddedSub(ctx context.Context, mediaPath string, subIndex int) ([]
 	defer os.Remove(tmp.Name())
 
 	args := []string{
+		"-nostdin",
 		"-y",
 		"-i", mediaPath,
 		"-map", fmt.Sprintf("0:s:%d", subIndex),
@@ -337,6 +339,8 @@ func extractEmbeddedSub(ctx context.Context, mediaPath string, subIndex int) ([]
 		tmp.Name(),
 	}
 	cmd := exec.CommandContext(ctx, ffmpegCommand, args...)
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

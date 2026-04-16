@@ -79,16 +79,9 @@ func resetConfigSoft(scriptDir, envFile string, env EnvMap) {
 	}
 
 	// Prowlarr: only reset config.xml — preserve database (indexers live there)
-	info("Resetting Prowlarr config (keeping indexer database)...")
-	keyXML := ""
-	if prowlarrKey != "" {
-		keyXML = "<ApiKey>" + xmlEscape(prowlarrKey) + "</ApiKey>"
+	if err := resetProwlarr(configDir, prowlarrKey); err != nil {
+		warn("prowlarr reset: " + err.Error())
 	}
-	prowlarrConf := fmt.Sprintf(
-		"<Config><UrlBase>/prowlarr</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
-		keyXML,
-	)
-	_ = os.WriteFile(filepath.Join(configDir, "prowlarr", "config.xml"), []byte(prowlarrConf), 0644)
 
 	_ = resetJellyfin(configDir)
 	_ = resetQBittorrent(configDir)
@@ -118,17 +111,8 @@ func resetConfigService(scriptDir, envFile, svc string, env EnvMap) {
 			fatal(err.Error())
 		}
 	case "prowlarr":
-		info("Resetting Prowlarr config (keeping indexer database)...")
 		key := extractAPIKey(filepath.Join(configDir, "prowlarr", "config.xml"))
-		keyXML := ""
-		if key != "" {
-			keyXML = "<ApiKey>" + xmlEscape(key) + "</ApiKey>"
-		}
-		content := fmt.Sprintf(
-			"<Config><UrlBase>/prowlarr</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
-			keyXML,
-		)
-		if err := os.WriteFile(filepath.Join(configDir, "prowlarr", "config.xml"), []byte(content), 0644); err != nil {
+		if err := resetProwlarr(configDir, key); err != nil {
 			fatal(err.Error())
 		}
 	case "jellyfin":

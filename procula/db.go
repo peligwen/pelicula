@@ -58,9 +58,43 @@ type migration struct {
 // schemaVersion is the current schema version. Bump this when adding new migrations.
 const schemaVersion = 7
 
+// DDL shared between migrateBaseline and the corresponding incremental migrations.
+// Keeping them as named constants ensures the two paths stay in sync.
+const (
+	ddlSettings = `CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`
+
+	ddlCatalogFlags = `CREATE TABLE IF NOT EXISTS catalog_flags (
+		path       TEXT PRIMARY KEY,
+		flags      TEXT NOT NULL,
+		severity   TEXT NOT NULL,
+		job_id     TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`
+
+	ddlCatalogFlagsIndex = `CREATE INDEX IF NOT EXISTS idx_catalog_flags_severity ON catalog_flags(severity)`
+
+	ddlDualsubProfiles = `CREATE TABLE IF NOT EXISTS dualsub_profiles (
+		name TEXT PRIMARY KEY,
+		data TEXT NOT NULL
+	)`
+
+	ddlBlockedReleases = `CREATE TABLE IF NOT EXISTS blocked_releases (
+		id               INTEGER PRIMARY KEY AUTOINCREMENT,
+		arr_app          TEXT    NOT NULL,
+		arr_blocklist_id INTEGER NOT NULL DEFAULT 0,
+		arr_item_id      INTEGER NOT NULL,
+		display_title    TEXT    NOT NULL,
+		file_path        TEXT    NOT NULL,
+		blocked_at       TEXT    NOT NULL,
+		reason           TEXT    NOT NULL DEFAULT ''
+	)`
+)
+
 // migrations is the ordered list of incremental schema migrations for existing installs.
 // New installs bypass these via migrateBaseline (see runMigrations).
-// These steps will be removed in a future release once no installs pre-date v0.1.
 var migrations = []migration{
 	{version: 1, up: migrate1},
 	{version: 2, up: migrate2},
@@ -162,32 +196,11 @@ func migrateBaseline(tx *sql.Tx) error {
 			catalog            TEXT,
 			flags              TEXT
 		)`,
-		`CREATE TABLE IF NOT EXISTS settings (
-			key   TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS catalog_flags (
-			path       TEXT PRIMARY KEY,
-			flags      TEXT NOT NULL,
-			severity   TEXT NOT NULL,
-			job_id     TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_catalog_flags_severity ON catalog_flags(severity)`,
-		`CREATE TABLE IF NOT EXISTS dualsub_profiles (
-			name TEXT PRIMARY KEY,
-			data TEXT NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS blocked_releases (
-			id               INTEGER PRIMARY KEY AUTOINCREMENT,
-			arr_app          TEXT    NOT NULL,
-			arr_blocklist_id INTEGER NOT NULL DEFAULT 0,
-			arr_item_id      INTEGER NOT NULL,
-			display_title    TEXT    NOT NULL,
-			file_path        TEXT    NOT NULL,
-			blocked_at       TEXT    NOT NULL,
-			reason           TEXT    NOT NULL DEFAULT ''
-		)`,
+		ddlSettings,
+		ddlCatalogFlags,
+		ddlCatalogFlagsIndex,
+		ddlDualsubProfiles,
+		ddlBlockedReleases,
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -230,18 +243,11 @@ func migrate4(tx *sql.Tx) error {
 // index table (path → aggregated flag list + top severity) used by the
 // catalog dashboard "Needs Attention" section.
 func migrate5(tx *sql.Tx) error {
-	stmts := []string{
+	for _, s := range []string{
 		`ALTER TABLE jobs ADD COLUMN flags TEXT`,
-		`CREATE TABLE IF NOT EXISTS catalog_flags (
-			path       TEXT PRIMARY KEY,
-			flags      TEXT NOT NULL,
-			severity   TEXT NOT NULL,
-			job_id     TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_catalog_flags_severity ON catalog_flags(severity)`,
-	}
-	for _, s := range stmts {
+		ddlCatalogFlags,
+		ddlCatalogFlagsIndex,
+	} {
 		if _, err := tx.Exec(s); err != nil {
 			return err
 		}
@@ -252,26 +258,14 @@ func migrate5(tx *sql.Tx) error {
 // migrate6 creates the dualsub_profiles table for storing named dual-subtitle
 // render profiles (JSON blobs keyed by profile name).
 func migrate6(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS dualsub_profiles (
-		name TEXT PRIMARY KEY,
-		data TEXT NOT NULL
-	)`)
+	_, err := tx.Exec(ddlDualsubProfiles)
 	return err
 }
 
 // migrate7 creates the blocked_releases table for tracking releases that have
 // been blocked and removed from the *arr queue.
 func migrate7(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS blocked_releases (
-		id               INTEGER PRIMARY KEY AUTOINCREMENT,
-		arr_app          TEXT    NOT NULL,
-		arr_blocklist_id INTEGER NOT NULL DEFAULT 0,
-		arr_item_id      INTEGER NOT NULL,
-		display_title    TEXT    NOT NULL,
-		file_path        TEXT    NOT NULL,
-		blocked_at       TEXT    NOT NULL,
-		reason           TEXT    NOT NULL DEFAULT ''
-	)`)
+	_, err := tx.Exec(ddlBlockedReleases)
 	return err
 }
 
@@ -299,11 +293,7 @@ func migrate1(tx *sql.Tx) error {
 			transcode_error    TEXT NOT NULL DEFAULT '',
 			transcode_eta      REAL NOT NULL DEFAULT 0
 		)`,
-
-		`CREATE TABLE IF NOT EXISTS settings (
-			key   TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		)`,
+		ddlSettings,
 	}
 
 	for _, stmt := range stmts {

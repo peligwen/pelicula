@@ -243,6 +243,22 @@ var qbtConf = "[Preferences]\n" +
 	`Session\TempPathEnabled=true` + "\n" +
 	`Session\TempPath=/downloads/incomplete/`
 
+// resetProwlarr resets Prowlarr's config.xml, preserving the API key and
+// the indexer database. The database is left in place; only config.xml is
+// rewritten.
+func resetProwlarr(configDir, apiKey string) error {
+	info("Resetting Prowlarr config (keeping indexer database)...")
+	keyXML := ""
+	if apiKey != "" {
+		keyXML = "<ApiKey>" + xmlEscape(apiKey) + "</ApiKey>"
+	}
+	content := fmt.Sprintf(
+		"<Config><UrlBase>/prowlarr</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
+		keyXML,
+	)
+	return os.WriteFile(filepath.Join(configDir, "prowlarr", "config.xml"), []byte(content), 0644)
+}
+
 // resetJellyfin wipes the Jellyfin config dir and re-seeds the base files.
 func resetJellyfin(configDir string) error {
 	info("Resetting Jellyfin...")

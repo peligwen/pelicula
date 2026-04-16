@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -31,7 +32,7 @@ type NotificationEvent struct {
 const maxFeedEvents = 50
 
 // NotificationConfig controls how Procula sends external notifications.
-// Written to /config/procula/notifications.json by `./pelicula configure`.
+// Written to /config/procula/notifications.json by the dashboard Settings tab.
 type NotificationConfig struct {
 	Mode        string   `json:"mode"`         // "internal", "apprise", "direct"
 	AppriseURLs []string `json:"apprise_urls"` // provider URLs passed to the Apprise container
@@ -122,46 +123,127 @@ func buildEvent(job *Job, eventType, message, detail string) NotificationEvent {
 	}
 }
 
+// appendToFeed appends event as a single JSON line to the JSONL feed file.
+// On first use it migrates a legacy JSON-array feed to JSONL in place.
+// The mutex is held only for the file open+write, keeping critical sections short.
 func appendToFeed(configDir string, event NotificationEvent) {
 	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
-
-	feedMu.Lock()
-	defer feedMu.Unlock()
 
 	if err := os.MkdirAll(filepath.Dir(feedPath), 0755); err != nil {
 		slog.Error("failed to create feed directory", "component", "catalog", "error", err)
 		return
 	}
 
-	var events []NotificationEvent
-	if data, err := os.ReadFile(feedPath); err == nil {
-		json.Unmarshal(data, &events) //nolint:errcheck
-	}
-
-	// Prepend new event, prune events older than 7 days, cap at maxFeedEvents.
-	events = append([]NotificationEvent{event}, events...)
-	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour)
-	pruned := events[:0]
-	for _, e := range events {
-		if e.Timestamp.After(cutoff) {
-			pruned = append(pruned, e)
-		}
-	}
-	if len(pruned) > maxFeedEvents {
-		pruned = pruned[:maxFeedEvents]
-	}
-	events = pruned
-
-	data, err := json.MarshalIndent(events, "", "  ")
+	line, err := json.Marshal(event)
 	if err != nil {
-		slog.Error("failed to marshal notifications", "component", "catalog", "error", err)
+		slog.Error("failed to marshal notification event", "component", "catalog", "error", err)
 		return
 	}
-	if err := os.WriteFile(feedPath, data, 0644); err != nil {
-		slog.Error("failed to write notifications feed", "component", "catalog", "error", err)
+	line = append(line, '\n')
+
+	feedMu.Lock()
+	defer feedMu.Unlock()
+
+	// One-shot migration: if the file starts with '[', it's the old JSON-array
+	// format. Read all events from it and rewrite as JSONL before appending.
+	migrateFeedIfLegacy(feedPath)
+
+	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		slog.Error("failed to open feed file", "component", "catalog", "error", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(line); err != nil {
+		slog.Error("failed to write notification", "component", "catalog", "error", err)
 		return
 	}
 	slog.Info("notification written", "component", "catalog", "message", event.Message)
+}
+
+// migrateFeedIfLegacy rewrites a legacy JSON-array feed to JSONL in place.
+// Caller must hold feedMu.
+func migrateFeedIfLegacy(feedPath string) {
+	f, err := os.Open(feedPath)
+	if err != nil {
+		return // file doesn't exist yet — nothing to migrate
+	}
+	first := make([]byte, 1)
+	_, err = f.Read(first)
+	f.Close()
+	if err != nil || first[0] != '[' {
+		return // not a JSON array — already JSONL or empty
+	}
+
+	data, err := os.ReadFile(feedPath)
+	if err != nil {
+		slog.Warn("feed migration: could not read file", "component", "catalog", "error", err)
+		return
+	}
+	var events []NotificationEvent
+	if err := json.Unmarshal(data, &events); err != nil {
+		slog.Warn("feed migration: could not unmarshal legacy array, leaving as-is", "component", "catalog", "error", err)
+		return
+	}
+
+	var buf bytes.Buffer
+	for _, ev := range events {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(feedPath, buf.Bytes(), 0644); err != nil {
+		slog.Warn("feed migration: could not rewrite as JSONL", "component", "catalog", "error", err)
+		return
+	}
+	slog.Info("migrated notifications feed from JSON array to JSONL", "component", "catalog", "events", len(events))
+}
+
+// ReadFeed reads the JSONL feed file and returns events newest-first,
+// pruned to the last 7 days and capped at maxFeedEvents.
+// Caller must NOT hold feedMu.
+func ReadFeed(configDir string) []NotificationEvent {
+	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
+
+	feedMu.Lock()
+	migrateFeedIfLegacy(feedPath)
+	feedMu.Unlock()
+
+	f, err := os.Open(feedPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	var events []NotificationEvent
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 256*1024), 256*1024)
+	for sc.Scan() {
+		l := strings.TrimSpace(sc.Text())
+		if l == "" {
+			continue
+		}
+		var ev NotificationEvent
+		if err := json.Unmarshal([]byte(l), &ev); err != nil {
+			continue
+		}
+		if ev.Timestamp.After(cutoff) {
+			events = append(events, ev)
+		}
+	}
+
+	// Reverse to newest-first
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
+	if len(events) > maxFeedEvents {
+		events = events[:maxFeedEvents]
+	}
+	return events
 }
 
 func loadNotificationConfig(configDir string) *NotificationConfig {

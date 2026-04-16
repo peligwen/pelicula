@@ -28,14 +28,19 @@ type jellyfinItem struct {
 const jellyfinCacheTTL = 5 * time.Minute
 
 // fetchJellyfinLibrary fetches all Movie/Series items from Jellyfin and caches them.
+// The mutex is NOT held across the outbound HTTP request — only around cache reads
+// and writes — to avoid serializing all callers on network latency.
 func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
+	// Fast path: return cached value while still fresh.
 	jellyfinCache.mu.Lock()
-	defer jellyfinCache.mu.Unlock()
-
 	if time.Since(jellyfinCache.fetchedAt) < jellyfinCacheTTL {
-		return jellyfinCache.items, nil
+		items := jellyfinCache.items
+		jellyfinCache.mu.Unlock()
+		return items, nil
 	}
+	jellyfinCache.mu.Unlock()
 
+	// Cache is stale — perform the HTTP fetch without holding the lock.
 	userID, err := resolveJellyfinUserID(svc)
 	if err != nil {
 		return nil, err
@@ -54,10 +59,18 @@ func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
 		return nil, fmt.Errorf("jellyfin library parse: %w", err)
 	}
 
-	jellyfinCache.items = resp.Items
-	jellyfinCache.fetchedAt = time.Now()
-	slog.Info("jellyfin library cached", "component", "catalog_sync", "count", len(resp.Items))
-	return jellyfinCache.items, nil
+	// Re-acquire lock to store result. Double-check: if another goroutine beat
+	// us and wrote a fresh value, keep theirs (it's equally good and avoids
+	// a spurious cache reset).
+	jellyfinCache.mu.Lock()
+	if time.Since(jellyfinCache.fetchedAt) >= jellyfinCacheTTL {
+		jellyfinCache.items = resp.Items
+		jellyfinCache.fetchedAt = time.Now()
+		slog.Info("jellyfin library cached", "component", "catalog_sync", "count", len(resp.Items))
+	}
+	items := jellyfinCache.items
+	jellyfinCache.mu.Unlock()
+	return items, nil
 }
 
 // UpsertFromHook creates or updates catalog records when a download completes.

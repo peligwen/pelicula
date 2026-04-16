@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -36,7 +37,7 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 		err := db.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
 		).Scan(&name)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("table %q not found", table)
 		} else if err != nil {
 			t.Errorf("query table %q: %v", table, err)

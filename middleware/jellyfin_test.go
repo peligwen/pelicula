@@ -54,6 +54,7 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) *httptest.Ser
 	testSvcs.JellyfinAPIKey = "test-token"
 	origAuth := authMiddleware
 	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{
+		DB:       testDB(t),
 		Jellyfin: NewJellyfinHTTPClient(srv.Client(), testSvcs),
 	})
 	t.Cleanup(func() { authMiddleware = origAuth })

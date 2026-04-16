@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -73,7 +74,7 @@ func DeleteBlockedRelease(db *sql.DB, id int64) (int, error) {
 	err := db.QueryRow(
 		`DELETE FROM blocked_releases WHERE id = ? RETURNING arr_blocklist_id`, id,
 	).Scan(&blocklistID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("blocked release %d not found", id)
 	}
 	return blocklistID, err

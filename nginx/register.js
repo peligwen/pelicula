@@ -83,13 +83,9 @@
     document.getElementById('reg-dead').style.display = '';
   }
 
-  function showError(msg, html) {
+  function showError(msg) {
     const el = document.getElementById('reg-error');
-    if (html) {
-      el.innerHTML = html;
-    } else {
-      el.textContent = msg;
-    }
+    el.textContent = msg;
     el.style.display = 'block';
   }
 
@@ -186,7 +182,7 @@
       }
 
       if (resp.status === 409 && data.code === 'username_taken') {
-        showError('', 'That username is already taken. Try a different one, or sign in to the dashboard if you already have an account.');
+        showError('That username is already taken. Try a different one, or sign in to the dashboard if you already have an account.');
         return;
       }
       if (resp.status === 410) {

@@ -45,11 +45,6 @@ func getScriptDir() string {
 	return start
 }
 
-// sudoRun creates an exec.Cmd prefixed with "sudo".
-func sudoRun(args ...string) *exec.Cmd {
-	return exec.Command("sudo", args...)
-}
-
 // openBrowser opens url in the default browser.
 func openBrowser(url string) {
 	var cmd *exec.Cmd
@@ -79,6 +74,18 @@ func generateAPIKey() string {
 		b[i] = chars[n.Int64()]
 	}
 	return string(b)
+}
+
+// capitalize uppercases the first byte of s if it is a lowercase ASCII letter.
+// Returns s unchanged if s is empty or the first byte is not a–z.
+func capitalize(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
+	}
+	return s
 }
 
 // requireEnv prints an error and exits if the .env file does not exist.

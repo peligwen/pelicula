@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"sync"
 	"time"
 )
@@ -127,7 +128,7 @@ type CatalogInfo struct {
 
 type Queue struct {
 	db        *sql.DB
-	pending   chan string
+	pending   chan struct{}
 	cancelsMu sync.Mutex
 	cancels   map[string]context.CancelFunc
 }
@@ -135,7 +136,7 @@ type Queue struct {
 func NewQueue(db *sql.DB) (*Queue, error) {
 	q := &Queue{
 		db:      db,
-		pending: make(chan string, 256),
+		pending: make(chan struct{}, 1),
 		cancels: make(map[string]context.CancelFunc),
 	}
 
@@ -186,12 +187,41 @@ func (q *Queue) loadExisting() error {
 			}
 		}
 		select {
-		case q.pending <- r.id:
+		case q.pending <- struct{}{}:
 		default:
-			slog.Warn("pending channel full, job will not run until retried or restarted", "component", "queue", "job_id", r.id)
 		}
 	}
 	return nil
+}
+
+// insertJobRow persists a new Job to the database. The caller is responsible
+// for populating all fields on j before calling. No signal is sent to q.pending.
+func (q *Queue) insertJobRow(j *Job) error {
+	sourceJSON, err := json.Marshal(j.Source)
+	if err != nil {
+		return fmt.Errorf("marshal source: %w", err)
+	}
+	var paramsJSON *string
+	if j.Params != nil {
+		b, _ := json.Marshal(j.Params)
+		s := string(b)
+		paramsJSON = &s
+	}
+	_, err = q.db.Exec(
+		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
+		                   action_type, params, result, flags)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL)`,
+		j.ID,
+		j.CreatedAt.Format(time.RFC3339Nano),
+		j.UpdatedAt.Format(time.RFC3339Nano),
+		string(j.State),
+		string(j.Stage),
+		string(sourceJSON),
+		j.ActionType,
+		paramsJSON,
+	)
+	return err
 }
 
 func (q *Queue) Create(source JobSource) (*Job, error) {
@@ -211,32 +241,9 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 		}
 	}
 
-	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
 	now := time.Now().UTC()
-
-	sourceJSON, err := json.Marshal(source)
-	if err != nil {
-		return nil, fmt.Errorf("marshal source: %w", err)
-	}
-
-	_, err = q.db.Exec(
-		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
-		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result, flags)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, 'pipeline', NULL, NULL, NULL)`,
-		id,
-		now.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
-		string(StateQueued),
-		string(StageValidate),
-		string(sourceJSON),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert job: %w", err)
-	}
-
 	job := &Job{
-		ID:         id,
+		ID:         fmt.Sprintf("job_%d_%s", now.UnixMilli(), randStr(6)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		State:      StateQueued,
@@ -245,10 +252,13 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 		ActionType: "pipeline",
 	}
 
+	if err := q.insertJobRow(job); err != nil {
+		return nil, fmt.Errorf("insert job: %w", err)
+	}
+
 	select {
-	case q.pending <- id:
+	case q.pending <- struct{}{}:
 	default:
-		slog.Warn("pending channel full, job will not run until retried or restarted", "component", "queue", "job_id", id)
 	}
 
 	return job, nil
@@ -259,40 +269,9 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 // always gets a fresh job row — dedup would corrupt in-flight pipeline jobs
 // that happen to share the same source path.
 func (q *Queue) createActionJob(source JobSource, actionType string, params map[string]any) (*Job, error) {
-	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
 	now := time.Now().UTC()
-
-	sourceJSON, err := json.Marshal(source)
-	if err != nil {
-		return nil, fmt.Errorf("marshal source: %w", err)
-	}
-	var paramsJSON *string
-	if params != nil {
-		b, _ := json.Marshal(params)
-		s := string(b)
-		paramsJSON = &s
-	}
-
-	_, err = q.db.Exec(
-		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
-		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result, flags)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL)`,
-		id,
-		now.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
-		string(StateQueued),
-		string(StageValidate),
-		string(sourceJSON),
-		actionType,
-		paramsJSON,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert action job: %w", err)
-	}
-
 	job := &Job{
-		ID:         id,
+		ID:         fmt.Sprintf("job_%d_%s", now.UnixMilli(), randStr(6)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		State:      StateQueued,
@@ -302,10 +281,13 @@ func (q *Queue) createActionJob(source JobSource, actionType string, params map[
 		Params:     params,
 	}
 
+	if err := q.insertJobRow(job); err != nil {
+		return nil, fmt.Errorf("insert action job: %w", err)
+	}
+
 	select {
-	case q.pending <- id:
+	case q.pending <- struct{}{}:
 	default:
-		slog.Warn("pending channel full, action job will not run until restart", "component", "queue", "job_id", id)
 	}
 
 	return job, nil
@@ -485,9 +467,8 @@ func (q *Queue) Retry(id string) error {
 		return fmt.Errorf("job %s is not in a retryable state", id)
 	}
 	select {
-	case q.pending <- id:
+	case q.pending <- struct{}{}:
 	default:
-		slog.Warn("pending channel full, retry will not run until restart", "component", "queue", "job_id", id)
 	}
 	return nil
 }
@@ -560,6 +541,25 @@ func (q *Queue) unregisterCancel(id string) {
 	q.cancelsMu.Lock()
 	delete(q.cancels, id)
 	q.cancelsMu.Unlock()
+}
+
+// nextQueued returns up to 64 job IDs in queued state, oldest first.
+// Used by the worker loop to drain all pending work after a wake signal.
+func (q *Queue) nextQueued() []string {
+	rows, err := q.db.Query(`SELECT id FROM jobs WHERE state='queued' ORDER BY created_at ASC LIMIT 64`)
+	if err != nil {
+		slog.Warn("nextQueued query failed", "component", "queue", "error", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (q *Queue) Status() map[string]int {
@@ -684,12 +684,17 @@ func scanJob(s scanner) (*Job, error) {
 	return &job, nil
 }
 
-const randChars = "abcdefghijklmnopqrstuvwxyz0123456789"
-
+// randStr returns a hex-encoded random string using crypto/rand.
+// n is the number of random bytes (output length is 2*n hex chars).
+// Uses at least 8 bytes (16 hex chars) regardless of the requested n.
 func randStr(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = randChars[rand.Intn(len(randChars))]
+	if n < 8 {
+		n = 8
 	}
-	return string(b)
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is extremely unlikely; fall back to a timestamp-derived suffix.
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }

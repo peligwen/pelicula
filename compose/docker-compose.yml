@@ -152,7 +152,7 @@ services:
       - ${CONFIG_DIR}/jellyfin:/config
       - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:8096/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8096/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -235,6 +235,10 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
+      # Intentionally only on the `pelicula` named network — not on `default`.
+      # pelicula-api reaches the proxy via Docker service discovery on this
+      # network; nginx never talks to it directly. Keeping it off `default`
+      # limits the blast radius if the proxy were ever compromised.
       pelicula:
         aliases:
           - docker-proxy

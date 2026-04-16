@@ -6,6 +6,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -165,7 +166,7 @@ func flagsByPath(db *sql.DB, path string) (*CatalogFlagRow, error) {
 	var r CatalogFlagRow
 	var flagsJSON, tsStr string
 	err := row.Scan(&r.Path, &flagsJSON, &r.Severity, &r.JobID, &tsStr)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

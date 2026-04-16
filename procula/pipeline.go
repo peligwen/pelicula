@@ -15,17 +15,28 @@ import (
 
 // RunWorker processes jobs from the queue sequentially.
 // It runs forever and should be called in a goroutine.
+// q.pending is a len-1 wake semaphore: a send signals that at least one queued
+// job is available. On each wake the worker drains all queued jobs from the DB
+// before waiting again, so multiple concurrent enqueues collapse into one scan.
 func RunWorker(q *Queue, configDir, peliculaAPI string) {
 	slog.Info("worker started", "component", "pipeline")
-	for id := range q.pending {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("panic in job — worker continuing", "component", "pipeline", "job_id", id, "panic", r)
-				}
-			}()
-			processJob(q, id, configDir, peliculaAPI)
-		}()
+	for range q.pending {
+		for {
+			ids := q.nextQueued()
+			if len(ids) == 0 {
+				break
+			}
+			for _, id := range ids {
+				func(id string) {
+					defer func() {
+						if r := recover(); r != nil {
+							slog.Error("panic in job — worker continuing", "component", "pipeline", "job_id", id, "panic", r)
+						}
+					}()
+					processJob(q, id, configDir, peliculaAPI)
+				}(id)
+			}
+		}
 	}
 }
 

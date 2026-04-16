@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
@@ -34,7 +35,7 @@ func GetSettings(db *sql.DB) PipelineSettings {
 	var value string
 	err := db.QueryRow(`SELECT value FROM settings WHERE key='pipeline'`).Scan(&value)
 	if err != nil {
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			slog.Warn("GetSettings query failed", "component", "settings", "error", err)
 		}
 		return defaultSettings()
