@@ -248,7 +248,7 @@ Session\DefaultSavePath=/downloads/'
         t_fail "Stack failed to start"
         echo ""
         warn "Check Docker logs for details. Run with --keep to investigate."
-        exit 1
+        return 1
     fi
 
     info "Waiting for middleware to be ready..."
@@ -266,7 +266,7 @@ Session\DefaultSavePath=/downloads/'
         echo ""
         warn "Container logs:"
         test_compose logs --tail 30 pelicula-api 2>/dev/null || true
-        exit 1
+        return 1
     fi
 
     t_pass "Stack started"
@@ -303,7 +303,7 @@ Session\DefaultSavePath=/downloads/'
         echo ""
         warn "Middleware logs:"
         test_compose logs --tail 40 pelicula-api 2>/dev/null || true
-        exit 1
+        return 1
     fi
 
     t_pass "Auto-wire complete"
@@ -379,7 +379,7 @@ EOPROFILE
 
     if [[ "$ffmpeg_ok" != "true" ]] || [[ ! -f "$movie_file" ]]; then
         t_fail "Test media generation failed (FFmpeg not available on host or in container)"
-        exit 1
+        return 1
     fi
 
     local file_size
@@ -423,7 +423,7 @@ EOPROFILE
         t_fail "Import webhook rejected or unreachable"
         echo ""
         warn "Response: ${webhook_resp:-<no response>}"
-        exit 1
+        return 1
     fi
 
     # ── Stage 5: Wait for Processing ─────────────────
@@ -476,13 +476,13 @@ except Exception as e:
         echo ""
         warn "Procula logs:"
         test_compose logs --tail 40 procula 2>/dev/null || true
-        exit 1
+        return 1
     else
         t_fail "Processing did not complete within 120s (state: ${job_state:-unknown})"
         echo ""
         warn "Procula logs:"
         test_compose logs --tail 40 procula 2>/dev/null || true
-        exit 1
+        return 1
     fi
 
     # ── Sidecar verification ──────────────────────────
@@ -505,7 +505,7 @@ except Exception as e:
         t_pass "Original file preserved after transcoding"
     else
         t_fail "Original file was deleted — sidecar mode must not remove the source"
-        exit 1
+        return 1
     fi
 
     # ── Stage 6: Verify in Jellyfin ──────────────────
@@ -533,7 +533,7 @@ except Exception:
         warn "Auth response: ${jf_auth_resp:-<no response>}"
         warn "Jellyfin logs:"
         test_compose logs --tail 30 jellyfin 2>/dev/null || true
-        exit 1
+        return 1
     fi
 
     # Jellyfin library scan is async — retry a few times
@@ -1115,7 +1115,6 @@ assert 'Movies' in names and 'TV Shows' in names
         echo -e "  ${GREEN}${BOLD}ALL TESTS PASSED${NC} (${test_passes}/${total})"
         echo ""
         # Disable the trap and run cleanup directly while locals are still in scope.
-        # (On the failure path we use exit 1, which fires the trap inside this function.)
         trap - EXIT
         cleanup_test
     else
@@ -1127,8 +1126,12 @@ assert 'Movies' in names and 'TV Shows' in names
         echo "    docker compose -p pelicula-test logs pelicula-api"
         echo "    docker compose -p pelicula-test logs jellyfin"
         echo ""
-        exit 1
+        trap - EXIT
+        cleanup_test
+        return 1
     fi
 }
 
-cmd_test "${1:-}"
+if ! cmd_test "${1:-}"; then
+    exit 1
+fi
