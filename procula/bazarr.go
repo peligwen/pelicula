@@ -13,6 +13,7 @@ import (
 	"time"
 )
 
+// bazarrURL is set at startup from BAZARR_URL; overridden in tests to inject a stub server.
 var bazarrURL = env("BAZARR_URL", "http://bazarr:6767/bazarr")
 
 // readBazarrAPIKey reads the Bazarr API key from config.yaml.

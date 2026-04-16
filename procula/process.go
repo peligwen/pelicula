@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	reDuration    = regexp.MustCompile(`Duration:\s+(\d+):(\d+):([\d.]+)`)
-	reTime        = regexp.MustCompile(`time=\s*(\d+):(\d+):([\d.]+)`)
+	reDuration = regexp.MustCompile(`Duration:\s+(\d+):(\d+):([\d.]+)`)
+	reTime     = regexp.MustCompile(`time=\s*(\d+):(\d+):([\d.]+)`)
+	// ffmpegCommand is set at startup; overridden in tests to inject a mock binary.
 	ffmpegCommand = "ffmpeg"
 )
 
