@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -349,17 +350,24 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the same request profile env vars that handleRequestApprove uses,
+	// so both add paths honour REQUESTS_RADARR_PROFILE_ID / REQUESTS_RADARR_ROOT.
+	radarrProfileID := envIntOr("REQUESTS_RADARR_PROFILE_ID", 0)
+	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
+	sonarrProfileID := envIntOr("REQUESTS_SONARR_PROFILE_ID", 0)
+	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
+
 	var arrID int
 	var err error
 	switch req.Type {
 	case "movie":
-		arrID, err = addMovieInternal(req.TmdbID, 0, "")
+		arrID, err = addMovieInternal(req.TmdbID, radarrProfileID, radarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	case "series":
-		arrID, err = addSeriesInternal(req.TvdbID, 0, "")
+		arrID, err = addSeriesInternal(req.TvdbID, sonarrProfileID, sonarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 			return

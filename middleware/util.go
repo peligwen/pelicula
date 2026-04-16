@@ -1,5 +1,23 @@
 package main
 
+import (
+	"fmt"
+	"os"
+)
+
+// envIntOr reads an env var as an integer, returning fallback on parse error or if unset.
+func envIntOr(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+		return fallback
+	}
+	return n
+}
+
 func shortHash(hash string) string {
 	if len(hash) > 8 {
 		return hash[:8]
