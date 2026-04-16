@@ -27,7 +27,7 @@ Pelicula is **LAN-first**. The design baseline assumes:
 
 ### Authentication (`middleware/peligrosa/`)
 
-Auth is always on. Credentials are verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `/config/pelicula/roles.json`. Jellyfin admins automatically get `admin` role. No passwords stored by Pelicula — Jellyfin is the authority.
+Auth is always on. Credentials are verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `pelicula.db` (SQLite, `roles` table). Jellyfin admins automatically get `admin` role. No passwords stored by Pelicula — Jellyfin is the authority. (On first startup after upgrade, existing `roles.json` is auto-migrated into SQLite and renamed to `roles.json.migrated`.)
 
 **Sessions:** In-memory `map[token]session`, `pelicula_session` HttpOnly cookie, `SameSite=Lax`. 24-hour session lifetime; 10-minute cleanup goroutine removes expired sessions and stale rate-limit entries.
 
@@ -71,13 +71,13 @@ Safe methods (GET/HEAD) always pass through. `admin_ops.go` uses `requireLocalOr
 
 ### Users and User Management (`middleware/jellyfin.go`)
 
-Pelicula manages users through Jellyfin. `CreateJellyfinUser` creates the Jellyfin account and maps the Jellyfin user ID to a Pelicula role in `roles.json`. Delete removes both.
+Pelicula manages users through Jellyfin. `CreateJellyfinUser` creates the Jellyfin account and maps the Jellyfin user ID to a Pelicula role in `pelicula.db`. Delete removes both.
 
 Roles: `viewer` (read + request), `manager` (search + add + pause downloads), `admin` (full access + user management).
 
 ### Invites (`middleware/peligrosa/invites.go`)
 
-32-byte crypto/rand token, base64url-encoded (43 chars), stored at `/config/pelicula/invites.json` (0600). Not HMAC-signed — a future Peligrosa upgrade will add HMAC-signing so tokens are verifiable without a database lookup. See [roadmap](#roadmap).
+32-byte crypto/rand token, base64url-encoded (43 chars), stored in `pelicula.db` (SQLite, `invites` table). Not HMAC-signed — a future Peligrosa upgrade will add HMAC-signing so tokens are verifiable without a database lookup. See [roadmap](#roadmap). (On first startup after upgrade, existing `invites.json` is auto-migrated into SQLite and renamed to `invites.json.migrated`.)
 
 `Invite{Token, Label, ExpiresAt, MaxUses, Uses, Revoked, RedeemedBy[]}`. States: active / revoked / expired / exhausted.
 

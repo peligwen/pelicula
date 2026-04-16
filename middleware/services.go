@@ -35,6 +35,9 @@ type xmlConfig struct {
 }
 
 // qbtBaseURL is the base URL for qBittorrent (runs on gluetun's network namespace).
+// No password is required: qBittorrent's config.xml is seeded with the Docker subnet
+// (172.16.0.0/12) in the IP bypass whitelist, so requests from within the Docker
+// network are admitted without credentials.
 var qbtBaseURL = envOr("QBITTORRENT_URL", "http://gluetun:8080")
 
 func NewServiceClients(configDir string) *ServiceClients {

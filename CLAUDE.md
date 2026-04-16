@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## About Pelicula
 
-**Pelicula** is a clone-and-run media stack. The `pelicula` Go CLI handles setup, lifecycle, and health checks for a Docker Compose stack of 9 services behind an nginx reverse proxy on port **7354** (PELI on a phone keypad).
+**Pelicula** is a clone-and-run media stack. The `pelicula` Go CLI handles setup, lifecycle, and health checks for a Docker Compose stack of 11 services behind an nginx reverse proxy on port **7354** (PELI on a phone keypad).
 
 ## Key Files
 
 - `pelicula` — thin bash wrapper at repo root; auto-builds the Go CLI on first run
 - `cmd/pelicula/` — Go CLI source (cross-platform: macOS/Linux/Windows/Synology), stdlib-only
 - `tests/e2e.sh` — end-to-end integration test runner (bash, standalone)
-- `compose/docker-compose.yml` — parameterized with `${CONFIG_DIR}` and `${MEDIA_DIR}` env vars
+- `compose/docker-compose.yml` — parameterized with `${CONFIG_DIR}`, `${LIBRARY_DIR}`, and `${WORK_DIR}` env vars
 - `middleware/` — Go backend (pelicula-api): auto-wiring, unified search, download management, auth, settings, request queue. SQLite for mutable state (`modernc.org/sqlite`).
 - `procula/` — Go processing pipeline: validation, FFprobe/FFmpeg, transcoding, Jellyfin catalog, storage monitoring. SQLite for job queue and settings.
 - `nginx/nginx.conf` — reverse proxy config, path-based routing to all services
@@ -23,6 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pelicula up                  # start stack (runs setup wizard on first run), seed configs, wait for VPN
 pelicula down|status|logs [svc]|update|check-vpn
 pelicula restart [svc]       # restart service(s) without taking the whole stack down
+pelicula restart-acquire     # restart VPN + acquisition services (jellyfin and nginx stay up), re-enforces *arr auth
 pelicula rebuild             # rebuild and restart middleware/procula containers
 pelicula redeploy [svc]      # rebuild images then full stack down/up (pelicula-api|middleware|procula)
 pelicula reset-config        # soft reset: wipe service configs, preserve API keys/VPN/certs/auth
@@ -36,10 +37,13 @@ pelicula test                # run e2e integration test (isolated stack on port 
 
 ## Architecture
 
-Nine Docker containers via Docker Compose (plus one opt-in profile service: Apprise):
+Eleven Docker containers via Docker Compose (plus one opt-in profile service: Apprise). Three of the eleven — gluetun, qbittorrent, and prowlarr — use the `vpn` Compose profile and are the norm for any VPN-enabled deployment:
 
 ```
 nginx (:7354) ─── /                → dashboard (static HTML)
+               ── /settings        → Settings page (auth-gated)
+               ── /import          → Local media import wizard (auth-gated)
+               ── /register        → Invite redemption / open registration (public)
                ── /api/pelicula/   → pelicula-api (Go middleware, :8181)
                ── /api/procula/    → procula (media processing pipeline, :8282)
                ── /api/vpn/        → gluetun control API
@@ -47,8 +51,11 @@ nginx (:7354) ─── /                → dashboard (static HTML)
                ── /radarr/         → Radarr
                ── /prowlarr/       → Prowlarr (via gluetun network)
                ── /qbt/            → qBittorrent (via gluetun network)
+               ── /bazarr/         → Bazarr (subtitle acquisition)
                ── /jellyfin/       → Jellyfin (NOT behind VPN)
 ```
+
+Services not behind nginx: `pelicula-docker-proxy` (tecnativa/docker-socket-proxy, exposes only container restart/logs to pelicula-api — the real Docker socket is never mounted into pelicula-api).
 
 **pelicula-api** auto-wires the *arr stack on startup and serves the dashboard API. **procula** handles post-import processing (validate → transcode → catalog). **qBittorrent and Prowlarr run on gluetun's network namespace** — reachable at `gluetun:8080` and `gluetun:9696` respectively, not their own container names.
 

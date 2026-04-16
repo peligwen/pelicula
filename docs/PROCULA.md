@@ -53,12 +53,14 @@ procula:
     - PUID=${PUID}
     - PGID=${PGID}
     - TZ=${TZ}
+    - CONFIG_DIR=/config
+    - PELICULA_API_URL=http://pelicula-api:8181
   volumes:
-    - ${CONFIG_DIR}/procula:/config           # job state, transcode profiles
-    - ${MEDIA_DIR}/downloads:/downloads       # Read: completed downloads
-    - ${MEDIA_DIR}/movies:/movies             # Read/write: movie library
-    - ${MEDIA_DIR}/tv:/tv                     # Read/write: TV library
-    - ${MEDIA_DIR}/processing:/processing     # Scratch space for transcoding
+    - ${CONFIG_DIR}/procula:/config                  # job state, transcode profiles
+    - ${CONFIG_DIR}/bazarr:/config/bazarr:ro         # Bazarr config (API key)
+    - ${WORK_DIR}/downloads:/downloads:ro            # Read: completed downloads
+    - ${LIBRARY_DIR}:/media                          # Read/write: full media library
+    - ${WORK_DIR}/processing:/processing             # Scratch space for transcoding
   healthcheck:
     test: ["CMD", "wget", "--spider", "-q", "http://localhost:8282/ping"]
     interval: 30s
@@ -241,24 +243,11 @@ When enabled and disk is low: query Jellyfin API for watched status, delete file
 
 ## Dashboard Integration
 
-Add a **Processing** section between Downloads and Services:
+Pipeline visibility is consolidated into the main dashboard at `http://localhost:7354/`:
 
-```
-+-- Search
-+-- Downloads
-+-- Processing (NEW)
-|   +-- section-header: "Processing" | "X queued / Y active / Z completed today"
-|   +-- pipeline items (same card style as downloads):
-|       +-- name + stage badge (Validating / Transcoding 45% / Cataloging / Done)
-|       +-- progress bar (purple for processing, green for done, red for failed)
-|       +-- meta: stage details, time elapsed
-|       +-- actions: retry (on failed), cancel
-|   +-- storage bar (if storage monitoring enabled):
-|       +-- "Movies: 1.2 TB / 4 TB" with fill bar
-|       +-- "TV: 800 GB / 4 TB" with fill bar
-|       +-- growth rate + time-to-full estimate
-+-- Services (Procula card, Bazarr card)
-```
+- **Jobs tab** — shows all pipeline jobs with stage badges (Validating / Transcoding 45% / Cataloging / Done), progress bars (purple for processing, green for done, red for failed), stage details, time elapsed, and retry/cancel actions. The in-page job drawer surfaces validation checks, file info, transcode details, and a job timeline.
+- **Settings tab** — pipeline toggles (transcoding, dual subtitles), subtitle language settings, notification mode, and download defaults. Includes a per-profile enable/disable toggle for transcode profiles.
+- **Storage monitoring** — per-volume usage bars with growth rate and time-to-full estimates appear in the main dashboard lane.
 
 The dashboard polls `GET /api/pelicula/processing` on the same 15-second refresh cycle.
 
@@ -434,10 +423,9 @@ All settings are also exposed in the Procula dashboard under **Settings → Dual
 
 ```
 /config/procula/
-  jobs/                    # Legacy — migrated to SQLite (procula.db)
+  procula.db               # SQLite database: jobs, settings, catalog_flags, dualsub_profiles, blocked_releases
+  jobs/                    # Legacy — migrated to SQLite on first startup (renamed to .json.migrated)
   profiles/                # Transcode profile JSON files
   dualsub-cache/           # Translator cue cache (SHA-256-keyed .txt files)
   notifications.json       # Webhook URLs and preferences
-  storage.json             # Retention policies, tier config, alert thresholds
-  history.json             # Ring buffer of hourly disk usage samples
 ```

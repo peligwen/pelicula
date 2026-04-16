@@ -34,7 +34,7 @@ Open `http://localhost:7354` — that's it. On first run, a browser-based setup 
 On `pelicula up`, the stack:
 
 1. Seeds service configs (URL bases, auth bypass, download paths)
-2. Starts 9 containers behind an nginx reverse proxy on port 7354
+2. Starts 11 containers behind an nginx reverse proxy on port 7354
 3. Waits for VPN connection and port forwarding
 4. Auto-wires qBittorrent as the download client in Sonarr and Radarr
 5. Connects Prowlarr indexers to both Sonarr and Radarr
@@ -78,6 +78,7 @@ Everything runs behind nginx on one port:
 | `/radarr/` | Radarr | Movie automation |
 | `/prowlarr/` | Prowlarr | Indexer management |
 | `/qbt/` | qBittorrent | Torrent client (VPN-only traffic) |
+| `/bazarr/` | Bazarr | Automatic subtitle acquisition |
 | `/jellyfin/` | Jellyfin | Media server and streaming |
 
 All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, qBittorrent loses internet (kill-switch).
@@ -94,6 +95,7 @@ pelicula update              # Pull latest images and recreate
 pelicula restart [svc]       # Restart service(s) without stopping the whole stack
 pelicula restart-acquire     # Restart and re-run VPN port-forward acquisition
 pelicula rebuild             # Rebuild and restart middleware/procula containers
+pelicula redeploy [svc]      # Rebuild Docker images then full stack down/up
 pelicula reset-config [svc]  # Delete seeded configs so they regenerate on next up
 pelicula import              # Open the browser-based local media import wizard
 pelicula export              # Export watchlist/library backup
@@ -163,7 +165,7 @@ Viewers can request movies and TV shows directly from the dashboard search resul
 
 ## Authentication
 
-Pelicula requires a login after first use. The first POST to `/api/pelicula/register` on an empty install claims the admin account. Credentials are verified against Jellyfin; roles are stored locally in `roles.json`; Jellyfin admins automatically get admin in Pelicula.
+Pelicula requires a login after first use. The first POST to `/api/pelicula/register` on an empty install claims the admin account. Credentials are verified against Jellyfin; roles are stored in `pelicula.db` (SQLite); Jellyfin admins automatically get admin in Pelicula.
 
 For convenience, requests originating on the host machine are granted an admin session automatically — no login required from the box running the stack. This is a per-request transient grant (no cookie is set); LAN and remote clients must authenticate normally. See [docs/PELIGROSA.md](docs/PELIGROSA.md) for the full security model.
 
@@ -188,7 +190,7 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 |---------|-----|--------|
 | **What Happens Automatically** | | |
 | Seeds service configs (URL bases, auth bypass, download paths) | ✓ e2e.sh | ☐ |
-| Starts 9 containers behind nginx reverse proxy | ~ partial (health check passes; container count not asserted) | ☐ |
+| Starts 11 containers behind nginx reverse proxy | ~ partial (health check passes; container count not asserted) | ☐ |
 | Waits for VPN connection and port forwarding | — | ☐ |
 | Auto-wires qBittorrent as download client in Sonarr and Radarr | ✓ e2e.sh | ☐ |
 | Connects Prowlarr indexers to Sonarr and Radarr | ✓ e2e.sh | ☐ |
