@@ -443,7 +443,7 @@ function addLibraryFromStorage(path) {
     // Extract dirname from path (/media/anime → anime)
     const name = path.split('/').filter(Boolean).pop() || '';
     const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const title = name.charAt(0).toUpperCase() + name.slice(1);
+    const title = name.replace(/[-_ ]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
     // Build a small inline modal
     const existing = document.getElementById('atl-modal');
