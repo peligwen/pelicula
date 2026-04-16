@@ -128,6 +128,22 @@ func (c *Compose) RunQuiet(args ...string) error {
 	return err
 }
 
+// RunProjectOnly runs docker compose using only the project name derived from
+// projectDir, without parsing compose files or requiring an env file.
+// Useful for teardown when .env is missing.
+func (c *Compose) RunProjectOnly(args ...string) error {
+	cmdArgs := []string{
+		"compose",
+		"--project-directory", c.projectDir,
+	}
+	cmdArgs = append(cmdArgs, args...)
+	cmd := c.dockerCmd(cmdArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // DockerExec runs a docker exec command, attaching stdin/stdout/stderr.
 func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
 	cmd := c.dockerCmd(append([]string{"exec", container}, cmdArgs...)...)
