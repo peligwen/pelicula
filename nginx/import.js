@@ -73,6 +73,15 @@ function updateHardlinkToggle() {
 
 // ── Browse tree ──────────────────────────────────────────────────────────────
 
+function isMediaChild(path) {
+    // /media/something with no further slashes
+    return /^\/media\/[^/]+$/.test(path);
+}
+
+function libraryForPath(path) {
+    return state.libraries.find(lib => '/media/' + lib.slug === path) || null;
+}
+
 async function loadBrowseRoots() {
     try {
         const res = await apiFetch('/api/pelicula/browse');
@@ -129,6 +138,32 @@ function createBrowseEntry(entry, depth) {
         hint.textContent = 'folder';
         row.appendChild(hint);
 
+        // Annotate /media immediate children with library status
+        if (isMediaChild(entry.path)) {
+            const lib = libraryForPath(entry.path);
+            if (lib) {
+                // Registered library — show a badge
+                const badge = document.createElement('span');
+                badge.className = 'browse-lib-badge';
+                badge.textContent = lib.name;
+                badge.title = lib.type + ' · ' + lib.arr;
+                row.appendChild(badge);
+            } else {
+                // Unregistered — show "Add as Library" button (admin only)
+                const addBtn = document.createElement('button');
+                addBtn.className = 'browse-add-lib admin-only';
+                addBtn.textContent = '+ Library';
+                addBtn.title = 'Add as library';
+                addBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // don't trigger dir expand
+                    if (typeof addLibraryFromStorage === 'function') {
+                        addLibraryFromStorage(entry.path);
+                    }
+                });
+                row.appendChild(addBtn);
+            }
+        }
+
         // Children container
         const children = document.createElement('div');
         children.className = 'browse-children';
@@ -137,6 +172,7 @@ function createBrowseEntry(entry, depth) {
 
         row.addEventListener('click', (e) => {
             if (e.target.classList.contains('browse-checkbox')) return;
+            if (e.target.closest('.browse-add-lib')) return;
             toggleDir(expand, children, entry.path);
         });
 
@@ -827,5 +863,5 @@ document.querySelectorAll('input[name="strategy"]').forEach(function(radio) {
 
 // On the dashboard this script is loaded on demand by openStorageExplorer()
 // in dashboard.js. Auto-init the browse tree immediately.
-loadBrowseRoots();
-loadImportLibraries();
+// Load libraries first so /media directory annotations are ready when the tree renders.
+loadImportLibraries().then(loadBrowseRoots);

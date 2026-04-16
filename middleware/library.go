@@ -127,10 +127,7 @@ var skipDirs = map[string]bool{
 
 // browseRoots returns the allowed top-level browse directories.
 func browseRoots() []string {
-	roots := []string{"/downloads"}
-	for _, lib := range GetLibraries() {
-		roots = append(roots, lib.ContainerPath())
-	}
+	roots := []string{"/downloads", "/media"}
 	if src := strings.TrimSpace(os.Getenv("IMPORT_SOURCE_DIR")); src != "" {
 		roots = append(roots, "/import-source")
 	}

@@ -45,15 +45,11 @@ func TestBuildStorageReport_GroupsByFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := monitoredVolumes
-	monitoredVolumes = []struct {
-		label string
-		path  string
-	}{
-		{"Alpha", sub1},
-		{"Beta", sub2},
+	monitoredVolumesOverride = []monitoredVolume{
+		{label: "Alpha", path: sub1, registered: true},
+		{label: "Beta", path: sub2, registered: true},
 	}
-	t.Cleanup(func() { monitoredVolumes = orig })
+	t.Cleanup(func() { monitoredVolumesOverride = nil })
 
 	report := buildStorageReport()
 
@@ -81,14 +77,10 @@ func TestBuildStorageReport_GroupsByFilesystem(t *testing.T) {
 
 func TestBuildStorageReport_Timestamp(t *testing.T) {
 	dir := t.TempDir()
-	orig := monitoredVolumes
-	monitoredVolumes = []struct {
-		label string
-		path  string
-	}{
-		{"Temp", dir},
+	monitoredVolumesOverride = []monitoredVolume{
+		{label: "Temp", path: dir, registered: true},
 	}
-	t.Cleanup(func() { monitoredVolumes = orig })
+	t.Cleanup(func() { monitoredVolumesOverride = nil })
 
 	report := buildStorageReport()
 	if report.Timestamp.IsZero() {
@@ -111,14 +103,10 @@ func TestComputeFolderSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := monitoredVolumes
-	monitoredVolumes = []struct {
-		label string
-		path  string
-	}{
-		{"Test", dir},
+	monitoredVolumesOverride = []monitoredVolume{
+		{label: "Test", path: dir, registered: true},
 	}
-	t.Cleanup(func() { monitoredVolumes = orig })
+	t.Cleanup(func() { monitoredVolumesOverride = nil })
 
 	// Reset cache first.
 	folderSizeMu.Lock()
