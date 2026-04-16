@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -249,6 +250,8 @@ func (s *ServiceClients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraPar
 }
 
 // CheckHealth checks if each service is reachable.
+// Each check uses a per-request 2-second context timeout so one dead backend
+// cannot block the entire call.
 func (s *ServiceClients) CheckHealth() map[string]string {
 	results := make(map[string]string)
 	checks := map[string]string{
@@ -263,22 +266,27 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	for name, url := range checks {
+	for name, checkURL := range checks {
 		wg.Add(1)
-		go func(name, url string) {
+		go func(name, checkURL string) {
 			defer wg.Done()
-			resp, err := s.client.Get(url)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
 			status := "down"
 			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode < 400 {
-					status = "up"
+				resp, err := s.client.Do(req)
+				if err == nil {
+					resp.Body.Close()
+					if resp.StatusCode < 400 {
+						status = "up"
+					}
 				}
 			}
 			mu.Lock()
 			results[name] = status
 			mu.Unlock()
-		}(name, url)
+		}(name, checkURL)
 	}
 
 	wg.Wait()
