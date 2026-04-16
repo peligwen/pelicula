@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -199,6 +200,22 @@ func (s *ServiceClients) ArrDelete(baseURL, apiKey, path string) ([]byte, error)
 // ArrPut makes a PUT request to a *arr service.
 func (s *ServiceClients) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return s.arrDo("PUT", baseURL, apiKey, path, payload)
+}
+
+// redactedURL returns the URL string with the "apikey" query parameter value
+// replaced by "[REDACTED]". Use this before logging any *arr service URLs.
+func redactedURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	q := u.Query()
+	if q.Get("apikey") != "" {
+		q.Set("apikey", "[REDACTED]")
+		copy := *u
+		copy.RawQuery = q.Encode()
+		return copy.String()
+	}
+	return u.String()
 }
 
 // ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.
