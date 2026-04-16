@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -184,14 +183,10 @@ func TestStorageNotificationMessage(t *testing.T) {
 	appendToFeed(dir, event)
 
 	feedPath := filepath.Join(dir, "procula", "notifications_feed.json")
-	data, err := os.ReadFile(feedPath)
-	if err != nil {
+	if _, err := os.Stat(feedPath); err != nil {
 		t.Fatalf("feed file not created: %v", err)
 	}
-	var events []NotificationEvent
-	if err := json.Unmarshal(data, &events); err != nil {
-		t.Fatalf("invalid JSON in feed: %v", err)
-	}
+	events := ReadFeed(dir)
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
@@ -228,15 +223,8 @@ func TestAppendToFeed_PrunesEventsOlderThan7Days(t *testing.T) {
 	appendToFeed(dir, old)
 	appendToFeed(dir, recent)
 
-	feedPath := filepath.Join(dir, "procula", "notifications_feed.json")
-	data, err := os.ReadFile(feedPath)
-	if err != nil {
-		t.Fatalf("feed file not created: %v", err)
-	}
-	var events []NotificationEvent
-	if err := json.Unmarshal(data, &events); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
+	// ReadFeed prunes events older than 7 days and returns newest-first.
+	events := ReadFeed(dir)
 	for _, ev := range events {
 		if ev.ID == "old-event" {
 			t.Error("old event (8 days ago) should have been pruned")

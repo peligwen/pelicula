@@ -306,20 +306,9 @@ func (s *Server) handleSubSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
-	feedPath := filepath.Join(s.configDir, "procula", "notifications_feed.json")
-	data, err := os.ReadFile(feedPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, []NotificationEvent{})
-			return
-		}
-		writeError(w, "failed to read notifications", http.StatusInternalServerError)
-		return
-	}
-	var events []NotificationEvent
-	if err := json.Unmarshal(data, &events); err != nil {
-		writeJSON(w, []NotificationEvent{})
-		return
+	events := ReadFeed(s.configDir)
+	if events == nil {
+		events = []NotificationEvent{}
 	}
 	writeJSON(w, events)
 }
