@@ -183,6 +183,17 @@ func mediaTypeFromPath(p string) string {
 	return "movie"
 }
 
+// isLibrarySlug reports whether slug matches any configured library's slug.
+// Used to distinguish a library directory name from a title-bearing parent dir.
+func isLibrarySlug(slug string) bool {
+	for _, lib := range getProculaLibraries() {
+		if lib.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
 // processingModeForPath returns the processing mode ("full", "audit", "off")
 // for the library that owns the given path. Falls back to "full".
 func processingModeForPath(path string) string {
