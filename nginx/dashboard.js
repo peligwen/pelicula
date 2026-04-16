@@ -344,15 +344,11 @@ function renderStorageFolders(data) {
     el.innerHTML = entries.sort((a,b) => b[1].size - a[1].size).map(([label, info]) => {
         const pct = grandTotal > 0 ? (info.size / grandTotal * 100).toFixed(0) : 0;
         const color = info.registered ? folderColor(label) : 'var(--faint)';
-        const addBtn = !info.registered
-            ? html`<button class="section-action admin-only" style="font-size:0.65rem;padding:0.1rem 0.4rem" onclick="addLibraryFromStorage(${JSON.stringify(info.path)})">+ Library</button>`.str
-            : '';
         return html`<div class="sm-folder-row">
             <div class="sm-folder-dot" style="background:${color};${!info.registered ? 'opacity:0.4' : ''}"></div>
             <div class="sm-folder-label" style="${!info.registered ? 'color:var(--muted);font-style:italic' : ''}">${label}</div>
             <div class="sm-folder-size">${formatSize(info.size)}</div>
             <div class="sm-folder-pct">${pct}%</div>
-            ${raw(addBtn)}
         </div>`.str;
     }).join('');
 }
@@ -398,16 +394,12 @@ function renderStorage(data) {
             const sizeText = f.size < 0 ? 'Calculating\u2026' : formatSize(f.size);
             const isRegistered = f.registered !== false;
             const color = isRegistered ? folderColor(f.label) : 'var(--faint)';
-            const addBtn = !isRegistered
-                ? html`<button class="section-action admin-only" style="font-size:0.65rem;padding:0.1rem 0.4rem;margin-top:0.2rem" onclick="addLibraryFromStorage(${JSON.stringify(f.path)})">+ Library</button>`.str
-                : '';
             return html`<div class="storage-folder">
                 <div class="storage-folder-header">
                     <span class="storage-folder-label" style="color:${color};${!isRegistered ? 'font-style:italic' : ''}">${f.label}</span>
                     <span class="storage-folder-size">${sizeText}</span>
                 </div>
                 <div class="download-bar-bg"><div class="download-bar storage-bar-folder" style="width:${folderPct}%;background:${color}${!isRegistered ? ';opacity:0.4' : ''}"></div></div>
-                ${raw(addBtn)}
             </div>`.str;
         }).join('');
 
@@ -442,88 +434,6 @@ function toggleStorageDisk(el) {
     if (!folders) return;
     const collapsed = folders.classList.toggle('collapsed');
     if (chevron) chevron.innerHTML = collapsed ? '&#9660;' : '&#9650;';
-}
-
-function addLibraryFromStorage(path) {
-    // Extract dirname from path (/media/anime → anime)
-    const name = path.split('/').filter(Boolean).pop() || '';
-    const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const title = name.replace(/[-_ ]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
-    // Build a small inline modal
-    const existing = document.getElementById('atl-modal');
-    if (existing) existing.remove();
-
-    const modal = document.createElement('div');
-    modal.id = 'atl-modal';
-    modal.className = 'se-modal';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)';
-    modal.innerHTML = html`<div class="se-modal-inner" style="min-width:320px;max-width:420px;width:90%">
-        <div class="se-modal-header">
-            <span class="se-modal-title">Add Library</span>
-            <button class="section-action" onclick="document.getElementById('atl-modal')?.remove()">&#10005;</button>
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-name">Name</label>
-            <input type="text" id="atl-name" class="settings-input" value="${title}">
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-slug">Slug</label>
-            <input type="text" id="atl-slug" class="settings-input" value="${slug}">
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-type">Type</label>
-            <select id="atl-type" class="settings-input">
-                <option value="other" selected>Other</option>
-                <option value="movies">Movies</option>
-                <option value="tvshows">TV Shows</option>
-                <option value="mixed">Mixed</option>
-            </select>
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-arr">Arr</label>
-            <select id="atl-arr" class="settings-input">
-                <option value="none" selected>None</option>
-                <option value="radarr">Radarr</option>
-                <option value="sonarr">Sonarr</option>
-            </select>
-        </div>
-        <div class="settings-actions" style="margin-top:0.75rem">
-            <button class="settings-save-btn" id="atl-submit" onclick="submitAddLibraryFromStorage(${JSON.stringify(path)})">Add Library</button>
-            <span class="settings-save-status" id="atl-status"></span>
-        </div>
-    </div>`.str;
-    document.body.appendChild(modal);
-    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-}
-
-async function submitAddLibraryFromStorage(path) {
-    const name = document.getElementById('atl-name')?.value.trim();
-    const slug = document.getElementById('atl-slug')?.value.trim();
-    const type = document.getElementById('atl-type')?.value || 'other';
-    const arr  = document.getElementById('atl-arr')?.value || 'none';
-    const btn  = document.getElementById('atl-submit');
-    const status = document.getElementById('atl-status');
-    if (!name || !slug) { if (status) status.textContent = 'Name and slug required'; return; }
-    if (btn) btn.disabled = true;
-    try {
-        const res = await tfetch('/api/pelicula/libraries', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, slug, type, arr, processing: 'audit' })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            if (status) status.textContent = err.error || 'Failed';
-            if (btn) btn.disabled = false;
-            return;
-        }
-        document.getElementById('atl-modal')?.remove();
-        await scanStorageNow();
-    } catch (e) {
-        if (status) status.textContent = 'Error: ' + e.message;
-        if (btn) btn.disabled = false;
-    }
 }
 
 // ── Libraries lane ────────────────────────

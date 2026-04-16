@@ -148,19 +148,6 @@ function createBrowseEntry(entry, depth) {
                 badge.textContent = lib.name;
                 badge.title = lib.type + ' · ' + lib.arr;
                 row.appendChild(badge);
-            } else {
-                // Unregistered — show "Add as Library" button (admin only)
-                const addBtn = document.createElement('button');
-                addBtn.className = 'browse-add-lib admin-only';
-                addBtn.textContent = '+ Library';
-                addBtn.title = 'Add as library';
-                addBtn.addEventListener('click', (e) => {
-                    e.stopPropagation(); // don't trigger dir expand
-                    if (typeof addLibraryFromStorage === 'function') {
-                        addLibraryFromStorage(entry.path);
-                    }
-                });
-                row.appendChild(addBtn);
             }
         }
 
@@ -172,7 +159,6 @@ function createBrowseEntry(entry, depth) {
 
         row.addEventListener('click', (e) => {
             if (e.target.classList.contains('browse-checkbox')) return;
-            if (e.target.closest('.browse-add-lib')) return;
             toggleDir(expand, children, entry.path);
         });
 
