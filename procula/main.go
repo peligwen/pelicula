@@ -67,7 +67,9 @@ func main() {
 	}
 	appDB = db
 
-	migrateAllJSON(db, configDir)
+	if os.Getenv("PROCULA_ALLOW_JSON_MIGRATION") == "1" {
+		migrateAllJSON(db, configDir)
+	}
 
 	q, err := NewQueue(db)
 	if err != nil {

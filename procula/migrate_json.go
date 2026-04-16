@@ -1,3 +1,4 @@
+// TODO: remove this file once legacy JSON installs are confirmed gone
 // migrate_json.go — one-time migration from legacy JSON flat files to SQLite.
 // Each function is idempotent: if the source files don't exist they return nil.
 // On success the JSON files/directory are renamed to *.migrated so they won't

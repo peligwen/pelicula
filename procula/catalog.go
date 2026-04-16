@@ -31,7 +31,7 @@ type NotificationEvent struct {
 const maxFeedEvents = 50
 
 // NotificationConfig controls how Procula sends external notifications.
-// Written to /config/procula/notifications.json by `./pelicula configure`.
+// Written to /config/procula/notifications.json by the dashboard Settings tab.
 type NotificationConfig struct {
 	Mode        string   `json:"mode"`         // "internal", "apprise", "direct"
 	AppriseURLs []string `json:"apprise_urls"` // provider URLs passed to the Apprise container

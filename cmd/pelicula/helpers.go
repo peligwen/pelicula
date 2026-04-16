@@ -45,11 +45,6 @@ func getScriptDir() string {
 	return start
 }
 
-// sudoRun creates an exec.Cmd prefixed with "sudo".
-func sudoRun(args ...string) *exec.Cmd {
-	return exec.Command("sudo", args...)
-}
-
 // openBrowser opens url in the default browser.
 func openBrowser(url string) {
 	var cmd *exec.Cmd

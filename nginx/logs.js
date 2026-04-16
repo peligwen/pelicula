@@ -5,7 +5,7 @@
 const ALL_SERVICES = [
     'pelicula-api', 'procula', 'nginx',
     'sonarr', 'radarr', 'prowlarr',
-    'qbittorrent', 'jellyfin', 'bazarr', 'gluetun',
+    'qbittorrent', 'jellyfin', 'bazarr', 'gluetun', 'docker-proxy',
 ];
 
 const logsState = {
