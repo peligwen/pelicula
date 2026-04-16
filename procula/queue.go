@@ -194,6 +194,36 @@ func (q *Queue) loadExisting() error {
 	return nil
 }
 
+// insertJobRow persists a new Job to the database. The caller is responsible
+// for populating all fields on j before calling. No signal is sent to q.pending.
+func (q *Queue) insertJobRow(j *Job) error {
+	sourceJSON, err := json.Marshal(j.Source)
+	if err != nil {
+		return fmt.Errorf("marshal source: %w", err)
+	}
+	var paramsJSON *string
+	if j.Params != nil {
+		b, _ := json.Marshal(j.Params)
+		s := string(b)
+		paramsJSON = &s
+	}
+	_, err = q.db.Exec(
+		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
+		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
+		                   action_type, params, result, flags)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL)`,
+		j.ID,
+		j.CreatedAt.Format(time.RFC3339Nano),
+		j.UpdatedAt.Format(time.RFC3339Nano),
+		string(j.State),
+		string(j.Stage),
+		string(sourceJSON),
+		j.ActionType,
+		paramsJSON,
+	)
+	return err
+}
+
 func (q *Queue) Create(source JobSource) (*Job, error) {
 	// Deduplicate: return existing job if the same path is already active.
 	// json_extract avoids LIKE wildcards that break on paths containing % or _.
@@ -211,38 +241,19 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 		}
 	}
 
-	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
 	now := time.Now().UTC()
-
-	sourceJSON, err := json.Marshal(source)
-	if err != nil {
-		return nil, fmt.Errorf("marshal source: %w", err)
-	}
-
-	_, err = q.db.Exec(
-		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
-		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result, flags)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, 'pipeline', NULL, NULL, NULL)`,
-		id,
-		now.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
-		string(StateQueued),
-		string(StageValidate),
-		string(sourceJSON),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert job: %w", err)
-	}
-
 	job := &Job{
-		ID:         id,
+		ID:         fmt.Sprintf("job_%d_%s", now.UnixMilli(), randStr(6)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		State:      StateQueued,
 		Stage:      StageValidate,
 		Source:     source,
 		ActionType: "pipeline",
+	}
+
+	if err := q.insertJobRow(job); err != nil {
+		return nil, fmt.Errorf("insert job: %w", err)
 	}
 
 	select {
@@ -258,40 +269,9 @@ func (q *Queue) Create(source JobSource) (*Job, error) {
 // always gets a fresh job row — dedup would corrupt in-flight pipeline jobs
 // that happen to share the same source path.
 func (q *Queue) createActionJob(source JobSource, actionType string, params map[string]any) (*Job, error) {
-	id := fmt.Sprintf("job_%d_%s", time.Now().UnixMilli(), randStr(6))
 	now := time.Now().UTC()
-
-	sourceJSON, err := json.Marshal(source)
-	if err != nil {
-		return nil, fmt.Errorf("marshal source: %w", err)
-	}
-	var paramsJSON *string
-	if params != nil {
-		b, _ := json.Marshal(params)
-		s := string(b)
-		paramsJSON = &s
-	}
-
-	_, err = q.db.Exec(
-		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
-		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result, flags)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL)`,
-		id,
-		now.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
-		string(StateQueued),
-		string(StageValidate),
-		string(sourceJSON),
-		actionType,
-		paramsJSON,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert action job: %w", err)
-	}
-
 	job := &Job{
-		ID:         id,
+		ID:         fmt.Sprintf("job_%d_%s", now.UnixMilli(), randStr(6)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		State:      StateQueued,
@@ -299,6 +279,10 @@ func (q *Queue) createActionJob(source JobSource, actionType string, params map[
 		Source:     source,
 		ActionType: actionType,
 		Params:     params,
+	}
+
+	if err := q.insertJobRow(job); err != nil {
+		return nil, fmt.Errorf("insert action job: %w", err)
 	}
 
 	select {
