@@ -1143,17 +1143,20 @@ func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
 		root = firstLibraryPath("radarr", "/media/movies")
 	}
 
-	payload := map[string]any{
-		"tmdbId":           item.TmdbID,
-		"title":            movie["title"],
-		"qualityProfileId": profileID,
-		"rootFolderPath":   root,
-		"monitored":        item.Monitored,
-		"addOptions": map[string]any{
-			"searchForMovie": false,
-		},
+	// Start from the full lookup object so Radarr gets all required fields
+	// (images, ratings, etc.), then overlay our config values.
+	movie["tmdbId"] = item.TmdbID
+	movie["qualityProfileId"] = profileID
+	movie["rootFolderPath"] = root
+	movie["monitored"] = item.Monitored
+	movie["addOptions"] = map[string]any{
+		"searchForMovie": false,
 	}
-	if _, err := services.ArrPost(radarrURL, apiKey, "/api/v3/movie", payload); err != nil {
+	body, err := services.ArrPost(radarrURL, apiKey, "/api/v3/movie", movie)
+	if err != nil {
+		if len(body) > 0 {
+			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
+		}
 		return err
 	}
 	return nil
@@ -1178,19 +1181,21 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 		root = firstLibraryPath("sonarr", "/media/tv")
 	}
 
-	payload := map[string]any{
-		"tvdbId":           item.TvdbID,
-		"title":            show["title"],
-		"qualityProfileId": profileID,
-		"rootFolderPath":   root,
-		"monitored":        item.Monitored,
-		"seasonFolder":     true,
-		"seasons":          show["seasons"],
-		"addOptions": map[string]any{
-			"searchForMissingEpisodes": false,
-		},
+	// Start from the full lookup object so Sonarr gets all required fields,
+	// then overlay our config values.
+	show["tvdbId"] = item.TvdbID
+	show["qualityProfileId"] = profileID
+	show["rootFolderPath"] = root
+	show["monitored"] = item.Monitored
+	show["seasonFolder"] = true
+	show["addOptions"] = map[string]any{
+		"searchForMissingEpisodes": false,
 	}
-	if _, err := services.ArrPost(sonarrURL, apiKey, "/api/v3/series", payload); err != nil {
+	body, err := services.ArrPost(sonarrURL, apiKey, "/api/v3/series", show)
+	if err != nil {
+		if len(body) > 0 {
+			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
+		}
 		return err
 	}
 	return nil
