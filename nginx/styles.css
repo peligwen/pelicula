@@ -1520,11 +1520,11 @@ details[open] .add-user-summary::before { content: '− '; }
 /* ── VPN port-forward warning banner ───────────────────────────────────── */
 .vpn-port-warn-banner {
     padding: 0.6rem 1rem;
-    background: rgba(224, 80, 80, 0.08);
-    border: 1px solid rgba(224, 80, 80, 0.25);
+    background: var(--lemon-l);
+    border: 1px solid rgba(248, 208, 64, 0.4);
     border-radius: 6px;
     font-size: 0.82rem;
-    color: #e05050;
+    color: var(--warn-deep);
     margin-bottom: 1rem;
     display: flex;
     align-items: center;
@@ -1532,16 +1532,16 @@ details[open] .add-user-summary::before { content: '− '; }
     flex-wrap: wrap;
 }
 .vpn-port-warn-banner button {
-    background: rgba(224, 80, 80, 0.12);
-    border: 1px solid rgba(224, 80, 80, 0.3);
-    color: #e05050;
+    background: rgba(248, 208, 64, 0.12);
+    border: 1px solid rgba(248, 208, 64, 0.4);
+    color: var(--warn);
     border-radius: 4px;
     padding: 0.2rem 0.6rem;
     font-size: 0.78rem;
     cursor: pointer;
     font-family: inherit;
 }
-.vpn-port-warn-banner button:hover { background: rgba(224, 80, 80, 0.2); }
+.vpn-port-warn-banner button:hover { background: rgba(248, 208, 64, 0.22); }
 .vpn-port-warn-banner button:disabled { opacity: 0.5; cursor: default; }
 .vpn-port-warn-banner .banner-dismiss {
     margin-left: auto;
@@ -1549,7 +1549,7 @@ details[open] .add-user-summary::before { content: '− '; }
     line-height: 1;
     padding: 0.1rem 0.4rem;
 }
-.vpn-v-error { color: #e05050 !important; }
+.vpn-v-error { color: var(--warn) !important; }
 
 /* ── Collapsible side panel ────────────────────────────────────────────── */
 

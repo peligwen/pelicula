@@ -31,7 +31,7 @@
         pips.forEach(p => {
             if (p.classList.contains('down') || p.classList.contains('unknown')) unhealthyCount++;
         });
-        const unhealthy = unhealthyCount > 0 || _panelVPNDegraded;
+        const unhealthy = unhealthyCount > 0;
         document.body.classList.toggle('panel-alert', unhealthy);
     }
 
