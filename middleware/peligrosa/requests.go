@@ -11,10 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"pelicula-api/clients"
-	"pelicula-api/httputil"
 	"strings"
 	"time"
+
+	"pelicula-api/clients"
+	"pelicula-api/httputil"
 )
 
 // RequestState represents the lifecycle state of a media request.
@@ -187,6 +188,7 @@ func (s *RequestStore) All() []*MediaRequest {
 	// Collect rows first, then close before making additional queries.
 	// (SQLite MaxOpenConns=1: keeping rows open while issuing another query deadlocks.)
 	var result []*MediaRequest
+	var ids []string
 	for rows.Next() {
 		var req MediaRequest
 		var createdAt, updatedAt string
@@ -221,19 +223,52 @@ func (s *RequestStore) All() []*MediaRequest {
 			req.UpdatedAt = t
 		}
 		result = append(result, &req)
+		ids = append(ids, req.ID)
 	}
 	if err := rows.Err(); err != nil {
 		slog.Warn("requests: all rows iteration error", "component", "requests", "error", err)
 	}
-	rows.Close() // must close before loadHistory queries
+	rows.Close() // must close before history query
 
-	// Now load history for each request (connection is free).
-	for _, req := range result {
-		history, _ := s.loadHistory(req.ID)
-		if history == nil {
-			history = []RequestEvent{}
+	if len(result) == 0 {
+		return []*MediaRequest{}
+	}
+
+	// Fetch all history events in one query and group by request_id in memory,
+	// avoiding an N+1 pattern (one loadHistory call per request row).
+	historyMap := make(map[string][]RequestEvent, len(ids))
+	for _, id := range ids {
+		historyMap[id] = []RequestEvent{} // ensure every request has a non-nil slice
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := "SELECT request_id, at, state, actor, note FROM request_events WHERE request_id IN (" +
+		strings.Join(placeholders, ",") + ") ORDER BY at"
+	evRows, err := s.db.Query(query, args...)
+	if err == nil {
+		defer evRows.Close()
+		for evRows.Next() {
+			var ev RequestEvent
+			var requestID, atStr string
+			if err := evRows.Scan(&requestID, &atStr, &ev.State, &ev.Actor, &ev.Note); err != nil {
+				continue
+			}
+			if t, parseErr := time.Parse(time.RFC3339Nano, atStr); parseErr == nil {
+				ev.At = t
+			} else if t, parseErr := time.Parse(time.RFC3339, atStr); parseErr == nil {
+				ev.At = t
+			}
+			historyMap[requestID] = append(historyMap[requestID], ev)
 		}
-		req.History = history
+	}
+
+	for _, req := range result {
+		req.History = historyMap[req.ID]
 	}
 	return result
 }
