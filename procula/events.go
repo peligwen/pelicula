@@ -129,11 +129,18 @@ func (el *EventLog) Read(limit, offset int, f EventFilter) ([]PipelineEvent, int
 	lines := el.readLines(el.path)
 	lines = append(lines, el.readLines(el.path+".1")...)
 
-	// Filter
+	// Filter by event type using exact JSON field matching.
 	if f.Type != "" {
+		type typeOnly struct {
+			Type string `json:"type"`
+		}
 		filtered := lines[:0]
 		for _, l := range lines {
-			if strings.Contains(l, `"`+f.Type+`"`) {
+			var ev typeOnly
+			if err := json.Unmarshal([]byte(l), &ev); err != nil {
+				continue // skip unparseable lines rather than including them
+			}
+			if ev.Type == f.Type {
 				filtered = append(filtered, l)
 			}
 		}

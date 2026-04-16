@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -58,6 +59,8 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", finalPath, "profile", profile.Name)
 
 	cmd := exec.CommandContext(ctx, ffmpegCommand, args...)
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", fmt.Errorf("stderr pipe: %w", err)
@@ -143,7 +146,8 @@ func preferredAudioLang() string {
 
 func buildFFmpegArgs(input, output string, p *TranscodeProfile, codecs *CodecInfo) []string {
 	args := []string{
-		"-y", // overwrite output without prompting
+		"-nostdin", // never read from stdin
+		"-y",       // overwrite output without prompting
 		"-i", input,
 	}
 
