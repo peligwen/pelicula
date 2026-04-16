@@ -1281,6 +1281,34 @@ details[open] .add-user-summary::before { content: '− '; }
 .sm-folder-size  { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 5rem; text-align: right; }
 .sm-folder-pct   { font-size: 0.68rem; color: var(--faint); min-width: 2.5rem; text-align: right; }
 
+/* Library lane badges (type/arr pills on registered library rows) */
+.sm-lib-badge {
+    font-size: 0.62rem; color: var(--muted); background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 0.1rem 0.4rem; white-space: nowrap; flex-shrink: 0;
+}
+
+/* Inline library form (create / register / edit) */
+.lib-form {
+    margin: 0.25rem 0 0.5rem; padding: 0.75rem 0.85rem;
+    background: var(--panel); border: 1.5px solid var(--border2);
+    border-radius: 12px;
+}
+.lib-form-row { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+.lib-form-row:last-child { border-bottom: none; }
+.lib-form-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.lib-form-input {
+    width: 100%; padding: 0.35rem 0.6rem; border-radius: 8px;
+    border: 1.5px solid var(--border2); background: var(--bg);
+    font-size: 0.8rem; color: var(--ink); font-family: inherit;
+    box-sizing: border-box;
+}
+.lib-form-input:focus { outline: none; border-color: var(--pink); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
+.lib-form-actions { display: flex; align-items: center; gap: 0.5rem; padding-top: 0.6rem; flex-wrap: wrap; }
+.lib-form-error { font-size: 0.75rem; color: var(--pink); margin-left: auto; }
+.lib-slug-display { font-size: 0.78rem; color: var(--ink); font-family: monospace; }
+.lib-slug-edit { font-size: 0.68rem; color: var(--pink); cursor: pointer; margin-left: 0.4rem; background: none; border: none; padding: 0; text-decoration: underline; }
+
 /* ── Requests section ──────────────────────────────────────────────────── */
 .requests-lane-header {
     font-size: 0.6rem; color: var(--muted); text-transform: uppercase;
