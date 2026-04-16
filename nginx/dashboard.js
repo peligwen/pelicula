@@ -479,7 +479,7 @@ function renderLibrariesLane(storageData, libraries) {
     const seenPaths = new Set();
     for (const fs of (storageData.filesystems || [])) {
         for (const f of (fs.folders || [])) {
-            if (f.registered === false && !seenPaths.has(f.path)) {
+            if (f.registered === false && f.path && f.path.startsWith('/media/') && !seenPaths.has(f.path)) {
                 seenPaths.add(f.path);
                 discovered.push(f);
             }
@@ -503,7 +503,7 @@ function renderLibrariesLane(storageData, libraries) {
         rows += html`<div class="sm-folder-row lib-row" id="lib-row-${lib.slug}">
             <div class="sm-folder-dot" style="background:${color}"></div>
             <div class="sm-folder-label">
-                <span class="lib-row-name">${lib.name}</span>
+                <span class="lib-row-name" title="${lib.name}">${lib.name}</span>
                 ${raw((typeBadge || arrBadge) ? '<div class="sm-lib-badge-row">' + typeBadge + arrBadge + '</div>' : '')}
             </div>
             <div class="sm-folder-size">${size}</div>
@@ -519,7 +519,7 @@ function renderLibrariesLane(storageData, libraries) {
         rows += html`<div class="sm-folder-row lib-row" id="lib-row-disc-${dirName}">
             <div class="sm-folder-dot" style="background:var(--faint);opacity:0.4"></div>
             <div class="sm-folder-label">
-                <span class="lib-row-name lib-row-name-muted">${f.label}</span>
+                <span class="lib-row-name lib-row-name-muted" title="${f.label}">${f.label}</span>
             </div>
             <div class="sm-folder-size">${size}</div>
             <button class="section-action admin-only lib-row-action" onclick="openLibraryModal(${JSON.stringify(dirName)}, 'register', ${fdata})">Register</button>
@@ -895,19 +895,37 @@ function _ensureStorageExplorerLoaded() {
     document.head.appendChild(s);
 }
 
+function switchStorageTab(tab) {
+    const tabs = document.querySelectorAll('.storage-tab');
+    const panels = document.querySelectorAll('.storage-tab-panel');
+    tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.stab === tab));
+    panels.forEach(panel => panel.classList.toggle('hidden', panel.id !== `storage-tab-${tab}`));
+    if (tab === 'explorer') _ensureStorageExplorerLoaded();
+}
+
+function toggleStorageSettings() {
+    const pop = document.getElementById('storage-settings-popover');
+    if (!pop) return;
+    const isHidden = pop.classList.toggle('hidden');
+    if (!isHidden) {
+        // close on outside click
+        const onOutside = e => {
+            if (!pop.contains(e.target) && !e.target.closest('[onclick*="toggleStorageSettings"]')) {
+                pop.classList.add('hidden');
+                document.removeEventListener('click', onOutside, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', onOutside, true), 0);
+    }
+}
+
 function openStorageExplorer() {
     if (window.switchTab) switchTab('storage');
-    const section = document.getElementById('storage-explorer-section');
-    if (section) {
-        section.classList.remove('hidden');
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    _ensureStorageExplorerLoaded();
+    switchStorageTab('explorer');
 }
 
 function closeStorageExplorer() {
-    const section = document.getElementById('storage-explorer-section');
-    if (section) section.classList.add('hidden');
+    switchStorageTab('folder');
 }
 
 async function checkVPNStatus() {

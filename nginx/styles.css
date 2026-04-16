@@ -1259,6 +1259,29 @@ details[open] .add-user-summary::before { content: '− '; }
 .add-user-summary:hover { color: var(--muted); }
 
 /* ── Storage Management ────────────────────────────────────────────────── */
+
+/* Two-column layout: wide Libraries left, tabbed detail panel right */
+.storage-lanes { display: grid !important; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+
+/* Tabbed right panel */
+.storage-right-panel { display: flex; flex-direction: column; min-width: 0; }
+.storage-tabs { display: flex; gap: 0.15rem; border-bottom: 1.5px solid var(--border); margin-bottom: 0.75rem; }
+.storage-tab {
+    background: none; border: none; cursor: pointer;
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); padding: 0.3rem 0.6rem 0.45rem; border-bottom: 2px solid transparent; margin-bottom: -1.5px;
+    transition: color 0.15s;
+}
+.storage-tab:hover { color: var(--ink); }
+.storage-tab.active { color: var(--pink); border-bottom-color: var(--pink); }
+.storage-tab-panel { min-width: 0; }
+
+/* Settings popover inside the Libraries lane header */
+.storage-settings-popover {
+    background: var(--panel); border: 1.5px solid var(--border2); border-radius: 10px;
+    padding: 0.6rem 0.75rem; margin: 0.25rem 0 0.5rem; display: flex; flex-direction: column; gap: 0.4rem;
+}
+
 .sm-settings { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.25rem 0; }
 .sm-setting-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--muted); }
 .sm-threshold-input {
@@ -1306,14 +1329,15 @@ details[open] .add-user-summary::before { content: '− '; }
 .lib-form-input:focus { outline: none; border-color: var(--pink); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
 .lib-form-actions { display: flex; align-items: center; gap: 0.5rem; padding-top: 0.6rem; flex-wrap: wrap; }
 .lib-form-error { font-size: 0.75rem; color: var(--pink); margin-left: auto; }
+.lib-form-hint  { font-size: 0.68rem; color: var(--muted); margin-top: 0.15rem; line-height: 1.4; }
 .lib-slug-display { font-size: 0.78rem; color: var(--ink); font-family: monospace; }
 .lib-slug-edit { font-size: 0.68rem; color: var(--pink); cursor: pointer; margin-left: 0.4rem; background: none; border: none; padding: 0; text-decoration: underline; }
 .lib-modal { width: min(440px, 92vw); }
 .lib-form-row select, .lib-form-row input { margin-bottom: 0; }
 
 /* Library lane row layout — scoped to .lib-row to avoid affecting By-Folder lane */
-.lib-row .sm-folder-label { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; align-items: flex-start; justify-content: center; font-weight: inherit; font-family: inherit; }
-.lib-row-name { font-size: 0.78rem; font-weight: 600; font-family: var(--font-display, 'Nunito', sans-serif); line-height: 1.2; overflow-wrap: anywhere; color: var(--ink); }
+.lib-row .sm-folder-label { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; overflow: hidden; align-items: flex-start; justify-content: center; font-weight: inherit; font-family: inherit; }
+.lib-row-name { font-size: 0.78rem; font-weight: 600; font-family: var(--font-display, 'Nunito', sans-serif); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; color: var(--ink); }
 .lib-row-name-muted { font-style: italic; color: var(--muted); }
 .sm-lib-badge-row { display: flex; flex-wrap: wrap; gap: 0.2rem; }
 .lib-row-action { font-size: 0.65rem; padding: 0.1rem 0.4rem; flex-shrink: 0; }

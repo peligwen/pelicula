@@ -12,6 +12,25 @@ import (
 	"time"
 )
 
+// systemDirs lists top-level directory names under /media that should never be
+// surfaced as unregistered library candidates. These are OS/NAS artifacts that
+// have no business showing up with a REGISTER button.
+var systemDirDenylist = map[string]bool{
+	"@eadir":                    true, // Synology thumbnail cache
+	"@synoesource":              true, // Synology resource fork
+	"@tmp":                      true,
+	"#recycle":                  true, // Synology Recycle Bin
+	"#snapshot":                 true, // Synology snapshots
+	"lost+found":                true, // Linux fs recovery dir
+	"thumbs.db":                 true,
+	"system volume information": true,
+	"$recycle.bin":              true,
+}
+
+func isSystemDir(name string) bool {
+	return systemDirDenylist[strings.ToLower(name)]
+}
+
 // videoExtensions is the set of file extensions treated as video files for the
 // has_media check on unregistered folders.
 var videoExtensions = map[string]bool{
@@ -90,7 +109,7 @@ func getMonitoredVolumes() []monitoredVolume {
 	entries, err := os.ReadDir("/media")
 	if err == nil {
 		for _, de := range entries {
-			if !de.IsDir() || strings.HasPrefix(de.Name(), ".") {
+			if !de.IsDir() || strings.HasPrefix(de.Name(), ".") || isSystemDir(de.Name()) {
 				continue
 			}
 			p := "/media/" + de.Name()

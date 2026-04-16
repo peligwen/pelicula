@@ -180,74 +180,60 @@
                         <div class="um-metric-label">Status</div>
                     </div>
                 </div>
-                <div class="um-lanes">
+                <div class="um-lanes storage-lanes">
+                    <!-- Left: Libraries (wider) -->
                     <div class="um-lane admin-only" id="libraries-lane-container">
                         <div class="um-lane-header">
                             <span>Libraries</span>
+                            <button class="section-action admin-only" onclick="toggleStorageSettings()" title="Storage settings" aria-label="Storage settings">&#9881;</button>
                             <button class="section-action" id="lib-add-btn" onclick="openLibraryModal(null, 'create')">+ New Library</button>
+                        </div>
+                        <div class="storage-settings-popover hidden" id="storage-settings-popover">
+                            <label class="sm-setting-row">Warn at
+                                <input type="number" id="sm-warn-pct" class="sm-threshold-input" min="50" max="99"> %
+                            </label>
+                            <label class="sm-setting-row">Critical at
+                                <input type="number" id="sm-crit-pct" class="sm-threshold-input" min="50" max="99"> %
+                            </label>
+                            <div class="sm-last-scan">Last scan: <span id="sm-last-scan">—</span></div>
                         </div>
                         <div id="libraries-lane"></div>
                     </div>
-                    <div class="um-lane">
-                        <div class="um-lane-header"><span>Volumes</span></div>
-                        <div id="storage-list"></div>
-                    </div>
-                    <div class="um-lane">
-                        <div class="um-lane-header"><span>By folder</span></div>
-                        <div id="sm-folder-list"></div>
-                    </div>
-                    <div class="um-lane admin-only">
-                        <details class="users-details">
-                            <summary class="um-lane-header">
-                                <span>Settings</span>
-                                <span class="um-lane-hint">expand</span>
-                            </summary>
-                            <div class="sm-settings">
-                                <label class="sm-setting-row">Warn at
-                                    <input type="number" id="sm-warn-pct" class="sm-threshold-input" min="50" max="99"> %
-                                </label>
-                                <label class="sm-setting-row">Critical at
-                                    <input type="number" id="sm-crit-pct" class="sm-threshold-input" min="50" max="99"> %
-                                </label>
-                                <div class="sm-last-scan">Last scan: <span id="sm-last-scan">—</span></div>
+                    <!-- Right: tabbed detail panel -->
+                    <div class="storage-right-panel">
+                        <div class="storage-tabs">
+                            <button class="storage-tab active" data-stab="folder" onclick="switchStorageTab('folder')">By folder</button>
+                            <button class="storage-tab" data-stab="volumes" onclick="switchStorageTab('volumes')">Volumes</button>
+                            <button class="storage-tab" data-stab="explorer" onclick="switchStorageTab('explorer')">Explorer</button>
+                        </div>
+                        <div class="storage-tab-panel" id="storage-tab-folder">
+                            <div id="sm-folder-list"></div>
+                        </div>
+                        <div class="storage-tab-panel hidden" id="storage-tab-volumes">
+                            <div id="storage-list"></div>
+                        </div>
+                        <div class="storage-tab-panel hidden" id="storage-tab-explorer" data-testid="storage-explorer-section">
+                            <div class="section-header" style="margin-top:0.25rem">
+                                <span>Media files</span>
+                                <span class="import-selected-count" id="selected-count"></span>
                             </div>
-                        </details>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Storage Explorer (media browser with import + transcode actions) -->
-            <div class="section hidden" id="storage-explorer-section" data-testid="storage-explorer-section">
-                <div class="um-hero">
-                    <div class="um-hero-title-row">
-                        <span class="um-hero-icon">&#128193;</span>
-                        <h2 class="um-hero-title">Storage Explorer</h2>
-                        <button class="section-action" onclick="closeStorageExplorer()">&#10005; Close</button>
-                    </div>
-                    <p class="um-hero-sub">Browse, import, and transcode media files</p>
-                </div>
-
-                <!-- Browse tree -->
-                <div class="section-header">
-                    <span>Media files</span>
-                    <span class="import-selected-count" id="selected-count"></span>
-                </div>
-                <div class="browse-tree" id="browse-tree" data-testid="browse-tree">
-                    <div class="no-items">Loading directories...</div>
-                </div>
-
-                <!-- Bulk action bar (shown when selection > 0) -->
-                <div class="action-bar hidden" id="action-bar">
-                    <div class="action-bar-left">
-                        <span id="action-bar-count"></span>
-                        <button class="import-btn" onclick="clearSelection()">Clear</button>
-                    </div>
-                    <div class="action-bar-right">
-                        <button class="import-btn" id="btn-import" data-testid="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
+                            <div class="browse-tree" id="browse-tree" data-testid="browse-tree">
+                                <div class="no-items">Loading directories...</div>
+                            </div>
+                            <div class="action-bar hidden" id="action-bar">
+                                <div class="action-bar-left">
+                                    <span id="action-bar-count"></span>
+                                    <button class="import-btn" onclick="clearSelection()">Clear</button>
+                                </div>
+                                <div class="action-bar-right">
+                                    <button class="import-btn" id="btn-import" data-testid="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Import modal -->
+                <!-- Import modal (fixed overlay — parent position irrelevant) -->
                 <div class="se-modal hidden" id="import-modal" data-testid="import-modal">
                     <div class="se-modal-inner">
                         <div class="se-modal-header">
@@ -348,6 +334,9 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Storage Explorer section stub — kept for URL hash back-compat (#storage-explorer) -->
+            <div class="section hidden" id="storage-explorer-section"></div>
 
             <!-- Activity -->
             <div class="section" id="activity-section">
@@ -750,8 +739,9 @@
                 <input id="lib-form-name" class="lib-form-input" type="text" placeholder="Library name" autocomplete="off">
             </div>
             <div class="lib-form-row" id="lib-form-slug-row">
-                <label class="lib-form-label" for="lib-form-slug-input">Folder slug</label>
-                <input id="lib-form-slug-input" class="lib-form-input" type="text" placeholder="slug">
+                <label class="lib-form-label" for="lib-form-slug-input">Folder</label>
+                <input id="lib-form-slug-input" class="lib-form-input" type="text" placeholder="e.g. anime-movies">
+                <div class="lib-form-hint">Used as the folder name under /media/ and in URLs. Lowercase, numbers, and dashes only.</div>
             </div>
             <div class="lib-form-row">
                 <label class="lib-form-label" for="lib-form-type">Type</label>
