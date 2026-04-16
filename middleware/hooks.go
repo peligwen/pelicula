@@ -234,8 +234,9 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch status and jobs in parallel
 	type result struct {
-		body []byte
-		err  error
+		body       []byte
+		statusCode int
+		err        error
 	}
 	statusCh := make(chan result, 1)
 	jobsCh := make(chan result, 1)
@@ -248,7 +249,7 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		statusCh <- result{body: b}
+		statusCh <- result{body: b, statusCode: resp.StatusCode}
 	}()
 	go func() {
 		resp, err := services.client.Get(base + "/api/procula/jobs")
@@ -258,21 +259,35 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		jobsCh <- result{body: b}
+		jobsCh <- result{body: b, statusCode: resp.StatusCode}
 	}()
 
 	statusRes := <-statusCh
 	jobsRes := <-jobsCh
 
+	// Network error reaching procula — signal as 502 with retryable flag.
 	if statusRes.err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":     "processing service unavailable",
+			"retryable": true,
+		})
+		return
+	}
+
+	// Non-2xx from procula — forward status code and body verbatim.
+	if statusRes.statusCode >= 300 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusRes.statusCode)
+		w.Write(statusRes.body)
 		return
 	}
 
 	// Merge into one response: {status: {...}, jobs: [...]}
 	var statusData, jobsData any
 	json.Unmarshal(statusRes.body, &statusData)
-	if jobsRes.err == nil {
+	if jobsRes.err == nil && jobsRes.statusCode < 300 {
 		json.Unmarshal(jobsRes.body, &jobsData)
 	}
 
