@@ -220,9 +220,13 @@ async function checkNotifications() {
 // ── Storage Management ────────────────────
 async function checkStorage() {
     try {
-        const res = await tfetch('/api/pelicula/storage');
-        if (!res.ok) return;
-        const data = await res.json();
+        const [storageRes, libsRes] = await Promise.all([
+            tfetch('/api/pelicula/storage'),
+            tfetch('/api/pelicula/libraries'),
+        ]);
+        if (!storageRes.ok) return;
+        const data = await storageRes.json();
+        const libs = libsRes.ok ? await libsRes.json().catch(() => []) : [];
         const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
         if (!filesystems.length) return;
         document.getElementById('storage-section').classList.remove('hidden');
@@ -230,6 +234,7 @@ async function checkStorage() {
         renderStorageMetrics(data);
         renderStorageFolders(data);
         renderStorageTimestamp(data.timestamp);
+        renderLibrariesLane(data, Array.isArray(libs) ? libs : []);
     } catch (e) { console.warn('[pelicula] storage error:', e); }
 }
 
@@ -339,15 +344,11 @@ function renderStorageFolders(data) {
     el.innerHTML = entries.sort((a,b) => b[1].size - a[1].size).map(([label, info]) => {
         const pct = grandTotal > 0 ? (info.size / grandTotal * 100).toFixed(0) : 0;
         const color = info.registered ? folderColor(label) : 'var(--faint)';
-        const addBtn = !info.registered
-            ? html`<button class="section-action admin-only" style="font-size:0.65rem;padding:0.1rem 0.4rem" onclick="addLibraryFromStorage(${JSON.stringify(info.path)})">+ Library</button>`.str
-            : '';
         return html`<div class="sm-folder-row">
             <div class="sm-folder-dot" style="background:${color};${!info.registered ? 'opacity:0.4' : ''}"></div>
             <div class="sm-folder-label" style="${!info.registered ? 'color:var(--muted);font-style:italic' : ''}">${label}</div>
             <div class="sm-folder-size">${formatSize(info.size)}</div>
             <div class="sm-folder-pct">${pct}%</div>
-            ${raw(addBtn)}
         </div>`.str;
     }).join('');
 }
@@ -393,16 +394,12 @@ function renderStorage(data) {
             const sizeText = f.size < 0 ? 'Calculating\u2026' : formatSize(f.size);
             const isRegistered = f.registered !== false;
             const color = isRegistered ? folderColor(f.label) : 'var(--faint)';
-            const addBtn = !isRegistered
-                ? html`<button class="section-action admin-only" style="font-size:0.65rem;padding:0.1rem 0.4rem;margin-top:0.2rem" onclick="addLibraryFromStorage(${JSON.stringify(f.path)})">+ Library</button>`.str
-                : '';
             return html`<div class="storage-folder">
                 <div class="storage-folder-header">
                     <span class="storage-folder-label" style="color:${color};${!isRegistered ? 'font-style:italic' : ''}">${f.label}</span>
                     <span class="storage-folder-size">${sizeText}</span>
                 </div>
                 <div class="download-bar-bg"><div class="download-bar storage-bar-folder" style="width:${folderPct}%;background:${color}${!isRegistered ? ';opacity:0.4' : ''}"></div></div>
-                ${raw(addBtn)}
             </div>`.str;
         }).join('');
 
@@ -439,85 +436,397 @@ function toggleStorageDisk(el) {
     if (chevron) chevron.innerHTML = collapsed ? '&#9660;' : '&#9650;';
 }
 
-function addLibraryFromStorage(path) {
-    // Extract dirname from path (/media/anime → anime)
-    const name = path.split('/').filter(Boolean).pop() || '';
-    const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const title = name.replace(/[-_ ]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+// ── Libraries lane ────────────────────────
 
-    // Build a small inline modal
-    const existing = document.getElementById('atl-modal');
-    if (existing) existing.remove();
+// Inject CSS once for library lane elements
+(function injectLibraryStyles() {
+    if (document.getElementById('lib-lane-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'lib-lane-styles';
+    s.textContent = [
+        '.sm-lib-badge{display:inline-block;font-size:0.6rem;padding:0.1rem 0.35rem;border-radius:3px;background:var(--border);color:var(--muted);margin-right:0.2rem;vertical-align:middle}',
+        '.lib-form{background:var(--bg-card,var(--card));border:1px solid var(--border);border-radius:6px;padding:0.75rem 1rem;margin:0.3rem 0 0.5rem;display:flex;flex-direction:column;gap:0.5rem}',
+        '.lib-form-row{display:flex;align-items:center;gap:0.5rem}',
+        '.lib-form-label{font-size:0.75rem;color:var(--muted);width:7rem;flex-shrink:0}',
+        '.lib-form-input{flex:1;background:var(--input,var(--bg));border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.4rem;font-size:0.8rem;color:var(--text)}',
+        '.lib-form-actions{display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem}',
+        '.lib-form-error{color:#e07070;font-size:0.75rem;margin-left:auto}',
+        '.lib-slug-display{font-size:0.78rem;color:var(--muted);font-family:monospace}',
+        '.lib-slug-edit{font-size:0.7rem;color:var(--accent,#7080e8);cursor:pointer;margin-left:0.3rem;text-decoration:underline;background:none;border:none;padding:0}',
+    ].join('\n');
+    document.head.appendChild(s);
+})();
 
-    const modal = document.createElement('div');
-    modal.id = 'atl-modal';
-    modal.className = 'se-modal';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)';
-    modal.innerHTML = html`<div class="se-modal-inner" style="min-width:320px;max-width:420px;width:90%">
-        <div class="se-modal-header">
-            <span class="se-modal-title">Add Library</span>
-            <button class="section-action" onclick="document.getElementById('atl-modal')?.remove()">&#10005;</button>
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-name">Name</label>
-            <input type="text" id="atl-name" class="settings-input" value="${title}">
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-slug">Slug</label>
-            <input type="text" id="atl-slug" class="settings-input" value="${slug}">
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-type">Type</label>
-            <select id="atl-type" class="settings-input">
-                <option value="other" selected>Other</option>
-                <option value="movies">Movies</option>
-                <option value="tvshows">TV Shows</option>
-                <option value="mixed">Mixed</option>
-            </select>
-        </div>
-        <div class="settings-field-row" style="margin-bottom:0.5rem">
-            <label class="settings-field-label" for="atl-arr">Arr</label>
-            <select id="atl-arr" class="settings-input">
-                <option value="none" selected>None</option>
-                <option value="radarr">Radarr</option>
-                <option value="sonarr">Sonarr</option>
-            </select>
-        </div>
-        <div class="settings-actions" style="margin-top:0.75rem">
-            <button class="settings-save-btn" id="atl-submit" onclick="submitAddLibraryFromStorage(${JSON.stringify(path)})">Add Library</button>
-            <span class="settings-save-status" id="atl-status"></span>
-        </div>
-    </div>`.str;
-    document.body.appendChild(modal);
-    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+function _autoSlug(s) {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-async function submitAddLibraryFromStorage(path) {
-    const name = document.getElementById('atl-name')?.value.trim();
-    const slug = document.getElementById('atl-slug')?.value.trim();
-    const type = document.getElementById('atl-type')?.value || 'other';
-    const arr  = document.getElementById('atl-arr')?.value || 'none';
-    const btn  = document.getElementById('atl-submit');
-    const status = document.getElementById('atl-status');
-    if (!name || !slug) { if (status) status.textContent = 'Name and slug required'; return; }
-    if (btn) btn.disabled = true;
-    try {
-        const res = await tfetch('/api/pelicula/libraries', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, slug, type, arr, processing: 'audit' })
+function _guessType(slug) {
+    const s = (slug || '').toLowerCase();
+    if (/anime|cartoon|show|series|episode|\btv\b|television/.test(s)) return 'tvshows';
+    if (/movie|film|cinema/.test(s)) return 'movies';
+    return 'other';
+}
+
+function _arrForType(type) {
+    if (type === 'movies') return 'radarr';
+    if (type === 'tvshows') return 'sonarr';
+    return 'none';
+}
+
+function _titleCase(s) {
+    return (s || '').replace(/[-_ ]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+}
+
+function renderLibrariesLane(storageData, libraries) {
+    const el = document.getElementById('libraries-lane');
+    if (!el) return;
+
+    // Build slug -> size map from all filesystems
+    const sizeBySlug = {};
+    for (const fs of (storageData.filesystems || [])) {
+        for (const f of (fs.folders || [])) {
+            if (f.slug && f.size >= 0) {
+                sizeBySlug[f.slug] = (sizeBySlug[f.slug] || 0) + f.size;
+            }
+        }
+    }
+
+    // Collect unregistered folders that have media (Group 2)
+    const discovered = [];
+    const seenPaths = new Set();
+    for (const fs of (storageData.filesystems || [])) {
+        for (const f of (fs.folders || [])) {
+            if (f.registered === false && f.has_media === true && !seenPaths.has(f.path)) {
+                seenPaths.add(f.path);
+                discovered.push(f);
+            }
+        }
+    }
+
+    if (!libraries.length && !discovered.length) {
+        el.innerHTML = html`<div style="color:var(--muted);font-size:0.82rem;padding:0.5rem 0">No libraries yet.</div>`.str;
+        return;
+    }
+
+    let rows = '';
+
+    // Group 1: registered libraries
+    for (const lib of libraries) {
+        const size = sizeBySlug[lib.slug] != null ? formatSize(sizeBySlug[lib.slug]) : '';
+        const color = folderColor(lib.slug);
+        const typeBadge = lib.type ? html`<span class="sm-lib-badge">${lib.type}</span>`.str : '';
+        const arrBadge  = (lib.arr && lib.arr !== 'none') ? html`<span class="sm-lib-badge">${lib.arr}</span>`.str : '';
+        const editData  = JSON.stringify(lib);
+        rows += html`<div class="sm-folder-row" id="lib-row-${lib.slug}">
+            <div class="sm-folder-dot" style="background:${color}"></div>
+            <div class="sm-folder-label">${lib.name}${raw(typeBadge)}${raw(arrBadge)}</div>
+            <div class="sm-folder-size">${size}</div>
+            <div class="sm-folder-pct"></div>
+            <button class="section-action admin-only" style="font-size:0.65rem;padding:0.1rem 0.4rem" onclick="expandLibraryForm(${JSON.stringify(lib.slug)}, 'edit', ${editData})">Edit</button>
+        </div>`.str;
+    }
+
+    // Group 2: discovered unregistered folders
+    for (const f of discovered) {
+        const dirName = f.path.split('/').pop();
+        const size = f.size >= 0 ? formatSize(f.size) : '';
+        const fdata = JSON.stringify({path: f.path, label: f.label, size: f.size});
+        rows += html`<div class="sm-folder-row" id="lib-row-disc-${dirName}">
+            <div class="sm-folder-dot" style="background:var(--faint);opacity:0.4"></div>
+            <div class="sm-folder-label" style="color:var(--muted);font-style:italic">${f.label}</div>
+            <div class="sm-folder-size">${size}</div>
+            <div class="sm-folder-pct"></div>
+            <button class="section-action admin-only" style="font-size:0.65rem;padding:0.1rem 0.4rem" onclick="expandLibraryForm(${JSON.stringify(dirName)}, 'register', ${fdata})">Register</button>
+        </div>`.str;
+    }
+
+    el.innerHTML = rows;
+}
+
+function expandLibraryForm(slug, mode, data) {
+    // Close any existing form first
+    const existing = document.getElementById('lib-form');
+    if (existing) existing.remove();
+
+    data = data || {};
+
+    // Determine pre-filled values
+    let nameVal = '';
+    let slugVal = slug || '';
+    let typeVal = 'other';
+    let arrVal = 'none';
+    let processingVal = mode === 'register' ? 'audit' : (mode === 'create' ? 'full' : (data.processing || 'audit'));
+    let extPath = '';
+    let showDelete = false;
+
+    if (mode === 'edit') {
+        nameVal = data.name || '';
+        slugVal = data.slug || slug || '';
+        typeVal = data.type || 'other';
+        arrVal  = data.arr  || 'none';
+        processingVal = data.processing || 'full';
+        extPath = (data.path && !data.path.startsWith('/media/')) ? (data.path || '') : '';
+        showDelete = !data.builtin;
+    } else if (mode === 'register') {
+        const dirName = (data.path || '').split('/').pop();
+        nameVal = _titleCase(dirName);
+        slugVal = dirName;
+        typeVal = _guessType(dirName);
+        arrVal  = _arrForType(typeVal);
+        processingVal = 'audit';
+    } else { // create
+        nameVal = '';
+        slugVal = '';
+        typeVal = 'other';
+        arrVal  = 'none';
+        processingVal = 'full';
+    }
+
+    const typeOptions = [
+        {v: 'movies',  l: 'Movies'},
+        {v: 'tvshows', l: 'TV Shows'},
+        {v: 'mixed',   l: 'Mixed'},
+        {v: 'other',   l: 'Other'},
+    ].map(o => '<option value="' + o.v + '"' + (typeVal === o.v ? ' selected' : '') + '>' + o.l + '</option>').join('');
+
+    const arrOptions = [
+        {v: 'radarr', l: 'Radarr'},
+        {v: 'sonarr', l: 'Sonarr'},
+        {v: 'none',   l: 'None'},
+    ].map(o => '<option value="' + o.v + '"' + (arrVal === o.v ? ' selected' : '') + '>' + o.l + '</option>').join('');
+
+    const procOptions = [
+        {v: 'full',  l: 'Full'},
+        {v: 'audit', l: 'Audit'},
+        {v: 'off',   l: 'Off'},
+    ].map(o => '<option value="' + o.v + '"' + (processingVal === o.v ? ' selected' : '') + '>' + o.l + '</option>').join('');
+
+    const form = document.createElement('div');
+    form.id = 'lib-form';
+    form.className = 'lib-form';
+
+    // Build slug row
+    const slugDisplaySpan = document.createElement('span');
+    slugDisplaySpan.className = 'lib-slug-display';
+    slugDisplaySpan.id = 'lib-form-slug-display';
+    slugDisplaySpan.textContent = '/media/' + slugVal;
+
+    const slugInput = document.createElement('input');
+    slugInput.id = 'lib-form-slug-input';
+    slugInput.className = 'lib-form-input';
+    slugInput.type = 'text';
+    slugInput.value = slugVal;
+    slugInput.placeholder = 'slug';
+    // For edit and register: slug is fixed, so hide the input; show display only.
+    // For create: show input (hidden display updates dynamically).
+    if (mode !== 'create') {
+        slugInput.style.display = 'none';
+    }
+
+    const nameInput = document.createElement('input');
+    nameInput.id = 'lib-form-name';
+    nameInput.className = 'lib-form-input';
+    nameInput.type = 'text';
+    nameInput.value = nameVal;
+    nameInput.placeholder = 'Library name';
+
+    const typeSelect = document.createElement('select');
+    typeSelect.id = 'lib-form-type';
+    typeSelect.className = 'lib-form-input';
+    typeSelect.innerHTML = typeOptions;
+
+    const arrSelect = document.createElement('select');
+    arrSelect.id = 'lib-form-arr';
+    arrSelect.className = 'lib-form-input';
+    arrSelect.innerHTML = arrOptions;
+
+    const procSelect = document.createElement('select');
+    procSelect.id = 'lib-form-processing';
+    procSelect.className = 'lib-form-input';
+    procSelect.innerHTML = procOptions;
+
+    const pathInput = document.createElement('input');
+    pathInput.id = 'lib-form-path';
+    pathInput.className = 'lib-form-input';
+    pathInput.type = 'text';
+    pathInput.value = extPath;
+    pathInput.placeholder = '/path/to/media (optional)';
+
+    const errSpan = document.createElement('span');
+    errSpan.id = 'lib-form-error';
+    errSpan.className = 'lib-form-error';
+
+    // Assemble form rows
+    function makeRow(labelText, ...children) {
+        const row = document.createElement('div');
+        row.className = 'lib-form-row';
+        const lbl = document.createElement('span');
+        lbl.className = 'lib-form-label';
+        lbl.textContent = labelText;
+        row.appendChild(lbl);
+        children.forEach(c => row.appendChild(c));
+        return row;
+    }
+
+    const slugRow = document.createElement('div');
+    slugRow.className = 'lib-form-row';
+    const slugLbl = document.createElement('span');
+    slugLbl.className = 'lib-form-label';
+    slugLbl.textContent = 'Folder';
+    slugRow.appendChild(slugLbl);
+    slugRow.appendChild(slugDisplaySpan);
+    if (mode === 'create') {
+        const editLink = document.createElement('button');
+        editLink.className = 'lib-slug-edit';
+        editLink.textContent = 'edit';
+        editLink.addEventListener('click', () => { slugInput.style.display = ''; slugInput.focus(); });
+        slugRow.appendChild(editLink);
+        slugRow.appendChild(slugInput);
+    }
+
+    const advDetails = document.createElement('details');
+    const advSummary = document.createElement('summary');
+    advSummary.textContent = 'Advanced';
+    advSummary.style.cssText = 'font-size:0.75rem;color:var(--muted);cursor:pointer;margin-bottom:0.25rem';
+    advDetails.appendChild(advSummary);
+    advDetails.appendChild(makeRow('External path', pathInput));
+    if (extPath) advDetails.open = true;
+
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'lib-form-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'section-action';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', () => saveLibraryForm(slug, mode));
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'section-action';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => document.getElementById('lib-form')?.remove());
+
+    actionsRow.appendChild(saveBtn);
+    actionsRow.appendChild(cancelBtn);
+
+    if (showDelete) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'section-action';
+        delBtn.textContent = 'Delete';
+        delBtn.style.cssText = 'margin-left:auto;color:#e07070;border-color:#e07070';
+        delBtn.addEventListener('click', () => deleteLibraryFromLane(slug));
+        actionsRow.appendChild(delBtn);
+    }
+
+    actionsRow.appendChild(errSpan);
+
+    form.appendChild(makeRow('Name', nameInput));
+    form.appendChild(slugRow);
+    form.appendChild(makeRow('Type', typeSelect));
+    form.appendChild(makeRow('Managed by', arrSelect));
+    form.appendChild(makeRow('Processing', procSelect));
+    form.appendChild(advDetails);
+    form.appendChild(actionsRow);
+
+    // Wire up live events
+    if (mode === 'create') {
+        nameInput.addEventListener('input', () => {
+            const s = _autoSlug(nameInput.value);
+            slugInput.value = s;
+            slugDisplaySpan.textContent = '/media/' + s;
         });
+        slugInput.addEventListener('input', () => {
+            slugDisplaySpan.textContent = '/media/' + slugInput.value;
+        });
+    }
+    typeSelect.addEventListener('change', () => {
+        arrSelect.value = _arrForType(typeSelect.value);
+    });
+
+    // Insert form: after the triggering row for edit/register, append for create
+    let inserted = false;
+    if (mode === 'edit' && slug) {
+        const row = document.getElementById('lib-row-' + slug);
+        if (row && row.parentNode) { row.parentNode.insertBefore(form, row.nextSibling); inserted = true; }
+    } else if (mode === 'register') {
+        const dirName = (data.path || '').split('/').pop();
+        const row = document.getElementById('lib-row-disc-' + dirName);
+        if (row && row.parentNode) { row.parentNode.insertBefore(form, row.nextSibling); inserted = true; }
+    }
+    if (!inserted) {
+        const lane = document.getElementById('libraries-lane');
+        if (lane) lane.appendChild(form);
+    }
+
+    nameInput.focus();
+}
+
+async function saveLibraryForm(slug, mode) {
+    const nameEl = document.getElementById('lib-form-name');
+    const slugInputEl = document.getElementById('lib-form-slug-input');
+    const typeEl = document.getElementById('lib-form-type');
+    const arrEl  = document.getElementById('lib-form-arr');
+    const procEl = document.getElementById('lib-form-processing');
+    const pathEl = document.getElementById('lib-form-path');
+    const errEl  = document.getElementById('lib-form-error');
+
+    const name = nameEl ? nameEl.value.trim() : '';
+    // For create: slug comes from the input field.
+    // For edit/register: slug was fixed at form-open time; use the original slug param.
+    const effectiveSlug = (mode === 'create' && slugInputEl)
+        ? slugInputEl.value.trim()
+        : (slug || '');
+    const type = typeEl ? typeEl.value : 'other';
+    const arr  = arrEl  ? arrEl.value  : 'none';
+    const processing = procEl ? procEl.value : 'audit';
+    const extPath = pathEl ? pathEl.value.trim() : '';
+
+    if (!name) { if (errEl) errEl.textContent = 'Name is required'; return; }
+    if (!effectiveSlug) { if (errEl) errEl.textContent = 'Folder name is required'; return; }
+
+    const body = { name, slug: effectiveSlug, type, arr, processing };
+    if (extPath) body.path = extPath;
+
+    try {
+        let res;
+        if (mode === 'edit') {
+            res = await tfetch('/api/pelicula/libraries/' + encodeURIComponent(slug), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+        } else {
+            res = await tfetch('/api/pelicula/libraries', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            if (status) status.textContent = err.error || 'Failed';
-            if (btn) btn.disabled = false;
+            if (errEl) errEl.textContent = err.error || 'Failed';
             return;
         }
-        document.getElementById('atl-modal')?.remove();
-        await scanStorageNow();
+        document.getElementById('lib-form')?.remove();
+        await checkStorage();
     } catch (e) {
-        if (status) status.textContent = 'Error: ' + e.message;
-        if (btn) btn.disabled = false;
+        if (errEl) errEl.textContent = 'Error: ' + e.message;
+    }
+}
+
+async function deleteLibraryFromLane(slug) {
+    const errEl = document.getElementById('lib-form-error');
+    try {
+        const res = await tfetch('/api/pelicula/libraries/' + encodeURIComponent(slug), { method: 'DELETE' });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            if (errEl) errEl.textContent = err.error || 'Failed to delete';
+            return;
+        }
+        document.getElementById('lib-form')?.remove();
+        await checkStorage();
+    } catch (e) {
+        if (errEl) errEl.textContent = 'Error: ' + e.message;
     }
 }
 
@@ -780,8 +1089,10 @@ setInterval(updateStaleBanner, 5000);
 // copyInviteLink — moved to users.js.
 
 // ── Window exports ────────────────────────
-window.refresh       = refresh;
-window.checkStorage  = checkStorage;
+window.refresh              = refresh;
+window.checkStorage         = checkStorage;
+window.expandLibraryForm    = expandLibraryForm;
+window.deleteLibraryFromLane = deleteLibraryFromLane;
 
 // ── Job drawer ────────────────────────────
 window.openJobDrawer = async function(jobId) {

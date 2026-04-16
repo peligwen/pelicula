@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+// videoExtensions is the set of file extensions treated as video files for the
+// has_media check on unregistered folders.
+var videoExtensions = map[string]bool{
+	".mkv": true, ".mp4": true, ".avi": true, ".m4v": true,
+	".ts": true, ".wmv": true, ".mov": true, ".flv": true,
+}
+
 // FolderSize holds the computed size of a single monitored folder.
 type FolderSize struct {
 	Path       string `json:"path"`
@@ -19,6 +26,7 @@ type FolderSize struct {
 	Size       int64  `json:"size"` // bytes; -1 means not yet computed
 	Registered bool   `json:"registered"`
 	Slug       string `json:"slug,omitempty"`
+	HasMedia   bool   `json:"has_media,omitempty"`
 }
 
 // FilesystemInfo represents one unique underlying filesystem.
@@ -99,9 +107,11 @@ func getMonitoredVolumes() []monitoredVolume {
 }
 
 // folderSizes caches the most recent per-folder byte totals from computeFolderSizes.
+// folderHasMedia caches whether unregistered folders contain any video files.
 var (
-	folderSizeMu sync.RWMutex
-	folderSizes  = map[string]int64{} // path → bytes
+	folderSizeMu   sync.RWMutex
+	folderSizes    = map[string]int64{} // path → bytes
+	folderHasMedia = map[string]bool{}  // path → has video file
 )
 
 // fsIDForPath returns a stable string identifying the filesystem a path lives on.
@@ -126,15 +136,29 @@ func getCachedFolderSizes() map[string]int64 {
 	return cp
 }
 
+// getCachedFolderHasMedia returns a copy of the current has-media cache.
+func getCachedFolderHasMedia() map[string]bool {
+	folderSizeMu.RLock()
+	defer folderSizeMu.RUnlock()
+	cp := make(map[string]bool, len(folderHasMedia))
+	for k, v := range folderHasMedia {
+		cp[k] = v
+	}
+	return cp
+}
+
 // computeFolderSizes walks each monitored volume and sums file sizes.
+// For unregistered volumes it also sets a flag if any video file is found.
 // Results are stored in the package-level cache. This is called from the
 // background monitor goroutine — never from the API handler.
 func computeFolderSizes() {
 	vols := getMonitoredVolumes()
 	result := make(map[string]int64, len(vols))
+	hasMedia := make(map[string]bool, len(vols))
 	for _, v := range vols {
 		var total int64
-		_ = filepath.WalkDir(v.path, func(_ string, d fs.DirEntry, err error) error {
+		found := false
+		_ = filepath.WalkDir(v.path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil // skip inaccessible entries
 			}
@@ -142,13 +166,23 @@ func computeFolderSizes() {
 				if info, err := d.Info(); err == nil {
 					total += info.Size()
 				}
+				if !v.registered && !found {
+					ext := strings.ToLower(filepath.Ext(d.Name()))
+					if videoExtensions[ext] {
+						found = true
+					}
+				}
 			}
 			return nil
 		})
 		result[v.path] = total
+		if !v.registered {
+			hasMedia[v.path] = found
+		}
 	}
 	folderSizeMu.Lock()
 	folderSizes = result
+	folderHasMedia = hasMedia
 	folderSizeMu.Unlock()
 }
 
@@ -217,8 +251,9 @@ func buildStorageReport() StorageReport {
 		g.paths = append(g.paths, fsGroupPath{path: v.path, label: v.label, registered: v.registered, slug: v.slug})
 	}
 
-	// Attach cached folder sizes.
+	// Attach cached folder sizes and has-media flags.
 	sizes := getCachedFolderSizes()
+	hasMedia := getCachedFolderHasMedia()
 	for _, id := range order {
 		g := groups[id]
 		for _, p := range g.paths {
@@ -232,6 +267,7 @@ func buildStorageReport() StorageReport {
 				Size:       size,
 				Registered: p.registered,
 				Slug:       p.slug,
+				HasMedia:   hasMedia[p.path],
 			})
 		}
 		report.Filesystems = append(report.Filesystems, g.info)

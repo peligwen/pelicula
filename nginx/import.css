@@ -192,19 +192,4 @@
     white-space: nowrap;
     flex-shrink: 0;
 }
-.browse-add-lib {
-    font-size: 0.65rem;
-    padding: 0.1rem 0.35rem;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    margin-left: auto;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-.browse-add-lib:hover {
-    border-color: var(--pink, #f060a8);
-    color: var(--pink, #f060a8);
-}
+
