@@ -15,6 +15,17 @@ import (
 	"pelicula-api/httputil"
 )
 
+// searchMode is read once at startup from the .env file and used by handleSearch
+// to decide whether to run the Prowlarr indexer filter pass.
+// Value is "" or "tmdb" for standard TMDB/TVDB search; "indexer" for Prowlarr filtering.
+var searchMode string
+
+func initSearchMode() {
+	if vars, err := parseEnvFile(envPath); err == nil {
+		searchMode = vars["SEARCH_MODE"]
+	}
+}
+
 // indexerSearchCache caches raw Prowlarr /api/v1/search responses to avoid
 // hammering indexer APIs on every keypress when SEARCH_MODE=indexer.
 var indexerSearchCache = struct {
@@ -97,10 +108,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	sonarrKey, radarrKey, prowlarrKey := services.Keys()
 
-	envMu.Lock()
-	envVars, _ := parseEnvFile(envPath)
-	envMu.Unlock()
-	searchMode := envVars["SEARCH_MODE"] // "" or "tmdb" = TMDB/TVDB; "indexer" = filter by Prowlarr
+	// searchMode is initialised once at startup (see initSearchMode); no per-request
+	// .env read needed — the value is stable for the lifetime of the process.
 
 	// Search Radarr (movies)
 	if typeFilter != "series" {
