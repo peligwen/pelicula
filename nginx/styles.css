@@ -1308,6 +1308,15 @@ details[open] .add-user-summary::before { content: '− '; }
 .lib-form-error { font-size: 0.75rem; color: var(--pink); margin-left: auto; }
 .lib-slug-display { font-size: 0.78rem; color: var(--ink); font-family: monospace; }
 .lib-slug-edit { font-size: 0.68rem; color: var(--pink); cursor: pointer; margin-left: 0.4rem; background: none; border: none; padding: 0; text-decoration: underline; }
+.lib-modal { width: min(440px, 92vw); }
+.lib-form-row select, .lib-form-row input { margin-bottom: 0; }
+
+/* Library lane row layout — scoped to .lib-row to avoid affecting By-Folder lane */
+.lib-row .sm-folder-label { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; align-items: flex-start; justify-content: center; font-weight: inherit; font-family: inherit; }
+.lib-row-name { font-size: 0.78rem; font-weight: 600; font-family: var(--font-display, 'Nunito', sans-serif); line-height: 1.2; overflow-wrap: anywhere; color: var(--ink); }
+.lib-row-name-muted { font-style: italic; color: var(--muted); }
+.sm-lib-badge-row { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+.lib-row-action { font-size: 0.65rem; padding: 0.1rem 0.4rem; flex-shrink: 0; }
 
 /* ── Requests section ──────────────────────────────────────────────────── */
 .requests-lane-header {

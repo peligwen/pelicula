@@ -184,7 +184,7 @@
                     <div class="um-lane admin-only" id="libraries-lane-container">
                         <div class="um-lane-header">
                             <span>Libraries</span>
-                            <button class="section-action" id="lib-add-btn" onclick="expandLibraryForm(null, 'create')">+ New Library</button>
+                            <button class="section-action" id="lib-add-btn" onclick="openLibraryModal(null, 'create')">+ New Library</button>
                         </div>
                         <div id="libraries-lane"></div>
                     </div>
@@ -741,6 +741,61 @@
     </div>
 
     <!-- Invite modal -->
+    <div class="modal-overlay hidden" id="lib-form-modal" onclick="if(event.target===this)closeLibraryModal()">
+        <div class="modal lib-modal">
+            <h3 id="lib-form-title">New Library</h3>
+            <div class="modal-sub" id="lib-form-slug-display">/media/</div>
+            <div class="lib-form-row">
+                <label class="lib-form-label" for="lib-form-name">Name</label>
+                <input id="lib-form-name" class="lib-form-input" type="text" placeholder="Library name" autocomplete="off">
+            </div>
+            <div class="lib-form-row" id="lib-form-slug-row">
+                <label class="lib-form-label" for="lib-form-slug-input">Folder slug</label>
+                <input id="lib-form-slug-input" class="lib-form-input" type="text" placeholder="slug">
+            </div>
+            <div class="lib-form-row">
+                <label class="lib-form-label" for="lib-form-type">Type</label>
+                <select id="lib-form-type" class="lib-form-input">
+                    <option value="movies">Movies</option>
+                    <option value="tvshows">TV Shows</option>
+                    <option value="mixed">Mixed</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="lib-form-row">
+                <label class="lib-form-label" for="lib-form-arr">Managed by</label>
+                <select id="lib-form-arr" class="lib-form-input">
+                    <option value="radarr">Radarr</option>
+                    <option value="sonarr">Sonarr</option>
+                    <option value="none">None</option>
+                </select>
+            </div>
+            <div class="lib-form-row">
+                <label class="lib-form-label" for="lib-form-processing">Processing</label>
+                <select id="lib-form-processing" class="lib-form-input">
+                    <option value="full">Full</option>
+                    <option value="audit">Audit</option>
+                    <option value="off">Off</option>
+                </select>
+            </div>
+            <details id="lib-form-advanced">
+                <summary style="font-size:0.75rem;color:var(--muted);cursor:pointer;margin:0.5rem 0 0.15rem">Advanced</summary>
+                <div class="lib-form-row">
+                    <label class="lib-form-label" for="lib-form-path">External path</label>
+                    <input id="lib-form-path" class="lib-form-input" type="text" placeholder="/path/to/media (optional)">
+                </div>
+            </details>
+            <span id="lib-form-error" class="lib-form-error"></span>
+            <div class="modal-buttons" style="margin-top:1rem">
+                <button class="modal-btn-cancel" onclick="closeLibraryModal()">Cancel</button>
+                <button class="modal-btn-confirm" onclick="saveLibraryModal()">Save</button>
+            </div>
+            <div id="lib-form-delete-row" class="modal-buttons" style="margin-top:0.4rem;display:none">
+                <button class="modal-btn-danger" onclick="deleteLibraryModal()">Delete Library</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay hidden" id="invite-modal">
         <div class="modal">
             <h3 id="invite-modal-title">Create invite link</h3>
