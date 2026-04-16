@@ -42,6 +42,13 @@ func NewServiceClients(configDir string) *ServiceClients {
 		client:    &http.Client{Timeout: 10 * time.Second},
 	}
 	s.JellyfinAPIKey = os.Getenv("JELLYFIN_API_KEY")
+	// If the env var is empty (e.g. container restarted without a full down/up),
+	// fall back to reading the key from the mounted .env file directly.
+	if s.JellyfinAPIKey == "" {
+		if vars, err := parseEnvFile(envPath); err == nil {
+			s.JellyfinAPIKey = vars["JELLYFIN_API_KEY"]
+		}
+	}
 	s.loadKeys()
 	return s
 }

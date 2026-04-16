@@ -431,12 +431,23 @@ func jellyfinAuth(s *ServiceClients) (string, error) {
 		return apiKey, nil
 	}
 
-	// Fallback: password-based auth (first boot or upgrade from older version).
-	// Read credentials from the mounted .env file, not from env vars.
+	// Read .env once; check for API key first, then fall back to password auth.
+	// The API key is present when AutoWire has completed on a previous boot but
+	// the container was restarted without a full down/up (Docker does not re-read
+	// .env on restart, so the env var is stale even though the file has the key).
 	vars, err := parseEnvFile(envPath)
 	if err != nil {
 		return "", fmt.Errorf("no API key and cannot read .env: %w", err)
 	}
+	if fileKey := vars["JELLYFIN_API_KEY"]; fileKey != "" {
+		s.mu.Lock()
+		s.JellyfinAPIKey = fileKey
+		s.mu.Unlock()
+		slog.Info("loaded Jellyfin API key from .env file", "component", "jellyfin")
+		return fileKey, nil
+	}
+
+	// Fallback: password-based auth (first boot or upgrade from older version).
 	adminUser := vars["JELLYFIN_ADMIN_USER"]
 	if adminUser == "" {
 		adminUser = jellyfinServiceUser
