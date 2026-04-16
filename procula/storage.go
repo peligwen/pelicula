@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,9 +14,11 @@ import (
 
 // FolderSize holds the computed size of a single monitored folder.
 type FolderSize struct {
-	Path  string `json:"path"`
-	Label string `json:"label"`
-	Size  int64  `json:"size"` // bytes; -1 means not yet computed
+	Path       string `json:"path"`
+	Label      string `json:"label"`
+	Size       int64  `json:"size"` // bytes; -1 means not yet computed
+	Registered bool   `json:"registered"`
+	Slug       string `json:"slug,omitempty"`
 }
 
 // FilesystemInfo represents one unique underlying filesystem.
@@ -37,15 +40,55 @@ type StorageReport struct {
 	Timestamp   time.Time        `json:"timestamp"`
 }
 
-// monitoredVolumes is the set of paths to watch. Overridable in tests.
-// /media covers all library subdirectories (previously separate /movies and /tv mounts).
-var monitoredVolumes = []struct {
-	label string
-	path  string
-}{
-	{"Downloads", "/downloads"},
-	{"Media", "/media"},
-	{"Processing", "/processing"},
+type monitoredVolume struct {
+	label      string
+	path       string
+	registered bool   // true = known library or system dir; false = discovered but unclaimed
+	slug       string // library slug; empty for non-library dirs
+}
+
+// getMonitoredVolumes dynamically builds the list of paths to watch.
+// It always includes the system dirs /downloads and /processing, adds one
+// entry per registered library, then discovers any unregistered subdirectories
+// under /media.
+func getMonitoredVolumes() []monitoredVolume {
+	vols := []monitoredVolume{
+		{label: "Downloads", path: "/downloads", registered: true},
+		{label: "Processing", path: "/processing", registered: true},
+	}
+
+	// Add one entry per registered library.
+	libs := getProculaLibraries()
+	libPaths := make(map[string]bool, len(libs))
+	for _, lib := range libs {
+		p := lib.ContainerPath() // /media/<slug>
+		vols = append(vols, monitoredVolume{
+			label:      lib.Name,
+			path:       p,
+			registered: true,
+			slug:       lib.Slug,
+		})
+		libPaths[p] = true
+	}
+
+	// Discover unregistered subdirectories under /media.
+	entries, err := os.ReadDir("/media")
+	if err == nil {
+		for _, de := range entries {
+			if !de.IsDir() || strings.HasPrefix(de.Name(), ".") {
+				continue
+			}
+			p := "/media/" + de.Name()
+			if !libPaths[p] {
+				vols = append(vols, monitoredVolume{
+					label:      de.Name(),
+					path:       p,
+					registered: false,
+				})
+			}
+		}
+	}
+	return vols
 }
 
 // folderSizes caches the most recent per-folder byte totals from computeFolderSizes.
@@ -80,8 +123,9 @@ func getCachedFolderSizes() map[string]int64 {
 // Results are stored in the package-level cache. This is called from the
 // background monitor goroutine — never from the API handler.
 func computeFolderSizes() {
-	result := make(map[string]int64, len(monitoredVolumes))
-	for _, v := range monitoredVolumes {
+	vols := getMonitoredVolumes()
+	result := make(map[string]int64, len(vols))
+	for _, v := range vols {
 		var total int64
 		_ = filepath.WalkDir(v.path, func(_ string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -106,14 +150,20 @@ func computeFolderSizes() {
 func buildStorageReport() StorageReport {
 	report := StorageReport{Timestamp: time.Now().UTC()}
 
+	type fsGroupPath struct {
+		path       string
+		label      string
+		registered bool
+		slug       string
+	}
 	type fsGroup struct {
 		info  FilesystemInfo
-		paths []struct{ path, label string }
+		paths []fsGroupPath
 	}
 	groups := make(map[string]*fsGroup)
 	order := []string{} // preserve first-seen order
 
-	for _, v := range monitoredVolumes {
+	for _, v := range getMonitoredVolumes() {
 		id, err := fsIDForPath(v.path)
 		if err != nil {
 			slog.Warn("skipping volume", "component", "storage", "path", v.path, "error", err)
@@ -157,7 +207,7 @@ func buildStorageReport() StorageReport {
 			groups[id] = g
 			order = append(order, id)
 		}
-		g.paths = append(g.paths, struct{ path, label string }{v.path, v.label})
+		g.paths = append(g.paths, fsGroupPath{path: v.path, label: v.label, registered: v.registered, slug: v.slug})
 	}
 
 	// Attach cached folder sizes.
@@ -170,9 +220,11 @@ func buildStorageReport() StorageReport {
 				size = -1 // not yet computed
 			}
 			g.info.Folders = append(g.info.Folders, FolderSize{
-				Path:  p.path,
-				Label: p.label,
-				Size:  size,
+				Path:       p.path,
+				Label:      p.label,
+				Size:       size,
+				Registered: p.registered,
+				Slug:       p.slug,
 			})
 		}
 		report.Filesystems = append(report.Filesystems, g.info)
