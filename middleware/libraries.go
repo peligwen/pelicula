@@ -89,10 +89,10 @@ var validLibraryProcessing = map[string]bool{
 // validateLibrary returns an error if lib contains invalid field values.
 func validateLibrary(lib Library) error {
 	if lib.Slug == "" {
-		return fmt.Errorf("library slug must not be empty")
+		return fmt.Errorf("folder name must not be empty")
 	}
 	if !slugRe.MatchString(lib.Slug) {
-		return fmt.Errorf("library slug %q is invalid: must match ^[a-z0-9][a-z0-9-]*$", lib.Slug)
+		return fmt.Errorf("folder name %q is invalid: use only lowercase letters, numbers, and dashes", lib.Slug)
 	}
 	if !validLibraryTypes[lib.Type] {
 		return fmt.Errorf("library type %q is invalid: must be one of movies, tvshows, mixed, other", lib.Type)
@@ -259,6 +259,16 @@ func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	// Prevent callers from injecting the built-in flag.
 	lib.BuiltIn = false
+
+	// Reject reserved and duplicate slugs — SaveLibrary silently replaces them.
+	if existing, err := GetLibraryBySlug(lib.Slug); err == nil {
+		if existing.BuiltIn {
+			httputil.WriteError(w, "a built-in library already uses that name", http.StatusConflict)
+		} else {
+			httputil.WriteError(w, "a library with that name already exists", http.StatusConflict)
+		}
+		return
+	}
 
 	if err := SaveLibrary(peliculaConfigDir, lib); err != nil {
 		httputil.WriteError(w, err.Error(), http.StatusBadRequest)

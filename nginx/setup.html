@@ -129,8 +129,7 @@
 
                 <div style="margin-top:.75rem;padding:.75rem;border:1px solid var(--border,#ddd);border-radius:6px">
                     <div style="font-weight:600;font-size:.85rem;margin-bottom:.5rem">Add Library</div>
-                    <input type="text" id="setup-lib-name" placeholder="Name (e.g. Anime)" style="width:100%;box-sizing:border-box;margin-bottom:.4rem" oninput="setupLibAutoSlug()">
-                    <input type="text" id="setup-lib-slug" placeholder="Slug (auto-generated)" style="width:100%;box-sizing:border-box;margin-bottom:.4rem">
+                    <input type="text" id="setup-lib-name" placeholder="Name (e.g. Anime)" style="width:100%;box-sizing:border-box;margin-bottom:.4rem">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-bottom:.4rem">
                         <select id="setup-lib-type">
                             <option value="movies">Movies</option>
@@ -340,27 +339,28 @@ function rowHTML(label, html) {
     return '<tr><td class="sum-label">' + PeliculaFW.esc(label) + '</td><td>' + html + '</td></tr>';
 }
 
-function setupLibAutoSlug() {
-    const nameEl = document.getElementById('setup-lib-name');
-    const slugEl = document.getElementById('setup-lib-slug');
-    if (!nameEl || !slugEl) return;
-    if (slugEl.dataset.manual === 'true') return;
-    slugEl.value = nameEl.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+function _setupDeriveSlug(name) {
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const reserved = ['movies', 'tv'];
+    if (base && !reserved.includes(base) && !setupCustomLibraries.find(function(l) { return l.slug === base; })) {
+        return base;
+    }
+    for (var i = 2; i < 20; i++) {
+        const candidate = base + '-' + i;
+        if (!reserved.includes(candidate) && !setupCustomLibraries.find(function(l) { return l.slug === candidate; })) {
+            return candidate;
+        }
+    }
+    return base || ('lib-' + Date.now());
 }
 
 function setupAddLibrary() {
     const nameEl = document.getElementById('setup-lib-name');
-    const slugEl = document.getElementById('setup-lib-slug');
     const errEl  = document.getElementById('setup-lib-error');
     if (errEl) errEl.textContent = '';
     const name = (nameEl?.value || '').trim();
-    const slug = (slugEl?.value || '').trim();
     if (!name) { if (errEl) errEl.textContent = 'Name is required'; return; }
-    if (!slug) { if (errEl) errEl.textContent = 'Slug is required'; return; }
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) { if (errEl) errEl.textContent = 'Slug must be lowercase letters, numbers, hyphens'; return; }
-    // Prevent duplicates with builtins
-    if (slug === 'movies' || slug === 'tv') { if (errEl) errEl.textContent = 'Slug conflicts with a built-in library'; return; }
-    if (setupCustomLibraries.find(function(l) { return l.slug === slug; })) { if (errEl) errEl.textContent = 'Slug already used'; return; }
+    const slug = _setupDeriveSlug(name);
 
     const lib = {
         name: name,
@@ -375,7 +375,6 @@ function setupAddLibrary() {
     renderSetupLibList();
     // Clear form
     if (nameEl) nameEl.value = '';
-    if (slugEl) { slugEl.value = ''; slugEl.dataset.manual = ''; }
     const pathEl = document.getElementById('setup-lib-path');
     if (pathEl) pathEl.value = '';
 }
@@ -397,7 +396,7 @@ function renderSetupLibList() {
         info.appendChild(nm);
         const meta = document.createElement('span');
         meta.style.cssText = 'margin-left:.4rem;font-size:.75rem;color:#888';
-        const parts = [lib.slug, lib.type, lib.arr !== 'none' ? lib.arr : null, lib.processing].filter(Boolean);
+        const parts = [lib.type, lib.arr !== 'none' ? lib.arr : null, lib.processing].filter(Boolean);
         meta.textContent = parts.join(' \u00b7 ');
         info.appendChild(meta);
         row.appendChild(info);
@@ -415,11 +414,6 @@ function renderSetupLibList() {
     });
 }
 
-// Wire up manual-edit detection for setup-lib-slug
-document.addEventListener('DOMContentLoaded', function() {
-    var slugEl = document.getElementById('setup-lib-slug');
-    if (slugEl) slugEl.addEventListener('input', function() { slugEl.dataset.manual = 'true'; });
-});
 
 async function submitSetup() {
     const btn = document.getElementById('btn-submit');

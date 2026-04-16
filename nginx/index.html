@@ -733,15 +733,10 @@
     <div class="modal-overlay hidden" id="lib-form-modal" onclick="if(event.target===this)closeLibraryModal()">
         <div class="modal lib-modal">
             <h3 id="lib-form-title">New Library</h3>
-            <div class="modal-sub" id="lib-form-slug-display">/media/</div>
+            <div class="modal-sub" id="lib-form-path-display"></div>
             <div class="lib-form-row">
                 <label class="lib-form-label" for="lib-form-name">Name</label>
                 <input id="lib-form-name" class="lib-form-input" type="text" placeholder="Library name" autocomplete="off">
-            </div>
-            <div class="lib-form-row" id="lib-form-slug-row">
-                <label class="lib-form-label" for="lib-form-slug-input">Folder</label>
-                <input id="lib-form-slug-input" class="lib-form-input" type="text" placeholder="e.g. anime-movies">
-                <div class="lib-form-hint">Used as the folder name under /media/ and in URLs. Lowercase, numbers, and dashes only.</div>
             </div>
             <div class="lib-form-row">
                 <label class="lib-form-label" for="lib-form-type">Type</label>
@@ -768,13 +763,10 @@
                     <option value="off">Off</option>
                 </select>
             </div>
-            <details id="lib-form-advanced">
-                <summary style="font-size:0.75rem;color:var(--muted);cursor:pointer;margin:0.5rem 0 0.15rem">Advanced</summary>
-                <div class="lib-form-row">
-                    <label class="lib-form-label" for="lib-form-path">External path</label>
-                    <input id="lib-form-path" class="lib-form-input" type="text" placeholder="/path/to/media (optional)">
-                </div>
-            </details>
+            <div class="lib-form-row">
+                <label class="lib-form-label" for="lib-form-path">Path</label>
+                <input id="lib-form-path" class="lib-form-input" type="text" placeholder="Leave blank to use default location">
+            </div>
             <span id="lib-form-error" class="lib-form-error"></span>
             <div class="modal-buttons" style="margin-top:1rem">
                 <button class="modal-btn-cancel" onclick="closeLibraryModal()">Cancel</button>

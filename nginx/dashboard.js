@@ -4,6 +4,24 @@ const store = PeliculaFW.initStore({
     role: 'admin',        // 'admin' | 'manager' | 'viewer'
     username: '',
 });
+
+// ── Library dir cache ─────────────────────
+let _libraryDir = '';
+
+function _effectiveLibraryPath(name, extPath, slug) {
+    if (extPath) return extPath;
+    const auto = slug || _autoSlug(name);
+    if (!auto) return '';
+    return (_libraryDir ? _libraryDir.replace(/\/$/, '') + '/' : '/') + auto;
+}
+
+async function _ensureLibraryDir() {
+    if (_libraryDir) return;
+    try {
+        const r = await tfetch('/api/pelicula/settings');
+        if (r.ok) { const s = await r.json(); _libraryDir = s.library_dir || ''; }
+    } catch {}
+}
 // ── Resilient fetch (auto-abort after ms) ──
 function tfetch(url, opts, ms) {
     ms = ms || 4000;
@@ -548,7 +566,7 @@ function openLibraryModal(slug, mode, data) {
         extPath = (data.path && !data.path.startsWith('/media/')) ? data.path : '';
     } else if (mode === 'register') {
         const dirName = (data.path || '').split('/').pop();
-        slugVal = dirName;
+        slugVal = _autoSlug(dirName);
         nameVal = _titleCase(dirName);
         typeVal = _guessType(dirName);
         arrVal  = _arrForType(typeVal);
@@ -559,46 +577,33 @@ function openLibraryModal(slug, mode, data) {
 
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set('lib-form-name', nameVal);
-    set('lib-form-slug-input', slugVal);
     set('lib-form-type', typeVal);
     set('lib-form-arr', arrVal);
     set('lib-form-processing', processingVal);
     set('lib-form-path', extPath);
 
-    const slugDisplay = document.getElementById('lib-form-slug-display');
-    if (slugDisplay) slugDisplay.textContent = '/media/' + (slugVal || '\u2026');
-
-    const slugRow = document.getElementById('lib-form-slug-row');
-    if (slugRow) slugRow.style.display = mode === 'create' ? '' : 'none';
+    const pathDisplay = document.getElementById('lib-form-path-display');
+    if (pathDisplay) pathDisplay.textContent = _effectiveLibraryPath(nameVal, extPath, mode === 'edit' ? slugVal : null) || '\u2026';
 
     const delRow = document.getElementById('lib-form-delete-row');
     if (delRow) delRow.style.display = (mode === 'edit' && !data.builtin) ? 'flex' : 'none';
-
-    const adv = document.getElementById('lib-form-advanced');
-    if (adv) adv.open = !!extPath;
 
     const errEl = document.getElementById('lib-form-error');
     if (errEl) errEl.textContent = '';
 
     // Wire live listeners via property assignment (prevents duplicate handlers on re-open)
     const nameInput  = document.getElementById('lib-form-name');
-    const slugInput  = document.getElementById('lib-form-slug-input');
+    const pathInput  = document.getElementById('lib-form-path');
     const typeSelect = document.getElementById('lib-form-type');
     const arrSelect  = document.getElementById('lib-form-arr');
 
-    if (mode === 'create') {
-        if (nameInput) nameInput.oninput = () => {
-            const s = _autoSlug(nameInput.value);
-            if (slugInput) slugInput.value = s;
-            if (slugDisplay) slugDisplay.textContent = '/media/' + s;
-        };
-        if (slugInput) slugInput.oninput = () => {
-            if (slugDisplay) slugDisplay.textContent = '/media/' + slugInput.value;
-        };
-    } else {
-        if (nameInput) nameInput.oninput = null;
-        if (slugInput) slugInput.oninput = null;
-    }
+    const updatePreview = () => {
+        const n = nameInput ? nameInput.value : nameVal;
+        const p = pathInput ? pathInput.value.trim() : extPath;
+        if (pathDisplay) pathDisplay.textContent = _effectiveLibraryPath(n, p, mode === 'edit' ? slugVal : null) || '\u2026';
+    };
+    if (nameInput) nameInput.oninput = (mode !== 'edit') ? updatePreview : null;
+    if (pathInput) pathInput.oninput = updatePreview;
     if (typeSelect) typeSelect.onchange = () => { if (arrSelect) arrSelect.value = _arrForType(typeSelect.value); };
 
     const overlay = document.getElementById('lib-form-modal');
@@ -621,7 +626,6 @@ function deleteLibraryModal() { deleteLibraryFromLane(_libModal.slug); }
 
 async function saveLibraryForm(slug, mode) {
     const nameEl = document.getElementById('lib-form-name');
-    const slugInputEl = document.getElementById('lib-form-slug-input');
     const typeEl = document.getElementById('lib-form-type');
     const arrEl  = document.getElementById('lib-form-arr');
     const procEl = document.getElementById('lib-form-processing');
@@ -629,18 +633,15 @@ async function saveLibraryForm(slug, mode) {
     const errEl  = document.getElementById('lib-form-error');
 
     const name = nameEl ? nameEl.value.trim() : '';
-    // For create: slug comes from the input field.
-    // For edit/register: slug was fixed at form-open time; use the original slug param.
-    const effectiveSlug = (mode === 'create' && slugInputEl)
-        ? slugInputEl.value.trim()
-        : (slug || '');
+    // For edit: slug is fixed (the original slug param). For create/register: derive from name.
+    const effectiveSlug = (mode === 'edit') ? (slug || '') : _autoSlug(name);
     const type = typeEl ? typeEl.value : 'other';
     const arr  = arrEl  ? arrEl.value  : 'none';
     const processing = procEl ? procEl.value : 'audit';
     const extPath = pathEl ? pathEl.value.trim() : '';
 
     if (!name) { if (errEl) errEl.textContent = 'Name is required'; return; }
-    if (!effectiveSlug) { if (errEl) errEl.textContent = 'Folder name is required'; return; }
+    if (!effectiveSlug) { if (errEl) errEl.textContent = 'Name must contain at least one letter or number'; return; }
 
     const body = { name, slug: effectiveSlug, type, arr, processing };
     if (extPath) body.path = extPath;
@@ -945,6 +946,7 @@ async function checkVPNStatus() {
 }
 
 checkAuth();
+_ensureLibraryDir();
 checkVPNStatus();
 if (window.location.hash === '#storage-explorer') {
     setTimeout(openStorageExplorer, 0);

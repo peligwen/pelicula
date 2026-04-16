@@ -813,7 +813,7 @@ function populateLibrarySelect() {
     state.libraries.forEach(function(lib) {
         const opt = document.createElement('option');
         opt.value = '/media/' + lib.slug;
-        opt.textContent = lib.name + ' (/media/' + lib.slug + ')';
+        opt.textContent = lib.name;
         opt.dataset.arr = lib.arr;
         sel.appendChild(opt);
     });
