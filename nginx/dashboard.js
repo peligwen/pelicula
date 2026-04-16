@@ -463,7 +463,7 @@ function _autoSlug(s) {
 
 function _guessType(slug) {
     const s = (slug || '').toLowerCase();
-    if (/anime|cartoon|show|series|episode/.test(s)) return 'tvshows';
+    if (/anime|cartoon|show|series|episode|\btv\b|television/.test(s)) return 'tvshows';
     if (/movie|film|cinema/.test(s)) return 'movies';
     return 'other';
 }
