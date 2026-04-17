@@ -849,7 +849,21 @@ function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 
 async function resubJob(id) {
     try {
-        const res = await tfetch(`/api/pelicula/procula/jobs/${id}/resub`, {method: 'POST'});
+        // Resolve arr context from the job, then dispatch via the action bus.
+        const jobRes = await tfetch(`/api/pelicula/procula/jobs/${id}`);
+        if (!jobRes.ok) { console.warn('[pelicula] resub: job fetch failed', jobRes.status); return; }
+        const job = await jobRes.json();
+        const src = job.source || {};
+        if (!src.arr_type || !src.arr_id) { console.warn('[pelicula] resub: missing arr context on job', id); return; }
+        const res = await tfetch('/api/pelicula/procula/actions', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                action: 'subtitle_search',
+                target: {arr_type: src.arr_type, arr_id: src.arr_id, episode_id: src.episode_id || 0},
+                params: {languages: ['en']},
+            }),
+        });
         if (!res.ok) console.warn('[pelicula] resub failed:', res.status);
     } catch (e) { console.warn('[pelicula] resub error:', e); }
 }

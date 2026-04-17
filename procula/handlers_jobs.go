@@ -103,51 +103,26 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, job)
 }
 
-// handleResubJob re-triggers subtitle acquisition for a job that has already
-// been processed. It calls Bazarr to re-search for subtitles using the job's
-// *arr IDs. The job itself is not re-enqueued.
+// handleResubJob is retained for route compatibility but is no longer active.
+// Use POST /api/procula/actions with action "subtitle_search" instead.
 func (s *Server) handleResubJob(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	job, ok := s.queue.Get(id)
-	if !ok {
-		writeError(w, "job not found", http.StatusNotFound)
-		return
-	}
-	bazarrSearchSubtitles(r.Context(), s.configDir, job)
-	slog.Info("subtitle re-acquisition triggered", "component", "api", "job_id", id, "arr_type", job.Source.ArrType)
-	writeJSON(w, map[string]string{"status": "triggered"})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+		"error":  "endpoint removed, use POST /api/procula/actions",
+		"action": "subtitle_search",
+	})
 }
 
-// handleSubSearch triggers Bazarr subtitle search for a library file that is
-// not tied to a Procula job. The caller supplies arr_type, arr_id, and
-// (for episodes) episode_id directly, typically resolved by the middleware
-// querying Radarr/Sonarr by file path.
+// handleSubSearch is retained for route compatibility but is no longer active.
+// Use POST /api/procula/actions with action "subtitle_search" instead.
 func (s *Server) handleSubSearch(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var req struct {
-		ArrType   string `json:"arr_type"`
-		ArrID     int    `json:"arr_id"`
-		EpisodeID int    `json:"episode_id,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.ArrType == "" || req.ArrID == 0 {
-		writeError(w, "arr_type and arr_id are required", http.StatusBadRequest)
-		return
-	}
-	// Construct a minimal Job to reuse bazarrSearchSubtitles.
-	syntheticJob := &Job{
-		ID: "manual-resub",
-		Source: JobSource{
-			ArrType:   req.ArrType,
-			ArrID:     req.ArrID,
-			EpisodeID: req.EpisodeID,
-		},
-	}
-	bazarrSearchSubtitles(r.Context(), s.configDir, syntheticJob)
-	writeJSON(w, map[string]string{"status": "triggered"})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+		"error":  "endpoint removed, use POST /api/procula/actions",
+		"action": "subtitle_search",
+	})
 }
 
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {

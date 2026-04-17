@@ -5,90 +5,20 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 )
 
-// handleManualTranscode creates a transcoding-only job for an existing library file.
-// The file must already be under /media/ (not /downloads).
+// handleManualTranscode is retained for route compatibility but is no longer active.
+// Use POST /api/procula/actions with action "transcode" instead.
 func (s *Server) handleManualTranscode(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var req struct {
-		Path    string `json:"path"`
-		Profile string `json:"profile"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.Path == "" || req.Profile == "" {
-		writeError(w, "path and profile are required", http.StatusBadRequest)
-		return
-	}
-
-	// Manual transcode is only valid for files already in the library.
-	clean := filepath.Clean(req.Path)
-	if !isLibraryPath(clean) {
-		writeError(w, "path must be under /media/", http.StatusBadRequest)
-		return
-	}
-
-	// Stat the file to confirm it exists and get its size.
-	fi, err := os.Stat(clean)
-	if err != nil {
-		writeError(w, "file not found or not accessible", http.StatusBadRequest)
-		return
-	}
-	if fi.IsDir() {
-		writeError(w, "path must be a file, not a directory", http.StatusBadRequest)
-		return
-	}
-
-	// Derive a human-readable title from the parent directory (Plex-style naming).
-	// Skip the parent if it is a known library root slug (e.g. "movies", "tv", "anime") —
-	// in that case the filename itself is the best available title.
-	title := strings.TrimSuffix(fi.Name(), filepath.Ext(fi.Name()))
-	if parent := filepath.Base(filepath.Dir(clean)); parent != "" {
-		isLibraryRoot := false
-		for _, lib := range getProculaLibraries() {
-			if parent == lib.Slug {
-				isLibraryRoot = true
-				break
-			}
-		}
-		if !isLibraryRoot {
-			title = parent
-		}
-	}
-
-	source := JobSource{
-		Path:    clean,
-		Size:    fi.Size(),
-		Title:   title,
-		ArrType: "radarr", // placeholder; manual jobs aren't tied to an arr instance
-		Type:    "movie",
-	}
-
-	job, err := s.queue.Create(source)
-	if err != nil {
-		writeError(w, "failed to create job: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := s.queue.Update(job.ID, func(j *Job) {
-		j.ManualProfile = req.Profile
-	}); err != nil {
-		writeError(w, "failed to set profile: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	job, _ = s.queue.Get(job.ID)
-	slog.Info("manual transcode job created", "component", "api", "job_id", job.ID, "profile", req.Profile, "title", title)
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, job)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+		"error":  "endpoint removed, use POST /api/procula/actions",
+		"action": "transcode",
+	})
 }
 
 // handleCreateAction creates an action-bus job from an ActionRequest.
