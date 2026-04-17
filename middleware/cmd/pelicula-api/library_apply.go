@@ -214,7 +214,6 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 
 	// Optionally forward successfully added items to Procula for validation.
 	if req.Validate && len(addedItems) > 0 {
-		proculaJobsURL := proculaURL + "/api/procula/jobs"
 		for _, item := range addedItems {
 			if item.SourcePath == "" {
 				continue
@@ -230,7 +229,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 				Path:    item.SourcePath,
 				ArrType: arrType,
 			}
-			if err := forwardToProcula(proculaJobsURL, source); err != nil {
+			if err := forwardToProcula(r.Context(), source); err != nil {
 				slog.Warn("failed to forward import to Procula",
 					"component", "library", "title", item.Title, "error", err)
 			}

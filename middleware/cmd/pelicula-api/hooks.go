@@ -7,7 +7,7 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -77,9 +77,8 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path, "episode_id", source.EpisodeID)
 
-	// Forward to Procula
-	jobsURL := proculaURL + "/api/procula/jobs"
-	if err := forwardToProcula(jobsURL, source); err != nil {
+	// Forward to Procula via the typed client.
+	if err := forwardToProcula(r.Context(), source); err != nil {
 		slog.Error("failed to forward to Procula", "component", "hooks", "error", err)
 		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
 		httputil.WriteJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
@@ -199,26 +198,9 @@ type ProculaJobSource struct {
 	ExpectedRuntimeMinutes int    `json:"expected_runtime_minutes"`
 }
 
-func forwardToProcula(url string, source ProculaJobSource) error {
-	data, err := json.Marshal(source)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		req.Header.Set("X-API-Key", key)
-	}
-	resp, err := services.client.Do(req)
-	if err != nil {
+func forwardToProcula(ctx context.Context, source ProculaJobSource) error {
+	if _, err := procClient.CreateJob(ctx, source); err != nil {
 		return fmt.Errorf("reach procula: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("procula HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -230,65 +212,40 @@ func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := proculaURL
-
-	// Fetch status and jobs in parallel
-	type result struct {
-		body       []byte
-		statusCode int
-		err        error
+	ctx := r.Context()
+	type rawResult struct {
+		body []byte
+		err  error
 	}
-	statusCh := make(chan result, 1)
-	jobsCh := make(chan result, 1)
+	statusCh := make(chan rawResult, 1)
+	jobsCh := make(chan rawResult, 1)
 
 	go func() {
-		resp, err := services.client.Get(base + "/api/procula/status")
-		if err != nil {
-			statusCh <- result{err: err}
-			return
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		statusCh <- result{body: b, statusCode: resp.StatusCode}
+		b, err := procClient.GetStatus(ctx)
+		statusCh <- rawResult{body: b, err: err}
 	}()
 	go func() {
-		resp, err := services.client.Get(base + "/api/procula/jobs")
-		if err != nil {
-			jobsCh <- result{err: err}
-			return
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		jobsCh <- result{body: b, statusCode: resp.StatusCode}
+		b, err := procClient.ListJobs(ctx)
+		jobsCh <- rawResult{body: b, err: err}
 	}()
 
 	statusRes := <-statusCh
 	jobsRes := <-jobsCh
 
-	// Network error reaching procula — signal as 502 with retryable flag.
 	if statusRes.err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"error":     "processing service unavailable",
 			"retryable": true,
 		})
 		return
 	}
 
-	// Non-2xx from procula — forward status code and body verbatim.
-	if statusRes.statusCode >= 300 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusRes.statusCode)
-		w.Write(statusRes.body)
-		return
-	}
-
-	// Merge into one response: {status: {...}, jobs: [...]}
 	var statusData, jobsData any
-	json.Unmarshal(statusRes.body, &statusData)
-	if jobsRes.err == nil && jobsRes.statusCode < 300 {
-		json.Unmarshal(jobsRes.body, &jobsData)
+	json.Unmarshal(statusRes.body, &statusData) //nolint:errcheck
+	if jobsRes.err == nil {
+		json.Unmarshal(jobsRes.body, &jobsData) //nolint:errcheck
 	}
 
 	httputil.WriteJSON(w, map[string]any{
@@ -346,14 +303,10 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		resp, err := services.client.Get(proculaURL + "/api/procula/notifications")
-		if err != nil || resp.StatusCode != http.StatusOK {
-			if resp != nil {
-				resp.Body.Close()
-			}
+		raw, err := procClient.GetNotifications(r.Context())
+		if err != nil {
 			return
 		}
-		defer resp.Body.Close()
 		// Procula uses its own NotificationEvent struct; we only need the shared fields.
 		var events []struct {
 			ID        string    `json:"id"`
@@ -363,7 +316,7 @@ func handleNotificationsProxy(w http.ResponseWriter, r *http.Request) {
 			Detail    string    `json:"detail"`
 			JobID     string    `json:"job_id"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&events) == nil {
+		if json.Unmarshal(raw, &events) == nil {
 			mu.Lock()
 			for _, e := range events {
 				all = append(all, dashNotif{

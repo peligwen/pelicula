@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"pelicula-api/httputil"
-	"strings"
 )
 
 // ── Filesystem helpers ────────────────────────────────────────────────────────
@@ -199,45 +196,35 @@ type RetranscodeResult struct {
 	Errors []string `json:"errors,omitempty"`
 }
 
-// handleTranscodeProfiles proxies GET and POST /api/procula/profiles.
+// handleTranscodeProfiles handles GET and POST /api/procula/profiles.
 // GET lists all profiles; POST creates or updates a profile.
 func handleTranscodeProfiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var upstream *http.Request
+	ctx := r.Context()
+	var raw []byte
 	var err error
 	if r.Method == http.MethodPost {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		upstream, err = http.NewRequest(http.MethodPost, proculaURL+"/api/procula/profiles", r.Body)
-		if err == nil {
-			upstream.Header.Set("Content-Type", "application/json")
+		body, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			httputil.WriteError(w, "read body: "+readErr.Error(), http.StatusBadRequest)
+			return
 		}
+		raw, err = procClient.CreateProfile(ctx, body)
+	} else if r.Method == http.MethodGet {
+		raw, err = procClient.ListProfiles(ctx)
 	} else {
-		upstream, err = http.NewRequest(http.MethodGet, proculaURL+"/api/procula/profiles", nil)
-	}
-	if err != nil {
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		upstream.Header.Set("X-API-Key", key)
-	}
-	resp, err := services.client.Do(upstream)
 	if err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		slog.Warn("failed to stream profiles response", "component", "library", "error", err)
-	}
+	w.Write(raw) //nolint:errcheck
 }
 
-// handleDeleteTranscodeProfile proxies DELETE /api/procula/profiles/{name}.
+// handleDeleteTranscodeProfile deletes a transcode profile by name.
 func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -248,21 +235,11 @@ func handleDeleteTranscodeProfile(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "profile name required", http.StatusBadRequest)
 		return
 	}
-	upstream, err := http.NewRequest(http.MethodDelete, proculaURL+"/api/procula/profiles/"+url.PathEscape(name), nil)
-	if err != nil {
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+	if err := procClient.DeleteProfile(r.Context(), name); err != nil {
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		upstream.Header.Set("X-API-Key", key)
-	}
-	resp, err := services.client.Do(upstream)
-	if err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	w.WriteHeader(resp.StatusCode)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleLibraryRetranscode accepts a list of library file paths and a profile
@@ -298,31 +275,14 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// POST to the action bus — /api/procula/transcode was removed in Phase 1.1 (410 Gone).
-		body, _ := json.Marshal(map[string]any{
+		_, err := procClient.EnqueueAction(r.Context(), map[string]any{
 			"action": "transcode",
 			"target": map[string]string{"path": clean},
 			"params": map[string]string{"profile": req.Profile},
-		})
-		proculaReq, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/actions", bytes.NewReader(body))
+		}, "")
 		if err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, path+": "+err.Error())
-			continue
-		}
-		proculaReq.Header.Set("Content-Type", "application/json")
-		if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-			proculaReq.Header.Set("X-API-Key", key)
-		}
-		resp, err := services.client.Do(proculaReq)
-		if err != nil {
-			result.Failed++
-			result.Errors = append(result.Errors, path+": "+err.Error())
-			continue
-		}
-		resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			result.Failed++
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: procula HTTP %d", path, resp.StatusCode))
 			continue
 		}
 		result.Queued++
@@ -346,25 +306,12 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
+
 	// Fetch the job from procula to read arr_type/arr_id/episode_id from its source.
-	jobReq, err := http.NewRequest(http.MethodGet, proculaURL+"/api/procula/jobs/"+url.PathEscape(id), nil)
+	jobRaw, err := procClient.GetJob(ctx, id)
 	if err != nil {
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		jobReq.Header.Set("X-API-Key", key)
-	}
-	jobResp, err := services.client.Do(jobReq)
-	if err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer jobResp.Body.Close()
-	if jobResp.StatusCode >= 400 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(jobResp.StatusCode)
-		io.Copy(w, jobResp.Body) //nolint:errcheck
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
@@ -376,14 +323,13 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 			EpID    int    `json:"episode_id"`
 		} `json:"source"`
 	}
-	if err := json.NewDecoder(jobResp.Body).Decode(&job); err != nil {
+	if err := json.Unmarshal(jobRaw, &job); err != nil {
 		httputil.WriteError(w, "parse job: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Dispatch subtitle_search via the action bus.
-	// /api/procula/jobs/{id}/resub was removed in Phase 1.1 (410 Gone).
-	payload, _ := json.Marshal(map[string]any{
+	raw, err := procClient.EnqueueAction(ctx, map[string]any{
 		"action": "subtitle_search",
 		"target": map[string]any{
 			"path":       job.Source.Path,
@@ -391,29 +337,16 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 			"arr_id":     job.Source.ArrID,
 			"episode_id": job.Source.EpID,
 		},
-	})
-	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/actions", bytes.NewReader(payload))
+	}, "")
 	if err != nil {
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	upstream.Header.Set("Content-Type", "application/json")
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		upstream.Header.Set("X-API-Key", key)
-	}
-	resp, err := services.client.Do(upstream)
-	if err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body) //nolint:errcheck
+	w.Write(raw) //nolint:errcheck
 }
 
-// handleJobRetry proxies POST /api/procula/jobs/{id}/retry — re-queues
-// a failed procula job for processing.
+// handleJobRetry re-queues a failed procula job for processing.
 func handleJobRetry(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -424,23 +357,13 @@ func handleJobRetry(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "job id required", http.StatusBadRequest)
 		return
 	}
-	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/jobs/"+url.PathEscape(id)+"/retry", nil)
+	raw, err := procClient.RetryJob(r.Context(), id)
 	if err != nil {
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		upstream.Header.Set("X-API-Key", key)
-	}
-	resp, err := services.client.Do(upstream)
-	if err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body) //nolint:errcheck
+	w.Write(raw) //nolint:errcheck
 }
 
 // handleLibraryResub looks up a media file in Radarr/Sonarr by path and
@@ -514,30 +437,18 @@ func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 // for the given arr item. The old /api/procula/subtitles/search endpoint was
 // removed in Phase 1.1 (410 Gone).
 func sendSubSearch(w http.ResponseWriter, r *http.Request, arrType string, arrID, episodeID int) {
-	payload, _ := json.Marshal(map[string]any{
+	raw, err := procClient.EnqueueAction(r.Context(), map[string]any{
 		"action": "subtitle_search",
 		"target": map[string]any{
 			"arr_type":   arrType,
 			"arr_id":     arrID,
 			"episode_id": episodeID,
 		},
-	})
-	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/actions", bytes.NewReader(payload))
+	}, "")
 	if err != nil {
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	upstream.Header.Set("Content-Type", "application/json")
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		upstream.Header.Set("X-API-Key", key)
-	}
-	resp, err := services.client.Do(upstream)
-	if err != nil {
-		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body) //nolint:errcheck
+	w.Write(raw) //nolint:errcheck
 }

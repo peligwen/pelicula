@@ -64,6 +64,25 @@ func (c *Client) GetActionsRegistry(ctx context.Context) ([]byte, error) {
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 
+// CreateJob posts a new pipeline job to Procula. body must be a JSON-serialisable
+// value matching Procula's JobSource schema.
+func (c *Client) CreateJob(ctx context.Context, body any) ([]byte, error) {
+	raw, err := c.base.RawPost(ctx, "/api/procula/jobs", body)
+	if err != nil {
+		return nil, fmt.Errorf("create job: %w", err)
+	}
+	return raw, nil
+}
+
+// GetStatus fetches the Procula queue status summary.
+func (c *Client) GetStatus(ctx context.Context) ([]byte, error) {
+	raw, err := c.base.RawGet(ctx, "/api/procula/status")
+	if err != nil {
+		return nil, fmt.Errorf("get status: %w", err)
+	}
+	return raw, nil
+}
+
 // ListJobs returns all jobs from Procula as raw JSON bytes.
 func (c *Client) ListJobs(ctx context.Context) ([]byte, error) {
 	raw, err := c.base.RawGet(ctx, "/api/procula/jobs")

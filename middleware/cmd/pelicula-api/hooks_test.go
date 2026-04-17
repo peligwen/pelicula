@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	proculaclient "pelicula-api/internal/clients/procula"
 )
 
 // newFakeProcula starts a test HTTP server that serves fixed JSON on a path.
@@ -17,6 +19,14 @@ func newFakeProcula(t *testing.T, path, body string) *httptest.Server {
 		w.Write([]byte(body))
 	})
 	return httptest.NewServer(mux)
+}
+
+// useFakeProcURL points procClient at the given test server URL for the duration of the test.
+func useFakeProcURL(t *testing.T, baseURL string) {
+	t.Helper()
+	old := procClient
+	procClient = proculaclient.New(baseURL, "")
+	t.Cleanup(func() { procClient = old })
 }
 
 func TestHandleStorageProxy(t *testing.T) {
@@ -407,6 +417,7 @@ func TestHandleNotificationsProxy_PassesThroughDetailAndJobID(t *testing.T) {
 	proculaURL = fake.URL
 	services = NewServiceClients("/config")
 	t.Cleanup(func() { proculaURL = old; services = origSvc })
+	useFakeProcURL(t, fake.URL)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/notifications", nil)
 	w := httptest.NewRecorder()

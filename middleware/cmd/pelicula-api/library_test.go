@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	proculaclient "pelicula-api/internal/clients/procula"
 )
 
 func TestCleanFilename(t *testing.T) {
@@ -755,6 +757,9 @@ func TestHandleJobRetry_ProxiesToProcula(t *testing.T) {
 	proculaURL = fake.URL
 	services = NewServiceClients("/config")
 	t.Cleanup(func() { proculaURL = old; services = origSvc })
+	oldProcClient := procClient
+	procClient = proculaclient.New(fake.URL, "")
+	t.Cleanup(func() { procClient = oldProcClient })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/procula/jobs/abc123/retry", nil)
 	req.SetPathValue("id", "abc123")
