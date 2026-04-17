@@ -297,8 +297,13 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 			result.Errors = append(result.Errors, path+": not under a library path")
 			continue
 		}
-		body, _ := json.Marshal(map[string]string{"path": clean, "profile": req.Profile})
-		proculaReq, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/transcode", bytes.NewReader(body))
+		// POST to the action bus — /api/procula/transcode was removed in Phase 1.1 (410 Gone).
+		body, _ := json.Marshal(map[string]any{
+			"action": "transcode",
+			"target": map[string]string{"path": clean},
+			"params": map[string]string{"profile": req.Profile},
+		})
+		proculaReq, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/actions", bytes.NewReader(body))
 		if err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, path+": "+err.Error())
@@ -326,8 +331,10 @@ func handleLibraryRetranscode(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, result)
 }
 
-// handleJobResub proxies POST /api/procula/jobs/{id}/resub — re-triggers
-// Bazarr subtitle search for an existing pipeline job.
+// handleJobResub re-triggers Bazarr subtitle search for an existing pipeline
+// job by looking up the job's source arr_type/arr_id/episode_id from procula
+// and dispatching a subtitle_search action.
+// The old /api/procula/jobs/{id}/resub endpoint was removed in Phase 1.1 (410 Gone).
 func handleJobResub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -338,11 +345,59 @@ func handleJobResub(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "job id required", http.StatusBadRequest)
 		return
 	}
-	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/jobs/"+url.PathEscape(id)+"/resub", nil)
+
+	// Fetch the job from procula to read arr_type/arr_id/episode_id from its source.
+	jobReq, err := http.NewRequest(http.MethodGet, proculaURL+"/api/procula/jobs/"+url.PathEscape(id), nil)
 	if err != nil {
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		jobReq.Header.Set("X-API-Key", key)
+	}
+	jobResp, err := services.client.Do(jobReq)
+	if err != nil {
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
+	defer jobResp.Body.Close()
+	if jobResp.StatusCode >= 400 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(jobResp.StatusCode)
+		io.Copy(w, jobResp.Body) //nolint:errcheck
+		return
+	}
+
+	var job struct {
+		Source struct {
+			Path    string `json:"path"`
+			ArrType string `json:"arr_type"`
+			ArrID   int    `json:"arr_id"`
+			EpID    int    `json:"episode_id"`
+		} `json:"source"`
+	}
+	if err := json.NewDecoder(jobResp.Body).Decode(&job); err != nil {
+		httputil.WriteError(w, "parse job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Dispatch subtitle_search via the action bus.
+	// /api/procula/jobs/{id}/resub was removed in Phase 1.1 (410 Gone).
+	payload, _ := json.Marshal(map[string]any{
+		"action": "subtitle_search",
+		"target": map[string]any{
+			"path":       job.Source.Path,
+			"arr_type":   job.Source.ArrType,
+			"arr_id":     job.Source.ArrID,
+			"episode_id": job.Source.EpID,
+		},
+	})
+	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/actions", bytes.NewReader(payload))
+	if err != nil {
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	upstream.Header.Set("Content-Type", "application/json")
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
 		upstream.Header.Set("X-API-Key", key)
 	}
@@ -455,14 +510,19 @@ func handleLibraryResub(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteError(w, "file not found in Radarr or Sonarr", http.StatusNotFound)
 }
 
-// sendSubSearch calls Procula's subtitle search endpoint for the given arr item.
+// sendSubSearch dispatches a subtitle_search action via the procula action bus
+// for the given arr item. The old /api/procula/subtitles/search endpoint was
+// removed in Phase 1.1 (410 Gone).
 func sendSubSearch(w http.ResponseWriter, r *http.Request, arrType string, arrID, episodeID int) {
 	payload, _ := json.Marshal(map[string]any{
-		"arr_type":   arrType,
-		"arr_id":     arrID,
-		"episode_id": episodeID,
+		"action": "subtitle_search",
+		"target": map[string]any{
+			"arr_type":   arrType,
+			"arr_id":     arrID,
+			"episode_id": episodeID,
+		},
 	})
-	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/subtitles/search", bytes.NewReader(payload))
+	upstream, err := http.NewRequest(http.MethodPost, proculaURL+"/api/procula/actions", bytes.NewReader(payload))
 	if err != nil {
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return

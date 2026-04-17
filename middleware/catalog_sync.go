@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -236,7 +235,9 @@ func backfillRadarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 	return nil
 }
 
-const sonarrEpisodeBatchSize = 50
+// episodeConcurrency is the maximum number of concurrent Sonarr episode fetches
+// during catalog backfill.
+const episodeConcurrency = 10
 
 func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 	data, err := svc.ArrGet(sonarrURL, apiKey, "/api/v3/series")
@@ -300,36 +301,62 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 		arrIDs = append(arrIDs, id)
 	}
 
-	// Second pass: fetch episodes in batches of sonarrEpisodeBatchSize.
-	// Sonarr v3 accepts repeated seriesId query params for bulk lookups:
-	//   GET /api/v3/episode?seriesId=1&seriesId=2&seriesId=3
-	var allEpisodes []map[string]any
-	for i := 0; i < len(arrIDs); i += sonarrEpisodeBatchSize {
-		end := i + sonarrEpisodeBatchSize
-		if end > len(arrIDs) {
-			end = len(arrIDs)
-		}
-		chunk := arrIDs[i:end]
+	// Second pass: fetch episodes per series with up to episodeConcurrency
+	// concurrent requests. Individual fetches are used because Sonarr v3's
+	// seriesId batch parameter is not reliably supported — when repeated query
+	// params are given (e.g. ?seriesId=1&seriesId=2), ASP.NET may take only
+	// the last value, silently returning episodes for a single series.
+	var (
+		allEpisodesMu sync.Mutex
+		allEpisodes   []map[string]any
+		fetchErr      error
+		fetchErrMu    sync.Mutex
+		wg            sync.WaitGroup
+		sem           = make(chan struct{}, episodeConcurrency)
+	)
 
-		parts := make([]string, len(chunk))
-		for j, id := range chunk {
-			parts[j] = "seriesId=" + strconv.Itoa(id)
+	for _, id := range arrIDs {
+		// Stop launching new goroutines if a fetch error was recorded.
+		fetchErrMu.Lock()
+		curErr := fetchErr
+		fetchErrMu.Unlock()
+		if curErr != nil {
+			break
 		}
-		path := "/api/v3/episode?" + strings.Join(parts, "&")
 
-		epData, err := svc.ArrGet(sonarrURL, apiKey, path)
-		if err != nil {
-			slog.Error("backfill: fetch episodes batch", "component", "catalog_sync",
-				"chunk_start", i, "chunk_end", end, "error", err)
-			continue
-		}
-		var batch []map[string]any
-		if err := json.Unmarshal(epData, &batch); err != nil {
-			slog.Error("backfill: parse episodes batch", "component", "catalog_sync",
-				"chunk_start", i, "chunk_end", end, "error", err)
-			continue
-		}
-		allEpisodes = append(allEpisodes, batch...)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(arrID int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			path := "/api/v3/episode?seriesId=" + strconv.Itoa(arrID)
+			epData, err := svc.ArrGet(sonarrURL, apiKey, path)
+			if err != nil {
+				slog.Error("backfill: fetch episodes", "component", "catalog_sync",
+					"arr_id", arrID, "error", err)
+				fetchErrMu.Lock()
+				if fetchErr == nil {
+					fetchErr = err
+				}
+				fetchErrMu.Unlock()
+				return
+			}
+			var batch []map[string]any
+			if err := json.Unmarshal(epData, &batch); err != nil {
+				slog.Error("backfill: parse episodes", "component", "catalog_sync",
+					"arr_id", arrID, "error", err)
+				return
+			}
+			allEpisodesMu.Lock()
+			allEpisodes = append(allEpisodes, batch...)
+			allEpisodesMu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+
+	if fetchErr != nil {
+		return fmt.Errorf("sonarr episode fetch: %w", fetchErr)
 	}
 
 	// Third pass: upsert unique seasons from the episode list.
