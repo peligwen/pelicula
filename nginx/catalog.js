@@ -1,17 +1,13 @@
 // catalog.js — Catalog tab: library browser with per-item action menu
 'use strict';
 
-(function () {
-const { component, html, raw, esc, toast } = PeliculaFW;
+import { component, html, raw, toast, onTab, mount, openDrawer, closeDrawer } from '/framework.js';
+import { get, post, put, del } from '/api.js';
 
 const REGISTRY_TTL = 60_000;
 const SUB_REQ_DEFAULT_LANGS = ['en', 'es', 'fr', 'de', 'pt', 'it', 'ja', 'zh'];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function catFetch(url, opts) {
-    return fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
-}
-
 function fmtSize(bytes) {
     if (bytes >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(1) + ' GB';
     if (bytes >= 1_048_576) return Math.round(bytes / 1_048_576) + ' MB';
@@ -63,9 +59,8 @@ component('catalog', function (el, store, _props) {
         const reg = store.get('catalog.registry');
         if (reg && now < store.get('catalog.registryExpires')) return reg;
         try {
-            const res = await catFetch('/api/pelicula/actions/registry');
-            if (!res.ok) return reg || [];
-            const data = await res.json();
+            const data = await get('/api/pelicula/actions/registry');
+            if (!data) return reg || [];
             const registry = Array.isArray(data) ? data : [];
             store.set('catalog.registry', registry);
             store.set('catalog.registryExpires', now + REGISTRY_TTL);
@@ -89,9 +84,8 @@ component('catalog', function (el, store, _props) {
             const t = store.get('catalog.type');
             if (q) params.set('q', q);
             if (t) params.set('type', t);
-            const res = await catFetch('/api/pelicula/catalog?' + params);
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
+            const data = await get('/api/pelicula/catalog?' + params);
+            if (!data) throw new Error('catalog unavailable');
             store.set('catalog.items', [...(data.movies || []), ...(data.series || [])]);
             store.set('catalog.loaded', true);
         } catch (e) {
@@ -104,9 +98,8 @@ component('catalog', function (el, store, _props) {
     // ── Flags ─────────────────────────────────────────────────────────────────
     async function loadFlags() {
         try {
-            const res = await catFetch('/api/pelicula/catalog/flags');
-            if (!res.ok) return;
-            const data = await res.json();
+            const data = await get('/api/pelicula/catalog/flags');
+            if (!data) return;
             const rows = Array.isArray(data.rows) ? data.rows : [];
             const byPath = {};
             for (const r of rows) byPath[r.path] = r;
@@ -275,9 +268,8 @@ component('catalog', function (el, store, _props) {
         rowEl.classList.add('expanded');
         let seasons = [];
         try {
-            const res = await catFetch('/api/pelicula/catalog/series/' + series.id);
-            if (res.ok) {
-                const d = await res.json();
+            const d = await get('/api/pelicula/catalog/series/' + series.id);
+            if (d) {
                 seasons = (d.seasons || []).filter(s => s.seasonNumber > 0).sort((a, b) => a.seasonNumber - b.seasonNumber);
             }
         } catch (e) { /* non-critical */ }
@@ -322,8 +314,8 @@ component('catalog', function (el, store, _props) {
         rowEl.classList.add('expanded');
         let eps = [];
         try {
-            const res = await catFetch('/api/pelicula/catalog/series/' + series.id + '/season/' + seasonNumber);
-            if (res.ok) eps = await res.json();
+            const data = await get('/api/pelicula/catalog/series/' + series.id + '/season/' + seasonNumber);
+            if (data) eps = data;
         } catch (e) { /* non-critical */ }
         let insertAfter = rowEl;
         for (const ep of eps) {
@@ -460,7 +452,7 @@ component('catalog', function (el, store, _props) {
         const sub = document.getElementById('cat-drawer-sub');
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
-        PeliculaFW.openDrawer(drawer, backdrop);
+        openDrawer(drawer, backdrop);
         const filename = path.split('/').slice(-1)[0] || 'Details';
         // Strip extension for display; keep raw filename in title attr for hover
         titleEl.textContent = filename.replace(/\.[^.]+$/, '');
@@ -469,13 +461,14 @@ component('catalog', function (el, store, _props) {
         sub.title = path;
         setHTML(body, html`<div style="color:var(--muted);padding:1rem 0">Loading\u2026</div>`);
         try {
-            const [detailRes, trackRes] = await Promise.all([
-                catFetch('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path)),
-                catFetch('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)),
+            const [detailResult, tracksResult] = await Promise.allSettled([
+                get('/api/pelicula/catalog/detail?path=' + encodeURIComponent(path)),
+                get('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)),
             ]);
-            if (!detailRes.ok) throw new Error('HTTP ' + detailRes.status);
-            const data = await detailRes.json();
-            const tracksData = trackRes.ok ? await trackRes.json() : {};
+            if (detailResult.status === 'rejected') throw detailResult.reason;
+            const data = detailResult.value;
+            if (!data) throw new Error('catalog unavailable');
+            const tracksData = (tracksResult.status === 'fulfilled' && tracksResult.value) ? tracksResult.value : {};
             const drawerDualsubs = tracksData.dualsubs || [];
             if (data.title) {
                 titleEl.textContent = data.title;
@@ -496,7 +489,7 @@ component('catalog', function (el, store, _props) {
         const sub = document.getElementById('cat-drawer-sub');
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
-        PeliculaFW.openDrawer(drawer, backdrop);
+        openDrawer(drawer, backdrop);
         titleEl.textContent = item.title || '(untitled)';
         titleEl.title = item.title || '';
         sub.textContent = item.monitored ? 'Monitored \u2014 not downloaded' : 'Not monitored';
@@ -507,9 +500,9 @@ component('catalog', function (el, store, _props) {
         let profilesData = store.get('catalog.qualityProfiles');
         if (!profilesData) {
             try {
-                const res = await catFetch('/api/pelicula/catalog/qualityprofiles');
-                if (res.ok) {
-                    profilesData = await res.json();
+                const data = await get('/api/pelicula/catalog/qualityprofiles');
+                if (data) {
+                    profilesData = data;
                     store.set('catalog.qualityProfiles', profilesData);
                 }
             } catch (e) { /* non-critical — will show profile ID instead of name */ }
@@ -608,23 +601,15 @@ component('catalog', function (el, store, _props) {
 
     async function runArrCommand(command, arrType, arrId, title) {
         const label = command === 'search' ? 'Force Search' : 'Unmonitor';
+        const successMsg = command === 'search'
+            ? (title || 'Item') + ': search triggered'
+            : (title || 'Item') + ': unmonitored';
         try {
-            const res = await catFetch('/api/pelicula/catalog/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ arr_type: arrType, arr_id: arrId, command }),
-            });
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                toast(label + ' failed: ' + (data.error || 'unknown'), { error: true });
-                return;
-            }
-            const successMsg = command === 'search'
-                ? (title || 'Item') + ': search triggered'
-                : (title || 'Item') + ': unmonitored';
+            await post('/api/pelicula/catalog/command', { arr_type: arrType, arr_id: arrId, command });
             toast(successMsg);
         } catch (e) {
-            toast(label + ' error: ' + e.message, { error: true });
+            const errMsg = (e.body && e.body.error) || e.message || 'unknown';
+            toast(label + ' failed: ' + errMsg, { error: true });
         }
     }
 
@@ -709,13 +694,11 @@ component('catalog', function (el, store, _props) {
         const waitSec = def.sync ? 10 : 0;
         const target = buildTarget(item, level);
         const params = buildParams(def, item, level);
-        const body = JSON.stringify({ action: def.name, target, params });
+        const body = { action: def.name, target, params };
         try {
             const url = '/api/pelicula/actions' + (waitSec > 0 ? '?wait=' + waitSec : '');
-            const res = await catFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-            const data = await res.json();
-            if (!res.ok) { toast((def.label || def.name) + ' failed: ' + (data.error || 'unknown'), { error: true }); return; }
-            if (def.sync && data.state === 'completed') {
+            const data = await post(url, body);
+            if (def.sync && data && data.state === 'completed') {
                 const passed = (data.result || {}).passed;
                 const summary = passed === true ? '\u2713 Passed' : passed === false ? '\u2717 Failed' : 'Done';
                 toast((def.label || def.name) + ': ' + summary, passed === false ? { error: true } : undefined);
@@ -723,7 +706,8 @@ component('catalog', function (el, store, _props) {
                 toast((def.label || def.name) + ' queued');
             }
         } catch (e) {
-            toast((def.label || def.name) + ' error: ' + e.message, { error: true });
+            const errMsg = (e.body && e.body.error) || e.message || 'unknown';
+            toast((def.label || def.name) + ' failed: ' + errMsg, { error: true });
         }
     }
 
@@ -745,20 +729,18 @@ component('catalog', function (el, store, _props) {
         let episodes = [];
         try {
             if (level === 'series') {
-                const res = await catFetch('/api/pelicula/catalog/series/' + item.id);
-                if (res.ok) {
-                    const detail = await res.json();
+                const detail = await get('/api/pelicula/catalog/series/' + item.id);
+                if (detail) {
                     for (const s of (detail.seasons || []).filter(s => s.seasonNumber > 0)) {
-                        const r2 = await catFetch('/api/pelicula/catalog/series/' + item.id + '/season/' + s.seasonNumber);
-                        if (r2.ok) {
-                            const eps = await r2.json();
-                            episodes.push(...eps.filter(e => e.hasFile || (e.file && e.file.id)));
-                        }
+                        try {
+                            const eps = await get('/api/pelicula/catalog/series/' + item.id + '/season/' + s.seasonNumber);
+                            if (eps) episodes.push(...eps.filter(e => e.hasFile || (e.file && e.file.id)));
+                        } catch (e) { /* non-critical */ }
                     }
                 }
             } else if (level === 'season') {
-                const r = await catFetch('/api/pelicula/catalog/series/' + item.id + '/season/' + item.season);
-                if (r.ok) episodes = (await r.json()).filter(e => e.hasFile || (e.file && e.file.id));
+                const eps = await get('/api/pelicula/catalog/series/' + item.id + '/season/' + item.season);
+                if (eps) episodes = eps.filter(e => e.hasFile || (e.file && e.file.id));
             }
         } catch (e) { /* non-critical */ }
 
@@ -835,11 +817,11 @@ component('catalog', function (el, store, _props) {
             container.appendChild(chip);
         });
 
-        PeliculaFW.openDrawer(document.getElementById('sub-search-dialog'), document.getElementById('sub-search-backdrop'));
+        openDrawer(document.getElementById('sub-search-dialog'), document.getElementById('sub-search-backdrop'));
     }
 
     window.subSearchClose = function () {
-        PeliculaFW.closeDrawer(document.getElementById('sub-search-dialog'), document.getElementById('sub-search-backdrop'));
+        closeDrawer(document.getElementById('sub-search-dialog'), document.getElementById('sub-search-backdrop'));
     };
 
     window.subSearchSubmit = async function () {
@@ -851,21 +833,15 @@ component('catalog', function (el, store, _props) {
         if (!langs.length) { statusEl.textContent = 'Select at least one language.'; return; }
         statusEl.textContent = 'Searching\u2026';
         try {
-            const res = await catFetch('/api/pelicula/actions?wait=10', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'subtitle_search',
-                    target: { arr_type: level === 'movie' ? 'radarr' : 'sonarr', arr_id: item.id, episode_id: item.episodeId || 0 },
-                    params: {
-                        languages: langs,
-                        hi: document.getElementById('sub-search-hi').checked,
-                        forced: document.getElementById('sub-search-forced').checked,
-                    },
-                }),
+            await post('/api/pelicula/actions?wait=10', {
+                action: 'subtitle_search',
+                target: { arr_type: level === 'movie' ? 'radarr' : 'sonarr', arr_id: item.id, episode_id: item.episodeId || 0 },
+                params: {
+                    languages: langs,
+                    hi: document.getElementById('sub-search-hi').checked,
+                    forced: document.getElementById('sub-search-forced').checked,
+                },
             });
-            const data = await res.json();
-            if (!res.ok) { statusEl.textContent = data.error || 'Error'; return; }
             statusEl.textContent = 'Search triggered.';
             setTimeout(window.subSearchClose, 1500);
         } catch (e) {
@@ -894,14 +870,14 @@ component('catalog', function (el, store, _props) {
         _dualsubManageOpen = false;
         document.getElementById('dualsub-manage-btn').textContent = 'Manage \u25be';
 
-        const [profRes, trackRes] = await Promise.all([
-            catFetch('/api/procula/dualsub-profiles'),
-            path ? catFetch('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)) : Promise.resolve(null),
+        const [profResult, trackResult] = await Promise.allSettled([
+            get('/api/procula/dualsub-profiles'),
+            path ? get('/api/procula/subtitle-tracks?path=' + encodeURIComponent(path)) : Promise.resolve(null),
         ]);
         // Guard: bail if another open superseded this one
         if (store.get('catalog.dualsub.path') !== path) return;
-        _dualsubProfiles = profRes.ok ? await profRes.json() : [];
-        const tracksData = (trackRes && trackRes.ok) ? await trackRes.json() : {};
+        _dualsubProfiles = (profResult.status === 'fulfilled' && profResult.value) ? profResult.value : [];
+        const tracksData = (trackResult.status === 'fulfilled' && trackResult.value) ? trackResult.value : {};
         _dualsubTracks = tracksData.tracks || [];
         _dualsubEmbedded = tracksData.embedded_tracks || [];
         _dualsubDualsubs = tracksData.dualsubs || [];
@@ -910,7 +886,7 @@ component('catalog', function (el, store, _props) {
         dualsubRenderOnDisk();
         dualsubRenderPairs();
 
-        PeliculaFW.openDrawer(document.getElementById('dualsub-dialog'), document.getElementById('dualsub-backdrop'));
+        openDrawer(document.getElementById('dualsub-dialog'), document.getElementById('dualsub-backdrop'));
     }
 
     function dualsubRenderProfiles() {
@@ -943,34 +919,25 @@ component('catalog', function (el, store, _props) {
             chip.textContent = ds.pair;
             chip.title = ds.file;
 
-            const del = document.createElement('button');
-            del.textContent = '\u00d7';
-            del.title = 'Delete sidecar (so it can be re-rendered)';
-            del.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:.95rem;padding:0 .15rem;line-height:1';
-            del.onclick = async () => {
-                del.disabled = true;
+            const delBtn = document.createElement('button');
+            delBtn.textContent = '\u00d7';
+            delBtn.title = 'Delete sidecar (so it can be re-rendered)';
+            delBtn.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:.95rem;padding:0 .15rem;line-height:1';
+            delBtn.onclick = async () => {
+                delBtn.disabled = true;
                 try {
-                    const res = await catFetch('/api/procula/dualsub-sidecars', {
-                        method: 'DELETE',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ file: ds.file }),
-                    });
-                    if (res.ok) {
-                        _dualsubDualsubs = _dualsubDualsubs.filter(x => x.file !== ds.file);
-                        dualsubRenderOnDisk();
-                    } else {
-                        const d = await res.json().catch(() => ({}));
-                        document.getElementById('dualsub-status').textContent = d.error || 'Delete failed';
-                        del.disabled = false;
-                    }
-                } catch {
-                    document.getElementById('dualsub-status').textContent = 'Request failed';
-                    del.disabled = false;
+                    await del('/api/procula/dualsub-sidecars', { file: ds.file });
+                    _dualsubDualsubs = _dualsubDualsubs.filter(x => x.file !== ds.file);
+                    dualsubRenderOnDisk();
+                } catch (e) {
+                    const errMsg = (e.body && e.body.error) || e.message || 'Delete failed';
+                    document.getElementById('dualsub-status').textContent = errMsg;
+                    delBtn.disabled = false;
                 }
             };
 
             row.appendChild(chip);
-            row.appendChild(del);
+            row.appendChild(delBtn);
             container.appendChild(row);
         });
     }
@@ -1071,7 +1038,7 @@ component('catalog', function (el, store, _props) {
     };
 
     window.dualsubClose = function () {
-        PeliculaFW.closeDrawer(document.getElementById('dualsub-dialog'), document.getElementById('dualsub-backdrop'));
+        closeDrawer(document.getElementById('dualsub-dialog'), document.getElementById('dualsub-backdrop'));
     };
 
     window.dualsubToggleManage = function () {
@@ -1131,46 +1098,49 @@ component('catalog', function (el, store, _props) {
     window.dualsubSaveAsNew = async function () {
         const fields = dualsubReadEditorFields();
         if (!fields.name) { toast('Profile name required'); return; }
-        const res = await catFetch('/api/procula/dualsub-profiles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fields),
-        });
-        if (!res.ok) { const d = await res.json(); toast(d.error || 'Save failed'); return; }
-        const saved = await res.json();
-        _dualsubProfiles.push(saved);
-        dualsubRenderProfiles();
-        document.getElementById('dualsub-profile-select').value = saved.name;
-        toast('Profile saved');
+        try {
+            const saved = await post('/api/procula/dualsub-profiles', fields);
+            _dualsubProfiles.push(saved);
+            dualsubRenderProfiles();
+            document.getElementById('dualsub-profile-select').value = saved.name;
+            toast('Profile saved');
+        } catch (e) {
+            const errMsg = (e.body && e.body.error) || e.message || 'Save failed';
+            toast(errMsg, { error: true });
+        }
     };
 
     window.dualsubUpdateProfile = async function () {
         const fields = dualsubReadEditorFields();
         if (!fields.name) return;
-        const res = await catFetch('/api/procula/dualsub-profiles/' + encodeURIComponent(fields.name), {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fields),
-        });
-        if (!res.ok) { const d = await res.json(); toast(d.error || 'Update failed'); return; }
-        const idx = _dualsubProfiles.findIndex(p => p.name === fields.name);
-        if (idx !== -1) _dualsubProfiles[idx] = fields;
-        dualsubRenderProfiles();
-        document.getElementById('dualsub-profile-select').value = fields.name;
-        toast('Profile updated');
+        try {
+            await put('/api/procula/dualsub-profiles/' + encodeURIComponent(fields.name), fields);
+            const idx = _dualsubProfiles.findIndex(p => p.name === fields.name);
+            if (idx !== -1) _dualsubProfiles[idx] = fields;
+            dualsubRenderProfiles();
+            document.getElementById('dualsub-profile-select').value = fields.name;
+            toast('Profile updated');
+        } catch (e) {
+            const errMsg = (e.body && e.body.error) || e.message || 'Update failed';
+            toast(errMsg, { error: true });
+        }
     };
 
     window.dualsubDeleteProfile = async function () {
         const name = document.getElementById('dsp-name').value.trim();
         if (!name) return;
-        const res = await catFetch('/api/procula/dualsub-profiles/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (!res.ok && res.status !== 204) { const d = await res.json(); toast(d.error || 'Delete failed'); return; }
-        _dualsubProfiles = _dualsubProfiles.filter(p => p.name !== name);
-        dualsubRenderProfiles();
-        document.getElementById('dualsub-profile-editor').style.display = 'none';
-        _dualsubManageOpen = false;
-        document.getElementById('dualsub-manage-btn').textContent = 'Manage \u25be';
-        toast('Profile deleted');
+        try {
+            await del('/api/procula/dualsub-profiles/' + encodeURIComponent(name));
+            _dualsubProfiles = _dualsubProfiles.filter(p => p.name !== name);
+            dualsubRenderProfiles();
+            document.getElementById('dualsub-profile-editor').style.display = 'none';
+            _dualsubManageOpen = false;
+            document.getElementById('dualsub-manage-btn').textContent = 'Manage \u25be';
+            toast('Profile deleted');
+        } catch (e) {
+            const errMsg = (e.body && e.body.error) || e.message || 'Delete failed';
+            toast(errMsg, { error: true });
+        }
     };
 
     window.dualsubSubmit = async function () {
@@ -1201,18 +1171,12 @@ component('catalog', function (el, store, _props) {
 
         statusEl.textContent = 'Generating\u2026';
         try {
-            const res = await catFetch('/api/pelicula/actions?wait=10', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'dualsub',
-                    target: { path },
-                    params: { profile: profileName, pairs },
-                }),
+            const data = await post('/api/pelicula/actions?wait=10', {
+                action: 'dualsub',
+                target: { path },
+                params: { profile: profileName, pairs },
             });
-            const data = await res.json();
-            if (!res.ok) { statusEl.textContent = data.error || 'Error'; return; }
-            const outputs = (data.result && data.result.outputs) || [];
+            const outputs = (data && data.result && data.result.outputs) || [];
             statusEl.textContent = outputs.length
                 ? 'Generated: ' + outputs.map(o => o.split('/').pop()).join(', ')
                 : 'No output produced.';
@@ -1228,16 +1192,13 @@ component('catalog', function (el, store, _props) {
     window.catResync = async function (btn) {
         btn.disabled = true;
         try {
-            const res = await catFetch('/api/pelicula/catalog/backfill', { method: 'POST' });
-            if (res.ok) {
-                toast('Catalog resync started');
-                store.set('catalog.loaded', false);
-                setTimeout(loadCatalog, 3000);
-            } else {
-                toast('Resync failed: ' + res.status, { error: true });
-            }
+            await post('/api/pelicula/catalog/backfill', {});
+            toast('Catalog resync started');
+            store.set('catalog.loaded', false);
+            setTimeout(loadCatalog, 3000);
         } catch (e) {
-            toast('Resync error: ' + e.message, { error: true });
+            const errMsg = (e.body && e.body.error) || e.message || 'unknown';
+            toast('Resync failed: ' + errMsg, { error: true });
         } finally {
             btn.disabled = false;
         }
@@ -1259,7 +1220,7 @@ component('catalog', function (el, store, _props) {
     window.catOpenDetail = function (path) { openDetail(path); };
 
     window.catCloseDetail = function () {
-        PeliculaFW.closeDrawer(
+        closeDrawer(
             document.getElementById('cat-drawer'),
             document.getElementById('cat-drawer-backdrop')
         );
@@ -1317,7 +1278,7 @@ component('catalog', function (el, store, _props) {
         }
 
         await updateReplaceFileCount();
-        PeliculaFW.openDrawer(document.getElementById('replace-dialog'), document.getElementById('replace-backdrop'));
+        openDrawer(document.getElementById('replace-dialog'), document.getElementById('replace-backdrop'));
     }
 
     async function updateReplaceFileCount() {
@@ -1356,19 +1317,17 @@ component('catalog', function (el, store, _props) {
             if (scopeVal === 'season') {
                 const seasonNum = item.season || (item.seasons && item.seasons[0] && item.seasons[0].seasonNumber);
                 if (seasonNum) {
-                    const r = await catFetch('/api/pelicula/catalog/series/' + item.id + '/season/' + seasonNum);
-                    if (r.ok) episodes = (await r.json()).filter(e => e.hasFile || (e.file && e.file.id));
+                    const eps = await get('/api/pelicula/catalog/series/' + item.id + '/season/' + seasonNum);
+                    if (eps) episodes = eps.filter(e => e.hasFile || (e.file && e.file.id));
                 }
             } else if (scopeVal === 'series') {
-                const r = await catFetch('/api/pelicula/catalog/series/' + item.id);
-                if (r.ok) {
-                    const detail = await r.json();
+                const detail = await get('/api/pelicula/catalog/series/' + item.id);
+                if (detail) {
                     for (const s of (detail.seasons || []).filter(s => s.seasonNumber > 0)) {
-                        const r2 = await catFetch('/api/pelicula/catalog/series/' + item.id + '/season/' + s.seasonNumber);
-                        if (r2.ok) {
-                            const eps = await r2.json();
-                            episodes.push(...eps.filter(e => e.hasFile || (e.file && e.file.id)));
-                        }
+                        try {
+                            const eps = await get('/api/pelicula/catalog/series/' + item.id + '/season/' + s.seasonNumber);
+                            if (eps) episodes.push(...eps.filter(e => e.hasFile || (e.file && e.file.id)));
+                        } catch (e) { /* non-critical */ }
                     }
                 }
             }
@@ -1388,7 +1347,7 @@ component('catalog', function (el, store, _props) {
     }
 
     window.replaceClose = function () {
-        PeliculaFW.closeDrawer(document.getElementById('replace-dialog'), document.getElementById('replace-backdrop'));
+        closeDrawer(document.getElementById('replace-dialog'), document.getElementById('replace-backdrop'));
     };
 
     window.replaceConfirm = async function () {
@@ -1406,17 +1365,12 @@ component('catalog', function (el, store, _props) {
         let failed = 0;
         for (const f of _replaceFiles) {
             try {
-                const res = await catFetch('/api/pelicula/actions?wait=10', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'replace',
-                        target: { path: f.path, arr_type: f.arr_type, arr_id: f.arr_id, episode_id: f.episode_id },
-                        params: { reason },
-                    }),
+                const data = await post('/api/pelicula/actions?wait=10', {
+                    action: 'replace',
+                    target: { path: f.path, arr_type: f.arr_type, arr_id: f.arr_id, episode_id: f.episode_id },
+                    params: { reason },
                 });
-                const data = await res.json();
-                if (!res.ok || data.state === 'failed') { failed++; } else { succeeded++; }
+                if (data && data.state === 'failed') { failed++; } else { succeeded++; }
             } catch (e) {
                 failed++;
             }
@@ -1445,11 +1399,11 @@ component('catalog', function (el, store, _props) {
 
 // ── Tab activation ────────────────────────────────────────────────────────────
 // dashboard.js dispatches pelicula:tab-changed; we mount on first activation.
-PeliculaFW.onTab('catalog', function () {
+onTab('catalog', function () {
     const el = document.getElementById('catalog-section');
     if (el && !el.dataset.mounted) {
         el.dataset.mounted = '1';
-        PeliculaFW.mount('catalog', el);
+        mount('catalog', el);
     }
 });
 
@@ -1457,7 +1411,6 @@ if (document.body && document.body.dataset.tab === 'catalog') {
     const el = document.getElementById('catalog-section');
     if (el && !el.dataset.mounted) {
         el.dataset.mounted = '1';
-        PeliculaFW.mount('catalog', el);
+        mount('catalog', el);
     }
 }
-})();
