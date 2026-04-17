@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,7 +49,14 @@ func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
 		return nil, err
 	}
 
-	path := fmt.Sprintf("/Users/%s/Items?IncludeItemTypes=Movie,Series&Fields=Overview,ImageTags,ProviderIds&Recursive=true&Limit=5000", userID)
+	jellyfinLibraryCap := 5000
+	if v := os.Getenv("JELLYFIN_LIBRARY_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			jellyfinLibraryCap = n
+		}
+	}
+
+	path := fmt.Sprintf("/Users/%s/Items?IncludeItemTypes=Movie,Series&Fields=Overview,ImageTags,ProviderIds&Recursive=true&Limit=%d", userID, jellyfinLibraryCap)
 	body, err := jellyfinDo(svc, "GET", path, svc.JellyfinAPIKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("jellyfin library fetch: %w", err)
@@ -59,6 +69,18 @@ func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
 		return nil, fmt.Errorf("jellyfin library parse: %w", err)
 	}
 
+	count := len(resp.Items)
+	pct := float64(count) / float64(jellyfinLibraryCap) * 100
+	if pct >= 80 {
+		slog.Warn("jellyfin library response near cap",
+			"component", "catalog_sync",
+			"count", count,
+			"cap", jellyfinLibraryCap,
+			"pct", fmt.Sprintf("%.0f%%", pct),
+			"hint", "consider increasing JELLYFIN_LIBRARY_LIMIT",
+		)
+	}
+
 	// Re-acquire lock to store result. Double-check: if another goroutine beat
 	// us and wrote a fresh value, keep theirs (it's equally good and avoids
 	// a spurious cache reset).
@@ -66,7 +88,7 @@ func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
 	if time.Since(jellyfinCache.fetchedAt) >= jellyfinCacheTTL {
 		jellyfinCache.items = resp.Items
 		jellyfinCache.fetchedAt = time.Now()
-		slog.Info("jellyfin library cached", "component", "catalog_sync", "count", len(resp.Items))
+		slog.Info("jellyfin library cached", "component", "catalog_sync", "count", count)
 	}
 	items := jellyfinCache.items
 	jellyfinCache.mu.Unlock()
@@ -214,6 +236,8 @@ func backfillRadarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 	return nil
 }
 
+const sonarrEpisodeBatchSize = 50
+
 func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 	data, err := svc.ArrGet(sonarrURL, apiKey, "/api/v3/series")
 	if err != nil {
@@ -224,6 +248,18 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 		return fmt.Errorf("sonarr parse: %w", err)
 	}
 
+	// seriesByArrID maps Sonarr series ID → parsed series fields needed for
+	// season upserts. Built in the first pass so the second pass (episode fetch)
+	// can look up series context without re-iterating seriesList.
+	type seriesMeta struct {
+		catalogID string
+		title     string
+		year      int
+		tier      string
+	}
+	seriesByArrID := make(map[int]seriesMeta, len(seriesList))
+
+	// First pass: upsert all series records and collect their arr IDs.
 	for _, s := range seriesList {
 		title, _ := s["title"].(string)
 		if title == "" {
@@ -241,7 +277,7 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 			}
 		}
 
-		seriesID, err := UpsertCatalogItem(db, CatalogItem{
+		catalogID, err := UpsertCatalogItem(db, CatalogItem{
 			Type:    "series",
 			TvdbID:  tvdbID,
 			TmdbID:  tmdbID,
@@ -255,43 +291,85 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 			slog.Error("backfill: upsert series", "component", "catalog_sync", "title", title, "error", err)
 			continue
 		}
+		seriesByArrID[arrID] = seriesMeta{catalogID: catalogID, title: title, year: year, tier: tier}
+	}
 
-		// Fetch episodes to upsert seasons
-		epData, err := svc.ArrGet(sonarrURL, apiKey, fmt.Sprintf("/api/v3/episode?seriesId=%d", arrID))
+	// Collect the arr IDs we successfully upserted.
+	arrIDs := make([]int, 0, len(seriesByArrID))
+	for id := range seriesByArrID {
+		arrIDs = append(arrIDs, id)
+	}
+
+	// Second pass: fetch episodes in batches of sonarrEpisodeBatchSize.
+	// Sonarr v3 accepts repeated seriesId query params for bulk lookups:
+	//   GET /api/v3/episode?seriesId=1&seriesId=2&seriesId=3
+	var allEpisodes []map[string]any
+	for i := 0; i < len(arrIDs); i += sonarrEpisodeBatchSize {
+		end := i + sonarrEpisodeBatchSize
+		if end > len(arrIDs) {
+			end = len(arrIDs)
+		}
+		chunk := arrIDs[i:end]
+
+		parts := make([]string, len(chunk))
+		for j, id := range chunk {
+			parts[j] = "seriesId=" + strconv.Itoa(id)
+		}
+		path := "/api/v3/episode?" + strings.Join(parts, "&")
+
+		epData, err := svc.ArrGet(sonarrURL, apiKey, path)
 		if err != nil {
-			slog.Error("backfill: fetch episodes", "component", "catalog_sync", "series", title, "error", err)
+			slog.Error("backfill: fetch episodes batch", "component", "catalog_sync",
+				"chunk_start", i, "chunk_end", end, "error", err)
 			continue
 		}
-		var episodes []map[string]any
-		if err := json.Unmarshal(epData, &episodes); err != nil {
+		var batch []map[string]any
+		if err := json.Unmarshal(epData, &batch); err != nil {
+			slog.Error("backfill: parse episodes batch", "component", "catalog_sync",
+				"chunk_start", i, "chunk_end", end, "error", err)
 			continue
 		}
+		allEpisodes = append(allEpisodes, batch...)
+	}
 
-		// Upsert unique seasons seen in episode list
-		seasonsSeen := map[int]bool{}
-		for _, ep := range episodes {
-			seasonNum := int(floatVal(ep, "seasonNumber"))
-			if seasonNum == 0 {
-				continue // skip specials
-			}
-			if seasonsSeen[seasonNum] {
-				continue
-			}
-			seasonsSeen[seasonNum] = true
-			if _, err := UpsertCatalogItem(db, CatalogItem{
-				Type:         "season",
-				ParentID:     seriesID,
-				SeasonNumber: seasonNum,
-				Title:        fmt.Sprintf("%s Season %d", title, seasonNum),
-				Year:         year,
-				Tier:         tier,
-			}); err != nil {
-				slog.Error("backfill: upsert season", "component", "catalog_sync",
-					"title", fmt.Sprintf("%s Season %d", title, seasonNum), "error", err)
-			}
+	// Third pass: upsert unique seasons from the episode list.
+	// seasonsSeen key: (arrID, seasonNumber)
+	type seasonKey struct {
+		arrID     int
+		seasonNum int
+	}
+	seasonsSeen := map[seasonKey]bool{}
+	for _, ep := range allEpisodes {
+		arrID := int(floatVal(ep, "seriesId"))
+		seasonNum := int(floatVal(ep, "seasonNumber"))
+		if seasonNum == 0 {
+			continue // skip specials
+		}
+		key := seasonKey{arrID, seasonNum}
+		if seasonsSeen[key] {
+			continue
+		}
+		seasonsSeen[key] = true
+
+		meta, ok := seriesByArrID[arrID]
+		if !ok {
+			continue
+		}
+		if _, err := UpsertCatalogItem(db, CatalogItem{
+			Type:         "season",
+			ParentID:     meta.catalogID,
+			SeasonNumber: seasonNum,
+			Title:        fmt.Sprintf("%s Season %d", meta.title, seasonNum),
+			Year:         meta.year,
+			Tier:         meta.tier,
+		}); err != nil {
+			slog.Error("backfill: upsert season", "component", "catalog_sync",
+				"title", fmt.Sprintf("%s Season %d", meta.title, seasonNum), "error", err)
 		}
 	}
-	slog.Info("backfill sonarr complete", "component", "catalog_sync", "count", len(seriesList))
+
+	slog.Info("backfill sonarr complete", "component", "catalog_sync",
+		"series", len(seriesList), "episodes", len(allEpisodes))
 	return nil
 }
 
