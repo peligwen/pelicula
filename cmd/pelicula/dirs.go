@@ -181,6 +181,7 @@ func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
 		"TRANSCODING_ENABLED":   "false",
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
+		"PELICULA_PROJECT_NAME": "pelicula",
 	}
 	return WriteEnv(envPath, m)
 }

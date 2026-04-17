@@ -29,6 +29,7 @@ var envKeyOrder = []string{
 	"TRANSCODING_ENABLED",
 	"NOTIFICATIONS_ENABLED",
 	"NOTIFICATIONS_MODE",
+	"PELICULA_PROJECT_NAME",
 }
 
 // ParseEnv reads a .env file and returns a map of key→value.
@@ -160,6 +161,7 @@ func MigrateEnv(path string) (bool, error) {
 		{"TRANSCODING_ENABLED", "false"},
 		{"NOTIFICATIONS_ENABLED", "false"},
 		{"NOTIFICATIONS_MODE", "internal"},
+		{"PELICULA_PROJECT_NAME", "pelicula"},
 	}
 	for _, d := range defaults {
 		if _, ok := m[d.key]; !ok {

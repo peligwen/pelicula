@@ -8,16 +8,16 @@
 # network_mode: "service:gluetun" still works — the stub provides the shared
 # network namespace.
 #
-# All services get pelicula-test-* container names so the test stack can
-# coexist with a running production stack (which uses bare names like
-# "procula", "nginx", etc.).
+# Compose generates project-scoped container names automatically from the
+# -p pelicula-test project flag: pelicula-test-nginx-1, pelicula-test-sonarr-1,
+# pelicula-test-pelicula-api-1, etc.  No explicit container_name overrides
+# are needed — the project name keeps the test stack isolated from production.
 
 services:
 
   # ── VPN stub ─────────────────────────────────────────────────────────────
   gluetun:
     image: alpine:3.20
-    container_name: pelicula-test-gluetun
     # Clear the inherited 6881:6881 torrent port — the alpine stub has no torrents, and
     # without !reset, compose CONCATENATES list fields across overlays rather than replacing
     # them, so a plain `ports: []` would leave 6881 bound and racing the production stack.
@@ -42,34 +42,6 @@ services:
       start_period: 15s
     restart: "no"
 
-  # ── Container name overrides (prevent conflicts with production stack) ────
-  qbittorrent:
-    container_name: pelicula-test-qbittorrent
-
-  prowlarr:
-    container_name: pelicula-test-prowlarr
-
-  sonarr:
-    container_name: pelicula-test-sonarr
-
-  radarr:
-    container_name: pelicula-test-radarr
-
+  # ── Port conflict suppression ─────────────────────────────────────────────
   jellyfin:
-    container_name: pelicula-test-jellyfin
     ports: !reset []  # suppress 7359:7359/udp LAN discovery — conflicts with production stack (plain [] would concatenate, see gluetun note)
-
-  procula:
-    container_name: pelicula-test-procula
-
-  pelicula-api:
-    container_name: pelicula-test-api
-
-  bazarr:
-    container_name: pelicula-test-bazarr
-
-  docker-proxy:
-    container_name: pelicula-test-docker-proxy
-
-  nginx:
-    container_name: pelicula-test-nginx

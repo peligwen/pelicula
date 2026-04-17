@@ -161,6 +161,7 @@ JELLYFIN_ADMIN_USER="admin"
 TRANSCODING_ENABLED="false"
 NOTIFICATIONS_ENABLED="false"
 NOTIFICATIONS_MODE="internal"
+PELICULA_PROJECT_NAME="pelicula"
 `
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)

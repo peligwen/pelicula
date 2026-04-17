@@ -5,7 +5,6 @@ services:
   # ═══════════════════════════════════════════════════
   gluetun:
     image: qmcgaw/gluetun:v3.41.0
-    container_name: gluetun
     profiles: [vpn]
     cap_add:
       - NET_ADMIN
@@ -45,7 +44,6 @@ services:
   # ═══════════════════════════════════════════════════
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: qbittorrent
     profiles: [vpn]
     network_mode: "service:gluetun"
     environment:
@@ -72,7 +70,6 @@ services:
   # ═══════════════════════════════════════════════════
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
-    container_name: prowlarr
     profiles: [vpn]
     network_mode: "service:gluetun"
     depends_on:
@@ -97,7 +94,6 @@ services:
   # ═══════════════════════════════════════════════════
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
-    container_name: sonarr
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -119,7 +115,6 @@ services:
   # ═══════════════════════════════════════════════════
   radarr:
     image: lscr.io/linuxserver/radarr:latest
-    container_name: radarr
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -141,7 +136,6 @@ services:
   # ═══════════════════════════════════════════════════
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
-    container_name: jellyfin
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -164,7 +158,6 @@ services:
   # ═══════════════════════════════════════════════════
   procula:
     build: ./procula
-    container_name: procula
     restart: unless-stopped
     depends_on:
       - pelicula-api
@@ -196,7 +189,6 @@ services:
   # ═══════════════════════════════════════════════════
   bazarr:
     image: lscr.io/linuxserver/bazarr:latest
-    container_name: bazarr
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -220,7 +212,6 @@ services:
   # ═══════════════════════════════════════════════════
   docker-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
-    container_name: pelicula-docker-proxy
     restart: unless-stopped
     environment:
       - CONTAINERS=1       # GET /containers/* (inspect, logs)
@@ -248,7 +239,6 @@ services:
   # ═══════════════════════════════════════════════════
   pelicula-api:
     build: ./middleware
-    container_name: pelicula-api
     environment:
       - TZ=${TZ}
       - DOCKER_HOST=http://docker-proxy:2375
@@ -260,6 +250,7 @@ services:
       - GLUETUN_HTTP_USER=${GLUETUN_HTTP_USER:-pelicula}
       - GLUETUN_HTTP_PASS=${GLUETUN_HTTP_PASS}
       - GLUETUN_PROXY_URL=${GLUETUN_PROXY_URL:-http://gluetun:8888}
+      - PELICULA_PROJECT_NAME=${PELICULA_PROJECT_NAME:-pelicula}
     volumes:
       - ./.env:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
@@ -294,7 +285,6 @@ services:
   # ═══════════════════════════════════════════════════
   apprise:
     image: caronc/apprise:latest
-    container_name: apprise
     profiles: [apprise]
     volumes:
       - ${CONFIG_DIR}/apprise:/config
@@ -305,7 +295,6 @@ services:
   # ═══════════════════════════════════════════════════
   nginx:
     image: nginx:alpine
-    container_name: nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro

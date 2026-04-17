@@ -315,7 +315,7 @@ Session\DefaultSavePath=/downloads/'
     # POST directly to procula (port 8282) inside its container to bypass
     # nginx auth_request, which gates /api/procula/ with the session cookie.
     local settings_resp
-    settings_resp="$($NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+    settings_resp="$($NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
         --header='Content-Type: application/json' \
         --header="X-API-Key: ${test_api_key}" \
         --post-data='{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
@@ -367,7 +367,7 @@ EOPROFILE
 
     if [[ "$ffmpeg_ok" != "true" ]]; then
         # Fall back: run FFmpeg inside the procula container (which has it)
-        if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+        if $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
             -f lavfi -i "color=c=blue:s=320x240:d=10:r=24" \
             -f lavfi -i "sine=frequency=1000:duration=10:sample_rate=44100" \
             -c:v libx264 -preset ultrafast -crf 28 \
@@ -396,7 +396,7 @@ EOPROFILE
     local webhook_resp
     # Send from inside the Docker network so nginx's RFC1918 allow-list passes.
     # (On macOS Docker Desktop, host→published-port traffic is not 127.0.0.1 to nginx.)
-    webhook_resp="$($NEEDS_SUDO docker exec pelicula-test-api \
+    webhook_resp="$($NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 \
         wget -qO- --timeout=10 \
         --header="Content-Type: application/json" \
         --post-data="{
@@ -435,7 +435,7 @@ EOPROFILE
         # GET directly from procula inside its container to bypass nginx
         # auth_request, which gates /api/procula/ with the session cookie.
         local jobs_resp
-        jobs_resp="$($NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+        jobs_resp="$($NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
             'http://localhost:8282/api/procula/jobs' 2>/dev/null || echo "[]")"
         job_state="$(echo "$jobs_resp" | python3 -c "
 import json, sys
@@ -494,7 +494,7 @@ except Exception as e:
     else
         # Non-fatal: sidecar may be inside the container volume only
         local container_sidecar="/media/movies/Test Movie (2024)/Test.Movie.2024.test.mkv"
-        if $NEEDS_SUDO docker exec pelicula-test-procula test -f "$container_sidecar" 2>/dev/null; then
+        if $NEEDS_SUDO docker exec pelicula-test-procula-1 test -f "$container_sidecar" 2>/dev/null; then
             t_pass "Transcoded sidecar created (inside container volume)"
         else
             warn "Sidecar not found at ${sidecar_file} — transcoding may have been skipped (passthrough or profile mismatch)"
@@ -821,7 +821,7 @@ assert 'Movies' in names and 'TV Shows' in names
             fi
         fi
         if [[ "$pw_ffmpeg_ok" != "true" ]]; then
-            if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+            if $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                 -f lavfi -i "color=c=blue:s=320x240:d=10:r=24" \
                 -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                 -c:v libx264 -preset ultrafast -crf 28 \
@@ -848,7 +848,7 @@ assert 'Movies' in names and 'TV Shows' in names
                     -metadata year="1968" \
                     "$pw_notld_file" 2>/dev/null || pw_ffmpeg_ok=false
             else
-                $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                     -f lavfi -i "color=c=black:s=320x240:d=15:r=24" \
                     -f lavfi -i "sine=frequency=220:duration=15:sample_rate=44100" \
                     -c:v libx264 -preset ultrafast -crf 28 \
@@ -880,7 +880,7 @@ assert 'Movies' in names and 'TV Shows' in names
                 fi
             fi
             if [[ "$pw_timeout_ok" != "true" ]]; then
-                if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                if $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                         -f lavfi -i "color=c=red:s=320x240:d=15:r=24" \
                         -f lavfi -i "sine=frequency=440:duration=15:sample_rate=44100" \
                         -c:v libx264 -preset ultrafast -crf 28 \
@@ -942,13 +942,13 @@ assert 'Movies' in names and 'TV Shows' in names
                 fi
             fi
             if [[ "$pw_happy_ok" != "true" ]]; then
-                if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                if $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                             -f lavfi -i "color=c=purple:s=320x240:d=10:r=24" \
                             -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                             -c:v libx264 -preset ultrafast -crf 28 \
                             -c:a aac -b:a 64k \
                             "/media/movies/Dualsub Happy (2024)/base.mkv" 2>/dev/null && \
-                    $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                    $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                             -i "/media/movies/Dualsub Happy (2024)/base.mkv" \
                             -i "/media/movies/Dualsub Happy (2024)/en.srt" \
                             -i "/media/movies/Dualsub Happy (2024)/es.srt" \
@@ -997,13 +997,13 @@ assert 'Movies' in names and 'TV Shows' in names
                 fi
             fi
             if [[ "$pw_failed_ok" != "true" ]]; then
-                if $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                if $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                             -f lavfi -i "color=c=green:s=320x240:d=10:r=24" \
                             -f lavfi -i "sine=frequency=440:duration=10:sample_rate=44100" \
                             -c:v libx264 -preset ultrafast -crf 28 \
                             -c:a aac -b:a 64k \
                             "/media/movies/Dualsub Failed (2024)/base.mkv" 2>/dev/null && \
-                    $NEEDS_SUDO docker exec pelicula-test-procula ffmpeg -y \
+                    $NEEDS_SUDO docker exec pelicula-test-procula-1 ffmpeg -y \
                             -i "/media/movies/Dualsub Failed (2024)/base.mkv" \
                             -i "/media/movies/Dualsub Failed (2024)/en.srt" \
                             -map 0:v -map 0:a -map 1 \
@@ -1030,7 +1030,7 @@ assert 'Movies' in names and 'TV Shows' in names
             # Playwright runs on the host and can't call it directly through nginx)
             # Path uses /media/movies so CatalogEarly's Jellyfin refresh picks it up.
             info "Pre-firing Night of the Living Dead import webhook..."
-            $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+            $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                 --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/media/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/media/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
                 --header='Content-Type: application/json' \
                 'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
@@ -1046,20 +1046,20 @@ assert 'Movies' in names and 'TV Shows' in names
                 info "Temporarily enabling validation for Sub Timeout fixture..."
                 # POST directly to procula (port 8282) inside its container to bypass
                 # nginx auth_request, which gates /api/procula/ with the session cookie.
-                $NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+                $NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
                     --post-data='{"validation_enabled":true,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
                     --header='Content-Type: application/json' \
                     --header="X-API-Key: ${test_api_key}" \
                     'http://localhost:8282/api/procula/settings' 2>/dev/null || true
                 info "Pre-firing Sub Timeout import webhook..."
-                $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/media/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/media/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
                     --header='Content-Type: application/json' \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
                 # Brief wait so the worker has picked up the job and read validation=true.
                 sleep 5
                 # Restore standard test settings (validation off, transcoding on).
-                $NEEDS_SUDO docker exec pelicula-test-procula wget -qO- \
+                $NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
                     --post-data='{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
                     --header='Content-Type: application/json' \
                     --header="X-API-Key: ${test_api_key}" \
@@ -1069,7 +1069,7 @@ assert 'Movies' in names and 'TV Shows' in names
             # Pre-fire Dualsub Happy import webhook.
             if [[ -f "$pw_happy_file" ]]; then
                 info "Pre-firing Dualsub Happy import webhook..."
-                $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2024,"title":"Dualsub Happy","year":2024,"folderPath":"/media/movies/Dualsub Happy (2024)"},"movieFile":{"path":"/media/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv","relativePath":"Dualsub.Happy.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-happy-test"}' \
                     --header='Content-Type: application/json' \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
@@ -1078,7 +1078,7 @@ assert 'Movies' in names and 'TV Shows' in names
             # Pre-fire Dualsub Failed import webhook.
             if [[ -f "$pw_failed_file" ]]; then
                 info "Pre-firing Dualsub Failed import webhook..."
-                $NEEDS_SUDO docker exec pelicula-test-api wget -qO- \
+                $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2025,"title":"Dualsub Failed","year":2024,"folderPath":"/media/movies/Dualsub Failed (2024)"},"movieFile":{"path":"/media/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv","relativePath":"Dualsub.Failed.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-failed-test"}' \
                     --header='Content-Type: application/json' \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
