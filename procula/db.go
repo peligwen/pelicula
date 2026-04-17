@@ -56,7 +56,7 @@ type migration struct {
 }
 
 // schemaVersion is the current schema version. Bump this when adding new migrations.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // DDL shared between migrateBaseline and the corresponding incremental migrations.
 // Keeping them as named constants ensures the two paths stay in sync.
@@ -103,6 +103,7 @@ var migrations = []migration{
 	{version: 5, up: migrate5},
 	{version: 6, up: migrate6},
 	{version: 7, up: migrate7},
+	{version: 8, up: migrate8},
 }
 
 // runMigrations reads the current schema version and applies all pending migrations.
@@ -194,7 +195,8 @@ func migrateBaseline(tx *sql.Tx) error {
 			params             TEXT,
 			result             TEXT,
 			catalog            TEXT,
-			flags              TEXT
+			flags              TEXT,
+			next_attempt_at    TEXT    DEFAULT NULL
 		)`,
 		ddlSettings,
 		ddlCatalogFlags,
@@ -266,6 +268,14 @@ func migrate6(tx *sql.Tx) error {
 // been blocked and removed from the *arr queue.
 func migrate7(tx *sql.Tx) error {
 	_, err := tx.Exec(ddlBlockedReleases)
+	return err
+}
+
+// migrate8 adds the next_attempt_at column used by the exponential-backoff
+// retry policy. NULL means the job is immediately eligible; a non-NULL value
+// defers re-execution until that UTC timestamp has passed.
+func migrate8(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN next_attempt_at TEXT DEFAULT NULL`)
 	return err
 }
 

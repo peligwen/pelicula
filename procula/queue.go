@@ -112,6 +112,10 @@ type Job struct {
 	Params     map[string]any `json:"params,omitempty"`
 	Result     map[string]any `json:"result,omitempty"`
 
+	// NextAttemptAt, when non-nil, defers re-execution until this UTC time.
+	// NULL means the job is immediately eligible for pickup by the worker.
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+
 	// Catalog tracks outcomes from the catalog stage.
 	Catalog *CatalogInfo `json:"catalog,omitempty"`
 
@@ -175,16 +179,43 @@ func (q *Queue) loadExisting() error {
 
 	for _, r := range toProcess {
 		if r.state == StateProcessing {
-			// Reset interrupted jobs back to queued
-			_, err := q.db.Exec(
-				`UPDATE jobs SET state=?, stage=?, progress=0, error=?, updated_at=? WHERE id=?`,
+			// The job was mid-flight when the process died. Increment retry_count;
+			// if it has now exceeded the poison-pill threshold mark it failed,
+			// otherwise re-queue it with a backoff delay.
+			var retryCount int
+			err := q.db.QueryRow(`SELECT retry_count FROM jobs WHERE id=?`, r.id).Scan(&retryCount)
+			if err != nil {
+				slog.Warn("could not read retry_count for interrupted job", "component", "queue", "job_id", r.id, "error", err)
+				continue
+			}
+			retryCount++
+			const interruptCap = 5
+			if retryCount > interruptCap {
+				_, err = q.db.Exec(
+					`UPDATE jobs SET state=?, error=?, retry_count=?, next_attempt_at=NULL, updated_at=? WHERE id=?`,
+					string(StateFailed), "interrupted repeatedly",
+					retryCount, time.Now().UTC().Format(time.RFC3339Nano), r.id,
+				)
+				if err != nil {
+					slog.Warn("could not mark interrupted job as failed", "component", "queue", "job_id", r.id, "error", err)
+				} else {
+					slog.Warn("job marked failed: interrupted too many times", "component", "queue", "job_id", r.id, "retry_count", retryCount)
+				}
+				continue
+			}
+			next := time.Now().UTC().Add(backoffDuration(retryCount))
+			_, err = q.db.Exec(
+				`UPDATE jobs SET state=?, stage=?, progress=0, error=?, retry_count=?, next_attempt_at=?, updated_at=? WHERE id=?`,
 				string(StateQueued), string(StageValidate), "interrupted: restarted",
+				retryCount, next.Format(time.RFC3339Nano),
 				time.Now().UTC().Format(time.RFC3339Nano), r.id,
 			)
 			if err != nil {
 				slog.Warn("could not reset interrupted job", "component", "queue", "job_id", r.id, "error", err)
 				continue
 			}
+			slog.Info("interrupted job re-queued with backoff", "component", "queue", "job_id", r.id,
+				"retry_count", retryCount, "next_attempt_at", next.Format(time.RFC3339))
 		}
 		select {
 		case q.pending <- struct{}{}:
@@ -207,11 +238,16 @@ func (q *Queue) insertJobRow(j *Job) error {
 		s := string(b)
 		paramsJSON = &s
 	}
+	var nextAttemptAt *string
+	if j.NextAttemptAt != nil {
+		s := j.NextAttemptAt.UTC().Format(time.RFC3339Nano)
+		nextAttemptAt = &s
+	}
 	_, err = q.db.Exec(
 		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
 		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
-		                   action_type, params, result, flags)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL)`,
+		                   action_type, params, result, flags, next_attempt_at)
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL, ?)`,
 		j.ID,
 		j.CreatedAt.Format(time.RFC3339Nano),
 		j.UpdatedAt.Format(time.RFC3339Nano),
@@ -220,6 +256,7 @@ func (q *Queue) insertJobRow(j *Job) error {
 		string(sourceJSON),
 		j.ActionType,
 		paramsJSON,
+		nextAttemptAt,
 	)
 	return err
 }
@@ -299,7 +336,7 @@ func (q *Queue) Get(id string) (*Job, bool) {
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result, catalog, flags
+		        action_type, params, result, catalog, flags, next_attempt_at
 		 FROM jobs WHERE id=?`, id,
 	)
 	job, err := scanJob(row)
@@ -315,7 +352,7 @@ func (q *Queue) List() []Job {
 		        subs_acquired,
 		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result, catalog, flags
+		        action_type, params, result, catalog, flags, next_attempt_at
 		 FROM jobs ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -424,13 +461,19 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		flagsJSON = &s
 	}
 
+	var nextAttemptAtStr *string
+	if job.NextAttemptAt != nil {
+		s := job.NextAttemptAt.UTC().Format(time.RFC3339Nano)
+		nextAttemptAtStr = &s
+	}
+
 	_, err := q.db.Exec(
 		`UPDATE jobs SET
 			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
 			subs_acquired=?,
 			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
 			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?,
-			action_type=?, params=?, result=?, catalog=?, flags=?
+			action_type=?, params=?, result=?, catalog=?, flags=?, next_attempt_at=?
 		 WHERE id=?`,
 		job.UpdatedAt.Format(time.RFC3339Nano),
 		string(job.State), string(job.Stage), job.Progress,
@@ -438,7 +481,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		subsAcquiredJSON,
 		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
-		job.ActionType, paramsJSON, resultJSON, catalogJSON, flagsJSON,
+		job.ActionType, paramsJSON, resultJSON, catalogJSON, flagsJSON, nextAttemptAtStr,
 		id,
 	)
 	if err != nil {
@@ -543,10 +586,15 @@ func (q *Queue) unregisterCancel(id string) {
 	q.cancelsMu.Unlock()
 }
 
-// nextQueued returns up to 64 job IDs in queued state, oldest first.
-// Used by the worker loop to drain all pending work after a wake signal.
+// nextQueued returns up to 64 job IDs in queued state that are eligible for
+// immediate execution (next_attempt_at is NULL or in the past), oldest first.
 func (q *Queue) nextQueued() []string {
-	rows, err := q.db.Query(`SELECT id FROM jobs WHERE state='queued' ORDER BY created_at ASC LIMIT 64`)
+	rows, err := q.db.Query(
+		`SELECT id FROM jobs
+		  WHERE state='queued'
+		    AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))
+		  ORDER BY created_at ASC LIMIT 64`,
+	)
 	if err != nil {
 		slog.Warn("nextQueued query failed", "component", "queue", "error", err)
 		return nil
@@ -610,6 +658,7 @@ func scanJob(s scanner) (*Job, error) {
 		resultJSON           *string
 		catalogJSON          *string
 		flagsJSON            *string
+		nextAttemptAtStr     *string
 	)
 
 	err := s.Scan(
@@ -622,6 +671,7 @@ func scanJob(s scanner) (*Job, error) {
 		&job.TranscodeProfile, &job.TranscodeDecision,
 		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,
 		&actionType, &paramsJSON, &resultJSON, &catalogJSON, &flagsJSON,
+		&nextAttemptAtStr,
 	)
 	if err != nil {
 		return nil, err
@@ -679,6 +729,12 @@ func scanJob(s scanner) (*Job, error) {
 
 	if flagsJSON != nil {
 		json.Unmarshal([]byte(*flagsJSON), &job.Flags) //nolint:errcheck
+	}
+
+	if nextAttemptAtStr != nil {
+		if t, err := time.Parse(time.RFC3339Nano, *nextAttemptAtStr); err == nil {
+			job.NextAttemptAt = &t
+		}
 	}
 
 	return &job, nil

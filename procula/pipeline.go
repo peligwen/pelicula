@@ -18,8 +18,24 @@ import (
 // q.pending is a len-1 wake semaphore: a send signals that at least one queued
 // job is available. On each wake the worker drains all queued jobs from the DB
 // before waiting again, so multiple concurrent enqueues collapse into one scan.
+//
+// A background ticker fires every minute to re-check deferred jobs whose
+// next_attempt_at has elapsed since the last wake.
 func RunWorker(q *Queue, configDir, peliculaAPI string) {
 	slog.Info("worker started", "component", "pipeline")
+
+	// Periodic wake: re-check for deferred (backoff) jobs once per minute.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			select {
+			case q.pending <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
 	for range q.pending {
 		for {
 			ids := q.nextQueued()
@@ -575,7 +591,9 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 
 // runActionJob dispatches a non-pipeline job to a registered action handler,
 // writes the result JSON back to the job row, and marks the job
-// completed/failed based on the handler's return.
+// completed/failed based on the handler's return. Transient failures are
+// re-queued with exponential backoff up to maxTransientRetries; permanent
+// failures are marked failed immediately.
 func runActionJob(ctx context.Context, q *Queue, job *Job) {
 	def := Lookup(job.ActionType)
 	if def == nil {
@@ -595,14 +613,43 @@ func runActionJob(ctx context.Context, q *Queue, job *Job) {
 			return
 		}
 		if err != nil {
-			j.State = StateFailed
-			j.Error = err.Error()
+			if IsPermanentError(err) {
+				j.State = StateFailed
+				j.Error = err.Error()
+				j.NextAttemptAt = nil
+				return
+			}
+			// Transient failure: apply backoff or give up.
+			j.RetryCount++
+			if j.RetryCount > maxTransientRetries {
+				j.State = StateFailed
+				j.Error = "max retries exceeded (transient)"
+				j.NextAttemptAt = nil
+				return
+			}
+			next := time.Now().UTC().Add(backoffDuration(j.RetryCount))
+			j.State = StateQueued
+			j.NextAttemptAt = &next
+			slog.Info("transient failure, re-queuing with backoff",
+				"component", "pipeline", "job_id", j.ID,
+				"action", j.ActionType, "retry_count", j.RetryCount,
+				"next_attempt_at", next.Format(time.RFC3339),
+				"error", err.Error())
 			return
 		}
 		j.State = StateCompleted
 		j.Progress = 1.0
 		j.Result = result
+		j.NextAttemptAt = nil
 	})
+
+	// Signal the worker that a re-queued job is waiting (backoff case).
+	if job, ok := q.Get(job.ID); ok && job.State == StateQueued {
+		select {
+		case q.pending <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // isAllowedJobPath checks that path is under a known media directory.
