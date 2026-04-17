@@ -220,8 +220,6 @@ func main() {
 			GluetunBaseURL: urls.Gluetun,
 		},
 	}
-	_ = app // app fields used via closure in handlers below
-
 	// Wire package-level globals for the handler files that still use them.
 	services = svc
 	authMiddleware = auth
@@ -386,7 +384,7 @@ func watchdogStateAdapter(ws VPNWatchdogState) health.WatchdogState {
 	}
 }
 
-// notifyAppriseErr wraps notifyApprise to match hooks.NotifyFunc signature.
+// notifyAppriseErr wraps notifyApprise to match the notify func signature passed to MarkAvailable.
 func notifyAppriseErr(title, body string) error {
 	notifyApprise(title, body)
 	return nil

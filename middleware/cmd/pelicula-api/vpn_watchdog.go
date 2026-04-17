@@ -45,7 +45,7 @@ type wdInternalState struct {
 	restartCooldown int // ticks remaining in post-restart cooldown
 }
 
-// VPNWatchdogState is the package-level public state read by handleHealth.
+// VPNWatchdogState is the package-level public state read by internal/app/health.Handler.
 type VPNWatchdogState struct {
 	PortForwardStatus string
 	ForwardedPort     int
