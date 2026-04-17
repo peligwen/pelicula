@@ -15,6 +15,8 @@ import (
 	"time"
 
 	arrclient "pelicula-api/internal/clients/arr"
+	bazarrclient "pelicula-api/internal/clients/bazarr"
+	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
 type ServiceClients struct {
@@ -34,6 +36,8 @@ type ServiceClients struct {
 	Sonarr   *arrclient.Client
 	Radarr   *arrclient.Client
 	Prowlarr *arrclient.Client
+	Qbt      *qbtclient.Client
+	Bazarr   *bazarrclient.Client
 
 	wired bool
 	mu    sync.RWMutex
@@ -54,6 +58,7 @@ func NewServiceClients(configDir string) *ServiceClients {
 	s := &ServiceClients{
 		configDir: configDir,
 		client:    &http.Client{Timeout: 10 * time.Second},
+		Qbt:       qbtclient.New(qbtBaseURL),
 	}
 	s.JellyfinAPIKey = os.Getenv("JELLYFIN_API_KEY")
 	// If the env var is empty (e.g. container restarted without a full down/up),

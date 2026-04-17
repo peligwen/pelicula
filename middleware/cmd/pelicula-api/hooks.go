@@ -14,7 +14,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"pelicula-api/httputil"
@@ -104,8 +103,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	// immediately after *arr has imported (and hardlinked) the file. The file itself
 	// is preserved; only the torrent entry is removed.
 	if os.Getenv("SEEDING_REMOVE_ON_COMPLETE") == "true" && source.DownloadHash != "" {
-		if err := services.QbtPost("/api/v2/torrents/delete",
-			"hashes="+url.QueryEscape(source.DownloadHash)+"&deleteFiles=false"); err != nil {
+		if err := services.Qbt.RemoveTorrent(r.Context(), source.DownloadHash); err != nil {
 			slog.Warn("remove-on-complete: failed to delete torrent", "component", "hooks",
 				"hash", shortHash(source.DownloadHash), "error", err)
 		} else {

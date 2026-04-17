@@ -176,7 +176,7 @@ func (p *SSEPoller) fetchServices(ctx context.Context) ([]byte, error) {
 // The SSE "downloads" event drives the Downloads tab in the dashboard (downloads.js),
 // distinct from the pipeline board which normalizes this data into PipelineItem cards.
 func (p *SSEPoller) fetchDownloads(ctx context.Context) ([]byte, error) {
-	torrentData, err := p.svc.QbtGet("/api/v2/torrents/info")
+	torrentData, err := p.svc.Qbt.RawGet(ctx, "/api/v2/torrents/info")
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (p *SSEPoller) fetchDownloads(ctx context.Context) ([]byte, error) {
 	}
 	out := combined{Torrents: torrentData}
 
-	if statsData, err := p.svc.QbtGet("/api/v2/transfer/info"); err == nil {
+	if statsData, err := p.svc.Qbt.RawGet(ctx, "/api/v2/transfer/info"); err == nil {
 		out.Stats = statsData
 	}
 

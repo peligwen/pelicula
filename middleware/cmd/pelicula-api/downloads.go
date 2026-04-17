@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"pelicula-api/httputil"
 )
 
@@ -38,33 +37,27 @@ func handleDownloads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := services.QbtGet("/api/v2/torrents/info")
+	qbtTorrents, err := services.Qbt.ListTorrents(r.Context())
 	if err != nil {
 		httputil.WriteError(w, "failed to reach qBittorrent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	var rawTorrents []map[string]any
-	if err := json.Unmarshal(data, &rawTorrents); err != nil {
-		httputil.WriteError(w, "failed to parse torrent data", http.StatusInternalServerError)
-		return
-	}
-
-	torrents := make([]Torrent, 0, len(rawTorrents))
+	torrents := make([]Torrent, 0, len(qbtTorrents))
 	active := 0
 	queued := 0
 
-	for _, rt := range rawTorrents {
+	for _, qt := range qbtTorrents {
 		t := Torrent{
-			Hash:     strVal(rt, "hash"),
-			Name:     strVal(rt, "name"),
-			Progress: floatVal(rt, "progress"),
-			DLSpeed:  intVal(rt, "dlspeed"),
-			UPSpeed:  intVal(rt, "upspeed"),
-			ETA:      intVal(rt, "eta"),
-			State:    strVal(rt, "state"),
-			Size:     intVal(rt, "size"),
-			Category: strVal(rt, "category"),
+			Hash:     qt.Hash,
+			Name:     qt.Name,
+			Progress: qt.Progress,
+			DLSpeed:  qt.DLSpeed,
+			UPSpeed:  qt.UPSpeed,
+			ETA:      qt.ETA,
+			State:    qt.State,
+			Size:     qt.Size,
+			Category: qt.Category,
 		}
 		torrents = append(torrents, t)
 
@@ -76,17 +69,13 @@ func handleDownloads(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	statsData, err := services.QbtGet("/api/v2/transfer/info")
 	var stats DownloadStats
 	stats.Active = active
 	stats.Queued = queued
 
-	if err == nil {
-		var rawStats map[string]any
-		if json.Unmarshal(statsData, &rawStats) == nil {
-			stats.DLSpeed = intVal(rawStats, "dl_info_speed")
-			stats.UPSpeed = intVal(rawStats, "up_info_speed")
-		}
+	if ti, err := services.Qbt.GetTransferInfo(r.Context()); err == nil {
+		stats.DLSpeed = ti.DLSpeed
+		stats.UPSpeed = ti.UPSpeed
 	}
 
 	httputil.WriteJSON(w, DownloadsResponse{
@@ -101,23 +90,16 @@ func handleDownloadStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statsData, err := services.QbtGet("/api/v2/transfer/info")
+	ti, err := services.Qbt.GetTransferInfo(r.Context())
 	if err != nil {
 		httputil.WriteError(w, "failed to reach qBittorrent", http.StatusBadGateway)
 		return
 	}
 
-	var rawStats map[string]any
-	if err := json.Unmarshal(statsData, &rawStats); err != nil {
-		httputil.WriteError(w, "failed to parse stats", http.StatusInternalServerError)
-		return
-	}
-
-	stats := DownloadStats{
-		DLSpeed: intVal(rawStats, "dl_info_speed"),
-		UPSpeed: intVal(rawStats, "up_info_speed"),
-	}
-	httputil.WriteJSON(w, stats)
+	httputil.WriteJSON(w, DownloadStats{
+		DLSpeed: ti.DLSpeed,
+		UPSpeed: ti.UPSpeed,
+	})
 }
 
 // handleDownloadPause pauses or resumes a torrent in qBittorrent.
@@ -138,14 +120,13 @@ func handleDownloadPause(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// qBittorrent v5+ renamed pause/resume to stop/start
-	var endpoint string
+	var qbtErr error
 	if req.Paused {
-		endpoint = "/api/v2/torrents/stop"
+		qbtErr = services.Qbt.StopTorrent(r.Context(), req.Hash)
 	} else {
-		endpoint = "/api/v2/torrents/start"
+		qbtErr = services.Qbt.StartTorrent(r.Context(), req.Hash)
 	}
-
-	if err := services.QbtPost(endpoint, "hashes="+url.QueryEscape(req.Hash)); err != nil {
+	if err := qbtErr; err != nil {
 		httputil.WriteError(w, "qBittorrent error: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -199,7 +180,7 @@ func handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete torrent + files from qBittorrent
-	if err := services.QbtPost("/api/v2/torrents/delete", "hashes="+url.QueryEscape(req.Hash)+"&deleteFiles=true"); err != nil {
+	if err := services.Qbt.DeleteTorrent(r.Context(), req.Hash); err != nil {
 		slog.Error("failed to delete torrent from qBittorrent", "component", "downloads", "error", err)
 	}
 

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
 // TestSSEPollerBroadcastsOnChange verifies that:
@@ -51,16 +53,14 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 	defer qbt.Close()
 
 	origProculaURL := proculaURL
-	origQbtBaseURL := qbtBaseURL
 	proculaURL = procula.URL
-	qbtBaseURL = qbt.URL
-	t.Cleanup(func() {
-		proculaURL = origProculaURL
-		qbtBaseURL = origQbtBaseURL
-	})
+	t.Cleanup(func() { proculaURL = origProculaURL })
 
 	hub := NewSSEHub()
-	svc := &ServiceClients{client: &http.Client{}}
+	svc := &ServiceClients{
+		client: &http.Client{},
+		Qbt:    qbtclient.New(qbt.URL),
+	}
 	poller := NewSSEPoller(hub, svc)
 
 	// Register a buffered client so we can inspect received messages.
