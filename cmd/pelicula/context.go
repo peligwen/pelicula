@@ -32,11 +32,24 @@ func (ctx *Context) LoadEnv() {
 	ctx.Env = loadEnvOrFatal(ctx.EnvFile)
 }
 
+// projectName returns the Docker Compose project name from ctx.Env, defaulting
+// to "pelicula". This is used to pass --project-name to every docker compose
+// invocation so container names are always pelicula-<service>-1 regardless of
+// the directory the repo was cloned into.
+func (ctx *Context) projectName() string {
+	if ctx.Env != nil {
+		if name := ctx.Env["PELICULA_PROJECT_NAME"]; name != "" {
+			return name
+		}
+	}
+	return "pelicula"
+}
+
 // newCompose returns a new *Compose rooted at ctx.ScriptDir using the cached
 // platform info. Profiles are NOT set — callers that need profile-aware
 // compose should use composeInvocation(ctx) instead.
 func (ctx *Context) newCompose() *Compose {
-	return NewCompose(ctx.ScriptDir, ctx.Plat.NeedsSudo, ctx.Plat.IsSynology)
+	return NewCompose(ctx.ScriptDir, ctx.Plat.NeedsSudo, ctx.Plat.IsSynology, ctx.projectName())
 }
 
 // composeInvocation builds a fully configured *Compose with compose profiles

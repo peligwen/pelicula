@@ -7,7 +7,6 @@ services:
 {{if .LetsEncrypt}}
   certbot:
     image: certbot/certbot:latest
-    container_name: pelicula-certbot
     pid: "service:nginx"
     volumes:
       - {{.LEStateDir}}:/etc/letsencrypt

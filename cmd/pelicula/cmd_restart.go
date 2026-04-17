@@ -18,7 +18,8 @@ func cmdRestart(ctx *Context, args []string) {
 
 	// Single service restart
 	requireEnv(ctx.EnvFile)
-	c := ctx.newCompose()
+	ctx.LoadEnv()
+	c := composeInvocation(ctx)
 
 	if err := c.Run(append([]string{"restart"}, args...)...); err != nil {
 		fatal("docker compose restart failed: " + err.Error())
@@ -28,7 +29,7 @@ func cmdRestart(ctx *Context, args []string) {
 
 func cmdRestartAcquire(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-	c := ctx.newCompose()
+	c := composeInvocation(ctx)
 
 	info("Restarting acquisition services (jellyfin and nginx stay up)...")
 

@@ -23,6 +23,7 @@ func cmdUp(ctx *Context, _ []string) {
 		fmt.Printf("%sNo configuration found — starting setup wizard.%s\n", colorBold, colorReset)
 		fmt.Println()
 
+		// intentional: pre-env setup wizard path; .env does not exist yet so profiles unavailable
 		c := ctx.newCompose()
 
 		setupCompose := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.setup.yml")

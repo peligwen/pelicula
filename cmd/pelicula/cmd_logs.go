@@ -2,7 +2,8 @@ package main
 
 func cmdLogs(ctx *Context, args []string) {
 	requireEnv(ctx.EnvFile)
-	c := ctx.newCompose()
+	ctx.LoadEnv()
+	c := composeInvocation(ctx)
 
 	composeArgs := []string{"logs", "-f"}
 	if len(args) > 0 {

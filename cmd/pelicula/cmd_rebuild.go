@@ -6,6 +6,7 @@ import (
 
 func cmdRedeploy(ctx *Context, args []string) {
 	requireEnv(ctx.EnvFile)
+	// intentional: only targets non-profile services (pelicula-api, procula); down/up handled by cmdDown/cmdUp
 	c := ctx.newCompose()
 
 	targets := args
@@ -38,6 +39,7 @@ func cmdRedeploy(ctx *Context, args []string) {
 
 func cmdRebuild(ctx *Context, args []string) {
 	requireEnv(ctx.EnvFile)
+	// intentional: only targets non-profile services (nginx, pelicula-api, procula)
 	c := ctx.newCompose()
 
 	targets := args

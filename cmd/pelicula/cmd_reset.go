@@ -61,7 +61,7 @@ func resetConfigSoft(ctx *Context) {
 		return
 	}
 
-	c := ctx.newCompose()
+	c := composeInvocation(ctx)
 	ensureStackDown(c)
 
 	// Extract API keys before wiping
@@ -94,7 +94,7 @@ func resetConfigService(ctx *Context, svc string) {
 	env := ctx.Env
 	configDir := env["CONFIG_DIR"]
 
-	c := ctx.newCompose()
+	c := composeInvocation(ctx)
 	ensureStackDown(c)
 
 	switch svc {
@@ -172,7 +172,7 @@ func resetConfigAll(ctx *Context) {
 		return
 	}
 
-	c := ctx.newCompose()
+	c := composeInvocation(ctx)
 	ensureStackDown(c)
 
 	// Stash values to preserve

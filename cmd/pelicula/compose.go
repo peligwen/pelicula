@@ -8,22 +8,30 @@ import (
 
 // Compose wraps docker compose with project-specific settings.
 type Compose struct {
-	projectDir string
-	envFile    string
-	needsSudo  bool
-	isSynology bool
-	profiles   []string // active profiles (e.g. "vpn", "apprise")
+	projectDir  string
+	envFile     string
+	needsSudo   bool
+	isSynology  bool
+	profiles    []string // active profiles (e.g. "vpn", "apprise")
+	projectName string   // --project-name passed to every docker compose invocation
 }
 
 // NewCompose creates a Compose helper rooted at scriptDir.
 // isSynology should come from the Platform detected via Detect() — it is
 // passed explicitly so that Synology detection is not duplicated here.
-func NewCompose(scriptDir string, needsSudo, isSynology bool) *Compose {
+// projectName is passed as --project-name to every docker compose invocation so
+// that container names are always pelicula-<service>-1 regardless of what
+// directory the repo was cloned into.
+func NewCompose(scriptDir string, needsSudo, isSynology bool, projectName string) *Compose {
+	if projectName == "" {
+		projectName = "pelicula"
+	}
 	return &Compose{
-		projectDir: scriptDir,
-		envFile:    filepath.Join(scriptDir, ".env"),
-		needsSudo:  needsSudo,
-		isSynology: isSynology,
+		projectDir:  scriptDir,
+		envFile:     filepath.Join(scriptDir, ".env"),
+		needsSudo:   needsSudo,
+		isSynology:  isSynology,
+		projectName: projectName,
 	}
 }
 
@@ -62,6 +70,7 @@ func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
 func (c *Compose) buildArgs(extra ...string) []string {
 	args := []string{
 		"compose",
+		"--project-name", c.projectName,
 		"--project-directory", c.projectDir,
 		"--env-file", c.envFile,
 		"-f", filepath.Join(c.projectDir, "compose", "docker-compose.yml"),
@@ -121,12 +130,13 @@ func (c *Compose) RunQuiet(args ...string) error {
 	return err
 }
 
-// RunProjectOnly runs docker compose using only the project name derived from
-// projectDir, without parsing compose files or requiring an env file.
+// RunProjectOnly runs docker compose using only the project name, without
+// parsing compose files or requiring an env file.
 // Useful for teardown when .env is missing.
 func (c *Compose) RunProjectOnly(args ...string) error {
 	cmdArgs := []string{
 		"compose",
+		"--project-name", c.projectName,
 		"--project-directory", c.projectDir,
 	}
 	cmdArgs = append(cmdArgs, args...)
