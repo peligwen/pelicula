@@ -148,6 +148,16 @@ async function checkStatus() {
             if (statusBar) statusBar.classList.remove('visible');
             if (hint) hint.textContent = '';
         }
+        // Render library access warnings returned by the middleware preflight.
+        const warns = Array.isArray(data.warnings) ? data.warnings : [];
+        const main = document.querySelector('.main-content') || document.body;
+        main.querySelectorAll('.library-warning').forEach(el => el.remove());
+        warns.forEach(msg => {
+            const banner = document.createElement('div');
+            banner.className = 'library-warning';
+            banner.textContent = '\u26a0 ' + msg;
+            main.prepend(banner);
+        });
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 

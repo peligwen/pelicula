@@ -101,6 +101,9 @@ func main() {
 	libraryRegistry = cfg
 	libraryRegistryMu.Unlock()
 	slog.Info("library registry loaded", "component", "main", "count", len(cfg.Libraries))
+	for _, w := range CheckLibraryAccess() {
+		slog.Warn("library access check", "component", "main", "warning", w)
+	}
 
 	db, err := OpenDB("/config/pelicula/pelicula.db")
 	if err != nil {
@@ -320,6 +323,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		"wired":          services.IsWired(),
 		"indexers":       idxCount,
 		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",
+		"warnings":       CheckLibraryAccess(),
 	}
 	httputil.WriteJSON(w, status)
 }

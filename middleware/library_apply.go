@@ -98,6 +98,11 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if warns := CheckLibraryAccess(); len(warns) > 0 {
+		httputil.WriteError(w, warns[0], http.StatusServiceUnavailable)
+		return
+	}
+
 	existingMovies := loadExistingMovieIDs(radarrKey)
 	existingSeries := loadExistingSeriesIDs(sonarrKey)
 

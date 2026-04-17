@@ -1517,6 +1517,17 @@ details[open] .add-user-summary::before { content: '− '; }
     font-weight: 600;
 }
 
+/* ── Library access warning banner ─────────────────────────────────────── */
+.library-warning {
+    padding: 0.6rem 1rem;
+    background: rgba(255, 152, 0, 0.08);
+    border: 1px solid rgba(255, 152, 0, 0.2);
+    border-radius: 0.4rem;
+    font-size: 0.85rem;
+    color: #FF9800;
+    margin-bottom: 1rem;
+}
+
 /* ── VPN port-forward warning banner ───────────────────────────────────── */
 .vpn-port-warn-banner {
     padding: 0.6rem 1rem;

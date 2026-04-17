@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -240,6 +241,38 @@ func TestFirstLibraryPath(t *testing.T) {
 			t.Errorf("got %q, want %q", got, "/media/films")
 		}
 	})
+}
+
+// TestCheckLibraryAccessPaths verifies that checkLibraryAccessPaths warns on
+// directories with no world-execute bit and passes on accessible directories.
+func TestCheckLibraryAccessPaths(t *testing.T) {
+	dir := t.TempDir()
+	accessible := filepath.Join(dir, "accessible")
+	inaccessible := filepath.Join(dir, "inaccessible")
+
+	if err := os.Mkdir(accessible, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(inaccessible, 0000); err != nil {
+		t.Fatal(err)
+	}
+
+	warns := checkLibraryAccessPaths([]string{accessible, inaccessible})
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warns), warns)
+	}
+	if !strings.Contains(warns[0], inaccessible) {
+		t.Errorf("warning %q should mention path %s", warns[0], inaccessible)
+	}
+}
+
+// TestCheckLibraryAccessPaths_Missing verifies a warning is returned for a
+// path that does not exist.
+func TestCheckLibraryAccessPaths_Missing(t *testing.T) {
+	warns := checkLibraryAccessPaths([]string{"/nonexistent/path/xyz123"})
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 warning for missing path, got %d: %v", len(warns), warns)
+	}
 }
 
 // TestDeleteLibrary_Custom checks that a custom library can be deleted.

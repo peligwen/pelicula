@@ -176,6 +176,41 @@ func firstLibraryPath(arr, defaultPath string) string {
 	return defaultPath
 }
 
+// CheckLibraryAccess checks that each library's container path can be
+// traversed by non-root processes (e.g. Radarr/Sonarr running as the abc
+// user). Returns a human-readable warning for each inaccessible path. Safe to
+// call repeatedly (two os.Stat calls per library, no side effects).
+//
+// On Synology NAS deployments the Media shared folder often has ACLs enabled;
+// when bind-mounted into containers the POSIX mode bits can be 000, locking
+// out non-root container users even though root can still read the directory.
+func CheckLibraryAccess() []string {
+	var paths []string
+	for _, lib := range GetLibraries() {
+		paths = append(paths, lib.ContainerPath())
+	}
+	return checkLibraryAccessPaths(paths)
+}
+
+// checkLibraryAccessPaths is the testable core of CheckLibraryAccess.
+func checkLibraryAccessPaths(paths []string) []string {
+	var warnings []string
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"Library path %s is not accessible: %v — check that the media volume is mounted correctly", p, err))
+			continue
+		}
+		if fi.Mode().Perm()&0001 == 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"Library path %s has no world-execute permission (mode %04o) — Radarr/Sonarr cannot use it as a root folder. On Synology: in DSM, grant the container user (PUID) read+execute on the shared folder, or run: sudo chmod -R 755 /volume1/Media",
+				p, fi.Mode().Perm()))
+		}
+	}
+	return warnings
+}
+
 // GetLibraries returns a snapshot of the current library registry.
 func GetLibraries() []Library {
 	libraryRegistryMu.RLock()
