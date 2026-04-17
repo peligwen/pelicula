@@ -1,3 +1,8 @@
+// cmd/pelicula-api is the entry point for the pelicula-api middleware service.
+// It wires together all internal packages and starts the HTTP server.
+//
+// This file is wiring only: build App, register routes, listen.
+// Business logic lives in the sibling handler files.
 package main
 
 import (
@@ -13,27 +18,37 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/catalog"
+	"pelicula-api/internal/app/downloads"
+	"pelicula-api/internal/app/health"
+	"pelicula-api/internal/app/hooks"
+	"pelicula-api/internal/app/sse"
+	"pelicula-api/internal/config"
 	"pelicula-api/peligrosa"
+
+	_ "modernc.org/sqlite"
 )
 
-var (
-	services       *ServiceClients
-	authMiddleware *peligrosa.Auth
-	inviteStore    *peligrosa.InviteStore
-	requestStore   *peligrosa.RequestStore
-	sseHub         *SSEHub
-	ssePoller      *SSEPoller
-	catalogDB      *sql.DB
-	indexerCount   indexerCountCache
-)
+// App holds all wired-up application state. No package-level globals.
+type App struct {
+	svc           *ServiceClients
+	urls          config.URLs
+	sseHub        *sse.Hub
+	ssePoller     *sse.Poller
+	catalogDB     *sql.DB
+	mainDB        *sql.DB
+	auth          *peligrosa.Auth
+	invites       *peligrosa.InviteStore
+	requests      *peligrosa.RequestStore
+	idxCache      indexerCountCacheApp
+	statusTTL     statusTTLCache
+	dlHandler     *downloads.Handler
+	hookHandler   *hooks.Handler
+	healthHandler *health.Handler
+}
 
-// statusCache caches the result of services.CheckHealth() with a 5-second TTL
-// so that the 15-second dashboard polling loop doesn't hammer every service.
-var statusCache = ttlCache[map[string]string]{ttl: 5 * time.Second}
-
-// indexerCountCache caches the Prowlarr indexer count so handleStatus doesn't
-// hit /api/v1/indexer on every 15-second dashboard poll.
-type indexerCountCache struct {
+// indexerCountCacheApp caches the Prowlarr indexer count.
+type indexerCountCacheApp struct {
 	mu        sync.Mutex
 	count     *int
 	fetchedAt time.Time
@@ -41,15 +56,19 @@ type indexerCountCache struct {
 
 const indexerCountTTL = 5 * time.Minute
 
-func (c *indexerCountCache) get(prowlarrURL, prowlarrKey string) *int {
+func (c *indexerCountCacheApp) get(svc *ServiceClients) *int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.count != nil && time.Since(c.fetchedAt) < indexerCountTTL {
 		return c.count
 	}
-	data, err := services.ArrGet(prowlarrURL, prowlarrKey, "/api/v1/indexer")
+	_, _, prowlarrKey := svc.Keys()
+	if prowlarrKey == "" {
+		return c.count
+	}
+	data, err := svc.ArrGet(prowlarrURL, prowlarrKey, "/api/v1/indexer")
 	if err != nil {
-		return c.count // serve stale value (or nil) on error
+		return c.count
 	}
 	var indexers []map[string]any
 	if json.Unmarshal(data, &indexers) != nil {
@@ -61,10 +80,32 @@ func (c *indexerCountCache) get(prowlarrURL, prowlarrKey string) *int {
 	return c.count
 }
 
-func (c *indexerCountCache) invalidate() {
+func (c *indexerCountCacheApp) invalidate() {
 	c.mu.Lock()
 	c.fetchedAt = time.Time{}
 	c.mu.Unlock()
+}
+
+// statusTTLCache is a simple single-value cache with a TTL for the status endpoint.
+type statusTTLCache struct {
+	mu        sync.Mutex
+	value     map[string]string
+	fetchedAt time.Time
+	ttl       time.Duration
+}
+
+func (c *statusTTLCache) Get(fetch func() (map[string]string, error)) (map[string]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.value != nil && time.Since(c.fetchedAt) < c.ttl {
+		return c.value, nil
+	}
+	v, err := fetch()
+	if err == nil {
+		c.value = v
+		c.fetchedAt = time.Now()
+	}
+	return v, err
 }
 
 func main() {
@@ -72,16 +113,17 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	// Setup mode: only serve setup endpoints, skip autowire and all service logic
+	urls := config.LoadURLs()
+
+	// Setup mode: only serve setup endpoints
 	if isSetupMode() {
 		slog.Info("starting in setup mode", "component", "main")
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/pelicula/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"status":"setup"}`))
+			w.Write([]byte(`{"status":"setup"}`)) //nolint:errcheck
 		})
 		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
-		// Peligrosa: httputil.RequireLocalOriginStrict — setup should only accept POSTs from a LAN browser.
 		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
 		setupCtx, setupStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -90,7 +132,7 @@ func main() {
 		return
 	}
 
-	services = NewServiceClients("/config")
+	svc := NewServiceClients("/config")
 	initSearchMode()
 
 	cfg, err := loadLibraries("/config/pelicula")
@@ -110,80 +152,123 @@ func main() {
 		slog.Error("failed to open database", "component", "main", "error", err)
 		os.Exit(1)
 	}
-	catalogDB, err = OpenCatalogDB("/config/pelicula/catalog.db")
+	cdb, err := catalog.OpenCatalogDB("/config/pelicula/catalog.db")
 	if err != nil {
 		slog.Error("failed to open catalog database", "component", "main", "error", err)
 		os.Exit(1)
 	}
 	migrateAllJSON(db, "/config/pelicula")
 
-	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, services)
+	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, svc)
 
-	inviteStore = peligrosa.NewInviteStore(db, jellyfinClient)
-	requestStore = peligrosa.NewRequestStore(db, NewArrFulfiller())
+	invites := peligrosa.NewInviteStore(db, jellyfinClient)
+	requests := peligrosa.NewRequestStore(db, NewArrFulfiller())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	sseHub = NewSSEHub()
-	ssePoller = NewSSEPoller(sseHub, services)
-	go ssePoller.Run(ctx)
-	go RunQueuePoller(ctx, catalogDB, services)
+	hub := sse.NewHub()
+	poller := sse.NewPoller(hub, svc, urls.Procula, dockerLogs)
+	go poller.Run(ctx)
+	go catalog.RunQueuePoller(ctx, cdb, svc, urls.Radarr, urls.Sonarr)
 
 	// Auto-wire in background so the HTTP server starts immediately
 	go func() {
-		if err := AutoWire(services); err != nil {
+		if err := AutoWire(svc); err != nil {
 			slog.Error("autowire failed", "component", "main", "error", err)
 		}
 	}()
 
-	// Watch for monitored content missing files and auto-search
-	go StartMissingWatcher(services, 2*time.Minute)
+	go StartMissingWatcher(svc, 2*time.Minute)
 
-	// Monitor VPN port forwarding; keep qBittorrent listen port in sync.
-	// Only active when a WireGuard key is present (VPN profile enabled).
 	if os.Getenv("WIREGUARD_PRIVATE_KEY") != "" {
-		go StartVPNWatchdog(services)
+		go StartVPNWatchdog(svc)
 	}
-
-	mux := http.NewServeMux()
 
 	peligrosa.SetOpenRegistration(os.Getenv("PELICULA_OPEN_REGISTRATION") == "true")
 
-	authMiddleware = peligrosa.NewAuth(peligrosa.AuthConfig{
+	auth := peligrosa.NewAuth(peligrosa.AuthConfig{
 		DB:       db,
 		Jellyfin: jellyfinClient,
 	})
-	auth := authMiddleware
-	deps := peligrosa.NewDeps(db, authMiddleware, inviteStore, requestStore, jellyfinClient)
-	deps.Notify = notifyApprise
+
+	peliculaNotify := func(title, body string) {
+		notifyApprise(title, body) //nolint:errcheck
+	}
+	deps := peligrosa.NewDeps(db, auth, invites, requests, jellyfinClient)
+	deps.Notify = peliculaNotify
 	deps.GenPassword = generateReadablePassword
 
-	// Health check — no auth, called by bash check-vpn and optionally by the dashboard
-	mux.HandleFunc("/api/pelicula/health", handleHealth)
+	// Build App struct — all new-style handler state lives here.
+	app := &App{
+		svc:       svc,
+		urls:      urls,
+		sseHub:    hub,
+		ssePoller: poller,
+		catalogDB: cdb,
+		mainDB:    db,
+		auth:      auth,
+		invites:   invites,
+		requests:  requests,
+		statusTTL: statusTTLCache{ttl: 5 * time.Second},
+		dlHandler: &downloads.Handler{
+			Svc:       svc,
+			SonarrURL: urls.Sonarr,
+			RadarrURL: urls.Radarr,
+		},
+		hookHandler: &hooks.Handler{
+			Svc:        svc,
+			HTTPClient: svc.client,
+			CatalogDB:  cdb,
+			ReqStore:   &requestStoreAdapter{requests},
+			Notify:     notifyAppriseErr,
+			ProculaURL: urls.Procula,
+			SonarrURL:  urls.Sonarr,
+			RadarrURL:  urls.Radarr,
+		},
+		healthHandler: &health.Handler{
+			Services:       svc,
+			GetWatchdog:    func() health.WatchdogState { return watchdogStateAdapter(GetWatchdogState()) },
+			GluetunBaseURL: urls.Gluetun,
+		},
+	}
+	_ = app // app fields used via closure in handlers below
 
-	// Peligrosa routes: auth, invites, requests, open registration.
-	// Webhook routes stay below (handlers live in hooks.go).
+	// Wire package-level globals for the handler files that still use them.
+	services = svc
+	authMiddleware = auth
+	inviteStore = invites
+	requestStore = requests
+	catalogDB = cdb
+	mainDB = db
+	sseHub = NewSSEHub()     // legacy; new code uses app.sseHub
+	ssePoller = &SSEPoller{} // legacy stub; new code uses app.ssePoller
+
+	mux := http.NewServeMux()
+
+	// Health check — no auth, called by bash check-vpn
+	mux.Handle("/api/pelicula/health", app.healthHandler)
+
+	// Peligrosa routes: auth, invites, requests, open registration
 	peligrosa.RegisterRoutes(mux, deps)
 
-	// Webhook receiver must be accessible without session auth — *arr services
-	// call this endpoint and cannot send a session cookie.
+	// Webhook receiver — no session auth needed (*arr services call this)
 	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
-	// Jellyfin refresh is called by Procula internally — no session auth needed.
+	// Jellyfin refresh — called by Procula internally
 	mux.HandleFunc("/api/pelicula/jellyfin/refresh", handleJellyfinRefresh)
 
-	// viewer+: SSE stream for real-time dashboard updates
+	// viewer+: SSE stream
 	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(sseHub.HandleSSE)))
 
 	// viewer+: read-only dashboard data
 	mux.Handle("/api/pelicula/host", auth.Guard(http.HandlerFunc(handleHost)))
-	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(handleStatus)))
-	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(handleDownloads)))
-	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(handleDownloadStats)))
+	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(app.handleStatus)))
+	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(app.dlHandler.HandleDownloads)))
+	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(app.dlHandler.HandleDownloadStats)))
 	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
 	mux.Handle("/api/pelicula/notifications", auth.Guard(http.HandlerFunc(handleNotificationsProxy)))
 	mux.Handle("/api/pelicula/storage", auth.Guard(http.HandlerFunc(handleStorageProxy)))
-	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(handleProculaSettingsProxy))
+	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(http.HandlerFunc(handleProculaSettingsProxy)))
 	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(handleStorageScanProxy)))
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(handleUpdatesProxy)))
 
@@ -193,13 +278,12 @@ func main() {
 	// manager+: search and add content, pause/resume downloads
 	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(handleSearch)))
 	mux.Handle("/api/pelicula/search/add", auth.GuardManager(http.HandlerFunc(handleSearchAdd)))
-	mux.Handle("/api/pelicula/downloads/pause", auth.GuardManager(http.HandlerFunc(handleDownloadPause)))
+	mux.Handle("/api/pelicula/downloads/pause", auth.GuardManager(http.HandlerFunc(app.dlHandler.HandleDownloadPause)))
 
 	// admin only: destructive actions
-	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(handleDownloadCancel)))
+	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(app.dlHandler.HandleDownloadCancel)))
 
-	// admin only: settings (read and update .env)
-	// Peligrosa: httputil.RequireLocalOriginStrict guards the POST paths against cross-origin mutations.
+	// admin only: settings
 	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettings))))
 	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
 
@@ -207,26 +291,22 @@ func main() {
 	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
 	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))
 
-	// admin only: Jellyfin user management (list + create)
-	// Peligrosa: httputil.RequireLocalOriginSoft allows API callers, blocks browser cross-origin.
+	// admin only: Jellyfin user management
 	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsers))))
-	// admin only: per-user operations (delete + password reset)
 	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
 
-	// admin only: role management (list + set + delete)
+	// admin only: role management
 	mux.Handle("/api/pelicula/operators", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperators))))
 	mux.Handle("/api/pelicula/operators/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperatorsWithID))))
 
-	// viewer+: active Jellyfin sessions for the now-playing card.
+	// viewer+: active Jellyfin sessions
 	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(handleSessions)))
 
-	// GET /api/pelicula/libraries — viewer+ (library metadata should not be public)
+	// viewer+: library metadata
 	mux.Handle("GET /api/pelicula/libraries", auth.Guard(http.HandlerFunc(handleListLibraries)))
-	// POST /api/pelicula/libraries — admin only (add library)
+	// admin only: library CRUD
 	mux.Handle("POST /api/pelicula/libraries", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleAddLibrary))))
-	// PUT /api/pelicula/libraries/{slug} — admin only (update library)
 	mux.Handle("PUT /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleUpdateLibrary))))
-	// DELETE /api/pelicula/libraries/{slug} — admin only (remove custom library)
 	mux.Handle("DELETE /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleDeleteLibrary))))
 
 	// admin only: library import scan + apply + browse
@@ -234,7 +314,7 @@ func main() {
 	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(handleLibraryScan)))
 	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(handleLibraryApply)))
 
-	// admin only: manual transcoding — list/create/update profiles, delete profile, enqueue transcode jobs
+	// admin only: transcoding
 	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(handleTranscodeProfiles)))
 	mux.Handle("/api/pelicula/transcode/profiles/{name}", auth.GuardAdmin(http.HandlerFunc(handleDeleteTranscodeProfile)))
 	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
@@ -244,17 +324,15 @@ func main() {
 	mux.Handle("/api/pelicula/procula/jobs/{id}/resub", auth.GuardAdmin(http.HandlerFunc(handleJobResub)))
 	mux.Handle("/api/pelicula/procula/jobs/{id}/retry", auth.GuardAdmin(http.HandlerFunc(handleJobRetry)))
 
-	// viewer+: catalog (live Radarr/Sonarr library view)
+	// viewer+: catalog
 	mux.Handle("/api/pelicula/catalog", auth.Guard(http.HandlerFunc(handleCatalogList)))
 	mux.Handle("/api/pelicula/catalog/series/{id}", auth.Guard(http.HandlerFunc(handleCatalogSeriesDetail)))
 	mux.Handle("/api/pelicula/catalog/series/{id}/season/{n}", auth.Guard(http.HandlerFunc(handleCatalogSeason)))
 	mux.Handle("/api/pelicula/catalog/item/history", auth.Guard(http.HandlerFunc(handleCatalogItemHistory)))
 	mux.Handle("/api/pelicula/catalog/flags", auth.Guard(http.HandlerFunc(handleCatalogFlags)))
 	mux.Handle("/api/pelicula/catalog/detail", auth.Guard(http.HandlerFunc(handleCatalogDetail)))
-	// viewer+: pelicula catalog item registry
 	mux.Handle("/api/pelicula/catalog/items", auth.Guard(http.HandlerFunc(handleCatalogItems)))
 	mux.Handle("/api/pelicula/catalog/items/{id}", auth.Guard(http.HandlerFunc(handleCatalogItemDetail)))
-	// admin only: backfill catalog from existing Radarr/Sonarr library
 	mux.Handle("/api/pelicula/catalog/backfill", auth.GuardAdmin(http.HandlerFunc(handleCatalogBackfill)))
 	mux.Handle("/api/pelicula/catalog/command", auth.GuardAdmin(http.HandlerFunc(handleCatalogCommand)))
 	mux.Handle("/api/pelicula/catalog/replace", auth.GuardAdmin(http.HandlerFunc(handleCatalogReplace)))
@@ -262,14 +340,14 @@ func main() {
 	mux.Handle("/api/pelicula/catalog/qualityprofiles", auth.Guard(http.HandlerFunc(handleCatalogQualityProfiles)))
 	mux.Handle("/api/pelicula/jobs", auth.Guard(http.HandlerFunc(handleJobsList)))
 
-	// admin only: action bus (mutating) — proxy to procula
+	// admin only: action bus
 	mux.Handle("/api/pelicula/actions", auth.GuardAdmin(http.HandlerFunc(handleActionsCreate)))
 	mux.Handle("/api/pelicula/actions/registry", auth.Guard(http.HandlerFunc(handleActionsRegistry)))
 
 	// admin only: VPN speed test
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(handleSpeedTest)))
 
-	// admin only: container control via docker-socket-proxy sidecar
+	// admin only: container control
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
 	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(handleVPNRestart)))
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
@@ -277,6 +355,69 @@ func main() {
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
 	serveWithShutdown(ctx, ":8181", mux)
+}
+
+// handleStatus is a method on App so it can access app.svc, app.idxCache, app.statusTTL
+// without package-level globals.
+func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	_, _, prowlarrKey := a.svc.Keys()
+	var idxCount *int
+	if prowlarrKey != "" {
+		idxCount = a.idxCache.get(a.svc)
+	}
+
+	svcHealth, _ := a.statusTTL.Get(func() (map[string]string, error) {
+		return a.svc.CheckHealth(), nil
+	})
+	status := map[string]any{
+		"status":         "ok",
+		"services":       svcHealth,
+		"wired":          a.svc.IsWired(),
+		"indexers":       idxCount,
+		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",
+		"warnings":       CheckLibraryAccess(),
+	}
+	httputil.WriteJSON(w, status)
+}
+
+// watchdogStateAdapter converts VPNWatchdogState to the health package's WatchdogState.
+func watchdogStateAdapter(ws VPNWatchdogState) health.WatchdogState {
+	return health.WatchdogState{
+		PortForwardStatus: ws.PortForwardStatus,
+		ForwardedPort:     ws.ForwardedPort,
+		LastSyncedAt:      ws.LastSyncedAt,
+		RestartAttempts:   ws.RestartAttempts,
+		ConsecutiveZero:   ws.ConsecutiveZero,
+		GraceRemaining:    ws.GraceRemaining,
+		CooldownRemaining: ws.CooldownRemaining,
+		LastTransitionAt:  ws.LastTransitionAt,
+		VPNTunnelStatus:   ws.VPNTunnelStatus,
+	}
+}
+
+// requestStoreAdapter adapts *peligrosa.RequestStore to hooks.RequestMarker.
+// peligrosa.RequestStore.MarkAvailable has signature (string, int, int, string, func(string, string))
+// but hooks.RequestMarker expects (string, int, int, string, func(string, string) error) error.
+type requestStoreAdapter struct {
+	s *peligrosa.RequestStore
+}
+
+func (a *requestStoreAdapter) MarkAvailable(reqType string, tmdbID, tvdbID int, title string, notify func(string, string) error) error {
+	a.s.MarkAvailable(reqType, tmdbID, tvdbID, title, func(subject, body string) {
+		notify(subject, body) //nolint:errcheck
+	})
+	return nil
+}
+
+// notifyAppriseErr wraps notifyApprise to match hooks.NotifyFunc signature.
+func notifyAppriseErr(title, body string) error {
+	notifyApprise(title, body)
+	return nil
 }
 
 func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {
@@ -296,34 +437,4 @@ func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("graceful shutdown failed", "component", "main", "error", err)
 	}
-}
-
-func handleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Check indexer count from Prowlarr (cached; TTL = 5 min)
-	services.mu.RLock()
-	prowlarrKey := services.ProwlarrKey
-	services.mu.RUnlock()
-
-	var idxCount *int
-	if prowlarrKey != "" {
-		idxCount = indexerCount.get(prowlarrURL, prowlarrKey)
-	}
-
-	svcHealth, _ := statusCache.Get(func() (map[string]string, error) {
-		return services.CheckHealth(), nil
-	})
-	status := map[string]any{
-		"status":         "ok",
-		"services":       svcHealth,
-		"wired":          services.IsWired(),
-		"indexers":       idxCount,
-		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",
-		"warnings":       CheckLibraryAccess(),
-	}
-	httputil.WriteJSON(w, status)
 }
