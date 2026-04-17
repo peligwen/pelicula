@@ -21,7 +21,6 @@ import (
 	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/downloads"
 	"pelicula-api/internal/app/health"
-	"pelicula-api/internal/app/hooks"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/config"
 	"pelicula-api/peligrosa"
@@ -43,7 +42,6 @@ type App struct {
 	idxCache      indexerCountCacheApp
 	statusTTL     statusTTLCache
 	dlHandler     *downloads.Handler
-	hookHandler   *hooks.Handler
 	healthHandler *health.Handler
 }
 
@@ -216,16 +214,6 @@ func main() {
 			SonarrURL: urls.Sonarr,
 			RadarrURL: urls.Radarr,
 		},
-		hookHandler: &hooks.Handler{
-			Svc:        svc,
-			HTTPClient: svc.client,
-			CatalogDB:  cdb,
-			ReqStore:   requests,
-			Notify:     notifyAppriseErr,
-			ProculaURL: urls.Procula,
-			SonarrURL:  urls.Sonarr,
-			RadarrURL:  urls.Radarr,
-		},
 		healthHandler: &health.Handler{
 			Services:       svc,
 			GetWatchdog:    func() health.WatchdogState { return watchdogStateAdapter(GetWatchdogState()) },
@@ -241,8 +229,6 @@ func main() {
 	requestStore = requests
 	catalogDB = cdb
 	mainDB = db
-	sseHub = NewSSEHub()     // legacy; new code uses app.sseHub
-	ssePoller = &SSEPoller{} // legacy stub; new code uses app.ssePoller
 
 	mux := http.NewServeMux()
 
@@ -258,7 +244,7 @@ func main() {
 	mux.HandleFunc("/api/pelicula/jellyfin/refresh", handleJellyfinRefresh)
 
 	// viewer+: SSE stream
-	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(sseHub.HandleSSE)))
+	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(app.sseHub.HandleSSE)))
 
 	// viewer+: read-only dashboard data
 	mux.Handle("/api/pelicula/host", auth.Guard(http.HandlerFunc(handleHost)))

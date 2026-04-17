@@ -36,11 +36,6 @@ var catalogDB *sql.DB
 // Set by main() once opened.
 var mainDB *sql.DB
 
-// sseHub and ssePoller are retained for any legacy code that may reference them.
-// New code uses app.sseHub / app.ssePoller.
-var sseHub *SSEHub
-var ssePoller *SSEPoller
-
 // indexerCount is the package-level indexer count cache, used by autowire to
 // invalidate the cached count after wiring completes.
 var indexerCount indexerCountApp

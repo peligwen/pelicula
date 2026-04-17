@@ -207,16 +207,8 @@ func (s *RequestStore) All() []*MediaRequest {
 		if arrID.Valid {
 			req.ArrID = int(arrID.Int64)
 		}
-		if t, parseErr := time.Parse(time.RFC3339Nano, createdAt); parseErr == nil {
-			req.CreatedAt = t
-		} else if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
-			req.CreatedAt = t
-		}
-		if t, parseErr := time.Parse(time.RFC3339Nano, updatedAt); parseErr == nil {
-			req.UpdatedAt = t
-		} else if t, parseErr := time.Parse(time.RFC3339, updatedAt); parseErr == nil {
-			req.UpdatedAt = t
-		}
+		req.CreatedAt, _ = dbutil.ParseTime(createdAt)
+		req.UpdatedAt, _ = dbutil.ParseTime(updatedAt)
 		result = append(result, &req)
 		ids = append(ids, req.ID)
 	}
@@ -253,11 +245,7 @@ func (s *RequestStore) All() []*MediaRequest {
 			if err := evRows.Scan(&requestID, &atStr, &ev.State, &ev.Actor, &ev.Note); err != nil {
 				continue
 			}
-			if t, parseErr := time.Parse(time.RFC3339Nano, atStr); parseErr == nil {
-				ev.At = t
-			} else if t, parseErr := time.Parse(time.RFC3339, atStr); parseErr == nil {
-				ev.At = t
-			}
+			ev.At, _ = dbutil.ParseTime(atStr)
 			historyMap[requestID] = append(historyMap[requestID], ev)
 		}
 	}
