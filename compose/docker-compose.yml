@@ -308,6 +308,7 @@ services:
     container_name: nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
       - ./nginx/styles.css:/usr/share/nginx/html/styles.css:ro
       - ./nginx/theme.css:/usr/share/nginx/html/theme.css:ro
