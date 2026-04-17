@@ -500,6 +500,7 @@ func (q *Queue) Retry(id string) error {
 			j.Progress = 0
 			j.Error = ""
 			j.RetryCount++
+			j.NextAttemptAt = nil
 			found = true
 		}
 	})
@@ -592,7 +593,7 @@ func (q *Queue) nextQueued() []string {
 	rows, err := q.db.Query(
 		`SELECT id FROM jobs
 		  WHERE state='queued'
-		    AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))
+		    AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime('now'))
 		  ORDER BY created_at ASC LIMIT 64`,
 	)
 	if err != nil {
