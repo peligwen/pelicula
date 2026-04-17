@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
 
 func TestQueryVPNStatus_PortStatusDegraded(t *testing.T) {
@@ -15,8 +17,6 @@ func TestQueryVPNStatus_PortStatusDegraded(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"public_ip":"1.2.3.4","country":"Netherlands"}`))
 		case "/v1/openvpn/portforwarded":
-			http.Redirect(w, r, "/v1/portforward", http.StatusMovedPermanently)
-		case "/v1/portforward":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"port":0}`))
 		default:
@@ -25,9 +25,9 @@ func TestQueryVPNStatus_PortStatusDegraded(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := gluetunControlURL
-	gluetunControlURL = srv.URL
-	t.Cleanup(func() { gluetunControlURL = origURL })
+	old := gluetunClient
+	gluetunClient = gluetunclient.New(srv.URL, "", "")
+	t.Cleanup(func() { gluetunClient = old })
 
 	watchdogMu.Lock()
 	watchdogState = VPNWatchdogState{PortForwardStatus: string(wdDegraded), RestartAttempts: 1}
@@ -55,8 +55,6 @@ func TestQueryVPNStatus_PortStatusOK(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"public_ip":"1.2.3.4","country":"Netherlands"}`))
 		case "/v1/openvpn/portforwarded":
-			http.Redirect(w, r, "/v1/portforward", http.StatusMovedPermanently)
-		case "/v1/portforward":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"port":51413}`))
 		default:
@@ -65,9 +63,9 @@ func TestQueryVPNStatus_PortStatusOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := gluetunControlURL
-	gluetunControlURL = srv.URL
-	t.Cleanup(func() { gluetunControlURL = origURL })
+	old := gluetunClient
+	gluetunClient = gluetunclient.New(srv.URL, "", "")
+	t.Cleanup(func() { gluetunClient = old })
 
 	watchdogMu.Lock()
 	watchdogState = VPNWatchdogState{

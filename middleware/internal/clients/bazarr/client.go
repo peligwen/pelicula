@@ -67,3 +67,10 @@ func (c *Client) SaveSettings(ctx context.Context, form url.Values) error {
 	_, err := c.base.PostForm(ctx, "/api/system/settings", form)
 	return err
 }
+
+// RawGet performs a GET and returns the raw response bytes without
+// deserialisation. Use when the caller needs to inspect the response as
+// raw JSON (e.g., for custom struct unmarshalling in the wiring logic).
+func (c *Client) RawGet(ctx context.Context, path string) ([]byte, error) {
+	return c.base.RawGet(ctx, path)
+}

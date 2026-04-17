@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
 
 // TestWatchdogState_NewFieldsReadable verifies the new diagnostic fields on
@@ -45,7 +47,7 @@ func TestQueryVPNStatus_WatchdogDetailsPopulated(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/publicip/ip":
 			w.Write([]byte(`{"public_ip":"1.2.3.4","country":"Netherlands"}`))
-		case "/v1/openvpn/portforwarded", "/v1/portforward":
+		case "/v1/openvpn/portforwarded":
 			w.Write([]byte(`{"port":0}`))
 		default:
 			http.NotFound(w, r)
@@ -53,9 +55,9 @@ func TestQueryVPNStatus_WatchdogDetailsPopulated(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := gluetunControlURL
-	gluetunControlURL = srv.URL
-	t.Cleanup(func() { gluetunControlURL = origURL })
+	old := gluetunClient
+	gluetunClient = gluetunclient.New(srv.URL, "", "")
+	t.Cleanup(func() { gluetunClient = old })
 
 	watchdogMu.Lock()
 	watchdogState = VPNWatchdogState{
@@ -133,7 +135,7 @@ func TestQueryVPNStatus_WatchdogNilWhenUnknown(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/publicip/ip":
 			w.Write([]byte(`{"public_ip":"1.2.3.4","country":"Netherlands"}`))
-		case "/v1/openvpn/portforwarded", "/v1/portforward":
+		case "/v1/openvpn/portforwarded":
 			w.Write([]byte(`{"port":51413}`))
 		default:
 			http.NotFound(w, r)
@@ -141,9 +143,9 @@ func TestQueryVPNStatus_WatchdogNilWhenUnknown(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := gluetunControlURL
-	gluetunControlURL = srv.URL
-	t.Cleanup(func() { gluetunControlURL = origURL })
+	old := gluetunClient
+	gluetunClient = gluetunclient.New(srv.URL, "", "")
+	t.Cleanup(func() { gluetunClient = old })
 
 	watchdogMu.Lock()
 	watchdogState = VPNWatchdogState{} // empty / VPN not configured

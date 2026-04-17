@@ -1,11 +1,8 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"sync"
 	"time"
 )
@@ -138,8 +135,7 @@ func wdTick(port int, s wdInternalState) (wdInternalState, watchdogAction) {
 // syncQbtListenPort tells qBittorrent to listen on port via the preferences API.
 // Uses form encoding: POST /api/v2/app/setPreferences with json={"listen_port":N}
 func syncQbtListenPort(s *ServiceClients, port int) error {
-	prefs := fmt.Sprintf(`{"listen_port":%d}`, port)
-	if err := s.QbtPost("/api/v2/app/setPreferences", "json="+url.QueryEscape(prefs)); err != nil {
+	if err := s.Qbt.SetPreferences(context.Background(), port); err != nil {
 		slog.Error("failed to sync qBittorrent listen port",
 			"component", "vpn_watchdog", "port", port, "error", err)
 		return err
@@ -157,7 +153,6 @@ func StartVPNWatchdog(s *ServiceClients) {
 	ticker := time.NewTicker(watchdogInterval)
 	defer ticker.Stop()
 
-	client := &http.Client{Timeout: 5 * time.Second}
 	internal := wdInternalState{status: wdUnknown}
 	prevStatus := wdUnknown
 
@@ -169,7 +164,7 @@ func StartVPNWatchdog(s *ServiceClients) {
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
 	for range ticker.C {
-		port, err := fetchForwardedPort(client)
+		port, err := fetchForwardedPort()
 		if err != nil {
 			slog.Warn("failed to query gluetun port forwarding — skipping tick",
 				"component", "vpn_watchdog", "error", err)
@@ -187,7 +182,7 @@ func StartVPNWatchdog(s *ServiceClients) {
 		// failure (tunnel up, port=0) from VPN not yet connected (tunnel down).
 		tunnelStatus := ""
 		if port == 0 {
-			tunnelStatus = fetchTunnelStatus(client)
+			tunnelStatus = fetchTunnelStatus()
 			if tunnelStatus != "" {
 				slog.Debug("gluetun tunnel status",
 					"component", "vpn_watchdog", "tunnel", tunnelStatus)
@@ -271,33 +266,14 @@ func StartVPNWatchdog(s *ServiceClients) {
 // fetchForwardedPort queries gluetun for the currently forwarded port.
 // Returns (port, nil) on success — port may be 0 if forwarding is inactive.
 // Returns (0, err) on any transport/JSON error.
-func fetchForwardedPort(client *http.Client) (int, error) {
-	body, err := gluetunGet(client, "/v1/portforward")
-	if err != nil {
-		return 0, err
-	}
-	var data struct {
-		Port int `json:"port"`
-	}
-	if json.Unmarshal(body, &data) != nil {
-		return 0, fmt.Errorf("parse portforward response")
-	}
-	return data.Port, nil
+func fetchForwardedPort() (int, error) {
+	return gluetunClient.GetPortForward(context.Background())
 }
 
 // fetchTunnelStatus queries gluetun for the VPN tunnel connection status.
 // Returns the status string (e.g. "running", "stopped") or "" on any error.
 // This is best-effort — callers should treat "" as unknown.
-func fetchTunnelStatus(client *http.Client) string {
-	body, err := gluetunGet(client, "/v1/openvpn/status")
-	if err != nil {
-		return ""
-	}
-	var data struct {
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(body, &data) != nil {
-		return ""
-	}
-	return data.Status
+func fetchTunnelStatus() string {
+	status, _ := gluetunClient.GetTunnelStatus(context.Background())
+	return status
 }

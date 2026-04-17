@@ -99,6 +99,31 @@ func (c *Client) DeleteTorrent(ctx context.Context, hash string) error {
 	})
 }
 
+// RemoveTorrent removes a torrent entry from qBittorrent without deleting the
+// downloaded files. Use when the files should be kept (e.g. seeding-remove-on-complete).
+func (c *Client) RemoveTorrent(ctx context.Context, hash string) error {
+	return c.formPost(ctx, "/api/v2/torrents/delete", url.Values{
+		"hashes":      {hash},
+		"deleteFiles": {"false"},
+	})
+}
+
+// SetPreferences updates qBittorrent preferences via the setPreferences
+// endpoint. Only the listen_port field is currently used (set by the VPN
+// watchdog when the forwarded port changes).
+func (c *Client) SetPreferences(ctx context.Context, port int) error {
+	return c.formPost(ctx, "/api/v2/app/setPreferences", url.Values{
+		"json": {fmt.Sprintf(`{"listen_port":%d}`, port)},
+	})
+}
+
+// RawGet performs a GET and returns the raw response bytes without
+// deserialisation. Use when the caller needs to forward or embed the raw JSON
+// (e.g. SSE transparent pass-through).
+func (c *Client) RawGet(ctx context.Context, path string) ([]byte, error) {
+	return c.base.RawGet(ctx, path)
+}
+
 // formPost sends a form-encoded POST request. It exists because qBittorrent's
 // Web API uses application/x-www-form-urlencoded for all mutation endpoints.
 func (c *Client) formPost(ctx context.Context, path string, values url.Values) error {

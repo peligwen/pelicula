@@ -1,41 +1,35 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
+
+	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
 
-// TestGluetunGet_ErrorOnConnectionRefused verifies gluetunGet returns a
-// descriptive error when the control API is unreachable.
-func TestGluetunGet_ErrorOnConnectionRefused(t *testing.T) {
-	origURL := gluetunControlURL
-	gluetunControlURL = "http://127.0.0.1:0" // nothing listening
-	t.Cleanup(func() { gluetunControlURL = origURL })
-
-	client := &http.Client{Timeout: time.Second}
-	_, err := gluetunGet(client, "/v1/portforward")
+// TestGluetunClient_ErrorOnConnectionRefused verifies the gluetun client returns
+// a descriptive error when the control API is unreachable.
+func TestGluetunClient_ErrorOnConnectionRefused(t *testing.T) {
+	c := gluetunclient.New("http://127.0.0.1:0", "", "")
+	_, err := c.GetPortForward(context.Background())
 	if err == nil {
 		t.Fatal("expected error when control API unreachable, got nil")
 	}
 }
 
-// TestGluetunGet_ErrorIncludesStatusCode verifies gluetunGet returns an error
-// that includes the HTTP status code on non-200 responses.
-func TestGluetunGet_ErrorIncludesStatusCode(t *testing.T) {
+// TestGluetunClient_ErrorIncludesStatusCode verifies the gluetun client returns
+// an error that includes the HTTP status code on non-200 responses.
+func TestGluetunClient_ErrorIncludesStatusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 
-	origURL := gluetunControlURL
-	gluetunControlURL = srv.URL
-	t.Cleanup(func() { gluetunControlURL = origURL })
-
-	client := &http.Client{Timeout: time.Second}
-	_, err := gluetunGet(client, "/v1/portforward")
+	c := gluetunclient.New(srv.URL, "", "")
+	_, err := c.GetPortForward(context.Background())
 	if err == nil {
 		t.Fatal("expected error on 401 response, got nil")
 	}
@@ -44,25 +38,24 @@ func TestGluetunGet_ErrorIncludesStatusCode(t *testing.T) {
 	}
 }
 
-// TestGluetunGet_SuccessReturnsBody verifies gluetunGet returns body and nil
-// error on a valid 200 response.
-func TestGluetunGet_SuccessReturnsBody(t *testing.T) {
+// TestGluetunClient_SuccessReturnsPort verifies the gluetun client correctly
+// parses the port from a valid GetPortForward response.
+func TestGluetunClient_SuccessReturnsPort(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"port":51413}`))
 	}))
 	defer srv.Close()
 
-	origURL := gluetunControlURL
-	gluetunControlURL = srv.URL
-	t.Cleanup(func() { gluetunControlURL = origURL })
+	old := gluetunClient
+	gluetunClient = gluetunclient.New(srv.URL, "", "")
+	t.Cleanup(func() { gluetunClient = old })
 
-	client := &http.Client{Timeout: time.Second}
-	body, err := gluetunGet(client, "/v1/portforward")
+	port, err := fetchForwardedPort()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(body) != `{"port":51413}` {
-		t.Fatalf("body = %q, want {\"port\":51413}", string(body))
+	if port != 51413 {
+		t.Fatalf("port = %d, want 51413", port)
 	}
 }

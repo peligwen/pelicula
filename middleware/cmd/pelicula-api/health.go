@@ -1,14 +1,21 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
+	"context"
 	"log/slog"
 	"net/http"
-	"os"
 	"pelicula-api/httputil"
+	gluetunclient "pelicula-api/internal/clients/gluetun"
 	"time"
+)
+
+// gluetunClient is the typed control-API client for Gluetun.
+// The optional HTTP Basic Auth credentials (GLUETUN_HTTP_PASS / GLUETUN_HTTP_USER)
+// are read once at startup; the control-API URL comes from GLUETUN_CONTROL_URL.
+var gluetunClient = gluetunclient.New(
+	envOr("GLUETUN_CONTROL_URL", "http://gluetun:8000"),
+	envOr("GLUETUN_HTTP_USER", "pelicula"),
+	envOr("GLUETUN_HTTP_PASS", ""),
 )
 
 // WatchdogInfo carries watchdog diagnostic fields surfaced in the health
@@ -91,32 +98,21 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 // queryVPNStatus queries the Gluetun control API (port 8000) for VPN status,
 // public IP, and forwarded port. All reachable via the Docker internal network.
 func queryVPNStatus() VPNStatus {
-	client := &http.Client{Timeout: 5 * time.Second}
+	ctx := context.Background()
 	vpn := VPNStatus{Status: "unknown"}
 
 	// Public IP and country
-	if body, err := gluetunGet(client, "/v1/publicip/ip"); err == nil {
-		var data struct {
-			PublicIP string `json:"public_ip"`
-			Country  string `json:"country"`
-		}
-		if json.Unmarshal(body, &data) == nil && data.PublicIP != "" {
-			vpn.IP = data.PublicIP
-			vpn.Country = data.Country
-			vpn.Status = "healthy"
-		}
-	} else {
+	if status, err := gluetunClient.GetPublicIP(ctx); err == nil && status.PublicIP != "" {
+		vpn.IP = status.PublicIP
+		vpn.Country = status.Country
+		vpn.Status = "healthy"
+	} else if err != nil {
 		slog.Debug("gluetun public IP unavailable", "component", "health", "error", err)
 	}
 
 	// Forwarded port
-	if body, err := gluetunGet(client, "/v1/openvpn/portforwarded"); err == nil {
-		var data struct {
-			Port int `json:"port"`
-		}
-		if json.Unmarshal(body, &data) == nil {
-			vpn.Port = data.Port
-		}
+	if pf, err := gluetunClient.GetForwardedPort(ctx); err == nil {
+		vpn.Port = pf.Port
 	} else {
 		slog.Debug("gluetun port forward status unavailable", "component", "health", "error", err)
 	}
@@ -147,34 +143,4 @@ func queryVPNStatus() VPNStatus {
 	}
 
 	return vpn
-}
-
-// gluetunControlURL is the base URL for the Gluetun control API (port 8000).
-var gluetunControlURL = envOr("GLUETUN_CONTROL_URL", "http://gluetun:8000")
-
-// gluetunGet makes a GET request to the Gluetun control API and returns the
-// response body. Returns a descriptive error on transport failures or non-200
-// responses. Includes HTTP Basic Auth when GLUETUN_HTTP_PASS is set.
-func gluetunGet(client *http.Client, path string) ([]byte, error) {
-	req, err := http.NewRequest("GET", gluetunControlURL+path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	if pass := os.Getenv("GLUETUN_HTTP_PASS"); pass != "" {
-		user := envOr("GLUETUN_HTTP_USER", "pelicula")
-		req.SetBasicAuth(user, pass)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, path)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	return body, nil
 }

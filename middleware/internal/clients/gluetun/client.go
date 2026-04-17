@@ -105,3 +105,38 @@ func (c *Client) GetForwardedPort(ctx context.Context) (*PortForward, error) {
 	}
 	return &out, nil
 }
+
+// GetPortForward fetches the active port-forward assignment from Gluetun's
+// port-forwarding provider endpoint (/v1/portforward). This differs from
+// GetForwardedPort: the portforward endpoint is used by the VPN watchdog
+// to detect ProtonVPN port assignments, while portforwarded is used for
+// health/status display.
+func (c *Client) GetPortForward(ctx context.Context) (int, error) {
+	body, err := c.get(ctx, "/v1/portforward")
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return 0, fmt.Errorf("parse portforward response: %w", err)
+	}
+	return out.Port, nil
+}
+
+// GetTunnelStatus fetches the VPN tunnel connection status from Gluetun.
+// Returns a status string such as "running" or "stopped", or "" on error.
+func (c *Client) GetTunnelStatus(ctx context.Context) (string, error) {
+	body, err := c.get(ctx, "/v1/openvpn/status")
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("parse tunnel status response: %w", err)
+	}
+	return out.Status, nil
+}
