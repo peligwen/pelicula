@@ -349,17 +349,21 @@ func (q *Queue) Get(id string) (*Job, bool) {
 // ListFilter controls which jobs List returns.
 // Zero values mean "no filter" (all states, no time bound, default limit).
 type ListFilter struct {
-	State JobState  // empty = all states
-	Limit int       // 0 = default 200
-	Since time.Time // zero = no lower bound
+	State      JobState  // empty = all states
+	ActionType string    // empty = all action types
+	Limit      int       // 0 = default 200; max 1000
+	Since      time.Time // zero = no lower bound
 }
 
 // List returns jobs matching the filter, ordered by created_at DESC.
-// It replaces the old unfiltered, unbounded List() for HTTP handler use.
+// Default limit is 200; maximum is 1000.
 func (q *Queue) List(f ListFilter) []Job {
 	limit := f.Limit
-	if limit <= 0 {
+	switch {
+	case limit <= 0:
 		limit = 200
+	case limit > 1000:
+		limit = 1000
 	}
 
 	query := `SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
@@ -373,6 +377,10 @@ func (q *Queue) List(f ListFilter) []Job {
 	if f.State != "" {
 		query += ` AND state=?`
 		args = append(args, string(f.State))
+	}
+	if f.ActionType != "" {
+		query += ` AND action_type=?`
+		args = append(args, f.ActionType)
 	}
 	if !f.Since.IsZero() {
 		query += ` AND created_at >= ?`
@@ -400,35 +408,6 @@ func (q *Queue) List(f ListFilter) []Job {
 	return out
 }
 
-// listAll is an internal helper that returns every job (unfiltered, ascending).
-// Used by loadExisting and internal callers that need a full scan.
-func (q *Queue) listAll() []Job {
-	rows, err := q.db.Query(
-		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
-		        subs_acquired,
-		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
-		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
-		        action_type, params, result, catalog, flags, next_attempt_at
-		 FROM jobs ORDER BY created_at ASC`,
-	)
-	if err != nil {
-		slog.Warn("listAll query failed", "component", "queue", "error", err)
-		return nil
-	}
-	defer rows.Close()
-
-	var out []Job
-	for rows.Next() {
-		job, err := scanJob(rows)
-		if err != nil {
-			slog.Warn("listAll scan failed", "component", "queue", "error", err)
-			continue
-		}
-		out = append(out, *job)
-	}
-	return out
-}
-
 // ArchiveOldJobs deletes terminal jobs (completed, failed, cancelled) older than
 // olderThan. Returns the number of rows deleted.
 func (q *Queue) ArchiveOldJobs(olderThan time.Duration) (int, error) {
@@ -442,24 +421,6 @@ func (q *Queue) ArchiveOldJobs(olderThan time.Duration) (int, error) {
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
-}
-
-// ListByActionType returns jobs filtered by action_type (e.g. "pipeline"
-// or "validate"). Empty string means all action types.
-// Returns all matching jobs (no pagination limit) — used by internal callers
-// that need a complete view (e.g. action dedup checks).
-func (q *Queue) ListByActionType(actionType string) []Job {
-	all := q.listAll()
-	if actionType == "" {
-		return all
-	}
-	var out []Job
-	for _, j := range all {
-		if j.ActionType == actionType {
-			out = append(out, j)
-		}
-	}
-	return out
 }
 
 func (q *Queue) Update(id string, fn func(*Job)) error {

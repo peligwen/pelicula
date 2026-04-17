@@ -112,7 +112,7 @@ const (
 	ddlJobsIndexState = `CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)`
 	// ddlJobsIndexCreatedAt supports ORDER BY created_at used in List().
 	ddlJobsIndexCreatedAt = `CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)`
-	// ddlJobsIndexActionType supports filtering by action_type in ListByActionType().
+	// ddlJobsIndexActionType supports action_type filtering in List().
 	ddlJobsIndexActionType = `CREATE INDEX IF NOT EXISTS idx_jobs_action_type ON jobs(action_type)`
 )
 

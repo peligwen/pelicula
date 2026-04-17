@@ -420,11 +420,11 @@ func TestQueueListByActionType(t *testing.T) {
 	b, _ := q.Create(testSource("/movies/b.mkv"))
 	_ = q.Update(b.ID, func(j *Job) { j.ActionType = "validate" })
 
-	pipe := q.ListByActionType("pipeline")
+	pipe := q.List(ListFilter{ActionType: "pipeline"})
 	if len(pipe) != 1 || pipe[0].ID != a.ID {
 		t.Errorf("pipeline filter: got %d jobs", len(pipe))
 	}
-	val := q.ListByActionType("validate")
+	val := q.List(ListFilter{ActionType: "validate"})
 	if len(val) != 1 || val[0].ID != b.ID {
 		t.Errorf("validate filter: got %d jobs", len(val))
 	}

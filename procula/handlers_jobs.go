@@ -22,22 +22,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-
-	// action_type filter goes through the unfiltered ListByActionType path,
-	// which is used by internal callers that need a complete view.
-	if at := q.Get("action_type"); at != "" {
-		writeJSON(w, s.queue.ListByActionType(at))
-		return
-	}
-
 	var f ListFilter
 
+	if at := q.Get("action_type"); at != "" {
+		f.ActionType = at
+	}
 	if stateStr := q.Get("state"); stateStr != "" {
 		f.State = JobState(stateStr)
 	}
 	if limitStr := q.Get("limit"); limitStr != "" {
 		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
-			f.Limit = n
+			f.Limit = n // List() enforces the 1000 cap
 		}
 	}
 	if sinceStr := q.Get("since"); sinceStr != "" {
