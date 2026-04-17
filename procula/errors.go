@@ -1,6 +1,6 @@
 // errors.go — error classification and exponential-backoff helpers for the
 // procula retry policy.
-package main
+package procula
 
 import (
 	"errors"

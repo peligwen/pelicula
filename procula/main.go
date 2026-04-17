@@ -1,4 +1,4 @@
-package main
+package procula
 
 import (
 	"context"
@@ -49,7 +49,8 @@ type Server struct {
 	peliculaAPI string
 }
 
-func main() {
+// Run is the application entry point, called from cmd/procula/main.go.
+func Run() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))

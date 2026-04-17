@@ -1,6 +1,6 @@
 // db.go — SQLite database setup and schema migration framework.
 // Opens procula.db, enables WAL mode, and runs all schema migrations in version order.
-package main
+package procula
 
 import (
 	"database/sql"

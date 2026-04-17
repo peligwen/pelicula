@@ -3,7 +3,7 @@
 // Each function is idempotent: if the source files don't exist they return nil.
 // On success the JSON files/directory are renamed to *.migrated so they won't
 // be re-processed on the next restart.
-package main
+package procula
 
 import (
 	"database/sql"

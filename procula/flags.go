@@ -1,7 +1,7 @@
 // flags.go — derives catalog flags from pipeline job state and persists them
 // in the catalog_flags index table. The engine is pure: ComputeFlags takes a
 // Job and returns zero or more Flag records. Persistence is separate.
-package main
+package procula
 
 import (
 	"database/sql"

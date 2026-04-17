@@ -3,7 +3,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
-RUN go build -o procula .
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+RUN go build -o procula ./cmd/procula/
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates ffmpeg

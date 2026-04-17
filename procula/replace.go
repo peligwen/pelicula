@@ -1,5 +1,5 @@
 // replace.go — "replace" action handler and blocked_releases DB helpers.
-package main
+package procula
 
 import (
 	"bytes"

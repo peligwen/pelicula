@@ -3,7 +3,7 @@
 // Actions are discrete operations on library items (validate, transcode,
 // subtitle_refresh). Each action is registered with a Handler that runs inside
 // the worker loop when a job's ActionType != "pipeline".
-package main
+package procula
 
 import (
 	"context"
