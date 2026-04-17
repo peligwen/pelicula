@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -194,8 +195,9 @@ func BackfillFromArr(db *sql.DB, svc *ServiceClients) error {
 	return nil
 }
 
-func backfillRadarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
-	data, err := svc.ArrGet(radarrURL, apiKey, "/api/v3/movie")
+func backfillRadarr(db *sql.DB, svc *ServiceClients, _ string) error {
+	ctx := context.Background()
+	data, err := svc.Radarr.Get(ctx, "/api/v3/movie")
 	if err != nil {
 		return fmt.Errorf("radarr list: %w", err)
 	}
@@ -239,8 +241,9 @@ func backfillRadarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 // during catalog backfill.
 const episodeConcurrency = 10
 
-func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
-	data, err := svc.ArrGet(sonarrURL, apiKey, "/api/v3/series")
+func backfillSonarr(db *sql.DB, svc *ServiceClients, _ string) error {
+	ctx := context.Background()
+	data, err := svc.Sonarr.Get(ctx, "/api/v3/series")
 	if err != nil {
 		return fmt.Errorf("sonarr list: %w", err)
 	}
@@ -331,7 +334,7 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, apiKey string) error {
 			defer func() { <-sem }()
 
 			path := "/api/v3/episode?seriesId=" + strconv.Itoa(arrID)
-			epData, err := svc.ArrGet(sonarrURL, apiKey, path)
+			epData, err := svc.Sonarr.Get(ctx, path)
 			if err != nil {
 				slog.Error("backfill: fetch episodes", "component", "catalog_sync",
 					"arr_id", arrID, "error", err)

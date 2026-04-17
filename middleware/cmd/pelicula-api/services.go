@@ -13,6 +13,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	arrclient "pelicula-api/internal/clients/arr"
 )
 
 type ServiceClients struct {
@@ -25,6 +27,13 @@ type ServiceClients struct {
 	BazarrKey      string
 	JellyfinAPIKey string
 	JellyfinUserID string // pelicula-internal user ID; resolved lazily on first metadata sync
+
+	// Typed clients — initialised by loadKeys() using the loaded API keys.
+	// Use these for new call sites; the legacy ArrGet/ArrPost helpers remain
+	// for existing code until progressively replaced.
+	Sonarr   *arrclient.Client
+	Radarr   *arrclient.Client
+	Prowlarr *arrclient.Client
 
 	wired bool
 	mu    sync.RWMutex
@@ -68,6 +77,10 @@ func (s *ServiceClients) loadKeys() {
 	s.SonarrKey = sonarr
 	s.RadarrKey = radarr
 	s.ProwlarrKey = prowlarr
+	// (Re-)initialise typed clients so they always carry the current key.
+	s.Sonarr = arrclient.New(sonarrURL, sonarr)
+	s.Radarr = arrclient.New(radarrURL, radarr)
+	s.Prowlarr = arrclient.New(prowlarrURL, prowlarr)
 	s.mu.Unlock()
 
 	if sonarr != "" {
