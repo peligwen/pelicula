@@ -220,7 +220,7 @@ func main() {
 			Svc:        svc,
 			HTTPClient: svc.client,
 			CatalogDB:  cdb,
-			ReqStore:   &requestStoreAdapter{requests},
+			ReqStore:   requests,
 			Notify:     notifyAppriseErr,
 			ProculaURL: urls.Procula,
 			SonarrURL:  urls.Sonarr,
@@ -398,20 +398,6 @@ func watchdogStateAdapter(ws VPNWatchdogState) health.WatchdogState {
 		LastTransitionAt:  ws.LastTransitionAt,
 		VPNTunnelStatus:   ws.VPNTunnelStatus,
 	}
-}
-
-// requestStoreAdapter adapts *peligrosa.RequestStore to hooks.RequestMarker.
-// peligrosa.RequestStore.MarkAvailable has signature (string, int, int, string, func(string, string))
-// but hooks.RequestMarker expects (string, int, int, string, func(string, string) error) error.
-type requestStoreAdapter struct {
-	s *peligrosa.RequestStore
-}
-
-func (a *requestStoreAdapter) MarkAvailable(reqType string, tmdbID, tvdbID int, title string, notify func(string, string) error) error {
-	a.s.MarkAvailable(reqType, tmdbID, tvdbID, title, func(subject, body string) {
-		notify(subject, body) //nolint:errcheck
-	})
-	return nil
 }
 
 // notifyAppriseErr wraps notifyApprise to match hooks.NotifyFunc signature.

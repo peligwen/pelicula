@@ -355,7 +355,8 @@ func (s *RequestStore) InsertFull(req RequestExport) error {
 // MarkAvailable transitions a request to "available" when its content has been imported.
 // Matched by tmdbID (movies) or tvdbID (series). Non-fatal if no matching request exists.
 // If notify is non-nil, it's invoked after the state transition to dispatch a notification.
-func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title string, notify func(subject, body string)) {
+// Returns a non-nil error only if the DB update fails; notify errors are logged but not returned.
+func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title string, notify func(subject, body string) error) error {
 	all := s.All()
 	var matched *MediaRequest
 	for _, req := range all {
@@ -372,7 +373,7 @@ func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title s
 		}
 	}
 	if matched == nil {
-		return
+		return nil
 	}
 
 	requester := matched.RequestedBy
@@ -380,7 +381,7 @@ func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title s
 	matched.UpdatedAt = time.Now().UTC()
 	if err := s.updateRequest(matched); err != nil {
 		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
-		return
+		return err
 	}
 	ev := RequestEvent{
 		At:    matched.UpdatedAt,
@@ -393,8 +394,11 @@ func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title s
 
 	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
 	if notify != nil {
-		notify(title+" is now available", fmt.Sprintf("Hey %s — %q has been imported and is ready to watch.", requester, title))
+		if err := notify(title+" is now available", fmt.Sprintf("Hey %s — %q has been imported and is ready to watch.", requester, title)); err != nil {
+			slog.Warn("notify failed after marking available", "component", "requests", "error", err)
+		}
 	}
+	return nil
 }
 
 // --- HTTP handlers ---
