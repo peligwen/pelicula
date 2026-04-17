@@ -56,7 +56,7 @@ type migration struct {
 }
 
 // schemaVersion is the current schema version. Bump this when adding new migrations.
-const schemaVersion = 8
+const schemaVersion = 9
 
 // DDL shared between migrateBaseline and the corresponding incremental migrations.
 // Keeping them as named constants ensures the two paths stay in sync.
@@ -91,6 +91,29 @@ const (
 		blocked_at       TEXT    NOT NULL,
 		reason           TEXT    NOT NULL DEFAULT ''
 	)`
+
+	// ddlNotifications stores the dashboard notification feed in SQLite.
+	// Replaces the JSONL file (notifications_feed.json) used by older procula versions.
+	ddlNotifications = `CREATE TABLE IF NOT EXISTS notifications (
+		id         TEXT PRIMARY KEY,
+		timestamp  TEXT NOT NULL,
+		type       TEXT NOT NULL,
+		title      TEXT NOT NULL,
+		year       INTEGER NOT NULL DEFAULT 0,
+		media_type TEXT NOT NULL DEFAULT '',
+		message    TEXT NOT NULL,
+		detail     TEXT NOT NULL DEFAULT '',
+		job_id     TEXT NOT NULL DEFAULT ''
+	)`
+
+	ddlNotificationsIdx = `CREATE INDEX IF NOT EXISTS idx_notifications_timestamp ON notifications(timestamp)`
+
+	// ddlJobsIndexState indexes the most common queue WHERE clause.
+	ddlJobsIndexState = `CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)`
+	// ddlJobsIndexCreatedAt supports ORDER BY created_at used in List().
+	ddlJobsIndexCreatedAt = `CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)`
+	// ddlJobsIndexActionType supports filtering by action_type in ListByActionType().
+	ddlJobsIndexActionType = `CREATE INDEX IF NOT EXISTS idx_jobs_action_type ON jobs(action_type)`
 )
 
 // migrations is the ordered list of incremental schema migrations for existing installs.
@@ -104,6 +127,7 @@ var migrations = []migration{
 	{version: 6, up: migrate6},
 	{version: 7, up: migrate7},
 	{version: 8, up: migrate8},
+	{version: 9, up: migrate9},
 }
 
 // runMigrations reads the current schema version and applies all pending migrations.
@@ -203,6 +227,11 @@ func migrateBaseline(tx *sql.Tx) error {
 		ddlCatalogFlagsIndex,
 		ddlDualsubProfiles,
 		ddlBlockedReleases,
+		ddlNotifications,
+		ddlNotificationsIdx,
+		ddlJobsIndexState,
+		ddlJobsIndexCreatedAt,
+		ddlJobsIndexActionType,
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -277,6 +306,24 @@ func migrate7(tx *sql.Tx) error {
 func migrate8(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN next_attempt_at TEXT DEFAULT NULL`)
 	return err
+}
+
+// migrate9 adds:
+//   - notifications table (replaces JSONL feed file)
+//   - query-performance indexes on the jobs table (state, created_at, action_type)
+func migrate9(tx *sql.Tx) error {
+	for _, s := range []string{
+		ddlNotifications,
+		ddlNotificationsIdx,
+		ddlJobsIndexState,
+		ddlJobsIndexCreatedAt,
+		ddlJobsIndexActionType,
+	} {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrate1 creates the initial schema (version 1).

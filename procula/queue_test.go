@@ -98,8 +98,8 @@ func TestQueueDuplicateDedup(t *testing.T) {
 		t.Errorf("expected same job ID for duplicate path, got %q and %q", job1.ID, job2.ID)
 	}
 
-	if len(q.List()) != 1 {
-		t.Errorf("expected 1 job after dedup, got %d", len(q.List()))
+	if len(q.List(ListFilter{})) != 1 {
+		t.Errorf("expected 1 job after dedup, got %d", len(q.List(ListFilter{})))
 	}
 }
 
@@ -115,15 +115,15 @@ func TestQueueList(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 
-	jobs := q.List()
+	jobs := q.List(ListFilter{})
 	if len(jobs) != 3 {
 		t.Fatalf("expected 3 jobs, got %d", len(jobs))
 	}
 
-	// Verify ascending CreatedAt order
+	// List returns newest-first (DESC). Verify descending CreatedAt order.
 	for i := 1; i < len(jobs); i++ {
-		if jobs[i].CreatedAt.Before(jobs[i-1].CreatedAt) {
-			t.Errorf("jobs not sorted by CreatedAt: jobs[%d]=%v before jobs[%d]=%v",
+		if jobs[i].CreatedAt.After(jobs[i-1].CreatedAt) {
+			t.Errorf("jobs not sorted by CreatedAt DESC: jobs[%d]=%v after jobs[%d]=%v",
 				i, jobs[i].CreatedAt, i-1, jobs[i-1].CreatedAt)
 		}
 	}

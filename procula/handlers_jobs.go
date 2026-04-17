@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -19,11 +21,32 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
-	if at := r.URL.Query().Get("action_type"); at != "" {
+	q := r.URL.Query()
+
+	// action_type filter goes through the unfiltered ListByActionType path,
+	// which is used by internal callers that need a complete view.
+	if at := q.Get("action_type"); at != "" {
 		writeJSON(w, s.queue.ListByActionType(at))
 		return
 	}
-	writeJSON(w, s.queue.List())
+
+	var f ListFilter
+
+	if stateStr := q.Get("state"); stateStr != "" {
+		f.State = JobState(stateStr)
+	}
+	if limitStr := q.Get("limit"); limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			f.Limit = n
+		}
+	}
+	if sinceStr := q.Get("since"); sinceStr != "" {
+		if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+			f.Since = t
+		}
+	}
+
+	writeJSON(w, s.queue.List(f))
 }
 
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {

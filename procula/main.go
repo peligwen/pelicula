@@ -70,13 +70,16 @@ func Run() {
 		migrateAllJSON(db, configDir)
 	}
 
+	// One-shot: import any existing JSONL notifications feed into SQLite.
+	migrateNotificationsFeedToDB(db, configDir)
+
 	q, err := NewQueue(db)
 	if err != nil {
 		slog.Error("queue initialization failed", "component", "main", "error", err)
 		os.Exit(1)
 	}
 
-	jobs := q.List()
+	jobs := q.List(ListFilter{})
 	slog.Info("queue loaded", "component", "queue", "job_count", len(jobs))
 
 	el, err := NewEventLog(configDir)
@@ -98,6 +101,8 @@ func Run() {
 	go RunWorker(q, configDir, peliculaAPI)
 	go RunStorageMonitor(configDir)
 	go RunUpdateChecker(configDir)
+	// Archive terminal jobs older than 30 days, every 24 hours.
+	go runArchiveLoop(q)
 
 	srv := &Server{queue: q, db: db, configDir: configDir, peliculaAPI: peliculaAPI}
 
@@ -182,4 +187,22 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// runArchiveLoop deletes terminal jobs older than 30 days every 24 hours.
+// Runs as a background goroutine; exits when the process is killed.
+func runArchiveLoop(q *Queue) {
+	const retention = 30 * 24 * time.Hour
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		n, err := q.ArchiveOldJobs(retention)
+		if err != nil {
+			slog.Warn("archive: failed to delete old jobs", "component", "archive", "error", err)
+			continue
+		}
+		if n > 0 {
+			slog.Info("archive: deleted old terminal jobs", "component", "archive", "count", n)
+		}
+	}
 }

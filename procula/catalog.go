@@ -3,6 +3,7 @@ package procula
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,11 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
-
-var feedMu sync.Mutex
 
 // NotificationEvent is an entry in the dashboard notification feed.
 type NotificationEvent struct {
@@ -123,10 +121,42 @@ func buildEvent(job *Job, eventType, message, detail string) NotificationEvent {
 	}
 }
 
-// appendToFeed appends event as a single JSON line to the JSONL feed file.
-// On first use it migrates a legacy JSON-array feed to JSONL in place.
-// The mutex is held only for the file open+write, keeping critical sections short.
+// appendToFeed writes a notification event to the SQLite notifications table.
+// If appDB is nil (e.g. in unit tests) it falls back to the JSONL file so
+// existing tests that don't initialise the DB continue to work.
 func appendToFeed(configDir string, event NotificationEvent) {
+	if appDB != nil {
+		if err := insertNotification(appDB, event); err != nil {
+			slog.Error("failed to write notification to DB", "component", "catalog", "error", err)
+		} else {
+			slog.Info("notification written", "component", "catalog", "message", event.Message)
+		}
+		return
+	}
+	// Fallback: write to JSONL file (used when DB is not available).
+	appendToFeedFile(configDir, event)
+}
+
+// insertNotification persists a single notification event to SQLite.
+func insertNotification(db *sql.DB, event NotificationEvent) error {
+	_, err := db.Exec(
+		`INSERT OR IGNORE INTO notifications (id, timestamp, type, title, year, media_type, message, detail, job_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.ID,
+		event.Timestamp.UTC().Format(time.RFC3339Nano),
+		event.Type,
+		event.Title,
+		event.Year,
+		event.MediaType,
+		event.Message,
+		event.Detail,
+		event.JobID,
+	)
+	return err
+}
+
+// appendToFeedFile is the legacy JSONL write path, kept as a fallback.
+func appendToFeedFile(configDir string, event NotificationEvent) {
 	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
 
 	if err := os.MkdirAll(filepath.Dir(feedPath), 0755); err != nil {
@@ -141,11 +171,6 @@ func appendToFeed(configDir string, event NotificationEvent) {
 	}
 	line = append(line, '\n')
 
-	feedMu.Lock()
-	defer feedMu.Unlock()
-
-	// One-shot migration: if the file starts with '[', it's the old JSON-array
-	// format. Read all events from it and rewrite as JSONL before appending.
 	migrateFeedIfLegacy(feedPath)
 
 	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -156,9 +181,7 @@ func appendToFeed(configDir string, event NotificationEvent) {
 	defer f.Close()
 	if _, err := f.Write(line); err != nil {
 		slog.Error("failed to write notification", "component", "catalog", "error", err)
-		return
 	}
-	slog.Info("notification written", "component", "catalog", "message", event.Message)
 }
 
 // migrateFeedIfLegacy rewrites a legacy JSON-array feed to JSONL in place.
@@ -202,15 +225,60 @@ func migrateFeedIfLegacy(feedPath string) {
 	slog.Info("migrated notifications feed from JSON array to JSONL", "component", "catalog", "events", len(events))
 }
 
-// ReadFeed reads the JSONL feed file and returns events newest-first,
-// pruned to the last 7 days and capped at maxFeedEvents.
-// Caller must NOT hold feedMu.
+// ReadFeed returns notification events newest-first, pruned to the last 7 days
+// and capped at maxFeedEvents. Reads from SQLite when the DB is available,
+// falling back to the JSONL file otherwise (for tests and cold-start scenarios).
 func ReadFeed(configDir string) []NotificationEvent {
-	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
+	if appDB != nil {
+		events, err := readNotificationsFromDB(appDB)
+		if err != nil {
+			slog.Warn("failed to read notifications from DB", "component", "catalog", "error", err)
+		} else {
+			return events
+		}
+	}
+	return readFeedFromFile(configDir)
+}
 
-	feedMu.Lock()
+// readNotificationsFromDB reads notifications from SQLite, newest-first,
+// within a 7-day window, capped at maxFeedEvents.
+func readNotificationsFromDB(db *sql.DB) ([]NotificationEvent, error) {
+	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)
+	rows, err := db.Query(
+		`SELECT id, timestamp, type, title, year, media_type, message, detail, job_id
+		 FROM notifications
+		 WHERE timestamp >= ?
+		 ORDER BY timestamp DESC
+		 LIMIT ?`,
+		cutoff, maxFeedEvents,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []NotificationEvent
+	for rows.Next() {
+		var ev NotificationEvent
+		var tsStr string
+		if err := rows.Scan(
+			&ev.ID, &tsStr, &ev.Type, &ev.Title, &ev.Year,
+			&ev.MediaType, &ev.Message, &ev.Detail, &ev.JobID,
+		); err != nil {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+			ev.Timestamp = t
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
+}
+
+// readFeedFromFile reads notifications from the JSONL file (fallback path).
+func readFeedFromFile(configDir string) []NotificationEvent {
+	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
 	migrateFeedIfLegacy(feedPath)
-	feedMu.Unlock()
 
 	f, err := os.Open(feedPath)
 	if err != nil {
@@ -236,7 +304,7 @@ func ReadFeed(configDir string) []NotificationEvent {
 		}
 	}
 
-	// Reverse to newest-first
+	// Reverse to newest-first.
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
@@ -244,6 +312,67 @@ func ReadFeed(configDir string) []NotificationEvent {
 		events = events[:maxFeedEvents]
 	}
 	return events
+}
+
+// migrateNotificationsFeedToDB imports any existing JSONL notifications feed into
+// the SQLite notifications table. Runs once at startup; idempotent (INSERT OR IGNORE).
+// After import the JSONL file is renamed to .migrated so it is not processed again.
+func migrateNotificationsFeedToDB(db *sql.DB, configDir string) {
+	feedPath := filepath.Join(configDir, "procula", "notifications_feed.json")
+	migratedPath := feedPath + ".migrated"
+
+	// If already migrated, nothing to do.
+	if _, err := os.Stat(migratedPath); err == nil {
+		return
+	}
+
+	f, err := os.Open(feedPath)
+	if err != nil {
+		return // file doesn't exist yet; nothing to import
+	}
+
+	// Migrate legacy JSON-array to JSONL in memory before importing.
+	data, _ := os.ReadFile(feedPath)
+	f.Close()
+
+	var events []NotificationEvent
+	if len(data) > 0 && data[0] == '[' {
+		// Legacy JSON-array format.
+		if err := json.Unmarshal(data, &events); err != nil {
+			slog.Warn("notifications feed migration: could not parse JSON array", "component", "catalog", "error", err)
+			return
+		}
+	} else {
+		// JSONL format — parse line by line.
+		sc := bufio.NewScanner(bytes.NewReader(data))
+		sc.Buffer(make([]byte, 256*1024), 256*1024)
+		for sc.Scan() {
+			l := strings.TrimSpace(sc.Text())
+			if l == "" {
+				continue
+			}
+			var ev NotificationEvent
+			if err := json.Unmarshal([]byte(l), &ev); err == nil {
+				events = append(events, ev)
+			}
+		}
+	}
+
+	imported := 0
+	for _, ev := range events {
+		if err := insertNotification(db, ev); err == nil {
+			imported++
+		}
+	}
+
+	// Rename the file so we don't import it again.
+	if err := os.Rename(feedPath, migratedPath); err != nil {
+		slog.Warn("notifications feed migration: could not rename feed file", "component", "catalog", "error", err)
+	}
+
+	if imported > 0 {
+		slog.Info("notifications feed migrated to SQLite", "component", "catalog", "count", imported)
+	}
 }
 
 func loadNotificationConfig(configDir string) *NotificationConfig {
