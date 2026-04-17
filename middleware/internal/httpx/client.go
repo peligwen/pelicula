@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,16 +35,80 @@ type Client struct {
 
 	// HTTPClient is the underlying transport. If nil, http.DefaultClient is used.
 	HTTPClient *http.Client
+
+	// Retry configures automatic retry on transient failures (5xx, transport errors).
+	// Zero value disables retries. New() sets {MaxAttempts: 3, Delay: 500ms}.
+	Retry RetryPolicy
+}
+
+// RetryPolicy configures automatic retry on transient failures.
+// Applies to all requests with a known-idempotent body (GET, DELETE, JSON POST/PUT).
+// Errors classified as transient: transport errors and HTTP 5xx responses.
+// HTTP 4xx responses are permanent — they are never retried.
+type RetryPolicy struct {
+	// MaxAttempts is the total number of tries (including the first). Zero or 1 means no retry.
+	MaxAttempts int
+	// Delay is the initial backoff duration; it doubles on each subsequent attempt.
+	Delay time.Duration
+}
+
+// isTransientErr returns true for transport errors worth retrying.
+// HTTP 5xx responses are handled separately (retry=true returned inline).
+func isTransientErr(err error) bool {
+	return err != nil &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded)
+}
+
+// withRetry calls fn until fn signals no-retry, the context is done, or
+// the retry budget is exhausted. fn returns (shouldRetry bool, err error).
+// When shouldRetry is false, err is returned immediately (may be nil on success).
+// When shouldRetry is true and budget remains, fn is called again after backoff.
+// The body for POST/PUT requests must be re-created inside fn because
+// http.Request bodies are consumed after the first use.
+func (c *Client) withRetry(ctx context.Context, fn func() (bool, error)) error {
+	p := c.Retry
+	maxAttempts := p.MaxAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	delay := p.Delay
+	if delay <= 0 {
+		delay = 500 * time.Millisecond
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+			delay *= 2
+		}
+		retry, err := fn()
+		if !retry {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
 }
 
 // New constructs a Client with the given base URL, key, and header.
 // A dedicated http.Client with the supplied timeout is created.
+// The default RetryPolicy retries up to 3 times on 5xx/transport errors.
 func New(baseURL, apiKey, keyHeader string, timeout time.Duration) *Client {
 	return &Client{
 		BaseURL:    baseURL,
 		APIKey:     apiKey,
 		KeyHeader:  keyHeader,
 		HTTPClient: &http.Client{Timeout: timeout},
+		Retry:      RetryPolicy{MaxAttempts: 3, Delay: 500 * time.Millisecond},
 	}
 }
 
@@ -68,118 +133,179 @@ func (c *Client) Do(ctx context.Context, method, path string, body io.Reader) (*
 }
 
 // GetJSON makes a GET request to path and JSON-decodes the response into out.
+// Retries on transient failures per the configured RetryPolicy.
 func (c *Client) GetJSON(ctx context.Context, path string, out any) error {
-	resp, err := c.Do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return fmt.Errorf("GET %s: %w", redactPath(path), err)
-	}
-	defer resp.Body.Close()
-	return c.decodeJSON(resp, path, out)
+	return c.withRetry(ctx, func() (bool, error) {
+		resp, err := c.Do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return isTransientErr(err), fmt.Errorf("GET %s: %w", redactPath(path), err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			io.Copy(io.Discard, resp.Body) //nolint:errcheck
+			return true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		return false, c.decodeJSON(resp, path, out)
+	})
 }
 
 // RawGet makes a GET request to path and returns the response body bytes.
+// Retries on transient failures per the configured RetryPolicy.
 func (c *Client) RawGet(ctx context.Context, path string) ([]byte, error) {
-	resp, err := c.Do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", redactPath(path), err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	var result []byte
+	var resultErr error
+	err := c.withRetry(ctx, func() (bool, error) {
+		resp, err := c.Do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return isTransientErr(err), fmt.Errorf("GET %s: %w", redactPath(path), err)
+		}
+		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
-		return body, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		if resp.StatusCode >= 500 {
+			return true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		if resp.StatusCode >= 400 {
+			result, resultErr = body, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		} else {
+			result, resultErr = body, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return io.ReadAll(resp.Body)
+	return result, resultErr
 }
 
 // PostJSON makes a POST request with a JSON-encoded body and decodes the response into out.
 // out may be nil if the response body is not needed.
+// Retries on transient failures per the configured RetryPolicy.
 func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(encoded))
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	c.setAuth(req)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("POST %s: %w", redactPath(path), err)
-	}
-	defer resp.Body.Close()
-	if out == nil {
-		// Drain the body so the connection can be reused.
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		if resp.StatusCode >= 400 {
-			return fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+	return c.withRetry(ctx, func() (bool, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(encoded))
+		if err != nil {
+			return false, fmt.Errorf("build request: %w", err)
 		}
-		return nil
-	}
-	return c.decodeJSON(resp, path, out)
+		c.setAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			return isTransientErr(err), fmt.Errorf("POST %s: %w", redactPath(path), err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			io.Copy(io.Discard, resp.Body) //nolint:errcheck
+			return true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		if out == nil {
+			io.Copy(io.Discard, resp.Body) //nolint:errcheck
+			if resp.StatusCode >= 400 {
+				return false, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+			}
+			return false, nil
+		}
+		return false, c.decodeJSON(resp, path, out)
+	})
 }
 
 // RawPost makes a POST request with a JSON-encoded body and returns the raw bytes.
+// Retries on transient failures per the configured RetryPolicy.
 func (c *Client) RawPost(ctx context.Context, path string, body any) ([]byte, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(encoded))
+	var result []byte
+	var resultErr error
+	err = c.withRetry(ctx, func() (bool, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(encoded))
+		if err != nil {
+			return false, fmt.Errorf("build request: %w", err)
+		}
+		c.setAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			return isTransientErr(err), fmt.Errorf("POST %s: %w", redactPath(path), err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 500 {
+			return true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		if resp.StatusCode >= 400 {
+			result, resultErr = b, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		} else {
+			result, resultErr = b, nil
+		}
+		return false, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, err
 	}
-	c.setAuth(req)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("POST %s: %w", redactPath(path), err)
-	}
-	defer resp.Body.Close()
-	b, readErr := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return b, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
-	}
-	return b, readErr
+	return result, resultErr
 }
 
 // PutJSON makes a PUT request with a JSON-encoded body and returns the raw bytes.
+// Retries on transient failures per the configured RetryPolicy.
 func (c *Client) PutJSON(ctx context.Context, path string, body any) ([]byte, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+path, bytes.NewReader(encoded))
+	var result []byte
+	var resultErr error
+	err = c.withRetry(ctx, func() (bool, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+path, bytes.NewReader(encoded))
+		if err != nil {
+			return false, fmt.Errorf("build request: %w", err)
+		}
+		c.setAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			return isTransientErr(err), fmt.Errorf("PUT %s: %w", redactPath(path), err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 500 {
+			return true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		if resp.StatusCode >= 400 {
+			result, resultErr = b, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		} else {
+			result, resultErr = b, nil
+		}
+		return false, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, err
 	}
-	c.setAuth(req)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("PUT %s: %w", redactPath(path), err)
-	}
-	defer resp.Body.Close()
-	b, readErr := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return b, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
-	}
-	return b, readErr
+	return result, resultErr
 }
 
 // Delete makes a DELETE request to path.
+// Retries on transient failures per the configured RetryPolicy.
 func (c *Client) Delete(ctx context.Context, path string) error {
-	resp, err := c.Do(ctx, http.MethodDelete, path, nil)
-	if err != nil {
-		return fmt.Errorf("DELETE %s: %w", redactPath(path), err)
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body) //nolint:errcheck
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
-	}
-	return nil
+	return c.withRetry(ctx, func() (bool, error) {
+		resp, err := c.Do(ctx, http.MethodDelete, path, nil)
+		if err != nil {
+			return isTransientErr(err), fmt.Errorf("DELETE %s: %w", redactPath(path), err)
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		if resp.StatusCode >= 500 {
+			return true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		if resp.StatusCode >= 400 {
+			return false, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactPath(path))
+		}
+		return false, nil
+	})
 }
 
 // PostForm makes a POST with application/x-www-form-urlencoded body and
@@ -235,8 +361,11 @@ func (c *Client) decodeJSON(resp *http.Response, path string, out any) error {
 	return nil
 }
 
-// redactPath replaces "apikey=<val>" in query strings with "apikey=REDACTED"
-// so API keys are not written to logs.
+// sensitiveParams lists query parameter names whose values must be redacted in logs.
+var sensitiveParams = []string{"apikey", "api_key", "token", "auth", "password", "secret"}
+
+// redactPath redacts sensitive query parameters from path so credentials are not
+// written to logs. Matching is case-insensitive.
 func redactPath(path string) string {
 	idx := strings.IndexByte(path, '?')
 	if idx < 0 {
@@ -246,9 +375,19 @@ func redactPath(path string) string {
 	if err != nil {
 		return path
 	}
-	if q.Get("apikey") == "" {
+	redacted := false
+	for key := range q {
+		lower := strings.ToLower(key)
+		for _, sensitive := range sensitiveParams {
+			if lower == sensitive {
+				q.Set(key, "REDACTED")
+				redacted = true
+				break
+			}
+		}
+	}
+	if !redacted {
 		return path
 	}
-	q.Set("apikey", "REDACTED")
 	return path[:idx+1] + q.Encode()
 }
