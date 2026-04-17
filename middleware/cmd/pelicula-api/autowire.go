@@ -1,15 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	bazarrclient "pelicula-api/internal/clients/bazarr"
 )
 
 var (
@@ -289,6 +290,7 @@ func wireBazarr(s *ServiceClients) {
 	}
 	s.mu.Lock()
 	s.BazarrKey = apiKey
+	s.Bazarr = bazarrclient.New(bazarrURL, apiKey)
 	s.mu.Unlock()
 
 	s.mu.RLock()
@@ -356,7 +358,7 @@ func wireBazarr(s *ServiceClients) {
 		form.Add("settings-general-enabled_providers", p)
 	}
 
-	if err := bzPostForm(s, "/api/system/settings", form); err != nil {
+	if err := s.Bazarr.SaveSettings(context.Background(), form); err != nil {
 		slog.Error("failed to wire Bazarr", "component", "autowire", "error", err)
 		return
 	}
@@ -405,7 +407,7 @@ func buildPeliculaProfile(langs []string) map[string]any {
 }
 
 func bazarrAlreadyWired(s *ServiceClients, sonarrKey, radarrKey string) bool {
-	data, err := bzGet(s, "/api/system/settings")
+	data, err := s.Bazarr.RawGet(context.Background(), "/api/system/settings")
 	if err != nil {
 		return false
 	}
@@ -439,7 +441,7 @@ func bazarrAlreadyWired(s *ServiceClients, sonarrKey, radarrKey string) bool {
 	if len(cur.General.EnabledProviders) == 0 {
 		return false
 	}
-	pdata, err := bzGet(s, "/api/system/languages/profiles")
+	pdata, err := s.Bazarr.RawGet(context.Background(), "/api/system/languages/profiles")
 	if err != nil {
 		return false
 	}
@@ -504,38 +506,6 @@ func readBazarrAPIKey(configDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no auth.apikey found in bazarr config.yaml")
-}
-
-func bzGet(s *ServiceClients, path string) ([]byte, error) {
-	s.mu.RLock()
-	key := s.BazarrKey
-	s.mu.RUnlock()
-	return s.arrDo("GET", bazarrURL, key, path, nil)
-}
-
-// bzPostForm sends a form-encoded POST to Bazarr. Bazarr is the only
-// form-consuming service in the stack (Flask-RESTx reads request.form), so
-// this helper lives here rather than on ServiceClients.
-func bzPostForm(s *ServiceClients, path string, form url.Values) error {
-	s.mu.RLock()
-	key := s.BazarrKey
-	s.mu.RUnlock()
-	req, err := http.NewRequest("POST", bazarrURL+path, strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("X-API-KEY", key)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("bazarr HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
 }
 
 func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
