@@ -16,6 +16,7 @@ import (
 
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/repo/dbutil"
 )
 
 // RequestState represents the lifecycle state of a media request.
@@ -121,9 +122,7 @@ func (s *RequestStore) loadHistory(id string) ([]RequestEvent, error) {
 		if err := rows.Scan(&atStr, &ev.State, &ev.Actor, &ev.Note); err != nil {
 			continue
 		}
-		if t, parseErr := time.Parse(time.RFC3339Nano, atStr); parseErr == nil {
-			ev.At = t
-		} else if t, parseErr := time.Parse(time.RFC3339, atStr); parseErr == nil {
+		if t, parseErr := dbutil.ParseTime(atStr); parseErr == nil {
 			ev.At = t
 		}
 		history = append(history, ev)
@@ -156,14 +155,10 @@ func (s *RequestStore) scanRequest(row *sql.Row) (*MediaRequest, error) {
 	if arrID.Valid {
 		req.ArrID = int(arrID.Int64)
 	}
-	if t, parseErr := time.Parse(time.RFC3339Nano, createdAt); parseErr == nil {
-		req.CreatedAt = t
-	} else if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+	if t, parseErr := dbutil.ParseTime(createdAt); parseErr == nil {
 		req.CreatedAt = t
 	}
-	if t, parseErr := time.Parse(time.RFC3339Nano, updatedAt); parseErr == nil {
-		req.UpdatedAt = t
-	} else if t, parseErr := time.Parse(time.RFC3339, updatedAt); parseErr == nil {
+	if t, parseErr := dbutil.ParseTime(updatedAt); parseErr == nil {
 		req.UpdatedAt = t
 	}
 

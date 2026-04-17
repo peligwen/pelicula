@@ -18,6 +18,7 @@ import (
 
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/repo/dbutil"
 )
 
 type UserRole string
@@ -117,7 +118,7 @@ func (a *Auth) loadSessionsFromDB() {
 		if err := rows.Scan(&token, &username, &role, &expiresAt); err != nil {
 			continue
 		}
-		t, err := time.Parse(time.RFC3339, expiresAt)
+		t, err := dbutil.ParseTime(expiresAt)
 		if err != nil {
 			continue
 		}

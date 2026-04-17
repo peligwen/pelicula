@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/repo/dbutil"
 	"strings"
 	"time"
 )
@@ -126,11 +127,11 @@ func (s *InviteStore) scanInvite(token string) (Invite, error) {
 		return Invite{}, err
 	}
 	inv.Revoked = revoked != 0
-	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+	if t, err := dbutil.ParseTime(createdAt); err == nil {
 		inv.CreatedAt = t
 	}
 	if expiresAt.Valid {
-		if t, err := time.Parse(time.RFC3339, expiresAt.String); err == nil {
+		if t, err := dbutil.ParseTime(expiresAt.String); err == nil {
 			inv.ExpiresAt = &t
 		}
 	}
@@ -154,7 +155,7 @@ func (s *InviteStore) scanInvite(token string) (Invite, error) {
 		if err := rows.Scan(&r.Username, &r.JellyfinID, &redeemedAt); err != nil {
 			continue
 		}
-		if t, err := time.Parse(time.RFC3339, redeemedAt); err == nil {
+		if t, err := dbutil.ParseTime(redeemedAt); err == nil {
 			r.RedeemedAt = t
 		}
 		inv.RedeemedBy = append(inv.RedeemedBy, r)
@@ -301,11 +302,11 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 		return err
 	}
 	inv.Revoked = revoked != 0
-	if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+	if t, parseErr := dbutil.ParseTime(createdAt); parseErr == nil {
 		inv.CreatedAt = t
 	}
 	if expiresAt.Valid {
-		if t, parseErr := time.Parse(time.RFC3339, expiresAt.String); parseErr == nil {
+		if t, parseErr := dbutil.ParseTime(expiresAt.String); parseErr == nil {
 			inv.ExpiresAt = &t
 		}
 	}
