@@ -7,16 +7,13 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 )
 
 // cmdImport opens the browser to the import wizard.
-func cmdImport(_ []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	env := loadEnvOrFatal(envFile)
-	port := envDefault(env, "PELICULA_PORT", "7354")
+func cmdImport(ctx *Context, _ []string) {
+	ctx.LoadEnv()
+	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	url := fmt.Sprintf("http://localhost:%s/import", port)
 	info("Opening import wizard: " + url)
@@ -24,11 +21,9 @@ func cmdImport(_ []string) {
 }
 
 // cmdImportBackup restores a backup via the middleware API.
-func cmdImportBackup(args []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	env := loadEnvOrFatal(envFile)
-	port := envDefault(env, "PELICULA_PORT", "7354")
+func cmdImportBackup(ctx *Context, args []string) {
+	ctx.LoadEnv()
+	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	if len(args) == 0 || args[0] == "" {
 		fail("Usage: pelicula import-backup <backup-file.json>")

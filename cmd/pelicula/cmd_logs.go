@@ -1,15 +1,8 @@
 package main
 
-import (
-	"path/filepath"
-)
-
-func cmdLogs(args []string) {
-	scriptDir := getScriptDir()
-	requireEnv(filepath.Join(scriptDir, ".env"))
-
-	plat := Detect(scriptDir)
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+func cmdLogs(ctx *Context, args []string) {
+	requireEnv(ctx.EnvFile)
+	c := ctx.newCompose()
 
 	composeArgs := []string{"logs", "-f"}
 	if len(args) > 0 {

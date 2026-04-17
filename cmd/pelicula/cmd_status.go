@@ -4,15 +4,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"time"
 )
 
-func cmdStatus(_ []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	env := loadEnvOrFatal(envFile)
-	port := envDefault(env, "PELICULA_PORT", "7354")
+func cmdStatus(ctx *Context, _ []string) {
+	ctx.LoadEnv()
+	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	url := fmt.Sprintf("http://localhost:%s/api/pelicula/health", port)
 

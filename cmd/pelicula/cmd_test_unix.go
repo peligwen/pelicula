@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 )
 
-func cmdTest(args []string) {
-	testScript := filepath.Join(getScriptDir(), "tests", "e2e.sh")
+func cmdTest(ctx *Context, args []string) {
+	testScript := filepath.Join(ctx.ScriptDir, "tests", "e2e.sh")
 	cmd := exec.Command("bash", append([]string{testScript}, args...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

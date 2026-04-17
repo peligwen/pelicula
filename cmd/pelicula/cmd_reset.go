@@ -8,10 +8,8 @@ import (
 	"strings"
 )
 
-func cmdResetConfig(args []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	env := loadEnvOrFatal(envFile)
+func cmdResetConfig(ctx *Context, args []string) {
+	ctx.LoadEnv()
 
 	arg := ""
 	if len(args) > 0 {
@@ -20,11 +18,11 @@ func cmdResetConfig(args []string) {
 
 	switch arg {
 	case "":
-		resetConfigSoft(scriptDir, envFile, env)
+		resetConfigSoft(ctx)
 	case "all", "full":
-		resetConfigAll(scriptDir, envFile, env)
+		resetConfigAll(ctx)
 	case "sonarr", "radarr", "prowlarr", "jellyfin", "qbittorrent", "procula-jobs":
-		resetConfigService(scriptDir, envFile, arg, env)
+		resetConfigService(ctx, arg)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown reset target: %s\n", arg)
 		fmt.Fprintln(os.Stderr, "Usage: pelicula reset-config [sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs|all]")
@@ -33,7 +31,8 @@ func cmdResetConfig(args []string) {
 }
 
 // resetConfigSoft wipes service configs, preserving API keys / gluetun / certs / user auth.
-func resetConfigSoft(scriptDir, envFile string, env EnvMap) {
+func resetConfigSoft(ctx *Context) {
+	env := ctx.Env
 	configDir := env["CONFIG_DIR"]
 
 	fmt.Printf("%sReset configuration%s\n", colorBold, colorReset)
@@ -62,8 +61,7 @@ func resetConfigSoft(scriptDir, envFile string, env EnvMap) {
 		return
 	}
 
-	plat := Detect(scriptDir)
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+	c := ctx.newCompose()
 	ensureStackDown(c)
 
 	// Extract API keys before wiping
@@ -92,11 +90,11 @@ func resetConfigSoft(scriptDir, envFile string, env EnvMap) {
 }
 
 // resetConfigService resets a single named service.
-func resetConfigService(scriptDir, envFile, svc string, env EnvMap) {
+func resetConfigService(ctx *Context, svc string) {
+	env := ctx.Env
 	configDir := env["CONFIG_DIR"]
 
-	plat := Detect(scriptDir)
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+	c := ctx.newCompose()
 	ensureStackDown(c)
 
 	switch svc {
@@ -135,7 +133,8 @@ func resetConfigService(scriptDir, envFile, svc string, env EnvMap) {
 
 // resetConfigAll does a full wipe: CONFIG_DIR + regenerate .env,
 // preserving WireGuard key, VPN country, and path/host vars.
-func resetConfigAll(scriptDir, envFile string, env EnvMap) {
+func resetConfigAll(ctx *Context) {
+	env := ctx.Env
 	configDir := env["CONFIG_DIR"]
 
 	// Safety guard
@@ -173,8 +172,7 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 		return
 	}
 
-	plat := Detect(scriptDir)
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+	c := ctx.newCompose()
 	ensureStackDown(c)
 
 	// Stash values to preserve
@@ -235,7 +233,7 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 	newProculaKey := generateAPIKey()
 
 	if err := writeEnvFile(
-		envFile,
+		ctx.EnvFile,
 		configDir, libraryDir, workDir,
 		env["PUID"], env["PGID"], env["TZ"],
 		savedWGKey, savedCountries,
@@ -244,7 +242,7 @@ func resetConfigAll(scriptDir, envFile string, env EnvMap) {
 	); err != nil {
 		fatal("Failed to write .env: " + err.Error())
 	}
-	pass("Wrote fresh " + envFile)
+	pass("Wrote fresh " + ctx.EnvFile)
 
 	fmt.Println()
 	pass("Full reset complete — run " + bold("pelicula up") + " to start fresh.")

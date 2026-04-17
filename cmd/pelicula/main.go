@@ -25,50 +25,58 @@ func main() {
 		}
 	}
 
-	if debugMode {
-		printDiagnostics()
-	}
-
+	// Fast-path commands that need no bootstrap context.
 	if len(args) == 0 {
 		usage()
 		return
 	}
+	switch args[0] {
+	case "--version", "-V":
+		fmt.Println("pelicula", version)
+		return
+	case "-h", "--help", "help":
+		usage()
+		return
+	}
+
+	// Build the context once — runs platform detection (docker info) one time.
+	ctx := newContext()
+
+	if debugMode {
+		printDiagnostics(ctx)
+	}
 
 	switch args[0] {
 	case "up":
-		cmdUp(args[1:])
+		cmdUp(ctx, args[1:])
 	case "down":
-		cmdDown(args[1:])
+		cmdDown(ctx, args[1:])
 	case "restart":
-		cmdRestart(args[1:])
+		cmdRestart(ctx, args[1:])
 	case "restart-acquire":
-		cmdRestartAcquire(args[1:])
+		cmdRestartAcquire(ctx, args[1:])
 	case "rebuild":
-		cmdRebuild(args[1:])
+		cmdRebuild(ctx, args[1:])
 	case "redeploy":
-		cmdRedeploy(args[1:])
+		cmdRedeploy(ctx, args[1:])
 	case "reset-config":
-		cmdResetConfig(args[1:])
+		cmdResetConfig(ctx, args[1:])
 	case "status":
-		cmdStatus(args[1:])
+		cmdStatus(ctx, args[1:])
 	case "logs":
-		cmdLogs(args[1:])
+		cmdLogs(ctx, args[1:])
 	case "check-vpn":
-		cmdCheckVPN(args[1:])
+		cmdCheckVPN(ctx, args[1:])
 	case "update":
-		cmdUpdate(args[1:])
+		cmdUpdate(ctx, args[1:])
 	case "export":
-		cmdExport(args[1:])
+		cmdExport(ctx, args[1:])
 	case "import-backup":
-		cmdImportBackup(args[1:])
+		cmdImportBackup(ctx, args[1:])
 	case "import":
-		cmdImport(args[1:])
+		cmdImport(ctx, args[1:])
 	case "test":
-		cmdTest(args[1:])
-	case "--version", "-V":
-		fmt.Println("pelicula", version)
-	case "-h", "--help", "help":
-		usage()
+		cmdTest(ctx, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		usage()
@@ -76,34 +84,32 @@ func main() {
 	}
 }
 
-func printDiagnostics() {
+func printDiagnostics(ctx *Context) {
 	exe, _ := os.Executable()
 	resolved, err := filepath.EvalSymlinks(exe)
 	if err != nil {
 		resolved = exe + " (symlink resolve failed: " + err.Error() + ")"
 	}
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	_, envErr := os.Stat(envFile)
+	_, envErr := os.Stat(ctx.EnvFile)
 
 	debug("pelicula version: " + version)
 	debug("GOOS: " + runtime.GOOS + " GOARCH: " + runtime.GOARCH)
 	debug("binary: " + resolved)
-	debug("script dir: " + scriptDir)
+	debug("script dir: " + ctx.ScriptDir)
 	if envErr == nil {
-		debug(".env: " + envFile + " (found)")
+		debug(".env: " + ctx.EnvFile + " (found)")
 	} else {
-		debug(".env: " + envFile + " (not found)")
+		debug(".env: " + ctx.EnvFile + " (not found)")
 	}
 
-	plat := Detect(scriptDir)
+	plat := ctx.Plat
 	debug(fmt.Sprintf("platform: %s (synology=%v, wsl=%v, needsSudo=%v, uid=%d, gid=%d)",
 		plat.PlatformLabel(), plat.IsSynology, plat.IsWSL, plat.NeedsSudo, plat.UID, plat.GID))
 	debug("TZ: " + plat.TZ)
 	debug("default config dir: " + plat.DefaultConfigDir)
 	debug("default library dir: " + plat.DefaultLibraryDir)
 
-	composeFile := filepath.Join(scriptDir, "compose", "docker-compose.yml")
+	composeFile := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.yml")
 	if _, err := os.Stat(composeFile); err == nil {
 		debug("compose file: " + composeFile + " (found)")
 	} else {

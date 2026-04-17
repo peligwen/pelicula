@@ -5,16 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"time"
 )
 
-func cmdCheckVPN(_ []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	env := loadEnvOrFatal(envFile)
-	port := envDefault(env, "PELICULA_PORT", "7354")
+func cmdCheckVPN(ctx *Context, _ []string) {
+	ctx.LoadEnv()
+	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	fmt.Printf("%sVPN & Service Health Check%s\n", colorBold, colorReset)
 	fmt.Println()

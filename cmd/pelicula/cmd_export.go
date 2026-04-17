@@ -6,15 +6,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 )
 
-func cmdExport(args []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-	env := loadEnvOrFatal(envFile)
-	port := envDefault(env, "PELICULA_PORT", "7354")
+func cmdExport(ctx *Context, args []string) {
+	ctx.LoadEnv()
+	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	// Default output filename: pelicula-backup-YYYY-MM-DD.json
 	date := time.Now().Format("2006-01-02")

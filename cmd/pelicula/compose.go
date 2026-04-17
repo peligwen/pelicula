@@ -16,22 +16,15 @@ type Compose struct {
 }
 
 // NewCompose creates a Compose helper rooted at scriptDir.
-func NewCompose(scriptDir string, needsSudo bool) *Compose {
+// isSynology should come from the Platform detected via Detect() — it is
+// passed explicitly so that Synology detection is not duplicated here.
+func NewCompose(scriptDir string, needsSudo, isSynology bool) *Compose {
 	return &Compose{
 		projectDir: scriptDir,
 		envFile:    filepath.Join(scriptDir, ".env"),
 		needsSudo:  needsSudo,
-		isSynology: isSynologyHost(),
+		isSynology: isSynology,
 	}
-}
-
-// isSynologyHost returns true when running on a Synology NAS.
-func isSynologyHost() bool {
-	if _, err := os.Stat("/proc/syno_platform"); err == nil {
-		return true
-	}
-	_, err := os.Stat("/volume1")
-	return err == nil
 }
 
 // synologyEnv returns a copy of the current environment with HOME replaced

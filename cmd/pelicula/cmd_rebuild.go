@@ -1,16 +1,12 @@
 package main
 
 import (
-	"path/filepath"
 	"strings"
 )
 
-func cmdRedeploy(args []string) {
-	scriptDir := getScriptDir()
-	requireEnv(filepath.Join(scriptDir, ".env"))
-
-	plat := Detect(scriptDir)
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+func cmdRedeploy(ctx *Context, args []string) {
+	requireEnv(ctx.EnvFile)
+	c := ctx.newCompose()
 
 	targets := args
 	if len(targets) == 0 {
@@ -36,16 +32,13 @@ func cmdRedeploy(args []string) {
 		fatal("build failed: " + err.Error())
 	}
 
-	cmdDown(nil)
-	cmdUp(nil)
+	cmdDown(ctx, nil)
+	cmdUp(ctx, nil)
 }
 
-func cmdRebuild(args []string) {
-	scriptDir := getScriptDir()
-	requireEnv(filepath.Join(scriptDir, ".env"))
-
-	plat := Detect(scriptDir)
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+func cmdRebuild(ctx *Context, args []string) {
+	requireEnv(ctx.EnvFile)
+	c := ctx.newCompose()
 
 	targets := args
 	if len(targets) == 0 {

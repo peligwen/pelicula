@@ -16,20 +16,16 @@ import (
 )
 
 // cmdUp implements the "up" subcommand.
-func cmdUp(_ []string) {
-	scriptDir := getScriptDir()
-	envFile := filepath.Join(scriptDir, ".env")
-
+func cmdUp(ctx *Context, _ []string) {
 	// If no .env, run setup wizard, then continue with up
-	if _, err := os.Stat(envFile); err != nil {
+	if _, err := os.Stat(ctx.EnvFile); err != nil {
 		fmt.Println()
 		fmt.Printf("%sNo configuration found — starting setup wizard.%s\n", colorBold, colorReset)
 		fmt.Println()
 
-		plat := Detect(scriptDir)
-		c := NewCompose(scriptDir, plat.NeedsSudo)
+		c := ctx.newCompose()
 
-		setupCompose := filepath.Join(scriptDir, "compose", "docker-compose.setup.yml")
+		setupCompose := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.setup.yml")
 		if _, err := os.Stat(setupCompose); err != nil {
 			fatal("compose/docker-compose.setup.yml not found — make sure you're running from the pelicula directory")
 		}
@@ -37,14 +33,14 @@ func cmdUp(_ []string) {
 		home, _ := os.UserHomeDir()
 		setupEnv := os.Environ()
 		setupEnv = append(setupEnv,
-			"HOST_PLATFORM="+plat.HostPlatformID(),
-			"HOST_TZ="+plat.TZ,
-			fmt.Sprintf("HOST_PUID=%d", plat.UID),
-			fmt.Sprintf("HOST_PGID=%d", plat.GID),
+			"HOST_PLATFORM="+ctx.Plat.HostPlatformID(),
+			"HOST_TZ="+ctx.Plat.TZ,
+			fmt.Sprintf("HOST_PUID=%d", ctx.Plat.UID),
+			fmt.Sprintf("HOST_PGID=%d", ctx.Plat.GID),
 			"HOST_HOME="+home,
-			"HOST_CONFIG_DIR="+plat.DefaultConfigDir,
-			"HOST_LIBRARY_DIR="+plat.DefaultLibraryDir,
-			"HOST_WORK_DIR="+plat.DefaultWorkDir,
+			"HOST_CONFIG_DIR="+ctx.Plat.DefaultConfigDir,
+			"HOST_LIBRARY_DIR="+ctx.Plat.DefaultLibraryDir,
+			"HOST_WORK_DIR="+ctx.Plat.DefaultWorkDir,
 			"HOST_LAN_URL="+detectLANURL(),
 		)
 
@@ -53,7 +49,7 @@ func cmdUp(_ []string) {
 			fatal("Failed to start setup containers: " + err.Error())
 		}
 
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		fmt.Printf("  Open %s in your browser to continue setup\n", bold("http://localhost:7354/"))
 		fmt.Println()
@@ -69,7 +65,7 @@ func cmdUp(_ []string) {
 		completed := false
 		for i := 0; i < maxWait; i++ {
 			select {
-			case <-ctx.Done():
+			case <-sigCtx.Done():
 				fmt.Println()
 				warn("Setup cancelled.")
 				_ = c.runSetupDown(setupCompose)
@@ -77,7 +73,7 @@ func cmdUp(_ []string) {
 			default:
 			}
 			time.Sleep(2 * time.Second)
-			if _, err := os.Stat(envFile); err == nil {
+			if _, err := os.Stat(ctx.EnvFile); err == nil {
 				pass("Configuration saved")
 				completed = true
 				break
@@ -105,18 +101,19 @@ func cmdUp(_ []string) {
 
 	// Load and migrate .env
 	progress("Loading configuration...")
-	env, err := ParseEnv(envFile)
+	env, err := ParseEnv(ctx.EnvFile)
 	if err != nil {
 		fatal("Failed to read .env: " + err.Error())
 	}
-	if _, err := MigrateEnv(envFile); err != nil {
+	if _, err := MigrateEnv(ctx.EnvFile); err != nil {
 		warn("Failed to migrate .env: " + err.Error())
 	}
 	// Re-read after migration
-	env, err = ParseEnv(envFile)
+	env, err = ParseEnv(ctx.EnvFile)
 	if err != nil {
 		fatal("Failed to read .env after migration: " + err.Error())
 	}
+	ctx.Env = env
 
 	configDir := env["CONFIG_DIR"]
 	libraryDir := env["LIBRARY_DIR"]
@@ -134,9 +131,7 @@ func cmdUp(_ []string) {
 		}
 	}
 
-	plat := Detect(scriptDir)
-	progress("Detected: " + plat.PlatformLabel())
-	c := NewCompose(scriptDir, plat.NeedsSudo)
+	progress("Detected: " + ctx.Plat.PlatformLabel())
 
 	info("Starting stack...")
 
@@ -161,7 +156,7 @@ func cmdUp(_ []string) {
 			fmt.Fprintf(os.Stderr, "  The directory %s%s%s exists but is not writable.\n", colorBold, ancestor, colorReset)
 			fmt.Fprintf(os.Stderr, "  Create the required folder first, then re-run %s:\n\n", bold("pelicula up"))
 			fmt.Fprintf(os.Stderr, "    sudo mkdir -p %s\n", filepath.Dir(dce.path))
-			fmt.Fprintf(os.Stderr, "    sudo chown %d:%d %s\n\n", plat.UID, plat.GID, filepath.Dir(dce.path))
+			fmt.Fprintf(os.Stderr, "    sudo chown %d:%d %s\n\n", ctx.Plat.UID, ctx.Plat.GID, filepath.Dir(dce.path))
 			fmt.Fprintf(os.Stderr, "  On Synology: create the shared folder in DSM File Station instead.\n\n")
 			os.Exit(1)
 		}
@@ -174,7 +169,7 @@ func cmdUp(_ []string) {
 	}
 
 	// Render remote configs
-	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
+	if err := RenderRemoteConfigs(ctx.ScriptDir, env); err != nil {
 		fatal(err.Error())
 	}
 
@@ -197,28 +192,21 @@ func cmdUp(_ []string) {
 		fatal("Config seeding failed: " + err.Error())
 	}
 
-	// Enable compose profiles based on config
-	wgKey := env["WIREGUARD_PRIVATE_KEY"]
-	if wgKey != "" {
-		c.profiles = append(c.profiles, "vpn")
-	}
-
-	notifMode := envDefault(env, "NOTIFICATIONS_MODE", "internal")
-	if notifMode == "apprise" {
-		c.profiles = append(c.profiles, "apprise")
-	}
-
 	// Regenerate the external-libraries compose override before starting.
-	librariesOverridePath := filepath.Join(scriptDir, "compose", "docker-compose.libraries.yml")
+	librariesOverridePath := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.libraries.yml")
 	if err := generateLibrariesOverride(configPeliculaDir, librariesOverridePath); err != nil {
 		warn("Failed to generate libraries override: " + err.Error())
 	}
+
+	// Build compose with profiles from env (vpn, apprise).
+	c := composeInvocation(ctx)
 
 	progress("Starting containers...")
 	if err := c.Run("up", "-d", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
 
+	wgKey := env["WIREGUARD_PRIVATE_KEY"]
 	if wgKey != "" {
 		// Wait for gluetun health
 		info("Connecting to VPN...")
