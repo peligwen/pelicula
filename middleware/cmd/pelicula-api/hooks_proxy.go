@@ -1,0 +1,177 @@
+// hooks_proxy.go — outbound proxying to Procula and Jellyfin.
+package main
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"pelicula-api/httputil"
+	"strings"
+)
+
+var proculaURL = envOr("PROCULA_URL", "http://procula:8282")
+
+func forwardToProcula(ctx context.Context, source ProculaJobSource) error {
+	if _, err := procClient.CreateJob(ctx, source); err != nil {
+		return fmt.Errorf("reach procula: %w", err)
+	}
+	return nil
+}
+
+// handleProcessingProxy proxies Procula's status + jobs for the dashboard Processing section.
+func handleProcessingProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+	type rawResult struct {
+		body []byte
+		err  error
+	}
+	statusCh := make(chan rawResult, 1)
+	jobsCh := make(chan rawResult, 1)
+
+	go func() {
+		b, err := procClient.GetStatus(ctx)
+		statusCh <- rawResult{body: b, err: err}
+	}()
+	go func() {
+		b, err := procClient.ListJobs(ctx)
+		jobsCh <- rawResult{body: b, err: err}
+	}()
+
+	statusRes := <-statusCh
+	jobsRes := <-jobsCh
+
+	if statusRes.err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"error":     "processing service unavailable",
+			"retryable": true,
+		})
+		return
+	}
+
+	var statusData, jobsData any
+	json.Unmarshal(statusRes.body, &statusData) //nolint:errcheck
+	if jobsRes.err == nil {
+		json.Unmarshal(jobsRes.body, &jobsData) //nolint:errcheck
+	}
+
+	httputil.WriteJSON(w, map[string]any{
+		"status": statusData,
+		"jobs":   jobsData,
+	})
+}
+
+// handleJellyfinRefresh triggers a Jellyfin library scan. Called by Procula (internal only).
+func handleJellyfinRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Verify Procula API key so only Procula can trigger refreshes.
+	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		provided := r.Header.Get("X-API-Key")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(key)) == 0 {
+			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+	if err := TriggerLibraryRefresh(services); err != nil {
+		slog.Error("library refresh failed", "component", "jellyfin", "error", err)
+		httputil.WriteError(w, "refresh failed", http.StatusInternalServerError)
+		return
+	}
+	httputil.WriteJSON(w, map[string]string{"status": "ok"})
+}
+
+// proxyProcula returns an http.HandlerFunc that forwards a GET to the given
+// Procula path and streams the JSON response back.
+// When forwardQuery is true the incoming request's raw query string is appended.
+func proxyProcula(path string, forwardQuery ...bool) http.HandlerFunc {
+	fwd := len(forwardQuery) > 0 && forwardQuery[0]
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		target := proculaURL + path
+		if fwd {
+			if q := r.URL.RawQuery; q != "" {
+				target += "?" + q
+			}
+		}
+		resp, err := services.client.Get(target)
+		if err != nil {
+			httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			slog.Warn("failed to stream proxy response", "component", "proxy", "path", path, "error", err)
+		}
+	}
+}
+
+// proxyProculaMutate returns an http.HandlerFunc that forwards the request
+// (method, body, Content-Type) to the given Procula path, injecting
+// X-API-Key if PROCULA_API_KEY is set.
+func proxyProculaMutate(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body io.Reader
+		if r.Body != nil {
+			body = r.Body
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, proculaURL+path, body)
+		if err != nil {
+			httputil.WriteError(w, "proxy error", http.StatusInternalServerError)
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "" {
+			req.Header.Set("Content-Type", ct)
+		}
+		if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+			req.Header.Set("X-API-Key", key)
+		}
+		resp, err := services.client.Do(req)
+		if err != nil {
+			httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			slog.Warn("failed to stream proxy response", "component", "proxy", "path", path, "error", err)
+		}
+	}
+}
+
+// handleStorageProxy proxies Procula's storage report for the dashboard Storage section.
+var handleStorageProxy = proxyProcula("/api/procula/storage")
+
+// handleProculaSettingsProxy proxies GET/POST to Procula's settings endpoint.
+var handleProculaSettingsProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		proxyProcula("/api/procula/settings")(w, r)
+		return
+	}
+	proxyProculaMutate("/api/procula/settings")(w, r)
+})
+
+// handleStorageScanProxy proxies a POST scan trigger to Procula.
+var handleStorageScanProxy = proxyProculaMutate("/api/procula/storage/scan")
+
+// handleUpdatesProxy proxies Procula's update check result for the dashboard footer.
+var handleUpdatesProxy = proxyProcula("/api/procula/updates")
