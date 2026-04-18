@@ -1,3 +1,12 @@
+// jellyfin_wiring.go — cmd-level Jellyfin wiring shims.
+//
+// This file contains the pieces of what was jellyfin_core.go that cannot move
+// to internal/ without circular imports or without dragging in cmd-level state
+// (envPath, envMu, parseEnvFile, ServiceClients, generateAPIKey).
+//
+// Pure HTTP client methods → internal/clients/jellyfin
+// Application business logic → internal/app/jellyfin
+// Everything here is wiring only.
 package main
 
 import (
