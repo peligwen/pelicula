@@ -9,6 +9,10 @@ var (
 	prowlarrURL = envOr("PROWLARR_URL", "http://gluetun:9696/prowlarr")
 	bazarrURL   = envOr("BAZARR_URL", "http://bazarr:6767/bazarr")
 
+	// jellyfinURL is a var (not const) so tests can point it at an httptest.Server
+	// and so power users can override it via JELLYFIN_URL.
+	jellyfinURL = envOr("JELLYFIN_URL", "http://jellyfin:8096/jellyfin")
+
 	// proculaURL is the base URL for the Procula processing-pipeline service.
 	// Used by hooks, catalog, jobs, actions, and services health check.
 	proculaURL = envOr("PROCULA_URL", "http://procula:8282")

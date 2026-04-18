@@ -37,6 +37,7 @@ import (
 	"pelicula-api/internal/app/vpnwatchdog"
 	"pelicula-api/internal/clients/apprise"
 	"pelicula-api/internal/clients/docker"
+	jfclient "pelicula-api/internal/clients/jellyfin"
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/peligrosa"
 	"pelicula-api/internal/repo/migratejson"
@@ -207,12 +208,19 @@ func main() {
 	}
 	migratejson.Run(db, "/config/pelicula")
 
-	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, svc)
+	jfWirer := jfapp.NewWirer(svc, jellyfinURL, envPath, generateAPIKey, parseEnvFile, writeEnvFile, &envMu)
+
+	jellyfinClient := jfapp.NewJellyfinHTTPClient(
+		&http.Client{Timeout: 10 * time.Second},
+		jfWirer.Auth,
+		jfWirer.CreateUser,
+		jellyfinURL,
+	)
 
 	jfHandler := jfapp.NewHandler(
-		jfClient(svc),
-		func() (string, error) { return jellyfinAuth(svc) },
-		jellyfinServiceUser,
+		jfclient.NewWithHTTPClient(jellyfinURL, svc.HTTPClient()),
+		jfWirer.Auth,
+		jfapp.ServiceUser,
 	)
 
 	invites := peligrosa.NewInviteStore(db, jellyfinClient)
@@ -256,7 +264,7 @@ func main() {
 			}
 			return out
 		},
-		WireJellyfin:           func() { wireJellyfin(svc, libHandler) },
+		WireJellyfin:           func() { jfWirer.Wire(libHandler) },
 		InvalidateIndexerCache: func() { indexerCount.invalidate() },
 	})
 
@@ -337,7 +345,7 @@ func main() {
 			CatalogDB:              cdb,
 			RequestStore:           requests,
 			Qbt:                    svc.Qbt,
-			TriggerJellyfinRefresh: func() error { return TriggerLibraryRefresh(svc) },
+			TriggerJellyfinRefresh: func() error { return jfWirer.TriggerRefresh() },
 			Notify:                 func(t, b string) error { appriseCli.Notify(t, b); return nil },
 		},
 		libHandler: libHandler,
