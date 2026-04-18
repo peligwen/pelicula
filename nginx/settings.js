@@ -1,7 +1,7 @@
 // nginx/settings.js
 // Settings component — registered with PeliculaFW; mounted by dashboard.js.
 
-import { component, onTab, openDrawer, closeDrawer } from '/framework.js';
+import { component, onTab, openDrawer, closeDrawer, wireSwitches } from '/framework.js';
 import { get, post, del } from '/api.js';
 
 // ── Module-level state ────────────────────────────────────────────────────
@@ -609,6 +609,9 @@ document.getElementById('settings-save-btn')?.addEventListener('click', saveSett
 document.getElementById('requests-settings-save-btn')?.addEventListener('click', saveRequestsSettings);
 document.getElementById('save-subs-drawer-btn')?.addEventListener('click', saveSubtitlesDrawer);
 document.getElementById('save-remote-drawer-btn')?.addEventListener('click', saveRemoteAccess);
+
+// Wire Space-key handler on all switches present at page load
+wireSwitches();
 
 // ── Window exports ────────────────────────────────────────────────────────
 // loadArrMeta is called from applyRole() in dashboard.js; the flag lives here.

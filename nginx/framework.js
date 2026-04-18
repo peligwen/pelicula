@@ -326,6 +326,31 @@ function announce(msg) {
     requestAnimationFrame(function () { el.textContent = msg; });
 }
 
+// ── Switch wiring ─────────────────────────────────────────────────────────────
+// wireSwitches(root) — attaches Space-key handler to every [role="switch"] under
+// root (defaults to document). Guards against double-binding with data-switch-wired.
+
+function wireSwitches(root) {
+    root = root || document;
+    var switches = root.querySelectorAll('[role="switch"]');
+    switches.forEach(function (sw) {
+        // Avoid double-binding
+        if (sw.dataset.switchWired) return;
+        sw.dataset.switchWired = '1';
+
+        sw.addEventListener('keydown', function (e) {
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                // Prevent default page scroll
+                e.preventDefault();
+                // Trigger click (the existing click handler does the toggle)
+                sw.click();
+            }
+            // Note: Enter on <button> already fires click natively — no action needed
+            // Note: Do NOT re-dispatch a new click event on Enter to avoid double-fire
+        });
+    });
+}
+
 // ── Exports ───────────────────────────────────────────────────────────────────
 // Named ES module exports — import individual helpers in each module file.
 export { createStore, initStore };
@@ -337,7 +362,8 @@ export { trapFocus, releaseFocus };
 export { openDrawer, closeDrawer };
 export { createPoller };
 export { onTab, toast, announce };
+export { wireSwitches };
 
 // Legacy window global retained during the onclick → event-delegation migration.
 // Removed in Phase 3.2 once all inline handlers are replaced.
-window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus, openDrawer, closeDrawer, createPoller, onTab, toast, announce };
+window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus, openDrawer, closeDrawer, createPoller, onTab, toast, announce, wireSwitches };
