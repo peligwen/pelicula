@@ -26,7 +26,7 @@ type ServiceQuerier interface {
 }
 
 // DockerLogsFunc is a function that fetches container logs.
-// Matches the signature of dockerLogsFunc in the main package.
+// Matches the signature of docker.Client.LogsFunc.
 type DockerLogsFunc func(name string, tail int, timestamps bool) ([]byte, error)
 
 // LogEntry is one log line tagged with its source service.

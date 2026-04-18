@@ -28,6 +28,7 @@ import (
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/sse"
+	"pelicula-api/internal/app/sysinfo"
 	"pelicula-api/internal/clients/apprise"
 	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/config"
@@ -53,6 +54,7 @@ type App struct {
 	backupHandler  *backup.Handler
 	dlHandler      *downloads.Handler
 	healthHandler  *health.Handler
+	sysinfoHandler *sysinfo.Handler
 	hooksHandler   *hooks.Handler
 	libHandler     *library.Handler
 	catalogHandler *catalog.Handler
@@ -285,6 +287,12 @@ func main() {
 		statusTTL:     statusTTLCache{ttl: 5 * time.Second},
 		vpnConfigured: cfg.WireguardPrivateKey != "",
 		autowireState: autowireState,
+		sysinfoHandler: &sysinfo.Handler{
+			Svc:          svc,
+			RadarrURL:    urls.Radarr,
+			SonarrURL:    urls.Sonarr,
+			DockerClient: dockerCli,
+		},
 		backupHandler: backup.New(svc, libHandler, auth, invites, requests, urls.Radarr, urls.Sonarr),
 		dlHandler: &downloads.Handler{
 			Svc:       svc,
@@ -347,7 +355,7 @@ func main() {
 	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(app.sseHub.HandleSSE)))
 
 	// viewer+: read-only dashboard data
-	mux.Handle("/api/pelicula/host", auth.Guard(http.HandlerFunc(handleHost)))
+	mux.Handle("/api/pelicula/host", auth.Guard(http.HandlerFunc(app.sysinfoHandler.ServeHost)))
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(app.handleStatus)))
 	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(app.dlHandler.HandleDownloads)))
 	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(app.dlHandler.HandleDownloadStats)))
@@ -431,13 +439,13 @@ func main() {
 	mux.Handle("/api/pelicula/actions/registry", auth.Guard(http.HandlerFunc(handleActionsRegistry)))
 
 	// admin only: VPN speed test
-	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(handleSpeedTest)))
+	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(app.sysinfoHandler.ServeSpeedtest)))
 
 	// admin only: container control
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
 	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(handleVPNRestart)))
 	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
-	mux.Handle("/api/pelicula/logs/aggregate", auth.GuardAdmin(http.HandlerFunc(handleLogsAggregate)))
+	mux.Handle("/api/pelicula/logs/aggregate", auth.GuardAdmin(http.HandlerFunc(app.sysinfoHandler.ServeLogs)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
 	serveWithShutdown(ctx, ":8181", mux)

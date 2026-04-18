@@ -1,4 +1,4 @@
-package main
+package sysinfo
 
 import (
 	"encoding/json"
@@ -29,7 +29,7 @@ type hostResponse struct {
 }
 
 // handleHost returns container uptime, media disk usage, and library counts.
-func handleHost(w http.ResponseWriter, r *http.Request) {
+func handleHost(h *Handler, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -38,7 +38,7 @@ func handleHost(w http.ResponseWriter, r *http.Request) {
 	resp := hostResponse{
 		UptimeSeconds: readUptime(),
 		Disk:          diskStats(),
-		Library:       libraryCounts(),
+		Library:       libraryCounts(h),
 	}
 	httputil.WriteJSON(w, resp)
 }
@@ -79,17 +79,17 @@ func diskStats() hostDisk {
 }
 
 // libraryCounts queries Radarr and Sonarr for movie/series counts.
-func libraryCounts() hostLibrary {
-	sonarrKey, radarrKey, _ := services.Keys()
+func libraryCounts(h *Handler) hostLibrary {
+	sonarrKey, radarrKey, _ := h.Svc.Keys()
 	lib := hostLibrary{}
 
 	if radarrKey != "" {
-		if body, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie"); err == nil {
+		if body, err := h.Svc.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie"); err == nil {
 			lib.Movies = jsonArrayLen(body)
 		}
 	}
 	if sonarrKey != "" {
-		if body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series"); err == nil {
+		if body, err := h.Svc.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series"); err == nil {
 			lib.Series = jsonArrayLen(body)
 		}
 	}
@@ -106,8 +106,8 @@ func jsonArrayLen(data []byte) int {
 	return len(arr)
 }
 
-// formatUptime formats uptime seconds for display (e.g. "3d 4h", "2h 15m").
-func formatUptime(secs float64) string {
+// FormatUptime formats uptime seconds for display (e.g. "3d 4h", "2h 15m").
+func FormatUptime(secs float64) string {
 	s := int(secs)
 	d := s / 86400
 	h := (s % 86400) / 3600

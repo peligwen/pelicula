@@ -1,6 +1,6 @@
-// logs_aggregate.go — fan-out over docker-proxy container logs, returning a
+// logs.go — fan-out over docker-proxy container logs, returning a
 // unified entry list the dashboard Logs tab can colour by service.
-package main
+package sysinfo
 
 import (
 	"bufio"
@@ -21,10 +21,10 @@ type LogEntry struct {
 	Timestamp time.Time `json:"ts,omitempty"`
 }
 
-// parseLogTimestamp peels the RFC3339Nano prefix Docker adds when timestamps=1.
+// ParseLogTimestamp peels the RFC3339Nano prefix Docker adds when timestamps=1.
 // Returns the parsed time and the remainder of the line. On parse failure,
 // returns a zero time and the original line unchanged.
-func parseLogTimestamp(line string) (time.Time, string) {
+func ParseLogTimestamp(line string) (time.Time, string) {
 	idx := strings.IndexByte(line, ' ')
 	if idx <= 0 {
 		return time.Time{}, line
@@ -36,8 +36,8 @@ func parseLogTimestamp(line string) (time.Time, string) {
 	return t, line[idx+1:]
 }
 
-// sortedLogEntries returns a copy of entries sorted newest-first, capped at max.
-func sortedLogEntries(entries []LogEntry, max int) []LogEntry {
+// SortedLogEntries returns a copy of entries sorted newest-first, capped at max.
+func SortedLogEntries(entries []LogEntry, max int) []LogEntry {
 	out := make([]LogEntry, len(entries))
 	copy(out, entries)
 	sort.Slice(out, func(i, j int) bool {
@@ -57,7 +57,7 @@ const (
 // handleLogsAggregate fetches logs from each requested service in parallel
 // and returns {entries: [...], services: [...]}.
 // Query params: ?tail=N (default 100, max 500), ?services=a,b,c (default: all allowed).
-func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
+func handleLogsAggregate(h *Handler, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -76,12 +76,12 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 	if sv := r.URL.Query().Get("services"); sv != "" {
 		for _, s := range strings.Split(sv, ",") {
 			s = strings.TrimSpace(s)
-			if dockerCli.IsAllowed(s) {
+			if h.DockerClient.IsAllowed(s) {
 				services = append(services, s)
 			}
 		}
 	} else {
-		for name := range dockerCli.AllowedNames() {
+		for name := range h.DockerClient.AllowedNames() {
 			services = append(services, name)
 		}
 	}
@@ -97,7 +97,7 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			raw, err := dockerCli.LogsFunc(name, tail, true)
+			raw, err := h.DockerClient.LogsFunc(name, tail, true)
 			resCh <- fetchResult{svc: name, raw: raw, err: err}
 		}(svc)
 	}
@@ -117,12 +117,12 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 			if line == "" {
 				continue
 			}
-			ts, content := parseLogTimestamp(line)
+			ts, content := ParseLogTimestamp(line)
 			entries = append(entries, LogEntry{Service: res.svc, Line: content, Timestamp: ts})
 		}
 	}
 
-	sorted := sortedLogEntries(entries, tail)
+	sorted := SortedLogEntries(entries, tail)
 	if sorted == nil {
 		sorted = []LogEntry{}
 	}
