@@ -1,45 +1,161 @@
-package main
+package backup_test
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"pelicula-api/internal/app/backup"
 	"pelicula-api/internal/peligrosa"
+
+	_ "modernc.org/sqlite"
 )
 
-// exportTestFulfiller is a no-op Fulfiller for export tests.
-type exportTestFulfiller struct{}
+// ── Test infrastructure ───────────────────────────────────────────────────────
 
-func (f *exportTestFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
-	return 0, nil
+// stubArrClient is a minimal ArrClient that returns empty keys and errors on all calls.
+type stubArrClient struct {
+	sonarr, radarr, prowlarr string
 }
-func (f *exportTestFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
-	return 0, nil
+
+func (s *stubArrClient) Keys() (string, string, string) {
+	return s.sonarr, s.radarr, s.prowlarr
 }
+func (s *stubArrClient) ArrGet(_, _, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (s *stubArrClient) ArrPost(_, _, _ string, _ any) ([]byte, error) {
+	return nil, nil
+}
+
+// stubLibPathResolver always returns the default path.
+type stubLibPathResolver struct{}
+
+func (s *stubLibPathResolver) FirstLibraryPath(_, defaultPath string) string {
+	return defaultPath
+}
+
+// stubFulfiller is a no-op Fulfiller for export tests.
+type stubFulfiller struct{}
+
+func (f *stubFulfiller) AddMovie(_, _ int, _ string) (int, error)  { return 0, nil }
+func (f *stubFulfiller) AddSeries(_, _ int, _ string) (int, error) { return 0, nil }
+
+// testDB creates a fresh SQLite database with the pelicula schema.
+// Mirrors the schema from db.go in the main package.
+func testDB(t *testing.T) *sql.DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("testDB: open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		db.Close()
+		t.Fatalf("testDB: WAL mode: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		db.Close()
+		t.Fatalf("testDB: foreign_keys: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS roles (
+			jellyfin_id TEXT PRIMARY KEY,
+			username    TEXT NOT NULL,
+			role        TEXT NOT NULL DEFAULT 'viewer'
+		);
+		CREATE TABLE IF NOT EXISTS invites (
+			token      TEXT PRIMARY KEY,
+			label      TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			created_by TEXT NOT NULL DEFAULT '',
+			expires_at TEXT,
+			max_uses   INTEGER,
+			uses       INTEGER NOT NULL DEFAULT 0,
+			revoked    INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE IF NOT EXISTS redemptions (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			invite_token TEXT NOT NULL REFERENCES invites(token) ON DELETE CASCADE,
+			username     TEXT NOT NULL,
+			jellyfin_id  TEXT NOT NULL,
+			redeemed_at  TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS requests (
+			id           TEXT PRIMARY KEY,
+			type         TEXT NOT NULL,
+			tmdb_id      INTEGER NOT NULL DEFAULT 0,
+			tvdb_id      INTEGER NOT NULL DEFAULT 0,
+			title        TEXT NOT NULL,
+			year         INTEGER NOT NULL DEFAULT 0,
+			poster       TEXT,
+			requested_by TEXT NOT NULL DEFAULT '',
+			state        TEXT NOT NULL DEFAULT 'pending',
+			reason       TEXT,
+			arr_id       INTEGER,
+			created_at   TEXT NOT NULL,
+			updated_at   TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS request_events (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+			at         TEXT NOT NULL,
+			state      TEXT NOT NULL,
+			actor      TEXT NOT NULL DEFAULT '',
+			note       TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE IF NOT EXISTS sessions (
+			token      TEXT PRIMARY KEY,
+			username   TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("testDB: schema: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// newHandler returns a Handler wired with stub dependencies.
+func newHandler(svc backup.ArrClient) *backup.Handler {
+	return backup.New(svc, &stubLibPathResolver{}, nil, nil, nil, "http://radarr:7878/radarr", "http://sonarr:8989/sonarr")
+}
+
+// ── Pure-function tests ───────────────────────────────────────────────────────
 
 func TestResolveProfileID(t *testing.T) {
+	t.Parallel()
 	t.Run("name found in map", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]int{"HD-1080p": 3, "Any": 1}
-		got := resolveProfileID("HD-1080p", m)
+		got := backup.ResolveProfileID("HD-1080p", m)
 		if got != 3 {
 			t.Errorf("got %d, want 3", got)
 		}
 	})
 
 	t.Run("name not found returns first available", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]int{"Any": 5}
-		got := resolveProfileID("Missing", m)
+		got := backup.ResolveProfileID("Missing", m)
 		if got != 5 {
 			t.Errorf("got %d, want 5", got)
 		}
 	})
 
 	t.Run("empty map returns 1", func(t *testing.T) {
-		got := resolveProfileID("anything", map[string]int{})
+		t.Parallel()
+		got := backup.ResolveProfileID("anything", map[string]int{})
 		if got != 1 {
 			t.Errorf("got %d, want 1", got)
 		}
@@ -47,6 +163,7 @@ func TestResolveProfileID(t *testing.T) {
 }
 
 func TestResolveTagIDs(t *testing.T) {
+	t.Parallel()
 	labelMap := map[string]int{
 		"4k":    10,
 		"hevc":  20,
@@ -54,25 +171,27 @@ func TestResolveTagIDs(t *testing.T) {
 	}
 
 	t.Run("all labels present", func(t *testing.T) {
-		ids := resolveTagIDs([]string{"4k", "hevc"}, labelMap)
+		t.Parallel()
+		ids := backup.ResolveTagIDs([]string{"4k", "hevc"}, labelMap)
 		if len(ids) != 2 {
 			t.Fatalf("expected 2 ids, got %v", ids)
 		}
-		// Order mirrors input order
 		if ids[0] != 10 || ids[1] != 20 {
 			t.Errorf("ids = %v, want [10 20]", ids)
 		}
 	})
 
 	t.Run("missing labels skipped", func(t *testing.T) {
-		ids := resolveTagIDs([]string{"4k", "unknown"}, labelMap)
+		t.Parallel()
+		ids := backup.ResolveTagIDs([]string{"4k", "unknown"}, labelMap)
 		if len(ids) != 1 || ids[0] != 10 {
 			t.Errorf("ids = %v, want [10]", ids)
 		}
 	})
 
 	t.Run("empty labels returns empty", func(t *testing.T) {
-		ids := resolveTagIDs(nil, labelMap)
+		t.Parallel()
+		ids := backup.ResolveTagIDs(nil, labelMap)
 		if len(ids) != 0 {
 			t.Errorf("expected empty, got %v", ids)
 		}
@@ -80,34 +199,38 @@ func TestResolveTagIDs(t *testing.T) {
 }
 
 func TestResolveTagLabels(t *testing.T) {
+	t.Parallel()
 	tagMap := map[int]string{
 		10: "4k",
 		20: "hevc",
 	}
 
 	t.Run("tags as float64 IDs resolved", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]any{
 			"tags": []any{float64(10), float64(20)},
 		}
-		labels := resolveTagLabels(m, tagMap)
+		labels := backup.ResolveTagLabels(m, tagMap)
 		if len(labels) != 2 || labels[0] != "4k" || labels[1] != "hevc" {
 			t.Errorf("labels = %v, want [4k hevc]", labels)
 		}
 	})
 
 	t.Run("unknown tag IDs skipped", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]any{
 			"tags": []any{float64(10), float64(99)},
 		}
-		labels := resolveTagLabels(m, tagMap)
+		labels := backup.ResolveTagLabels(m, tagMap)
 		if len(labels) != 1 || labels[0] != "4k" {
 			t.Errorf("labels = %v, want [4k]", labels)
 		}
 	})
 
 	t.Run("missing tags key returns empty", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]any{}
-		labels := resolveTagLabels(m, tagMap)
+		labels := backup.ResolveTagLabels(m, tagMap)
 		if len(labels) != 0 {
 			t.Errorf("expected empty, got %v", labels)
 		}
@@ -115,8 +238,10 @@ func TestResolveTagLabels(t *testing.T) {
 }
 
 func TestUniqueStrings(t *testing.T) {
+	t.Parallel()
 	t.Run("duplicates removed, order preserved", func(t *testing.T) {
-		got := uniqueStrings(func(add func(string)) {
+		t.Parallel()
+		got := backup.UniqueStrings(func(add func(string)) {
 			add("a")
 			add("b")
 			add("a")
@@ -134,7 +259,8 @@ func TestUniqueStrings(t *testing.T) {
 	})
 
 	t.Run("empty input returns nil", func(t *testing.T) {
-		got := uniqueStrings(func(add func(string)) {})
+		t.Parallel()
+		got := backup.UniqueStrings(func(add func(string)) {})
 		if len(got) != 0 {
 			t.Errorf("expected empty, got %v", got)
 		}
@@ -142,7 +268,9 @@ func TestUniqueStrings(t *testing.T) {
 }
 
 func TestExtractSeasons(t *testing.T) {
+	t.Parallel()
 	t.Run("seasons extracted", func(t *testing.T) {
+		t.Parallel()
 		s := map[string]any{
 			"seasons": []any{
 				map[string]any{"seasonNumber": float64(0), "monitored": false},
@@ -150,7 +278,7 @@ func TestExtractSeasons(t *testing.T) {
 				map[string]any{"seasonNumber": float64(2), "monitored": true},
 			},
 		}
-		seasons := extractSeasons(s)
+		seasons := backup.ExtractSeasons(s)
 		if len(seasons) != 3 {
 			t.Fatalf("expected 3 seasons, got %v", seasons)
 		}
@@ -163,7 +291,8 @@ func TestExtractSeasons(t *testing.T) {
 	})
 
 	t.Run("missing seasons key returns empty", func(t *testing.T) {
-		seasons := extractSeasons(map[string]any{})
+		t.Parallel()
+		seasons := backup.ExtractSeasons(map[string]any{})
 		if len(seasons) != 0 {
 			t.Errorf("expected empty, got %v", seasons)
 		}
@@ -173,46 +302,49 @@ func TestExtractSeasons(t *testing.T) {
 // ── Backup version tests ───────────────────────────────────────────────────
 
 func TestBackupVersionBoundaries(t *testing.T) {
-	// Helper that POSTs a backup JSON to handleImportBackup and returns the response code.
-	post := func(t *testing.T, payload BackupExport) int {
+	t.Parallel()
+
+	// post POSTs a backup JSON to HandleImportBackup and returns the response code.
+	post := func(t *testing.T, payload backup.BackupExport) int {
 		t.Helper()
 		body, _ := json.Marshal(payload)
 		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/import-backup", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 
-		// handleImportBackup calls services.Keys() — stub them.
-		origServices := services
-		services = &ServiceClients{}
-		t.Cleanup(func() { services = origServices })
-
-		handleImportBackup(w, req)
+		// Use a stub client with no API keys — Keys() returns ("","","")
+		h := newHandler(&stubArrClient{})
+		h.HandleImportBackup(w, req)
 		return w.Code
 	}
 
 	t.Run("version 0 rejected", func(t *testing.T) {
-		code := post(t, BackupExport{Version: 0})
+		t.Parallel()
+		code := post(t, backup.BackupExport{Version: 0})
 		if code != http.StatusBadRequest {
 			t.Errorf("got %d, want 400", code)
 		}
 	})
 
 	t.Run("version 99 rejected", func(t *testing.T) {
-		code := post(t, BackupExport{Version: 99})
+		t.Parallel()
+		code := post(t, backup.BackupExport{Version: 99})
 		if code != http.StatusBadRequest {
 			t.Errorf("got %d, want 400", code)
 		}
 	})
 
 	t.Run("version 1 accepted (keys missing → 503)", func(t *testing.T) {
+		t.Parallel()
 		// Version is valid; missing API keys yield 503, not 400.
-		code := post(t, BackupExport{Version: 1})
+		code := post(t, backup.BackupExport{Version: 1})
 		if code != http.StatusServiceUnavailable {
 			t.Errorf("got %d, want 503", code)
 		}
 	})
 
 	t.Run("version 2 accepted (keys missing → 503)", func(t *testing.T) {
-		code := post(t, BackupExport{Version: 2})
+		t.Parallel()
+		code := post(t, backup.BackupExport{Version: 2})
 		if code != http.StatusServiceUnavailable {
 			t.Errorf("got %d, want 503", code)
 		}
@@ -222,6 +354,7 @@ func TestBackupVersionBoundaries(t *testing.T) {
 // ── InviteStore.InsertFull tests ───────────────────────────────────────────
 
 func TestInviteStoreInsertFull(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := peligrosa.NewInviteStore(db, nil)
 
@@ -259,6 +392,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 	}
 
 	t.Run("idempotent on duplicate token", func(t *testing.T) {
+		t.Parallel()
 		// Second insert of same token must not error.
 		if err := store.InsertFull(inv); err != nil {
 			t.Errorf("second InsertFull: %v", err)
@@ -272,8 +406,9 @@ func TestInviteStoreInsertFull(t *testing.T) {
 // ── RequestStore.InsertFull tests ─────────────────────────────────────────
 
 func TestRequestStoreInsertFull(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
-	store := peligrosa.NewRequestStore(db, &exportTestFulfiller{})
+	store := peligrosa.NewRequestStore(db, &stubFulfiller{})
 
 	now := time.Now().UTC().Truncate(time.Second)
 	req := peligrosa.RequestExport{
@@ -312,6 +447,7 @@ func TestRequestStoreInsertFull(t *testing.T) {
 	}
 
 	t.Run("idempotent on duplicate id", func(t *testing.T) {
+		t.Parallel()
 		if err := store.InsertFull(req); err != nil {
 			t.Errorf("second InsertFull: %v", err)
 		}
@@ -324,16 +460,16 @@ func TestRequestStoreInsertFull(t *testing.T) {
 // ── v1 backup import compatibility test ───────────────────────────────────
 
 func TestImportV1BackupHasNoRolesInvitesRequests(t *testing.T) {
-	// A v1 backup JSON: only movies/series, no roles/invites/requests.
+	t.Parallel()
 	v1 := `{"version":1,"exported":"2025-01-01T00:00:00Z","movies":[],"series":[]}`
-	var backup BackupExport
-	if err := json.Unmarshal([]byte(v1), &backup); err != nil {
+	var bk backup.BackupExport
+	if err := json.Unmarshal([]byte(v1), &bk); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if backup.Version != 1 {
-		t.Errorf("version = %d, want 1", backup.Version)
+	if bk.Version != 1 {
+		t.Errorf("version = %d, want 1", bk.Version)
 	}
-	if len(backup.Roles) != 0 || len(backup.Invites) != 0 || len(backup.Requests) != 0 {
+	if len(bk.Roles) != 0 || len(bk.Invites) != 0 || len(bk.Requests) != 0 {
 		t.Error("v1 backup should have no roles/invites/requests")
 	}
 }
@@ -341,13 +477,14 @@ func TestImportV1BackupHasNoRolesInvitesRequests(t *testing.T) {
 // ── v2 backup struct roundtrip test ───────────────────────────────────────
 
 func TestBackupExportV2Roundtrip(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	maxUses := 1
-	export := BackupExport{
+	export := backup.BackupExport{
 		Version:  2,
 		Exported: now.Format(time.RFC3339),
-		Movies:   []MovieExport{},
-		Series:   []SeriesExport{},
+		Movies:   []backup.MovieExport{},
+		Series:   []backup.SeriesExport{},
 		Roles: []peligrosa.RolesEntry{
 			{JellyfinID: "jf-001", Username: "alice", Role: peligrosa.RoleAdmin},
 		},
@@ -382,7 +519,7 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var got BackupExport
+	var got backup.BackupExport
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -404,24 +541,28 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 // ── resolveProfileID warning tests ────────────────────────────────────────
 
 func TestResolveProfileIDWithWarning(t *testing.T) {
+	t.Parallel()
 	t.Run("known profile returns exact match silently", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]int{"HD-1080p": 3, "Any": 1}
-		got := resolveProfileID("HD-1080p", m)
+		got := backup.ResolveProfileID("HD-1080p", m)
 		if got != 3 {
 			t.Errorf("got %d, want 3", got)
 		}
 	})
 
 	t.Run("unknown profile falls back to first available", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]int{"Any": 5}
-		got := resolveProfileID("MissingProfile", m)
+		got := backup.ResolveProfileID("MissingProfile", m)
 		if got != 5 {
 			t.Errorf("got %d, want 5 (first available)", got)
 		}
 	})
 
 	t.Run("empty map returns 1", func(t *testing.T) {
-		got := resolveProfileID("anything", map[string]int{})
+		t.Parallel()
+		got := backup.ResolveProfileID("anything", map[string]int{})
 		if got != 1 {
 			t.Errorf("got %d, want 1", got)
 		}

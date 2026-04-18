@@ -20,6 +20,7 @@ import (
 
 	"pelicula-api/httputil"
 	"pelicula-api/internal/app/autowire"
+	"pelicula-api/internal/app/backup"
 	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/downloads"
 	"pelicula-api/internal/app/health"
@@ -45,6 +46,7 @@ type App struct {
 	requests      *peligrosa.RequestStore
 	idxCache      indexerCountCacheApp
 	statusTTL     statusTTLCache
+	backupHandler *backup.Handler
 	dlHandler     *downloads.Handler
 	healthHandler *health.Handler
 	hooksHandler  *hooks.Handler
@@ -268,6 +270,7 @@ func main() {
 		statusTTL:     statusTTLCache{ttl: 5 * time.Second},
 		vpnConfigured: cfg.WireguardPrivateKey != "",
 		autowireState: autowireState,
+		backupHandler: backup.New(svc, libHandler, auth, invites, requests, urls.Radarr, urls.Sonarr),
 		dlHandler: &downloads.Handler{
 			Svc:       svc,
 			SonarrURL: urls.Sonarr,
@@ -347,8 +350,8 @@ func main() {
 	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
 
 	// admin only: backup export / import
-	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(handleExport)))
-	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(handleImportBackup)))
+	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(app.backupHandler.HandleExport)))
+	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(app.backupHandler.HandleImportBackup)))
 
 	// admin only: Jellyfin user management
 	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsers))))
