@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/adminops"
 	"pelicula-api/internal/app/autowire"
 	"pelicula-api/internal/app/backup"
 	"pelicula-api/internal/app/catalog"
@@ -450,9 +451,16 @@ func main() {
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(app.sysinfoHandler.ServeSpeedtest)))
 
 	// admin only: container control
-	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(handleStackRestart)))
-	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(handleVPNRestart)))
-	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(handleServiceLogs)))
+	adminHandler := adminops.New(dockerCli, func(r *http.Request) (string, bool) {
+		if authMiddleware == nil {
+			return "", false
+		}
+		username, _, ok := authMiddleware.SessionFor(r)
+		return username, ok
+	})
+	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(adminHandler.HandleStackRestart)))
+	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(adminHandler.HandleVPNRestart)))
+	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(adminHandler.HandleServiceLogs)))
 	mux.Handle("/api/pelicula/logs/aggregate", auth.GuardAdmin(http.HandlerFunc(app.sysinfoHandler.ServeLogs)))
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
