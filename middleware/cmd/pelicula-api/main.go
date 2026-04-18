@@ -25,6 +25,7 @@ import (
 	"pelicula-api/internal/app/downloads"
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/hooks"
+	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/config"
@@ -52,6 +53,7 @@ type App struct {
 	hooksHandler   *hooks.Handler
 	libHandler     *library.Handler
 	catalogHandler *catalog.Handler
+	jfHandler      *jfapp.Handler
 	vpnConfigured  bool
 	autowireState  *autowire.AutowireState
 }
@@ -185,6 +187,12 @@ func main() {
 
 	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, svc)
 
+	jfHandler := jfapp.NewHandler(
+		jfClient(svc),
+		func() (string, error) { return jellyfinAuth(svc) },
+		jellyfinServiceUser,
+	)
+
 	invites := peligrosa.NewInviteStore(db, jellyfinClient)
 	requests := peligrosa.NewRequestStore(db, NewArrFulfiller())
 
@@ -298,6 +306,7 @@ func main() {
 			Notify:                 notifyAppriseErr,
 		},
 		libHandler: libHandler,
+		jfHandler:  jfHandler,
 		catalogHandler: &catalog.Handler{
 			DB:         cdb,
 			Arr:        svc,
@@ -363,15 +372,15 @@ func main() {
 	mux.Handle("/api/pelicula/import-backup", auth.GuardAdmin(http.HandlerFunc(app.backupHandler.HandleImportBackup)))
 
 	// admin only: Jellyfin user management
-	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsers))))
-	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleUsersWithID))))
+	mux.Handle("/api/pelicula/users", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(app.jfHandler.HandleUsers))))
+	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(app.jfHandler.HandleUsersWithID))))
 
 	// admin only: role management
 	mux.Handle("/api/pelicula/operators", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperators))))
 	mux.Handle("/api/pelicula/operators/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperatorsWithID))))
 
 	// viewer+: active Jellyfin sessions
-	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(handleSessions)))
+	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(app.jfHandler.HandleSessions)))
 
 	// viewer+: library metadata
 	mux.Handle("GET /api/pelicula/libraries", auth.Guard(http.HandlerFunc(app.libHandler.HandleListLibraries)))

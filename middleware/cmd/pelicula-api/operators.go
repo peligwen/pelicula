@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+
 	"pelicula-api/httputil"
+	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/peligrosa"
 	"strings"
 )
@@ -30,7 +32,7 @@ func handleOperators(w http.ResponseWriter, r *http.Request) {
 // and DELETE /api/pelicula/operators/{id} (remove entry).
 func handleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/pelicula/operators/")
-	if !validJellyfinID(id) {
+	if !jfapp.ValidJellyfinID(id) {
 		httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
 		return
 	}
