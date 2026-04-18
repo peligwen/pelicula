@@ -1597,6 +1597,11 @@ body.side-collapsed .side-toggle::after { content: '‹'; }
 body.side-collapsed .pane-side { display: none; }
 body.side-collapsed .main { grid-template-columns: 1fr; }
 
+/* Hamburger button — hidden by default; revealed in @media (max-width: 480px) */
+.tabbar-hamburger {
+    display: none;
+}
+
 /* Mobile layout: single column, pane-side floats over main content when open. */
 @media (max-width: 768px) {
     .main { grid-template-columns: 1fr; }
@@ -1622,6 +1627,62 @@ body.side-collapsed .main { grid-template-columns: 1fr; }
     .logo-sub { display: none; }
     .masthead-right .watch-btn,
     .masthead-right .register-btn { display: none; }
+
+    /* Show hamburger on mobile */
+    .tabbar-hamburger {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: none;
+        color: var(--ink);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 8px;
+        order: -1; /* push to start of masthead-right flex row */
+    }
+    .tabbar-hamburger:focus-visible {
+        outline: 2px solid var(--pink);
+        outline-offset: 2px;
+    }
+
+    /* Hide regular tabbar tabs — hamburger drawer handles nav instead */
+    .tabbar .tab {
+        display: none;
+    }
+
+    /* Mobile nav drawer — slides from left */
+    .mobile-nav-drawer {
+        left: 0;
+        right: auto;
+        width: min(280px, 85vw);
+        border-left: none;
+        border-right: 1.5px solid var(--border2);
+    }
+
+    /* Mobile nav list */
+    .mobile-nav-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .mobile-nav-list li button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 1rem 1.25rem;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--border);
+        font-size: 1rem;
+        font-family: var(--font-body);
+        color: var(--ink);
+        cursor: pointer;
+    }
+    .mobile-nav-list li button:hover,
+    .mobile-nav-list li button.active {
+        background: var(--panel2);
+    }
 }
 
 /* ── Alert glow on collapsed toggle ─────── */

@@ -1092,6 +1092,61 @@ document.getElementById('tabbar').addEventListener('keydown', function(e) {
     tabs[next].click();
 });
 
+// ── Mobile nav hamburger ───────────────────────────────────────────────────────
+(function () {
+    const hamburger = document.getElementById('tabbar-hamburger');
+    const mobileDrawer = document.getElementById('mobile-nav-drawer');
+    const mobileBackdrop = document.getElementById('mobile-nav-backdrop');
+    const mobileCloseBtn = document.getElementById('mobile-nav-close-btn');
+    if (!hamburger || !mobileDrawer || !mobileBackdrop) return;
+
+    function openMobileNav() {
+        // Populate nav list on first open
+        if (!mobileDrawer.querySelector('.mobile-nav-list')) {
+            const tabs = document.querySelectorAll('.tabbar .tab');
+            const list = document.createElement('ul');
+            list.className = 'mobile-nav-list';
+            tabs.forEach(function(tab) {
+                const li = document.createElement('li');
+                const btn = document.createElement('button');
+                btn.textContent = tab.textContent.trim();
+                btn.dataset.tab = tab.dataset.tab;
+                if (tab.classList.contains('active')) btn.classList.add('active');
+                btn.addEventListener('click', function() {
+                    tab.click();
+                    closeMobileNav();
+                });
+                li.appendChild(btn);
+                list.appendChild(li);
+            });
+            mobileDrawer.appendChild(list);
+        } else {
+            // Sync active state on subsequent opens
+            mobileDrawer.querySelectorAll('.mobile-nav-list li button').forEach(function(btn) {
+                const tab = document.querySelector('.tabbar .tab[data-tab="' + btn.dataset.tab + '"]');
+                btn.classList.toggle('active', !!(tab && tab.classList.contains('active')));
+            });
+        }
+        openDrawer(mobileDrawer, mobileBackdrop);
+        hamburger.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeMobileNav() {
+        closeDrawer(mobileDrawer, mobileBackdrop);
+        hamburger.setAttribute('aria-expanded', 'false');
+        hamburger.focus();
+    }
+
+    hamburger.addEventListener('click', function() {
+        const isOpen = !mobileDrawer.classList.contains('hidden');
+        if (isOpen) closeMobileNav();
+        else openMobileNav();
+    });
+
+    mobileBackdrop.addEventListener('click', closeMobileNav);
+    if (mobileCloseBtn) mobileCloseBtn.addEventListener('click', closeMobileNav);
+})();
+
 // Settings functions are in settings.js (PeliculaFW component 'settings').
 // loadSettingsTab, saveSettingsTab, toggleSetting, updateNotifMode, clearProfileForm,
 // saveProfile, installDefaultProfiles, saveRequestsSettings, loadArrMeta on window.*.

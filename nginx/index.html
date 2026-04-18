@@ -58,6 +58,14 @@
                 <a href="/" class="logo">P<span class="accent">E</span>LICULA<span class="logo-sub">media acquisition system</span></a>
             </div>
             <div class="masthead-right">
+                <!-- Mobile hamburger — shown only at <480px via CSS -->
+                <button class="tabbar-hamburger" id="tabbar-hamburger" aria-label="Open navigation" aria-expanded="false" aria-controls="mobile-nav-drawer">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <rect y="3" width="20" height="2" rx="1"/>
+                    <rect y="9" width="20" height="2" rx="1"/>
+                    <rect y="15" width="20" height="2" rx="1"/>
+                  </svg>
+                </button>
                 <!-- Health chips (managed by dashboard.js via titlebar-chip class + data attributes) -->
                 <span class="titlebar-chip titlebar-chip-ok hidden" id="chip-health-ok" data-testid="chip-health-ok"><span class="pip"></span><span id="chip-health-ok-text">all good!</span></span>
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
@@ -86,6 +94,16 @@
         <button class="tab" data-tab="users" role="tab" aria-selected="false" tabindex="-1">users</button>
         <button class="tab" data-tab="settings" role="tab" aria-selected="false" tabindex="-1">settings</button>
     </nav>
+
+    <!-- Mobile nav drawer (shown at <480px via hamburger button) -->
+    <div class="drawer-backdrop hidden" id="mobile-nav-backdrop"></div>
+    <div id="mobile-nav-drawer" class="drawer mobile-nav-drawer hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+        <div class="drawer-header">
+            <div class="drawer-title">Navigation</div>
+            <button class="drawer-close" id="mobile-nav-close-btn" aria-label="Close navigation">&times;</button>
+        </div>
+        <!-- .mobile-nav-list populated by dashboard.js on first open -->
+    </div>
 
     <!-- Two-pane grid -->
     <div class="main">
