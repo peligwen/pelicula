@@ -89,6 +89,6 @@ nginx/
   styles.css            dashboard styles
   register.html/js      registration page (invite flow, open registration, initial setup)
   setup.html/css        browser-based setup wizard (served when SETUP_MODE=true)
-  import.html/js/css    local media import wizard with server-side folder browser
+  import.html           redirect shim: /import → /#storage-explorer (wizard moved into dashboard 2026-04; URL kept for CLI and bookmarks)
   remote.conf.template  envsubst template for the Peligrosa remote vhost (see PELIGROSA.md)
 ```
