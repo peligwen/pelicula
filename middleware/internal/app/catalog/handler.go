@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"pelicula-api/httputil"
 )
@@ -18,6 +20,13 @@ import (
 // to make outbound requests to Procula.
 type ProxyClient interface {
 	Get(url string) (*http.Response, error)
+}
+
+// jellyfinCacheState is a short-lived in-process cache of Jellyfin library items.
+type jellyfinCacheState struct {
+	mu        sync.Mutex
+	items     []jellyfinItem
+	fetchedAt time.Time
 }
 
 // Handler holds the dependencies for catalog HTTP handlers.
@@ -30,6 +39,7 @@ type Handler struct {
 	ProculaURL string
 	RadarrURL  string
 	SonarrURL  string
+	jfCache    jellyfinCacheState
 }
 
 type catalogResponse struct {
@@ -255,7 +265,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 			title = item.Title
 			metadataSyncedAt = item.MetadataSyncedAt
 			if item.Type == "movie" {
-				go MaybeSyncJellyfinMetadata(h.DB, h.Jf, item)
+				go h.MaybeSyncJellyfinMetadata(item)
 			} else if item.Type == "episode" {
 				if season, err := GetCatalogItemByID(h.DB, item.ParentID); err == nil && season != nil {
 					if series, err := GetCatalogItemByID(h.DB, season.ParentID); err == nil && series != nil {
@@ -268,7 +278,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 						if metadataSyncedAt == "" {
 							metadataSyncedAt = series.MetadataSyncedAt
 						}
-						go MaybeSyncJellyfinMetadata(h.DB, h.Jf, series)
+						go h.MaybeSyncJellyfinMetadata(series)
 					}
 				}
 			}
@@ -362,7 +372,7 @@ func (h *Handler) HandleCatalogItemDetail(w http.ResponseWriter, r *http.Request
 		httputil.WriteError(w, "not found", http.StatusNotFound)
 		return
 	}
-	go MaybeSyncJellyfinMetadata(h.DB, h.Jf, item)
+	go h.MaybeSyncJellyfinMetadata(item)
 	httputil.WriteJSON(w, item)
 }
 

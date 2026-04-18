@@ -11,13 +11,6 @@ import (
 	"time"
 )
 
-// jellyfinItemCache is a short-lived in-process cache of Jellyfin library items.
-var jellyfinCache struct {
-	mu        sync.Mutex
-	items     []jellyfinItem
-	fetchedAt time.Time
-}
-
 type jellyfinItem struct {
 	ID          string            `json:"Id"`
 	Overview    string            `json:"Overview"`
@@ -58,14 +51,14 @@ func floatVal(m map[string]any, key string) float64 {
 }
 
 // fetchJellyfinLibrary fetches all Movie/Series items from Jellyfin and caches them.
-func fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, error) {
-	jellyfinCache.mu.Lock()
-	if time.Since(jellyfinCache.fetchedAt) < jellyfinCacheTTL {
-		items := jellyfinCache.items
-		jellyfinCache.mu.Unlock()
+func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, error) {
+	h.jfCache.mu.Lock()
+	if time.Since(h.jfCache.fetchedAt) < jellyfinCacheTTL {
+		items := h.jfCache.items
+		h.jfCache.mu.Unlock()
 		return items, nil
 	}
-	jellyfinCache.mu.Unlock()
+	h.jfCache.mu.Unlock()
 
 	userID := jf.GetJellyfinUserID()
 	if userID == "" {
@@ -128,14 +121,14 @@ func fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, error) {
 		)
 	}
 
-	jellyfinCache.mu.Lock()
-	if time.Since(jellyfinCache.fetchedAt) >= jellyfinCacheTTL {
-		jellyfinCache.items = resp.Items
-		jellyfinCache.fetchedAt = time.Now()
+	h.jfCache.mu.Lock()
+	if time.Since(h.jfCache.fetchedAt) >= jellyfinCacheTTL {
+		h.jfCache.items = resp.Items
+		h.jfCache.fetchedAt = time.Now()
 		slog.Info("jellyfin library cached", "component", "catalog_sync", "count", count)
 	}
-	items := jellyfinCache.items
-	jellyfinCache.mu.Unlock()
+	items := h.jfCache.items
+	h.jfCache.mu.Unlock()
 	return items, nil
 }
 
@@ -420,7 +413,7 @@ func backfillSonarr(db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
 
 // MaybeSyncJellyfinMetadata syncs Jellyfin metadata for an item if stale (>24h) or never synced.
 // Safe to call in a goroutine — logs errors, never panics.
-func MaybeSyncJellyfinMetadata(db *sql.DB, jf JellyfinMetaClient, item *CatalogItem) {
+func (h *Handler) MaybeSyncJellyfinMetadata(item *CatalogItem) {
 	if item == nil {
 		return
 	}
@@ -433,19 +426,19 @@ func MaybeSyncJellyfinMetadata(db *sql.DB, jf JellyfinMetaClient, item *CatalogI
 			return
 		}
 	}
-	if err := SyncJellyfinMetadata(db, jf, item); err != nil {
+	if err := h.SyncJellyfinMetadata(item); err != nil {
 		slog.Error("jellyfin metadata sync", "component", "catalog_sync", "id", item.ID, "error", err)
 	}
 }
 
 // SyncJellyfinMetadata fetches artwork and synopsis from Jellyfin and persists them.
-func SyncJellyfinMetadata(db *sql.DB, jf JellyfinMetaClient, item *CatalogItem) error {
-	jellyfinID, artworkURL, synopsis, err := fetchJellyfinItemMeta(jf, item)
+func (h *Handler) SyncJellyfinMetadata(item *CatalogItem) error {
+	jellyfinID, artworkURL, synopsis, err := h.fetchJellyfinItemMeta(item)
 	if err != nil {
 		return err
 	}
 	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := UpdateCatalogMetadata(db, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
+	if err := UpdateCatalogMetadata(h.DB, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
 		return fmt.Errorf("persist metadata: %w", err)
 	}
 	if jellyfinID != "" {
@@ -455,8 +448,8 @@ func SyncJellyfinMetadata(db *sql.DB, jf JellyfinMetaClient, item *CatalogItem) 
 }
 
 // fetchJellyfinItemMeta looks up a catalog item in the cached Jellyfin library.
-func fetchJellyfinItemMeta(jf JellyfinMetaClient, item *CatalogItem) (string, string, string, error) {
-	items, err := fetchJellyfinLibrary(jf)
+func (h *Handler) fetchJellyfinItemMeta(item *CatalogItem) (string, string, string, error) {
+	items, err := h.fetchJellyfinLibrary(h.Jf)
 	if err != nil {
 		return "", "", "", err
 	}
