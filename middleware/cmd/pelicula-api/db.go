@@ -6,7 +6,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log/slog"
+
+	"pelicula-api/internal/repo/dbutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -34,68 +35,17 @@ func OpenDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
-	if err := runMigrations(db); err != nil {
+	if err := dbutil.Migrate(db, migrations, "db"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 	return db, nil
 }
 
-// currentVersion reads the PRAGMA user_version from the database.
-func currentVersion(db *sql.DB) (int, error) {
-	var v int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-// migration is a single schema migration step.
-type migration struct {
-	version int
-	up      func(tx *sql.Tx) error
-}
-
-// migrations is the ordered list of all schema migrations.
-// Each migration runs in a transaction and sets PRAGMA user_version on success.
-var migrations = []migration{
-	{version: 1, up: migrate1},
-}
-
-// runMigrations reads the current schema version and applies all pending
-// migrations in order.
-func runMigrations(db *sql.DB) error {
-	ver, err := currentVersion(db)
-	if err != nil {
-		return fmt.Errorf("read user_version: %w", err)
-	}
-
-	for _, m := range migrations {
-		if m.version <= ver {
-			continue
-		}
-		slog.Info("applying DB migration", "component", "db", "version", m.version)
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration %d: %w", m.version, err)
-		}
-		if err := m.up(tx); err != nil {
-			tx.Rollback() //nolint:errcheck
-			return fmt.Errorf("migration %d: %w", m.version, err)
-		}
-		// SQLite does not allow PRAGMA user_version inside a transaction via
-		// the parameter syntax, so we use string formatting (the value is
-		// an int literal from our own code — not user input).
-		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, m.version)); err != nil {
-			tx.Rollback() //nolint:errcheck
-			return fmt.Errorf("set user_version %d: %w", m.version, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %d: %w", m.version, err)
-		}
-		slog.Info("DB migration applied", "component", "db", "version", m.version)
-	}
-	return nil
+// migrations is the ordered list of all schema migrations for pelicula.db.
+// Each migration runs in a transaction via dbutil.Migrate.
+var migrations = []dbutil.Migration{
+	{Version: 1, Up: migrate1},
 }
 
 // migrate1 creates the initial schema (version 1).

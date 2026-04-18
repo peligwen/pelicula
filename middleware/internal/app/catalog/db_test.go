@@ -3,6 +3,8 @@ package catalog
 import (
 	"context"
 	"database/sql"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -75,6 +77,51 @@ func TestOpenCatalogDB_Idempotent(t *testing.T) {
 		t.Fatalf("second open (should skip already-applied migrations): %v", err)
 	}
 	db2.Close()
+}
+
+// TestSchemaEquivalence_CatalogDB asserts that running all catalog.db
+// migrations produces the exact expected set of table names. This catches
+// accidental migration renumbering (which would skip or double-apply steps).
+func TestSchemaEquivalence_CatalogDB(t *testing.T) {
+	t.Parallel()
+	db := testCatalogDB(t)
+
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+	if err != nil {
+		t.Fatalf("sqlite_master query: %v", err)
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+
+	sort.Strings(tables)
+	got := strings.Join(tables, ",")
+
+	// Known-good snapshot after migration v1.
+	// If this fails, a migration was renumbered, reordered, or the schema changed unexpectedly.
+	const want = "catalog_items"
+	if got != want {
+		t.Errorf("schema mismatch\n  got:  %s\n  want: %s", got, want)
+	}
+
+	// Final user_version must equal the count of catalogMigrations.
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	if ver != len(catalogMigrations) {
+		t.Errorf("user_version = %d, want %d (len(catalogMigrations))", ver, len(catalogMigrations))
+	}
 }
 
 func TestUpsertCatalogItem_Movie_InsertAndFind(t *testing.T) {

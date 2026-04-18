@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 
 	_ "modernc.org/sqlite"
 
 	repocatalog "pelicula-api/internal/repo/catalog"
+	"pelicula-api/internal/repo/dbutil"
 )
 
 // CatalogItem is an alias for the repo type so all in-package callers and
@@ -33,50 +33,16 @@ func OpenCatalogDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("catalog db foreign keys: %w", err)
 	}
-	if err := runCatalogMigrations(db); err != nil {
+	if err := dbutil.Migrate(db, catalogMigrations, "catalog_db"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("catalog db migrations: %w", err)
 	}
 	return db, nil
 }
 
-type catalogMigration struct {
-	version int
-	up      func(tx *sql.Tx) error
-}
-
-var catalogMigrations = []catalogMigration{
-	{version: 1, up: catalogMigrate1},
-}
-
-func runCatalogMigrations(db *sql.DB) error {
-	var ver int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
-		return fmt.Errorf("read user_version: %w", err)
-	}
-	for _, m := range catalogMigrations {
-		if m.version <= ver {
-			continue
-		}
-		slog.Info("applying catalog DB migration", "component", "catalog_db", "version", m.version)
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration %d: %w", m.version, err)
-		}
-		if err := m.up(tx); err != nil {
-			tx.Rollback() //nolint:errcheck
-			return fmt.Errorf("migration %d: %w", m.version, err)
-		}
-		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, m.version)); err != nil {
-			tx.Rollback() //nolint:errcheck
-			return fmt.Errorf("set user_version %d: %w", m.version, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %d: %w", m.version, err)
-		}
-		slog.Info("catalog DB migration applied", "component", "catalog_db", "version", m.version)
-	}
-	return nil
+// catalogMigrations is the ordered list of all schema migrations for catalog.db.
+var catalogMigrations = []dbutil.Migration{
+	{Version: 1, Up: catalogMigrate1},
 }
 
 func catalogMigrate1(tx *sql.Tx) error {
