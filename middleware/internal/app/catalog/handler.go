@@ -2,6 +2,7 @@
 package catalog
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -258,7 +259,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	synopsis, artworkURL, title, metadataSyncedAt := "", "", "", ""
 	inCatalog := false
 	if h.DB != nil {
-		if item, err := GetCatalogItemByFilePath(h.DB, path); err == nil && item != nil {
+		if item, err := GetCatalogItemByFilePath(r.Context(), h.DB, path); err == nil && item != nil {
 			inCatalog = true
 			synopsis = item.Synopsis
 			artworkURL = item.ArtworkURL
@@ -267,8 +268,8 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 			if item.Type == "movie" {
 				go h.MaybeSyncJellyfinMetadata(item)
 			} else if item.Type == "episode" {
-				if season, err := GetCatalogItemByID(h.DB, item.ParentID); err == nil && season != nil {
-					if series, err := GetCatalogItemByID(h.DB, season.ParentID); err == nil && series != nil {
+				if season, err := GetCatalogItemByID(r.Context(), h.DB, item.ParentID); err == nil && season != nil {
+					if series, err := GetCatalogItemByID(r.Context(), h.DB, season.ParentID); err == nil && series != nil {
 						if synopsis == "" {
 							synopsis = series.Synopsis
 						}
@@ -342,7 +343,7 @@ func (h *Handler) HandleCatalogItems(w http.ResponseWriter, r *http.Request) {
 		Tier:  r.URL.Query().Get("tier"),
 		Query: r.URL.Query().Get("q"),
 	}
-	items, err := ListCatalogItems(h.DB, f)
+	items, err := ListCatalogItems(r.Context(), h.DB, f)
 	if err != nil {
 		slog.Error("list catalog items", "component", "catalog", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
@@ -362,7 +363,7 @@ func (h *Handler) HandleCatalogItemDetail(w http.ResponseWriter, r *http.Request
 		httputil.WriteError(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	item, err := GetCatalogItemByID(h.DB, id)
+	item, err := GetCatalogItemByID(r.Context(), h.DB, id)
 	if err != nil {
 		slog.Error("get catalog item", "component", "catalog", "id", id, "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
@@ -382,7 +383,7 @@ func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) 
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go BackfillFromArr(h.DB, h.Arr, h.RadarrURL, h.SonarrURL) //nolint:errcheck
+	go BackfillFromArr(context.Background(), h.DB, h.Arr, h.RadarrURL, h.SonarrURL) //nolint:errcheck
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 

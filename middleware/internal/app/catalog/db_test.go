@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 )
@@ -88,7 +89,7 @@ func TestUpsertCatalogItem_Movie_InsertAndFind(t *testing.T) {
 		Year:    1999,
 		Tier:    "pipeline",
 	}
-	id, err := UpsertCatalogItem(db, item)
+	id, err := UpsertCatalogItem(context.Background(), db, item)
 	if err != nil {
 		t.Fatalf("UpsertCatalogItem: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestUpsertCatalogItem_Movie_InsertAndFind(t *testing.T) {
 		t.Fatal("expected non-empty ID")
 	}
 
-	got, err := GetCatalogItemByID(db, id)
+	got, err := GetCatalogItemByID(context.Background(), db, id)
 	if err != nil {
 		t.Fatalf("GetCatalogItemByID: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestUpsertCatalogItem_Movie_InsertAndFind(t *testing.T) {
 func TestUpsertCatalogItem_TierNotDowngraded(t *testing.T) {
 	db := testCatalogDB(t)
 
-	id, err := UpsertCatalogItem(db, CatalogItem{
+	id, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "movie", TmdbID: 999, ArrType: "radarr",
 		Title: "Dune", Year: 2021, Tier: "pipeline",
 	})
@@ -119,7 +120,7 @@ func TestUpsertCatalogItem_TierNotDowngraded(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	_, err = UpsertCatalogItem(db, CatalogItem{
+	_, err = UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "movie", TmdbID: 999, ArrType: "radarr",
 		Title: "Dune", Year: 2021, Tier: "queue",
 	})
@@ -127,7 +128,7 @@ func TestUpsertCatalogItem_TierNotDowngraded(t *testing.T) {
 		t.Fatalf("upsert downgrade: %v", err)
 	}
 
-	got, err := GetCatalogItemByID(db, id)
+	got, err := GetCatalogItemByID(context.Background(), db, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -139,7 +140,7 @@ func TestUpsertCatalogItem_TierNotDowngraded(t *testing.T) {
 func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 	db := testCatalogDB(t)
 
-	seriesID, err := UpsertCatalogItem(db, CatalogItem{
+	seriesID, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "series", TvdbID: 81189, ArrType: "sonarr",
 		Title: "Breaking Bad", Year: 2008, Tier: "library",
 	})
@@ -147,7 +148,7 @@ func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 		t.Fatalf("insert series: %v", err)
 	}
 
-	seasonID, err := UpsertCatalogItem(db, CatalogItem{
+	seasonID, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "season", ParentID: seriesID,
 		SeasonNumber: 1, Title: "Breaking Bad Season 1",
 		Year: 2008, Tier: "library",
@@ -156,7 +157,7 @@ func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 		t.Fatalf("insert season: %v", err)
 	}
 
-	epID, err := UpsertCatalogItem(db, CatalogItem{
+	epID, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "episode", ParentID: seasonID,
 		EpisodeID: 55, SeasonNumber: 1, EpisodeNumber: 1,
 		ArrType: "sonarr", FilePath: "/media/bb/s01e01.mkv",
@@ -167,7 +168,7 @@ func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 	}
 
 	// Re-upsert same episode by EpisodeID — should update, not duplicate
-	_, err = UpsertCatalogItem(db, CatalogItem{
+	_, err = UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "episode", ParentID: seasonID,
 		EpisodeID: 55, SeasonNumber: 1, EpisodeNumber: 1,
 		ArrType: "sonarr", FilePath: "/media/bb/s01e01.mkv",
@@ -178,7 +179,7 @@ func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 		t.Fatalf("re-upsert episode: %v", err)
 	}
 
-	got, err := GetCatalogItemByID(db, epID)
+	got, err := GetCatalogItemByID(context.Background(), db, epID)
 	if err != nil {
 		t.Fatalf("get episode: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestUpsertCatalogItem_EpisodeHierarchy(t *testing.T) {
 		t.Errorf("expected ProculaJobID updated, got %q", got.ProculaJobID)
 	}
 
-	items, err := ListCatalogItems(db, CatalogFilter{Type: "episode"})
+	items, err := ListCatalogItems(context.Background(), db, CatalogFilter{Type: "episode"})
 	if err != nil {
 		t.Fatalf("list episodes: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestUpsertCatalogItem_BackfillsTmdbID(t *testing.T) {
 	db := testCatalogDB(t)
 
 	// First upsert by arr_id only (no tmdb_id yet)
-	id, err := UpsertCatalogItem(db, CatalogItem{
+	id, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "movie", ArrID: 77, ArrType: "radarr",
 		Title: "Arrival", Year: 2016, Tier: "library",
 	})
@@ -208,7 +209,7 @@ func TestUpsertCatalogItem_BackfillsTmdbID(t *testing.T) {
 	}
 
 	// Re-upsert with tmdb_id now known
-	_, err = UpsertCatalogItem(db, CatalogItem{
+	_, err = UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "movie", ArrID: 77, ArrType: "radarr",
 		TmdbID: 329865,
 		Title:  "Arrival", Year: 2016, Tier: "library",
@@ -217,7 +218,7 @@ func TestUpsertCatalogItem_BackfillsTmdbID(t *testing.T) {
 		t.Fatalf("re-upsert: %v", err)
 	}
 
-	got, err := GetCatalogItemByID(db, id)
+	got, err := GetCatalogItemByID(context.Background(), db, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -229,7 +230,7 @@ func TestUpsertCatalogItem_BackfillsTmdbID(t *testing.T) {
 func TestUpsertCatalogItem_UpdatesTitle(t *testing.T) {
 	db := testCatalogDB(t)
 
-	id, err := UpsertCatalogItem(db, CatalogItem{
+	id, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "movie", TmdbID: 500, ArrType: "radarr",
 		Title: "Provisional Title", Year: 2022, Tier: "queue",
 	})
@@ -237,7 +238,7 @@ func TestUpsertCatalogItem_UpdatesTitle(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	_, err = UpsertCatalogItem(db, CatalogItem{
+	_, err = UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type: "movie", TmdbID: 500, ArrType: "radarr",
 		Title: "Final Title", Year: 2022, Tier: "queue",
 	})
@@ -245,7 +246,7 @@ func TestUpsertCatalogItem_UpdatesTitle(t *testing.T) {
 		t.Fatalf("re-upsert: %v", err)
 	}
 
-	got, err := GetCatalogItemByID(db, id)
+	got, err := GetCatalogItemByID(context.Background(), db, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -257,7 +258,7 @@ func TestUpsertCatalogItem_UpdatesTitle(t *testing.T) {
 func TestGetCatalogItemByFilePath(t *testing.T) {
 	db := testCatalogDB(t)
 
-	_, err := UpsertCatalogItem(db, CatalogItem{
+	_, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 		Type:       "movie",
 		TmdbID:     101,
 		ArrType:    "radarr",
@@ -273,7 +274,7 @@ func TestGetCatalogItemByFilePath(t *testing.T) {
 		t.Fatalf("UpsertCatalogItem: %v", err)
 	}
 
-	item, err := GetCatalogItemByFilePath(db, "/media/movies/test.mkv")
+	item, err := GetCatalogItemByFilePath(context.Background(), db, "/media/movies/test.mkv")
 	if err != nil {
 		t.Fatalf("GetCatalogItemByFilePath: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestGetCatalogItemByFilePath(t *testing.T) {
 
 func TestGetCatalogItemByFilePath_NotFound(t *testing.T) {
 	db := testCatalogDB(t)
-	item, err := GetCatalogItemByFilePath(db, "/media/movies/missing.mkv")
+	item, err := GetCatalogItemByFilePath(context.Background(), db, "/media/movies/missing.mkv")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -313,7 +314,7 @@ func TestListCatalogItems_FilterByTier(t *testing.T) {
 		{2, "pipeline"},
 		{3, "library"},
 	} {
-		_, err := UpsertCatalogItem(db, CatalogItem{
+		_, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
 			Type: "movie", TmdbID: tc.tmdb, ArrType: "radarr",
 			Title: "Movie", Year: 2020, Tier: tc.tier,
 		})
@@ -322,7 +323,7 @@ func TestListCatalogItems_FilterByTier(t *testing.T) {
 		}
 	}
 
-	libs, err := ListCatalogItems(db, CatalogFilter{Tier: "library"})
+	libs, err := ListCatalogItems(context.Background(), db, CatalogFilter{Tier: "library"})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

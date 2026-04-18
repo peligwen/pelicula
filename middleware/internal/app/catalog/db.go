@@ -127,9 +127,6 @@ func catalogMigrate1(tx *sql.Tx) error {
 }
 
 // ── Package-level helpers delegating to repocatalog.Store ─────────────────────
-//
-// These wrappers preserve the existing function signatures used throughout the
-// catalog package (handler.go, poller.go, sync.go) so callers need no changes.
 
 func storeFor(db *sql.DB) *repocatalog.Store {
 	return repocatalog.New(db)
@@ -138,28 +135,28 @@ func storeFor(db *sql.DB) *repocatalog.Store {
 // UpsertCatalogItem finds an existing item by natural key and updates it,
 // or inserts a new record. Tier is never downgraded.
 // Returns the ID of the upserted item.
-func UpsertCatalogItem(db *sql.DB, item CatalogItem) (string, error) {
-	return storeFor(db).Upsert(context.Background(), item)
+func UpsertCatalogItem(ctx context.Context, db *sql.DB, item CatalogItem) (string, error) {
+	return storeFor(db).Upsert(ctx, item)
 }
 
 // GetCatalogItemByID fetches a catalog item by its internal ID.
 // Returns nil, nil if not found.
-func GetCatalogItemByID(db *sql.DB, id string) (*CatalogItem, error) {
-	return storeFor(db).Get(context.Background(), id)
+func GetCatalogItemByID(ctx context.Context, db *sql.DB, id string) (*CatalogItem, error) {
+	return storeFor(db).Get(ctx, id)
 }
 
 // GetCatalogItemByFilePath fetches a catalog item by its file_path.
 // Returns (nil, nil) if no item matches.
-func GetCatalogItemByFilePath(db *sql.DB, filePath string) (*CatalogItem, error) {
-	return storeFor(db).GetByFilePath(context.Background(), filePath)
+func GetCatalogItemByFilePath(ctx context.Context, db *sql.DB, filePath string) (*CatalogItem, error) {
+	return storeFor(db).GetByFilePath(ctx, filePath)
 }
 
 // ListCatalogItems returns catalog items matching the filter, ordered by updated_at DESC.
-func ListCatalogItems(db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
-	return storeFor(db).List(context.Background(), f)
+func ListCatalogItems(ctx context.Context, db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
+	return storeFor(db).List(ctx, f)
 }
 
 // UpdateCatalogMetadata sets Jellyfin-sourced fields on a catalog item.
-func UpdateCatalogMetadata(db *sql.DB, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
-	return storeFor(db).UpdateMetadata(context.Background(), id, jellyfinID, artworkURL, synopsis, syncedAt)
+func UpdateCatalogMetadata(ctx context.Context, db *sql.DB, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
+	return storeFor(db).UpdateMetadata(ctx, id, jellyfinID, artworkURL, synopsis, syncedAt)
 }

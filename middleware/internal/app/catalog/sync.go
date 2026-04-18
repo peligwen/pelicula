@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -133,10 +134,10 @@ func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, e
 }
 
 // UpsertFromHook creates or updates catalog records when a download completes.
-func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
+func UpsertFromHook(ctx context.Context, db *sql.DB, source ProculaJobSource) error {
 	switch source.Type {
 	case "movie":
-		_, err := UpsertCatalogItem(db, CatalogItem{
+		_, err := UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:     "movie",
 			TmdbID:   source.TmdbID,
 			ArrID:    source.ArrID,
@@ -152,7 +153,7 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 		return nil
 
 	case "episode":
-		seriesID, err := UpsertCatalogItem(db, CatalogItem{
+		seriesID, err := UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:    "series",
 			TvdbID:  source.TvdbID,
 			TmdbID:  source.TmdbID,
@@ -167,7 +168,7 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 		}
 
 		seasonTitle := fmt.Sprintf("%s Season %d", source.Title, source.SeasonNumber)
-		seasonID, err := UpsertCatalogItem(db, CatalogItem{
+		seasonID, err := UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:         "season",
 			ParentID:     seriesID,
 			SeasonNumber: source.SeasonNumber,
@@ -179,7 +180,7 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 			return fmt.Errorf("upsert season: %w", err)
 		}
 
-		_, err = UpsertCatalogItem(db, CatalogItem{
+		_, err = UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:          "episode",
 			ParentID:      seasonID,
 			EpisodeID:     source.EpisodeID,
@@ -203,16 +204,16 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 
 // BackfillFromArr scans all movies in Radarr and all series in Sonarr,
 // upserting catalog records for items in the existing library.
-func BackfillFromArr(db *sql.DB, svc ArrClient, radarrURL, sonarrURL string) error {
+func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, sonarrURL string) error {
 	sonarrKey, radarrKey, _ := svc.Keys()
 
 	if radarrKey != "" {
-		if err := backfillRadarr(db, svc, radarrURL, radarrKey); err != nil {
+		if err := backfillRadarr(ctx, db, svc, radarrURL, radarrKey); err != nil {
 			slog.Error("backfill radarr failed", "component", "catalog_sync", "error", err)
 		}
 	}
 	if sonarrKey != "" {
-		if err := backfillSonarr(db, svc, sonarrURL, sonarrKey); err != nil {
+		if err := backfillSonarr(ctx, db, svc, sonarrURL, sonarrKey); err != nil {
 			slog.Error("backfill sonarr failed", "component", "catalog_sync", "error", err)
 		}
 	}
@@ -220,7 +221,7 @@ func BackfillFromArr(db *sql.DB, svc ArrClient, radarrURL, sonarrURL string) err
 	return nil
 }
 
-func backfillRadarr(db *sql.DB, svc ArrClient, radarrURL, apiKey string) error {
+func backfillRadarr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, apiKey string) error {
 	data, err := svc.ArrGet(radarrURL, apiKey, "/api/v3/movie")
 	if err != nil {
 		return fmt.Errorf("radarr list: %w", err)
@@ -244,7 +245,7 @@ func backfillRadarr(db *sql.DB, svc ArrClient, radarrURL, apiKey string) error {
 		if mf, ok := m["movieFile"].(map[string]any); ok {
 			filePath, _ = mf["path"].(string)
 		}
-		if _, err := UpsertCatalogItem(db, CatalogItem{
+		if _, err := UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:     "movie",
 			TmdbID:   int(floatVal(m, "tmdbId")),
 			ArrID:    int(floatVal(m, "id")),
@@ -263,7 +264,7 @@ func backfillRadarr(db *sql.DB, svc ArrClient, radarrURL, apiKey string) error {
 
 const episodeConcurrency = 10
 
-func backfillSonarr(db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
+func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
 	data, err := svc.ArrGet(sonarrURL, apiKey, "/api/v3/series")
 	if err != nil {
 		return fmt.Errorf("sonarr list: %w", err)
@@ -298,7 +299,7 @@ func backfillSonarr(db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
 			}
 		}
 
-		catalogID, err := UpsertCatalogItem(db, CatalogItem{
+		catalogID, err := UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:    "series",
 			TvdbID:  tvdbID,
 			TmdbID:  tmdbID,
@@ -393,7 +394,7 @@ func backfillSonarr(db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
 		if !ok {
 			continue
 		}
-		if _, err := UpsertCatalogItem(db, CatalogItem{
+		if _, err := UpsertCatalogItem(ctx, db, CatalogItem{
 			Type:         "season",
 			ParentID:     meta.catalogID,
 			SeasonNumber: seasonNum,
@@ -438,7 +439,7 @@ func (h *Handler) SyncJellyfinMetadata(item *CatalogItem) error {
 		return err
 	}
 	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := UpdateCatalogMetadata(h.DB, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
+	if err := UpdateCatalogMetadata(context.Background(), h.DB, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
 		return fmt.Errorf("persist metadata: %w", err)
 	}
 	if jellyfinID != "" {

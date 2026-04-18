@@ -20,19 +20,19 @@ func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrU
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
-	pollDownloadQueue(db, svc, radarrURL, sonarrURL)
+	pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			pollDownloadQueue(db, svc, radarrURL, sonarrURL)
+			pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL)
 		}
 	}
 }
 
-func pollDownloadQueue(db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string) {
+func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string) {
 	sonarrKey, radarrKey, _ := svc.Keys()
 
 	if radarrKey != "" {
@@ -41,7 +41,7 @@ func pollDownloadQueue(db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL stri
 			slog.Error("catalog poller: radarr queue fetch", "component", "catalog_poller", "error", err)
 		} else {
 			for _, rec := range records {
-				upsertQueueMovie(db, rec)
+				upsertQueueMovie(ctx, db, rec)
 			}
 		}
 	}
@@ -52,13 +52,13 @@ func pollDownloadQueue(db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL stri
 			slog.Error("catalog poller: sonarr queue fetch", "component", "catalog_poller", "error", err)
 		} else {
 			for _, rec := range records {
-				upsertQueueEpisode(db, rec)
+				upsertQueueEpisode(ctx, db, rec)
 			}
 		}
 	}
 }
 
-func upsertQueueMovie(db *sql.DB, rec map[string]any) {
+func upsertQueueMovie(ctx context.Context, db *sql.DB, rec map[string]any) {
 	movie, ok := rec["movie"].(map[string]any)
 	if !ok {
 		return
@@ -67,7 +67,7 @@ func upsertQueueMovie(db *sql.DB, rec map[string]any) {
 	if title == "" {
 		return
 	}
-	if _, err := UpsertCatalogItem(db, CatalogItem{
+	if _, err := UpsertCatalogItem(ctx, db, CatalogItem{
 		Type:    "movie",
 		TmdbID:  int(floatVal(movie, "tmdbId")),
 		ArrID:   int(floatVal(movie, "id")),
@@ -80,7 +80,7 @@ func upsertQueueMovie(db *sql.DB, rec map[string]any) {
 	}
 }
 
-func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
+func upsertQueueEpisode(ctx context.Context, db *sql.DB, rec map[string]any) {
 	series, ok := rec["series"].(map[string]any)
 	if !ok {
 		return
@@ -104,7 +104,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 		}
 	}
 
-	seriesID, err := UpsertCatalogItem(db, CatalogItem{
+	seriesID, err := UpsertCatalogItem(ctx, db, CatalogItem{
 		Type:    "series",
 		TvdbID:  tvdbID,
 		ArrID:   arrID,
@@ -118,7 +118,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 		return
 	}
 
-	seasonID, err := UpsertCatalogItem(db, CatalogItem{
+	seasonID, err := UpsertCatalogItem(ctx, db, CatalogItem{
 		Type:         "season",
 		ParentID:     seriesID,
 		SeasonNumber: seasonNum,
@@ -131,7 +131,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 		return
 	}
 
-	if _, err := UpsertCatalogItem(db, CatalogItem{
+	if _, err := UpsertCatalogItem(ctx, db, CatalogItem{
 		Type:          "episode",
 		ParentID:      seasonID,
 		EpisodeID:     episodeID,

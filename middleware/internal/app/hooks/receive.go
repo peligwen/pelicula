@@ -82,7 +82,7 @@ func (h *Handler) HandleImportHook(w http.ResponseWriter, r *http.Request) {
 	// Upsert catalog record — best-effort, non-blocking.
 	if h.CatalogDB != nil {
 		go func() {
-			if err := catalog.UpsertFromHook(h.CatalogDB, source); err != nil {
+			if err := catalog.UpsertFromHook(context.Background(), h.CatalogDB, source); err != nil {
 				slog.Error("catalog upsert from hook failed", "component", "hooks", "error", err)
 			}
 		}()
