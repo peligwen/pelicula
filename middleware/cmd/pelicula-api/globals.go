@@ -13,7 +13,6 @@ import (
 
 	"pelicula-api/internal/app/library"
 	appservices "pelicula-api/internal/app/services"
-	"pelicula-api/internal/app/vpnwatchdog"
 	"pelicula-api/internal/clients/apprise"
 	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/peligrosa"
@@ -49,10 +48,6 @@ var dockerCli *docker.Client
 // appriseCli is the package-level Apprise notification client.
 // Set by main() once constructed; never nil after startup.
 var appriseCli *apprise.Client
-
-// watchdogInst is the VPN watchdog instance; nil when VPN is not configured.
-// Set by main() once constructed. Used by queryVPNStatus in health.go.
-var watchdogInst *vpnwatchdog.Watchdog
 
 // indexerCount is the package-level indexer count cache, used by autowire to
 // invalidate the cached count after wiring completes.

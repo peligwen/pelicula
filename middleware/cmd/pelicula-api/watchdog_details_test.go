@@ -11,20 +11,16 @@ import (
 )
 
 // TestWatchdogState_NewFieldsReadable verifies the diagnostic fields on
-// vpnwatchdog.State are readable via Watchdog.State().
+// vpnwatchdog.State are accessible — confirmed by constructing and reading
+// a State literal directly.
 func TestWatchdogState_NewFieldsReadable(t *testing.T) {
-	wd := vpnwatchdog.New(nil, nil, nil)
-	wd.ForceState(vpnwatchdog.State{
+	st := vpnwatchdog.State{
 		PortForwardStatus: "grace",
 		ConsecutiveZero:   4,
 		GraceRemaining:    6,
 		CooldownRemaining: 0,
 		VPNTunnelStatus:   "running",
-	})
-	watchdogInst = wd
-	t.Cleanup(func() { watchdogInst = nil })
-
-	st := watchdogInst.State()
+	}
 	if st.ConsecutiveZero != 4 {
 		t.Fatalf("ConsecutiveZero = %d, want 4", st.ConsecutiveZero)
 	}
@@ -56,17 +52,13 @@ func TestQueryVPNStatus_WatchdogDetailsPopulated(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	wd := vpnwatchdog.New(nil, nil, nil)
-	wd.ForceState(vpnwatchdog.State{
+	state := vpnwatchdog.State{
 		PortForwardStatus: "grace",
 		ConsecutiveZero:   4,
 		GraceRemaining:    6,
 		VPNTunnelStatus:   "running",
-	})
-	watchdogInst = wd
-	t.Cleanup(func() { watchdogInst = nil })
-
-	vpn := queryVPNStatus()
+	}
+	vpn := queryVPNStatus(func() vpnwatchdog.State { return state })
 
 	if vpn.Watchdog == nil {
 		t.Fatal("Watchdog is nil, want non-nil")
@@ -140,10 +132,8 @@ func TestQueryVPNStatus_WatchdogNilWhenUnknown(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	// No watchdog set — simulate VPN not configured.
-	watchdogInst = nil
-
-	vpn := queryVPNStatus()
+	// No watchdog state — simulate VPN not configured.
+	vpn := queryVPNStatus(func() vpnwatchdog.State { return vpnwatchdog.State{} })
 
 	if vpn.Watchdog != nil {
 		t.Fatalf("expected Watchdog to be nil when watchdog state is empty, got %+v", vpn.Watchdog)

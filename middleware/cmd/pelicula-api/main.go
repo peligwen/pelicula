@@ -270,7 +270,6 @@ func main() {
 	var watchdog *vpnwatchdog.Watchdog
 	if cfg.WireguardPrivateKey != "" {
 		watchdog = vpnwatchdog.New(svc, dockerCli, gluetunClient)
-		watchdogInst = watchdog
 		go watchdog.Run()
 	}
 

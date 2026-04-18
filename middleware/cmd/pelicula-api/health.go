@@ -40,7 +40,9 @@ type VPNStatus struct {
 
 // queryVPNStatus queries the Gluetun control API (port 8000) for VPN status,
 // public IP, and forwarded port. All reachable via the Docker internal network.
-func queryVPNStatus() VPNStatus {
+// getState returns the current watchdog state; pass a func returning zero State
+// when no watchdog is active.
+func queryVPNStatus(getState func() vpnwatchdog.State) VPNStatus {
 	ctx := context.Background()
 	vpn := VPNStatus{Status: "unknown"}
 
@@ -62,10 +64,7 @@ func queryVPNStatus() VPNStatus {
 
 	// Annotate port_status from watchdog state. The watchdog is the authority —
 	// transient states (grace, restarting, unknown) leave port_status empty.
-	var ws vpnwatchdog.State
-	if watchdogInst != nil {
-		ws = watchdogInst.State()
-	}
+	ws := getState()
 	switch ws.PortForwardStatus {
 	case "degraded":
 		vpn.PortStatus = "degraded"

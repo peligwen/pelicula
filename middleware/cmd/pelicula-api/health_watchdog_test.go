@@ -30,12 +30,8 @@ func TestQueryVPNStatus_PortStatusDegraded(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	wd := vpnwatchdog.New(nil, nil, nil)
-	wd.ForceState(vpnwatchdog.State{PortForwardStatus: "degraded", RestartAttempts: 1})
-	watchdogInst = wd
-	t.Cleanup(func() { watchdogInst = nil })
-
-	vpn := queryVPNStatus()
+	state := vpnwatchdog.State{PortForwardStatus: "degraded", RestartAttempts: 1}
+	vpn := queryVPNStatus(func() vpnwatchdog.State { return state })
 
 	if vpn.PortStatus != "degraded" {
 		t.Fatalf("PortStatus = %q, want %q", vpn.PortStatus, "degraded")
@@ -64,16 +60,12 @@ func TestQueryVPNStatus_PortStatusOK(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	wd := vpnwatchdog.New(nil, nil, nil)
-	wd.ForceState(vpnwatchdog.State{
+	state := vpnwatchdog.State{
 		PortForwardStatus: "synced",
 		ForwardedPort:     51413,
 		LastSyncedAt:      time.Now(),
-	})
-	watchdogInst = wd
-	t.Cleanup(func() { watchdogInst = nil })
-
-	vpn := queryVPNStatus()
+	}
+	vpn := queryVPNStatus(func() vpnwatchdog.State { return state })
 
 	if vpn.PortStatus != "ok" {
 		t.Fatalf("PortStatus = %q, want %q", vpn.PortStatus, "ok")

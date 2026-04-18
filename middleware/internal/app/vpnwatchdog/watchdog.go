@@ -96,13 +96,6 @@ func (w *Watchdog) State() State {
 	return w.state
 }
 
-// ForceState overwrites the internal state snapshot. Intended for tests only.
-func (w *Watchdog) ForceState(s State) {
-	w.mu.Lock()
-	w.state = s
-	w.mu.Unlock()
-}
-
 // ── Pure state machine ─────────────────────────────────────────────────────────
 
 // wdTick advances the watchdog state machine for one poll cycle.
