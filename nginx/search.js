@@ -53,14 +53,15 @@ function renderResultCard(r) {
         ? html`<button
                 class="${added ? 'search-add added' : 'search-add'}"
                 ${added ? raw('disabled') : raw('')}
+                data-action="add-media"
                 data-type="${r.type}"
                 data-tmdb="${tmdbId}"
                 data-tvdb="${tvdbId}"
                 data-testid="search-add-btn"
-                onclick="event.stopPropagation();addMedia(this.dataset.type,this.dataset.type==='movie'?parseInt(this.dataset.tmdb):parseInt(this.dataset.tvdb),this)"
               >${added ? 'Added' : 'Add'}</button>`
         : html`<button
                 class="search-request"
+                data-action="submit-request"
                 data-type="${r.type}"
                 data-tmdb="${tmdbId}"
                 data-tvdb="${tvdbId}"
@@ -68,13 +69,11 @@ function renderResultCard(r) {
                 data-year="${r.year || 0}"
                 data-poster="${r.poster || ''}"
                 data-testid="search-request-btn"
-                onclick="event.stopPropagation();submitRequest(this.dataset.type,parseInt(this.dataset.tmdb),parseInt(this.dataset.tvdb),this.dataset.title,parseInt(this.dataset.year),this.dataset.poster);this.textContent='Requested';this.disabled=true"
               >Request</button>`;
     const detailChips = buildDetailChips(r);
     const overview = r.overview ? html`<div class="search-overview">${r.overview}</div>` : raw('');
     return html`
-        <div class="search-card" data-testid="search-result-card" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-type="${r.type}"
-             onclick="showMediaDetail(${tmdbId},${tvdbId},'${r.type}')">
+        <div class="search-card" data-testid="search-result-card" data-action="show-detail" data-tmdb="${tmdbId}" data-tvdb="${tvdbId}" data-type="${r.type}">
             <div class="search-poster">${poster}</div>
             <div class="search-info">
                 <div class="search-title">${r.title}</div>
@@ -106,7 +105,7 @@ function renderResults(results, collapsed) {
     }
     let markup = items.map(r => renderResultCard(r)).join('');
     if (collapsed && items.length > 1) {
-        markup += '<div class="search-show-more" onclick="expandResults(); event.stopPropagation();">Show <span class="count">' + (items.length - 1) + '</span> more result' + (items.length > 2 ? 's' : '') + '</div>';
+        markup += '<div class="search-show-more" data-action="expand-results">Show <span class="count">' + (items.length - 1) + '</span> more result' + (items.length > 2 ? 's' : '') + '</div>';
     }
     searchResults.innerHTML = markup;
     searchResults.className = collapsed ? 'search-results collapsed' : 'search-results visible';
@@ -121,7 +120,7 @@ function renderResults(results, collapsed) {
     }
 }
 
-// ── Public functions (exposed on window for onclick handlers) ─────────────
+// ── Public functions ──────────────────────────────────────────────────────
 
 async function doSearch(q) {
     lockedResult = null;
@@ -288,16 +287,28 @@ component('search', function (el, storeProxy) {
     };
 });
 
-// ── Window exports (for onclick handlers in index.html) ───────────────────
-window.doSearch        = doSearch;
-window.addMedia        = addMedia;
-window.submitRequest   = submitRequest;
-window.setFilter       = setFilter;
-window.expandResults   = expandResults;
-window.showMediaDetail = showMediaDetail;
+// ── Event delegation ──────────────────────────────────────────────────────
 
-// ── Event delegation for search filter buttons ────────────────────────────
+// Filter buttons
 document.getElementById('search-filters').addEventListener('click', e => {
     const btn = e.target.closest('.filter-btn');
     if (btn) setFilter(btn);
 });
+
+// Search results: cards and action buttons
+document.getElementById('search-results').addEventListener('click', e => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+    if (action === 'show-detail') {
+        showMediaDetail(parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.type);
+    } else if (action === 'add-media') {
+        addMedia(el.dataset.type, el.dataset.type === 'movie' ? parseInt(el.dataset.tmdb, 10) : parseInt(el.dataset.tvdb, 10), el);
+    } else if (action === 'submit-request') {
+        el.textContent = 'Requested'; el.disabled = true;
+        submitRequest(el.dataset.type, parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.title, parseInt(el.dataset.year, 10), el.dataset.poster);
+    } else if (action === 'expand-results') {
+        expandResults();
+    }
+});
+

@@ -881,9 +881,9 @@
                 <div class="settings-field-row">
                     <label class="settings-field-label">Certificate mode</label>
                     <div class="settings-radio-row">
-                        <label><input type="radio" name="st-cert-mode" value="letsencrypt" onchange="updateCertMode()"> Let&#x2019;s Encrypt</label>
-                        <label><input type="radio" name="st-cert-mode" value="byo" onchange="updateCertMode()"> BYO certificate</label>
-                        <label><input type="radio" name="st-cert-mode" value="self-signed" onchange="updateCertMode()"> Self-signed</label>
+                        <label><input type="radio" name="st-cert-mode" value="letsencrypt"> Let&#x2019;s Encrypt</label>
+                        <label><input type="radio" name="st-cert-mode" value="byo"> BYO certificate</label>
+                        <label><input type="radio" name="st-cert-mode" value="self-signed"> Self-signed</label>
                     </div>
                 </div>
                 <div id="st-le-opts" style="display:none">
@@ -919,7 +919,7 @@
             <button class="drawer-close" data-close-drawer="profiles">&times;</button>
         </div>
         <div class="drawer-actions">
-            <button class="sm-btn" onclick="installDefaultProfiles()">Install defaults</button>
+            <button class="sm-btn" id="pf-install-defaults-btn">Install defaults</button>
         </div>
         <div class="drawer-body">
             <div id="st-profiles-list" class="st-profiles-list">Loading&hellip;</div>
@@ -990,8 +990,8 @@
                         </button>
                     </div>
                     <div class="st-pf-actions">
-                        <button class="sm-btn sm-btn-primary" onclick="saveProfile()">Save profile</button>
-                        <button class="sm-btn" onclick="clearProfileForm()" id="pf-cancel-btn" style="display:none">Cancel edit</button>
+                        <button class="sm-btn sm-btn-primary" id="pf-save-btn">Save profile</button>
+                        <button class="sm-btn" id="pf-cancel-btn" style="display:none">Cancel edit</button>
                         <span id="st-profile-status" style="font-size:0.75rem;margin-left:0.5rem"></span>
                     </div>
                 </div>
@@ -1040,14 +1040,14 @@
     </div>
 
     <!-- Job detail drawer -->
-    <div class="drawer-backdrop hidden" id="drawer-backdrop" onclick="closeJobDrawer()"></div>
+    <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
     <div class="drawer hidden" id="job-drawer" role="dialog" aria-modal="true" aria-label="Job details">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title" id="drawer-title">Job Details</div>
                 <div class="drawer-sub" id="drawer-subtitle"></div>
             </div>
-            <button class="drawer-close" onclick="closeJobDrawer()">&times;</button>
+            <button class="drawer-close" id="job-drawer-close-btn">&times;</button>
         </div>
         <div class="drawer-actions" id="drawer-actions"></div>
         <div class="drawer-body" id="drawer-body"></div>
@@ -1066,27 +1066,27 @@
     </div>
 
     <!-- Catalog detail modal -->
-    <div class="modal-backdrop hidden" id="cat-drawer-backdrop" onclick="catCloseDetail()"></div>
+    <div class="modal-backdrop hidden" id="cat-drawer-backdrop"></div>
     <div class="cat-modal hidden" id="cat-drawer" role="dialog" aria-modal="true" aria-label="Catalog item details">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title" id="cat-drawer-title">Details</div>
                 <div class="drawer-sub" id="cat-drawer-sub"></div>
             </div>
-            <button class="drawer-close" onclick="catCloseDetail()">&times;</button>
+            <button class="drawer-close" id="cat-drawer-close-btn">&times;</button>
         </div>
         <div class="drawer-body" id="cat-drawer-body"></div>
     </div>
 
     <!-- Subtitle search dialog -->
-    <div class="modal-backdrop hidden" id="sub-search-backdrop" onclick="subSearchClose()"></div>
+    <div class="modal-backdrop hidden" id="sub-search-backdrop"></div>
     <div class="cat-modal hidden" id="sub-search-dialog" role="dialog" aria-modal="true" aria-label="Search subtitles">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title">Search subtitles</div>
                 <div class="drawer-sub" id="sub-search-sub"></div>
             </div>
-            <button class="drawer-close" onclick="subSearchClose()">&times;</button>
+            <button class="drawer-close" id="sub-search-close-btn">&times;</button>
         </div>
         <div class="drawer-body">
             <div class="drawer-section-title">Languages</div>
@@ -1107,22 +1107,22 @@
                 </div>
             </div>
             <div class="modal-buttons">
-                <button class="modal-btn-cancel" onclick="subSearchClose()">Cancel</button>
-                <button class="modal-btn-confirm" onclick="subSearchSubmit()">Search</button>
+                <button class="modal-btn-cancel" id="sub-search-cancel-btn">Cancel</button>
+                <button class="modal-btn-confirm" id="sub-search-submit-btn">Search</button>
             </div>
             <div id="sub-search-status" class="no-items"></div>
         </div>
     </div>
 
     <!-- Dual subtitle dialog -->
-    <div class="modal-backdrop hidden" id="dualsub-backdrop" onclick="dualsubClose()"></div>
+    <div class="modal-backdrop hidden" id="dualsub-backdrop"></div>
     <div class="cat-modal hidden" id="dualsub-dialog" role="dialog" aria-modal="true" aria-label="Dual subtitles" style="max-width:480px">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title">Dual subtitles</div>
                 <div class="drawer-sub" id="dualsub-sub"></div>
             </div>
-            <button class="drawer-close" onclick="dualsubClose()">&times;</button>
+            <button class="drawer-close" id="dualsub-close-btn">&times;</button>
         </div>
         <div class="drawer-body">
             <div class="drawer-section-title">On disk</div>
@@ -1130,8 +1130,8 @@
 
             <div class="drawer-section-title">Profile</div>
             <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
-                <select id="dualsub-profile-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:.35rem .6rem;font-size:.82rem;color:var(--text)" onchange="dualsubProfileChanged()"></select>
-                <button id="dualsub-manage-btn" style="padding:.35rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.75rem;cursor:pointer;white-space:nowrap" onclick="dualsubToggleManage()">Manage &#9660;</button>
+                <select id="dualsub-profile-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:.35rem .6rem;font-size:.82rem;color:var(--text)"></select>
+                <button id="dualsub-manage-btn" style="padding:.35rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.75rem;cursor:pointer;white-space:nowrap">Manage &#9660;</button>
             </div>
 
             <div id="dualsub-profile-editor" style="display:none;border:1px solid var(--border);border-radius:8px;padding:.85rem;background:var(--bg);margin-bottom:1rem">
@@ -1164,38 +1164,38 @@
                 </div>
                 <div style="font-size:.7rem;color:var(--muted);margin-bottom:.4rem">Layout</div>
                 <div id="dsp-layout-btns" style="display:flex;gap:.4rem;margin-bottom:.75rem">
-                    <button data-layout="stacked_bottom" onclick="dualsubSetLayout(this)" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Stacked &#8595;</button>
-                    <button data-layout="stacked_top" onclick="dualsubSetLayout(this)" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Stacked &#8593;</button>
-                    <button data-layout="split" onclick="dualsubSetLayout(this)" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Split</button>
+                    <button data-layout="stacked_bottom" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Stacked &#8595;</button>
+                    <button data-layout="stacked_top" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Stacked &#8593;</button>
+                    <button data-layout="split" style="flex:1;padding:.3rem .4rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">Split</button>
                 </div>
                 <div style="display:flex;gap:.4rem">
-                    <button onclick="dualsubSaveAsNew()" style="padding:.28rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">+ Save as new</button>
-                    <button id="dsp-update-btn" onclick="dualsubUpdateProfile()" style="padding:.28rem .6rem;border-radius:4px;border:none;background:var(--accent);color:#000;font-size:.72rem;font-weight:600;cursor:pointer">Update</button>
-                    <button id="dsp-delete-btn" onclick="dualsubDeleteProfile()" style="margin-left:auto;padding:.28rem .6rem;border-radius:4px;border:1px solid #c0392b;background:transparent;color:#c0392b;font-size:.72rem;cursor:pointer">Delete</button>
+                    <button id="dsp-save-new-btn" style="padding:.28rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">+ Save as new</button>
+                    <button id="dsp-update-btn" style="padding:.28rem .6rem;border-radius:4px;border:none;background:var(--accent);color:#000;font-size:.72rem;font-weight:600;cursor:pointer">Update</button>
+                    <button id="dsp-delete-btn" style="margin-left:auto;padding:.28rem .6rem;border-radius:4px;border:1px solid #c0392b;background:transparent;color:#c0392b;font-size:.72rem;cursor:pointer">Delete</button>
                 </div>
             </div>
 
             <div class="drawer-section-title">Track pairs</div>
             <div id="dualsub-pairs"></div>
-            <button onclick="dualsubAddPair()" style="font-size:.75rem;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;padding:.25rem .65rem;cursor:pointer;margin:0 0 1rem">+ Add pair</button>
+            <button id="dualsub-add-pair-btn" style="font-size:.75rem;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;padding:.25rem .65rem;cursor:pointer;margin:0 0 1rem">+ Add pair</button>
 
             <div class="modal-buttons">
-                <button class="modal-btn-cancel" onclick="dualsubClose()">Cancel</button>
-                <button class="modal-btn-confirm" onclick="dualsubSubmit()">Generate</button>
+                <button class="modal-btn-cancel" id="dualsub-cancel-btn">Cancel</button>
+                <button class="modal-btn-confirm" id="dualsub-submit-btn">Generate</button>
             </div>
             <div id="dualsub-status" class="no-items"></div>
         </div>
     </div>
 
     <!-- Replace drawer -->
-    <div class="modal-backdrop hidden" id="replace-backdrop" onclick="replaceClose()"></div>
+    <div class="modal-backdrop hidden" id="replace-backdrop"></div>
     <div class="cat-modal hidden" id="replace-dialog" role="dialog" aria-modal="true" aria-label="Replace file" style="max-width:420px">
         <div class="drawer-header">
             <div>
                 <div class="drawer-title">Replace &amp; Re-search</div>
                 <div class="drawer-sub" id="replace-sub"></div>
             </div>
-            <button class="drawer-close" onclick="replaceClose()">&times;</button>
+            <button class="drawer-close" id="replace-close-btn">&times;</button>
         </div>
         <div class="drawer-body">
             <div id="replace-path" style="font-size:.75rem;color:var(--muted);word-break:break-all;margin-bottom:1rem"></div>
@@ -1225,8 +1225,8 @@
             <div id="replace-file-count" style="font-size:.78rem;color:var(--muted);margin-bottom:1rem"></div>
 
             <div class="modal-buttons">
-                <button class="modal-btn-cancel" onclick="replaceClose()">Cancel</button>
-                <button class="modal-btn-confirm modal-btn-danger" id="replace-confirm-btn" onclick="replaceConfirm()">Replace &amp; Re-search</button>
+                <button class="modal-btn-cancel" id="replace-cancel-btn">Cancel</button>
+                <button class="modal-btn-confirm modal-btn-danger" id="replace-confirm-btn">Replace &amp; Re-search</button>
             </div>
             <div id="replace-status" class="no-items" style="margin-top:.75rem"></div>
         </div>

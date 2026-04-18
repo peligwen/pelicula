@@ -124,10 +124,10 @@ function renderFilters() {
     wrap.replaceChildren(frag);
 }
 
-window.logsRefresh = function() {
+document.getElementById('log-refresh-btn').addEventListener('click', function() {
     logsState.userScrolled = false;
     loadLogs();
-};
+});
 
 window.renderLogsFromSSE = function(data) {
     const out = document.getElementById('logs-stream');

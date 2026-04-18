@@ -79,7 +79,7 @@ function renderNotifications(events) {
     }
 
     const clearBtn = html`<div class="notif-actions">
-        <button class="notif-clear-all" onclick="clearAllNotifications()">Clear all</button>
+        <button class="notif-clear-all" data-action="clear-all">Clear all</button>
     </div>`;
 
     const items = events.slice(0, 20).map(e => {
@@ -94,7 +94,7 @@ function renderNotifications(events) {
                 <div class="notif-msg">${e.message}</div>
                 <div class="notif-time">${time}</div>
             </div>
-            <button class="notif-dismiss" title="Dismiss" onclick="dismissNotification('${id}')">&#10005;</button>
+            <button class="notif-dismiss" title="Dismiss" data-action="dismiss" data-id="${id}">&#10005;</button>
         </div>`;
     });
 
@@ -133,10 +133,13 @@ component('notifications', function (el, storeProxy) {
 
 document.getElementById('bell-btn').addEventListener('click', toggleNotifications);
 
-// ── Window exports (for onclick handlers in index.html and dashboard.js) ───
-window.renderNotifications    = renderNotifications;
-window.notifIcon              = notifIcon;
-window.notifClass             = notifClass;
-window.formatNotifTime        = formatNotifTime;
-window.dismissNotification    = dismissNotification;
-window.clearAllNotifications  = clearAllNotifications;
+document.getElementById('notif-dropdown').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'dismiss') dismissNotification(btn.dataset.id);
+    else if (btn.dataset.action === 'clear-all') clearAllNotifications();
+});
+
+// ── Window exports ────────────────────────────────────────────────────────
+// renderNotifications is called by sse.js, activity.js, and dashboard.js refresh.
+window.renderNotifications = renderNotifications;

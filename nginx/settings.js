@@ -594,6 +594,16 @@ document.querySelectorAll('[name="st-notif"]').forEach(r => {
     r.addEventListener('change', updateNotifMode);
 });
 
+// Certificate mode radios
+document.querySelectorAll('[name="st-cert-mode"]').forEach(r => {
+    r.addEventListener('change', updateCertMode);
+});
+
+// Profiles drawer buttons
+document.getElementById('pf-install-defaults-btn')?.addEventListener('click', installDefaultProfiles);
+document.getElementById('pf-save-btn')?.addEventListener('click', saveProfile);
+document.getElementById('pf-cancel-btn')?.addEventListener('click', clearProfileForm);
+
 // Save buttons
 document.getElementById('settings-save-btn')?.addEventListener('click', saveSettingsTab);
 document.getElementById('requests-settings-save-btn')?.addEventListener('click', saveRequestsSettings);
@@ -601,12 +611,6 @@ document.getElementById('save-subs-drawer-btn')?.addEventListener('click', saveS
 document.getElementById('save-remote-drawer-btn')?.addEventListener('click', saveRemoteAccess);
 
 // ── Window exports ────────────────────────────────────────────────────────
-// updateCertMode is called from onchange on st-cert-mode radios in the remote drawer.
-// clearProfileForm, saveProfile, installDefaultProfiles remain as onclick in profiles drawer.
-window.updateCertMode         = updateCertMode;
-window.clearProfileForm       = clearProfileForm;
-window.saveProfile            = saveProfile;
-window.installDefaultProfiles = installDefaultProfiles;
 // loadArrMeta is called from applyRole() in dashboard.js; the flag lives here.
 window.loadArrMeta = function () {
     if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }

@@ -1216,23 +1216,13 @@ component('catalog', function (el, store, _props) {
     }
 
     // ── Public API (window.*) ─────────────────────────────────────────────────
-    window.catLoad = function () { loadCatalog(); };
-
-    window.catOpenDetail = function (path) { openDetail(path); };
-
+    // These are called by the static dialog listeners at the bottom of this file.
     window.catCloseDetail = function () {
         closeDrawer(
             document.getElementById('cat-drawer'),
             document.getElementById('cat-drawer-backdrop')
         );
     };
-
-    window.catAction = function (action, itemJson) {
-        const item = typeof itemJson === 'string' ? JSON.parse(itemJson) : itemJson;
-        runAction(action, item, item.level || 'movie');
-    };
-
-    window.catRefreshFlags = function () { loadFlags(); };
 
     // ── Subscribe to store changes ────────────────────────────────────────────
     store.subscribe('catalog.items', renderCatalog);
@@ -1425,3 +1415,39 @@ if (document.body && document.body.dataset.tab === 'catalog') {
         mount('catalog', el);
     }
 }
+
+// ── Dialog static listeners ───────────────────────────────────────────────────
+// Functions are set on window when the catalog component mounts; use arrow
+// wrappers so the lookup is deferred to call time.
+
+// Catalog detail drawer
+document.getElementById('cat-drawer-backdrop').addEventListener('click', () => window.catCloseDetail?.());
+document.getElementById('cat-drawer-close-btn').addEventListener('click', () => window.catCloseDetail?.());
+
+// Subtitle search dialog
+document.getElementById('sub-search-backdrop').addEventListener('click', () => window.subSearchClose?.());
+document.getElementById('sub-search-close-btn').addEventListener('click', () => window.subSearchClose?.());
+document.getElementById('sub-search-cancel-btn').addEventListener('click', () => window.subSearchClose?.());
+document.getElementById('sub-search-submit-btn').addEventListener('click', () => window.subSearchSubmit?.());
+
+// Dual subtitle dialog
+document.getElementById('dualsub-backdrop').addEventListener('click', () => window.dualsubClose?.());
+document.getElementById('dualsub-close-btn').addEventListener('click', () => window.dualsubClose?.());
+document.getElementById('dualsub-profile-select').addEventListener('change', () => window.dualsubProfileChanged?.());
+document.getElementById('dualsub-manage-btn').addEventListener('click', () => window.dualsubToggleManage?.());
+document.getElementById('dsp-layout-btns').addEventListener('click', e => {
+    const btn = e.target.closest('[data-layout]');
+    if (btn) window.dualsubSetLayout?.(btn);
+});
+document.getElementById('dsp-save-new-btn').addEventListener('click', () => window.dualsubSaveAsNew?.());
+document.getElementById('dsp-update-btn').addEventListener('click', () => window.dualsubUpdateProfile?.());
+document.getElementById('dsp-delete-btn').addEventListener('click', () => window.dualsubDeleteProfile?.());
+document.getElementById('dualsub-add-pair-btn').addEventListener('click', () => window.dualsubAddPair?.());
+document.getElementById('dualsub-cancel-btn').addEventListener('click', () => window.dualsubClose?.());
+document.getElementById('dualsub-submit-btn').addEventListener('click', () => window.dualsubSubmit?.());
+
+// Replace drawer
+document.getElementById('replace-backdrop').addEventListener('click', () => window.replaceClose?.());
+document.getElementById('replace-close-btn').addEventListener('click', () => window.replaceClose?.());
+document.getElementById('replace-cancel-btn').addEventListener('click', () => window.replaceClose?.());
+document.getElementById('replace-confirm-btn').addEventListener('click', () => window.replaceConfirm?.());

@@ -37,26 +37,26 @@ async function loadUsers() {
             const disabledBadge = u.isDisabled
                 ? '<span class="user-admin-badge" style="background:var(--danger-dim,#3a1a2a);color:var(--danger,#ff6b8a)">disabled</span>'
                 : '';
-            const disableBtn = html`<button class="user-action-btn" onclick="toggleDisableUser(this)" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`.str;
+            const disableBtn = html`<button class="user-action-btn" data-action="toggle-disable" data-disabled="${u.isDisabled ? 'true' : 'false'}" title="${u.isDisabled ? 'Re-enable account' : 'Disable account'}">${u.isDisabled ? 'Enable' : 'Disable'}</button>`.str;
             const moviesOn = u.enableAllFolders || false;
             const tvOn     = u.enableAllFolders || false;
             // TODO: when enableAllFolders is false, check u.enabledFolders to
             // pre-tick the correct boxes. Requires the frontend to know the Movies/
             // TV Shows folder IDs (not returned by the API yet). For now, partial
             // access shows both unchecked; saving applies the chosen coarse access.
-            const libraryRow = html`<div class="user-library-row" style="font-size:0.8rem;padding:0.25rem 0;display:flex;gap:1rem;align-items:center"><label><input type="checkbox" class="user-lib-movies"${moviesOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> Movies</label><label><input type="checkbox" class="user-lib-tv"${tvOn ? ' checked' : ''} onchange="saveLibraryAccess(this)"> TV Shows</label></div>`.str;
+            const libraryRow = html`<div class="user-library-row" style="font-size:0.8rem;padding:0.25rem 0;display:flex;gap:1rem;align-items:center"><label><input type="checkbox" class="user-lib-movies" data-action="save-library-access"${moviesOn ? ' checked' : ''}> Movies</label><label><input type="checkbox" class="user-lib-tv" data-action="save-library-access"${tvOn ? ' checked' : ''}> TV Shows</label></div>`.str;
             return html`<li data-user-id="${u.id}" data-user-name="${u.name}">
                 <div class="user-info"><span class="user-name">${u.name}</span>${raw(adminBadge)}${raw(disabledBadge)}<span class="user-meta">last login: ${lastSeen}</span></div>
                 <div class="user-actions">
-                <button class="user-action-btn" onclick="startResetPassword(this)" title="Reset password">Reset</button>
+                <button class="user-action-btn" data-action="start-reset-password" title="Reset password">Reset</button>
                 ${raw(disableBtn)}
-                <button class="user-action-btn user-action-delete" onclick="startDeleteUser(this)" title="Delete user">Delete</button>
+                <button class="user-action-btn user-action-delete" data-action="start-delete-user" title="Delete user">Delete</button>
                 </div>
                 ${raw(libraryRow)}
-                <form class="user-reset-form hidden" onsubmit="event.preventDefault(); submitResetPassword(this);">
+                <form class="user-reset-form hidden">
                 <input type="password" class="user-reset-input" placeholder="New password" autocomplete="new-password">
                 <button type="submit" class="user-action-btn">Set</button>
-                <button type="button" class="user-action-btn" onclick="cancelResetPassword(this)">Cancel</button>
+                <button type="button" class="user-action-btn" data-action="cancel-reset-password">Cancel</button>
                 </form>
                 <span class="users-error hidden"></span>
             </li>`.str;
@@ -230,8 +230,8 @@ function renderRequests(requests) {
                     <div class="request-meta">${r.type} \u00b7 requested by ${r.requested_by}</div>
                 </div>
                 <div class="request-actions">
-                    <button class="request-btn request-btn-approve" onclick="approveRequest('${r.id}')">Approve</button>
-                    <button class="request-btn request-btn-deny" onclick="denyRequest('${r.id}')">Deny</button>
+                    <button class="request-btn request-btn-approve" data-action="approve-request">Approve</button>
+                    <button class="request-btn request-btn-deny" data-action="deny-request">Deny</button>
                 </div>
             </li>`.str;
         }).join('');
@@ -310,8 +310,8 @@ async function loadInvites() {
             const link = window.location.origin + '/register?t=' + encodeURIComponent(inv.token);
             const isActive = inv.state === 'active';
             const labelSpan = inv.label ? html`<span class="invite-label-text">${inv.label}</span>`.str : '';
-            const copyBtn = isActive ? html`<button class="user-action-btn" onclick="copyInviteItemLink(this, '${link}')" title="Copy invite link">Copy link</button>`.str : '';
-            const revokeBtn = isActive ? html`<button class="user-action-btn" onclick="revokeInvite(this)" title="Deactivate this invite">Revoke</button>`.str : '';
+            const copyBtn = isActive ? html`<button class="user-action-btn" data-action="copy-invite" data-link="${link}" title="Copy invite link">Copy link</button>`.str : '';
+            const revokeBtn = isActive ? html`<button class="user-action-btn" data-action="revoke-invite" title="Deactivate this invite">Revoke</button>`.str : '';
             return html`<li class="invite-item" data-token="${inv.token}">
                 <div class="invite-row">
                 <span class="invite-badge ${stateClass}">${stateLabel}</span>
@@ -320,7 +320,7 @@ async function loadInvites() {
                 </div>
                 <div class="invite-actions">
                 ${raw(copyBtn)}${raw(revokeBtn)}
-                <button class="user-action-btn user-action-delete" onclick="deleteInvite(this)" title="Delete record">Delete</button>
+                <button class="user-action-btn user-action-delete" data-action="delete-invite" title="Delete record">Delete</button>
                 </div>
                 <span class="invite-error hidden" style="font-size:0.75rem;color:var(--danger,#ff6b8a);padding:0.2rem 0;display:block"></span>
             </li>`.str;
@@ -330,7 +330,8 @@ async function loadInvites() {
     }
 }
 
-function copyInviteItemLink(btn, link) {
+function copyInviteItemLink(btn) {
+    const link = btn.dataset.link;
     const doCopy = () => {
         const prev = btn.textContent;
         btn.textContent = 'Copied!';
@@ -633,32 +634,16 @@ async function doRemoveOperator(id, name, li) {
     }
 }
 
-// ── Window exports (for onclick handlers and cross-file access) ───────────
-window.loadUsers             = loadUsers;
-window.loadSessions          = loadSessions;
-window.loadRequests          = loadRequests;
-window.loadInvites           = loadInvites;
-window.loadOperators         = loadOperators;
-window.setOperatorRole       = setOperatorRole;
-window.removeOperator        = removeOperator;
-// loadArrMeta + saveRequestsSettings exported by settings.js (canonical owner)
-window.approveRequest        = approveRequest;
-window.denyRequest           = denyRequest;
-window.startResetPassword    = startResetPassword;
-window.cancelResetPassword   = cancelResetPassword;
-window.submitResetPassword   = submitResetPassword;
-window.startDeleteUser       = startDeleteUser;
-window.toggleDisableUser     = toggleDisableUser;
-window.saveLibraryAccess     = saveLibraryAccess;
-window.copyInviteItemLink    = copyInviteItemLink;
-window.revokeInvite          = revokeInvite;
-window.deleteInvite          = deleteInvite;
-// State accessors for applyRole in dashboard.js
+// ── Window exports (cross-file access from dashboard.js applyRole) ───────────
+window.loadUsers     = loadUsers;
+window.loadSessions  = loadSessions;
+window.loadRequests  = loadRequests;
+window.loadInvites   = loadInvites;
+window.loadOperators = loadOperators;
 window._users_getUsersLoaded    = getUsersLoaded;
 window._users_setUsersLoaded    = setUsersLoaded;
 window._users_getRequestsLoaded = getRequestsLoaded;
 window._users_setRequestsLoaded = setRequestsLoaded;
-// arrMeta load-once guard lives in settings.js's window.loadArrMeta wrapper
 
 // ── Invite modal button listeners ────────────────────────────────────────────
 document.getElementById('invite-open-btn').addEventListener('click', openInviteModal);
@@ -666,3 +651,41 @@ document.getElementById('invite-cancel-btn').addEventListener('click', closeInvi
 document.getElementById('invite-create-btn').addEventListener('click', submitCreateInvite);
 document.getElementById('invite-copy-btn').addEventListener('click', copyInviteLink);
 document.getElementById('invite-done-btn').addEventListener('click', closeInviteModal);
+
+// ── Event delegation for dynamically-rendered user/request/invite lists ──────
+document.getElementById('users-list').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === 'toggle-disable') toggleDisableUser(btn);
+    else if (action === 'start-reset-password') startResetPassword(btn);
+    else if (action === 'start-delete-user') startDeleteUser(btn);
+    else if (action === 'cancel-reset-password') cancelResetPassword(btn);
+});
+
+document.getElementById('users-list').addEventListener('change', e => {
+    if (e.target.dataset.action === 'save-library-access') saveLibraryAccess(e.target);
+});
+
+document.getElementById('users-list').addEventListener('submit', e => {
+    e.preventDefault();
+    submitResetPassword(e.target);
+});
+
+document.getElementById('requests-pending-list').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id = btn.closest('li')?.dataset.id;
+    if (!id) return;
+    if (btn.dataset.action === 'approve-request') approveRequest(id);
+    else if (btn.dataset.action === 'deny-request') denyRequest(id);
+});
+
+document.getElementById('invites-list').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === 'copy-invite') copyInviteItemLink(btn);
+    else if (action === 'revoke-invite') revokeInvite(btn);
+    else if (action === 'delete-invite') deleteInvite(btn);
+});

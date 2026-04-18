@@ -124,10 +124,8 @@ document.getElementById('blocklist-cancel-btn').addEventListener('click', closeB
 document.getElementById('blocklist-confirm-btn').addEventListener('click', confirmBlocklist);
 
 // ── Window exports ─
-window.checkDownloads     = checkDownloads;
-window.dlPause            = dlPause;
-window.dlCancel           = dlCancel;
-window.openBlocklistModal = openBlocklistModal;
+// checkDownloads is called by sse.js and dashboard.js refresh cycle.
+window.checkDownloads = checkDownloads;
 
 // formatSpeed, formatSize, formatETA are defined in dashboard.js and available on window.
 function formatSpeed(bps) { return window.formatSpeed ? window.formatSpeed(bps) : ''; }

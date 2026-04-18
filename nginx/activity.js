@@ -37,26 +37,25 @@ function buildDrawer(e) {
     const actions = [];
     if (e.type === 'validation_failed' || e.type === 'transcode_failed') {
         if (e.job_id) {
-            actions.push(html`<button class="act-btn act-btn-primary" onclick="event.stopPropagation();actRetry('${e.job_id}')">Retry</button>`);
-            actions.push(html`<button class="act-btn" onclick="event.stopPropagation();actJumpToJob('${e.job_id}')">Jump to job</button>`);
+            actions.push(html`<button class="act-btn act-btn-primary" data-action="act-retry" data-job-id="${e.job_id}">Retry</button>`);
+            actions.push(html`<button class="act-btn" data-action="act-jump" data-job-id="${e.job_id}">Jump to job</button>`);
         }
     } else if (e.type === 'storage_warning' || e.type === 'storage_critical') {
-        actions.push(html`<button class="act-btn act-btn-primary" onclick="event.stopPropagation();actGoToStorage()">Go to storage</button>`);
+        actions.push(html`<button class="act-btn act-btn-primary" data-action="act-go-storage">Go to storage</button>`);
     }
-    actions.push(html`<button class="act-btn" onclick="event.stopPropagation();actDismiss('${e.id}')">Dismiss</button>`);
+    actions.push(html`<button class="act-btn" data-action="act-dismiss" data-id="${e.id}">Dismiss</button>`);
 
     const detail = e.detail ? html`<div class="act-detail">${e.detail}</div>` : raw('');
     return html`<div class="act-drawer">${detail}<div class="act-actions">${actions}</div></div>`;
 }
 
 function buildRow(e) {
-    return html`<div class="act-item ${notifClass(e.type)}" onclick="actToggleDrawer(this)">
+    return html`<div class="act-item ${notifClass(e.type)}" data-action="act-toggle-drawer">
         <div class="act-row">
             <span class="act-icon">${raw(notifIcon(e.type))}</span>
             <span class="act-msg">${e.message}</span>
             <span class="act-time">${formatTime(e.timestamp)}</span>
-            <button class="act-x" title="Dismiss"
-                onclick="event.stopPropagation();actDismiss('${e.id}')">&#10005;</button>
+            <button class="act-x" title="Dismiss" data-action="act-dismiss" data-id="${e.id}">&#10005;</button>
         </div>
         ${buildDrawer(e)}
     </div>`;
@@ -79,7 +78,7 @@ function renderActivity(events) {
 
     if (older.length > 0) {
         const label = older.length + ' older event' + (older.length !== 1 ? 's' : '');
-        out += html`<div class="act-sep" id="act-sep" onclick="actToggleOlder()">
+        out += html`<div class="act-sep" id="act-sep" data-action="act-toggle-older">
             <span class="act-sep-line"></span>
             <span>${label}</span>
             <span class="act-sep-chevron" id="act-chevron">&#9660;</span>
@@ -91,7 +90,7 @@ function renderActivity(events) {
     list.innerHTML = out;
 }
 
-// -- Action handlers (called via onclick attributes) ----------------------
+// -- Action handlers ------------------------------------------------------
 
 function actToggleDrawer(item) {
     const drawer = item.querySelector('.act-drawer');
@@ -138,11 +137,19 @@ component('activity', function () {
     return { render: function () {} };
 });
 
+// -- Event delegation on activity list ------------------------------------
+document.getElementById('activity-list').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === 'act-dismiss') actDismiss(btn.dataset.id);
+    else if (action === 'act-retry') actRetry(btn.dataset.jobId);
+    else if (action === 'act-jump') actJumpToJob(btn.dataset.jobId);
+    else if (action === 'act-go-storage') actGoToStorage();
+    else if (action === 'act-toggle-drawer') actToggleDrawer(btn);
+    else if (action === 'act-toggle-older') actToggleOlder();
+});
+
 // -- Window exports -------------------------------------------------------
-window.renderActivity  = renderActivity;
-window.actToggleDrawer = actToggleDrawer;
-window.actToggleOlder  = actToggleOlder;
-window.actDismiss      = actDismiss;
-window.actRetry        = actRetry;
-window.actJumpToJob    = actJumpToJob;
-window.actGoToStorage  = actGoToStorage;
+// renderActivity is called by sse.js and dashboard.js refresh cycle.
+window.renderActivity = renderActivity;

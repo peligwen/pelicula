@@ -968,11 +968,8 @@ setInterval(updateStaleBanner, 5000);
 // copyInviteLink — moved to users.js.
 
 // ── Window exports ────────────────────────
-window.refresh              = refresh;
-window.checkStorage         = checkStorage;
-window.deleteLibraryFromLane = deleteLibraryFromLane;
-window.toggleSidePanel       = toggleSidePanel;
-window.closeStorageExplorer  = closeStorageExplorer;
+window.refresh      = refresh;      // sse.js setInterval
+window.checkStorage = checkStorage; // sse.js storage-changed event
 
 // ── Job drawer ────────────────────────────
 window.openJobDrawer = async function(jobId) {
@@ -1227,3 +1224,6 @@ document.getElementById('libraries-lane').addEventListener('click', e => {
     const fn = _libRowActions.get(btn.dataset.key);
     if (fn) fn();
 });
+
+document.getElementById('drawer-backdrop').addEventListener('click', window.closeJobDrawer);
+document.getElementById('job-drawer-close-btn').addEventListener('click', window.closeJobDrawer);
