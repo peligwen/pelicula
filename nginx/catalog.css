@@ -397,16 +397,16 @@
 .cat-missing-list { padding: 0 0.25rem 0.5rem; }
 .cat-row-missing { cursor: pointer; }
 
-/* Replace / danger confirm button */
-.modal-btn-danger {
+/* Replace / danger confirm button — modal override of .btn-danger */
+.modal .btn-danger {
     background: var(--danger, #c0392b);
     color: #fff;
     border-color: var(--danger, #c0392b);
 }
-.modal-btn-danger:hover:not(:disabled) {
+.modal .btn-danger:hover:not(:disabled) {
     opacity: 0.88;
 }
-.modal-btn-danger:disabled {
+.modal .btn-danger:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }

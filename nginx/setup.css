@@ -79,10 +79,6 @@ label {
     color: var(--muted, #9080a8); margin-top: 1.25rem; margin-bottom: 0.3rem;
     font-family: var(--font-display, 'Nunito', sans-serif);
 }
-.field-help { font-size: 0.72rem; color: var(--muted, #9080a8); line-height: 1.5; margin-bottom: 0.5rem; }
-.field-help strong { color: var(--ink, #2a1f35); }
-.field-help code { background: var(--panel2, #fdf5ff); padding: 0.1rem 0.35rem; border-radius: 8px; font-size: 0.7rem; color: var(--periwinkle, #7080e8); border: 1px solid var(--border2, rgba(180,140,220,0.4)); }
-
 input[type="text"],
 input[type="password"],
 select {
@@ -132,32 +128,6 @@ select { cursor: pointer; border-radius: 12px; }
     margin-top: 2rem; padding-top: 1.5rem;
     border-top: 1px solid var(--border, rgba(180,140,220,0.25));
 }
-.btn-primary {
-    background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
-    color: #fff; border: none; border-radius: 50px;
-    padding: 0.6rem 1.75rem; font-size: 0.82rem; font-weight: 800; cursor: pointer;
-    text-transform: uppercase; letter-spacing: 0.06em;
-    box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s, transform 0.1s;
-    font-family: var(--font-display, 'Nunito', sans-serif);
-}
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-.btn-secondary {
-    background: var(--panel2, #fdf5ff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4)); border-radius: 50px;
-    padding: 0.6rem 1.25rem; font-size: 0.82rem; font-weight: 700; cursor: pointer;
-    text-transform: uppercase; letter-spacing: 0.06em; transition: all 0.15s;
-    color: var(--muted, #9080a8); text-decoration: none; display: inline-flex; align-items: center;
-    font-family: var(--font-display, 'Nunito', sans-serif);
-}
-.btn-secondary:hover { background: var(--peri-l, #eaecfd); border-color: rgba(112,128,232,0.4); color: var(--periwinkle, #7080e8); }
-.btn-danger {
-    background: var(--pink-l, #fce8f4); color: var(--pink, #f060a8);
-    border: 1.5px solid rgba(240,96,168,0.4); border-radius: 50px;
-    padding: 0.5rem 1.25rem; font-size: 0.78rem; font-weight: 700; cursor: pointer;
-    text-transform: uppercase; letter-spacing: 0.06em; transition: all 0.15s;
-    font-family: var(--font-display, 'Nunito', sans-serif);
-}
-.btn-danger:hover { background: var(--pink, #f060a8); color: #fff; }
 
 /* ── Summary table ──────────────── */
 .summary {
