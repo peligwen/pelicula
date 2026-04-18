@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"pelicula-api/internal/app/catalog"
 )
 
 // RunQueuePoller polls Radarr and Sonarr's download queues every 60 seconds
@@ -63,7 +65,7 @@ func upsertQueueMovie(db *sql.DB, rec map[string]any) {
 	if title == "" {
 		return
 	}
-	if _, err := UpsertCatalogItem(db, CatalogItem{
+	if _, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 		Type:    "movie",
 		TmdbID:  int(floatVal(movie, "tmdbId")),
 		ArrID:   int(floatVal(movie, "id")),
@@ -101,7 +103,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 	}
 
 	// Upsert series
-	seriesID, err := UpsertCatalogItem(db, CatalogItem{
+	seriesID, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 		Type:    "series",
 		TvdbID:  tvdbID,
 		ArrID:   arrID,
@@ -116,7 +118,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 	}
 
 	// Upsert season
-	seasonID, err := UpsertCatalogItem(db, CatalogItem{
+	seasonID, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 		Type:         "season",
 		ParentID:     seriesID,
 		SeasonNumber: seasonNum,
@@ -130,7 +132,7 @@ func upsertQueueEpisode(db *sql.DB, rec map[string]any) {
 	}
 
 	// Upsert episode (no file path yet — still downloading)
-	if _, err := UpsertCatalogItem(db, CatalogItem{
+	if _, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 		Type:          "episode",
 		ParentID:      seasonID,
 		EpisodeID:     episodeID,

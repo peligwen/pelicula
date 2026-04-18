@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"pelicula-api/internal/app/catalog"
 )
 
 // jellyfinItemCache is a short-lived in-process cache of Jellyfin library items
@@ -103,7 +105,7 @@ func fetchJellyfinLibrary(svc *ServiceClients) ([]jellyfinItem, error) {
 func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 	switch source.Type {
 	case "movie":
-		_, err := UpsertCatalogItem(db, CatalogItem{
+		_, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:     "movie",
 			TmdbID:   source.TmdbID,
 			ArrID:    source.ArrID,
@@ -120,7 +122,7 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 
 	case "episode":
 		// 1. Upsert the parent series
-		seriesID, err := UpsertCatalogItem(db, CatalogItem{
+		seriesID, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:    "series",
 			TvdbID:  source.TvdbID,
 			TmdbID:  source.TmdbID,
@@ -136,7 +138,7 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 
 		// 2. Upsert the season
 		seasonTitle := fmt.Sprintf("%s Season %d", source.Title, source.SeasonNumber)
-		seasonID, err := UpsertCatalogItem(db, CatalogItem{
+		seasonID, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:         "season",
 			ParentID:     seriesID,
 			SeasonNumber: source.SeasonNumber,
@@ -149,7 +151,7 @@ func UpsertFromHook(db *sql.DB, source ProculaJobSource) error {
 		}
 
 		// 3. Upsert the episode
-		_, err = UpsertCatalogItem(db, CatalogItem{
+		_, err = catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:          "episode",
 			ParentID:      seasonID,
 			EpisodeID:     source.EpisodeID,
@@ -220,7 +222,7 @@ func backfillRadarr(db *sql.DB, svc *ServiceClients, _ string) error {
 		if mf, ok := m["movieFile"].(map[string]any); ok {
 			filePath, _ = mf["path"].(string)
 		}
-		if _, err := UpsertCatalogItem(db, CatalogItem{
+		if _, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:     "movie",
 			TmdbID:   int(floatVal(m, "tmdbId")),
 			ArrID:    int(floatVal(m, "id")),
@@ -281,7 +283,7 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, _ string) error {
 			}
 		}
 
-		catalogID, err := UpsertCatalogItem(db, CatalogItem{
+		catalogID, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:    "series",
 			TvdbID:  tvdbID,
 			TmdbID:  tmdbID,
@@ -385,7 +387,7 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, _ string) error {
 		if !ok {
 			continue
 		}
-		if _, err := UpsertCatalogItem(db, CatalogItem{
+		if _, err := catalog.UpsertCatalogItem(db, catalog.CatalogItem{
 			Type:         "season",
 			ParentID:     meta.catalogID,
 			SeasonNumber: seasonNum,
@@ -406,7 +408,7 @@ func backfillSonarr(db *sql.DB, svc *ServiceClients, _ string) error {
 // maybeSyncJellyfinMetadata syncs Jellyfin metadata for an item if stale (>24h) or never synced.
 // Only syncs movies and series (they carry the artwork/synopsis for their subtree).
 // Safe to call in a goroutine — logs errors, never panics.
-func maybeSyncJellyfinMetadata(item *CatalogItem) {
+func maybeSyncJellyfinMetadata(item *catalog.CatalogItem) {
 	if item == nil {
 		return
 	}
@@ -428,13 +430,13 @@ func maybeSyncJellyfinMetadata(item *CatalogItem) {
 // SyncJellyfinMetadata fetches artwork and synopsis from Jellyfin and persists them.
 // If the item is not yet in Jellyfin, it records the attempt (MetadataSyncedAt is set)
 // so we don't hammer Jellyfin on every request.
-func SyncJellyfinMetadata(db *sql.DB, svc *ServiceClients, item *CatalogItem) error {
+func SyncJellyfinMetadata(db *sql.DB, svc *ServiceClients, item *catalog.CatalogItem) error {
 	jellyfinID, artworkURL, synopsis, err := fetchJellyfinItemMeta(svc, item)
 	if err != nil {
 		return err
 	}
 	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := UpdateCatalogMetadata(db, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
+	if err := catalog.UpdateCatalogMetadata(db, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
 		return fmt.Errorf("persist metadata: %w", err)
 	}
 	if jellyfinID != "" {
@@ -491,7 +493,7 @@ func resolveJellyfinUserID(svc *ServiceClients) (string, error) {
 //
 // Note: Jellyfin 10.11+ ignores AnyProviderIdEquals on user-scoped queries,
 // so we fetch the full library once (cached 5 min) and match client-side.
-func fetchJellyfinItemMeta(svc *ServiceClients, item *CatalogItem) (string, string, string, error) {
+func fetchJellyfinItemMeta(svc *ServiceClients, item *catalog.CatalogItem) (string, string, string, error) {
 	items, err := fetchJellyfinLibrary(svc)
 	if err != nil {
 		return "", "", "", err

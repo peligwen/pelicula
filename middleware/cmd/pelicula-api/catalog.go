@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/catalog"
 	"strings"
 )
 
@@ -232,7 +233,7 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	synopsis, artworkURL, title, metadataSyncedAt := "", "", "", ""
 	inCatalog := false
 	if catalogDB != nil {
-		if item, err := GetCatalogItemByFilePath(catalogDB, path); err == nil && item != nil {
+		if item, err := catalog.GetCatalogItemByFilePath(catalogDB, path); err == nil && item != nil {
 			inCatalog = true
 			synopsis = item.Synopsis
 			artworkURL = item.ArtworkURL
@@ -241,8 +242,8 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 			if item.Type == "movie" {
 				go maybeSyncJellyfinMetadata(item)
 			} else if item.Type == "episode" {
-				if season, err := GetCatalogItemByID(catalogDB, item.ParentID); err == nil && season != nil {
-					if series, err := GetCatalogItemByID(catalogDB, season.ParentID); err == nil && series != nil {
+				if season, err := catalog.GetCatalogItemByID(catalogDB, item.ParentID); err == nil && season != nil {
+					if series, err := catalog.GetCatalogItemByID(catalogDB, season.ParentID); err == nil && series != nil {
 						if synopsis == "" {
 							synopsis = series.Synopsis
 						}
@@ -310,12 +311,12 @@ func handleCatalogItems(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	f := CatalogFilter{
+	f := catalog.CatalogFilter{
 		Type:  r.URL.Query().Get("type"),
 		Tier:  r.URL.Query().Get("tier"),
 		Query: r.URL.Query().Get("q"),
 	}
-	items, err := ListCatalogItems(catalogDB, f)
+	items, err := catalog.ListCatalogItems(catalogDB, f)
 	if err != nil {
 		slog.Error("list catalog items", "component", "catalog", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
@@ -334,7 +335,7 @@ func handleCatalogItemDetail(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	item, err := GetCatalogItemByID(catalogDB, id)
+	item, err := catalog.GetCatalogItemByID(catalogDB, id)
 	if err != nil {
 		slog.Error("get catalog item", "component", "catalog", "id", id, "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
