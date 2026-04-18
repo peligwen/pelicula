@@ -8,4 +8,8 @@ var (
 	radarrURL   = envOr("RADARR_URL", "http://radarr:7878/radarr")
 	prowlarrURL = envOr("PROWLARR_URL", "http://gluetun:9696/prowlarr")
 	bazarrURL   = envOr("BAZARR_URL", "http://bazarr:6767/bazarr")
+
+	// proculaURL is the base URL for the Procula processing-pipeline service.
+	// Used by hooks, catalog, jobs, actions, and services health check.
+	proculaURL = envOr("PROCULA_URL", "http://procula:8282")
 )

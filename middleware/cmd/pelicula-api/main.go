@@ -23,6 +23,7 @@ import (
 	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/downloads"
 	"pelicula-api/internal/app/health"
+	"pelicula-api/internal/app/hooks"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/peligrosa"
@@ -45,6 +46,7 @@ type App struct {
 	statusTTL     statusTTLCache
 	dlHandler     *downloads.Handler
 	healthHandler *health.Handler
+	hooksHandler  *hooks.Handler
 	vpnConfigured bool
 	autowireState *autowire.AutowireState
 }
@@ -260,6 +262,20 @@ func main() {
 			GetWatchdog:    func() health.WatchdogState { return watchdogStateAdapter(GetWatchdogState()) },
 			GluetunBaseURL: urls.Gluetun,
 		},
+		hooksHandler: &hooks.Handler{
+			Procula:                procClient,
+			HTTPClient:             &http.Client{Timeout: 10 * time.Second},
+			ProculaURL:             proculaURL,
+			SonarrURL:              sonarrURL,
+			RadarrURL:              radarrURL,
+			GetKeys:                func() (string, string, string) { return svc.Keys() },
+			ArrGet:                 svc.ArrGet,
+			CatalogDB:              cdb,
+			RequestStore:           requests,
+			Qbt:                    svc.Qbt,
+			TriggerJellyfinRefresh: func() error { return TriggerLibraryRefresh(svc) },
+			Notify:                 notifyAppriseErr,
+		},
 	}
 	// Wire package-level globals for the handler files that still use them.
 	services = svc
@@ -278,9 +294,9 @@ func main() {
 	peligrosa.RegisterRoutes(mux, deps)
 
 	// Webhook receiver — no session auth needed (*arr services call this)
-	mux.HandleFunc("/api/pelicula/hooks/import", handleImportHook)
+	mux.HandleFunc("/api/pelicula/hooks/import", app.hooksHandler.HandleImportHook)
 	// Jellyfin refresh — called by Procula internally
-	mux.HandleFunc("/api/pelicula/jellyfin/refresh", handleJellyfinRefresh)
+	mux.HandleFunc("/api/pelicula/jellyfin/refresh", app.hooksHandler.HandleJellyfinRefresh)
 
 	// viewer+: SSE stream
 	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(app.sseHub.HandleSSE)))
@@ -290,12 +306,12 @@ func main() {
 	mux.Handle("/api/pelicula/status", auth.Guard(http.HandlerFunc(app.handleStatus)))
 	mux.Handle("/api/pelicula/downloads", auth.Guard(http.HandlerFunc(app.dlHandler.HandleDownloads)))
 	mux.Handle("/api/pelicula/downloads/stats", auth.Guard(http.HandlerFunc(app.dlHandler.HandleDownloadStats)))
-	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(handleProcessingProxy)))
-	mux.Handle("/api/pelicula/notifications", auth.Guard(http.HandlerFunc(handleNotificationsProxy)))
-	mux.Handle("/api/pelicula/storage", auth.Guard(http.HandlerFunc(handleStorageProxy)))
-	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(http.HandlerFunc(handleProculaSettingsProxy)))
-	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(handleStorageScanProxy)))
-	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(handleUpdatesProxy)))
+	mux.Handle("/api/pelicula/processing", auth.Guard(http.HandlerFunc(app.hooksHandler.HandleProcessingProxy)))
+	mux.Handle("/api/pelicula/notifications", auth.Guard(http.HandlerFunc(app.hooksHandler.HandleNotificationsProxy)))
+	mux.Handle("/api/pelicula/storage", auth.Guard(http.HandlerFunc(app.hooksHandler.HandleStorageProxy)))
+	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(http.HandlerFunc(app.hooksHandler.HandleProculaSettingsProxy)))
+	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(app.hooksHandler.HandleStorageScanProxy)))
+	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(app.hooksHandler.HandleUpdatesProxy)))
 
 	// admin only: *arr metadata for settings dropdowns
 	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(handleArrMeta)))

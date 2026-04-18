@@ -1,34 +1,22 @@
-// hooks_normalize.go — *arr webhook payload normalization.
-package main
+// normalize.go — *arr webhook payload normalization.
+package hooks
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"pelicula-api/internal/app/catalog"
 )
 
-// ProculaJobSource mirrors procula's JobSource for the HTTP call.
-type ProculaJobSource struct {
-	Type                   string `json:"type"`
-	Title                  string `json:"title"`
-	Year                   int    `json:"year"`
-	Path                   string `json:"path"`
-	Size                   int64  `json:"size"`
-	ArrID                  int    `json:"arr_id"`
-	ArrType                string `json:"arr_type"`
-	EpisodeID              int    `json:"episode_id,omitempty"`
-	SeasonNumber           int    `json:"season_number,omitempty"`
-	EpisodeNumber          int    `json:"episode_number,omitempty"`
-	TmdbID                 int    `json:"tmdb_id,omitempty"`
-	TvdbID                 int    `json:"tvdb_id,omitempty"`
-	DownloadHash           string `json:"download_hash"`
-	ExpectedRuntimeMinutes int    `json:"expected_runtime_minutes"`
-}
-
-// normalizeHookPayload converts a Radarr or Sonarr webhook body into a JobSource.
-func normalizeHookPayload(raw map[string]any) (source ProculaJobSource, err error) {
+// NormalizeHookPayload converts a Radarr or Sonarr webhook body into a
+// catalog.ProculaJobSource. It validates that the file path is under a known
+// media directory to prevent path traversal.
+func NormalizeHookPayload(raw map[string]any) (source catalog.ProculaJobSource, err error) {
 	downloadHash, _ := raw["downloadId"].(string)
 
-	// Detect *arr type by payload shape
+	// Detect *arr type by payload shape.
 	if movie, ok := raw["movie"].(map[string]any); ok {
 		// Radarr
 		source.ArrType = "radarr"
@@ -79,12 +67,34 @@ func normalizeHookPayload(raw map[string]any) (source ProculaJobSource, err erro
 	if source.Path == "" {
 		return source, fmt.Errorf("no file path in webhook payload")
 	}
-	if !isAllowedWebhookPath(source.Path) {
+	if !IsAllowedWebhookPath(source.Path) {
 		return source, fmt.Errorf("path not under an allowed media directory: %s", source.Path)
 	}
 
 	source.DownloadHash = downloadHash
 	return source, nil
+}
+
+// IsAllowedWebhookPath checks that the path from a webhook payload is under a
+// known media directory, preventing path traversal to arbitrary filesystem locations.
+func IsAllowedWebhookPath(p string) bool {
+	if isUnderPrefixes(p, []string{"/downloads", "/processing"}) {
+		return true
+	}
+	clean := filepath.Clean(p)
+	return clean == "/media" || strings.HasPrefix(clean, "/media/")
+}
+
+// isUnderPrefixes reports whether the cleaned path equals or is nested under
+// one of the given prefixes.
+func isUnderPrefixes(p string, prefixes []string) bool {
+	clean := filepath.Clean(p)
+	for _, prefix := range prefixes {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseArrDate(s string) time.Time {
@@ -93,4 +103,20 @@ func parseArrDate(s string) time.Time {
 		t, _ = time.Parse("2006-01-02T15:04:05Z", s)
 	}
 	return t
+}
+
+// floatVal extracts a float64 from a map[string]any by key.
+func floatVal(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
+}
+
+// strVal extracts a string from a map[string]any by key.
+func strVal(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }

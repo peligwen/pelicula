@@ -1,22 +1,24 @@
-// hooks_receive.go — inbound webhook receipt and path allowlist.
+// receive.go — inbound webhook receipt and path allowlist.
 // See docs/PELIGROSA.md for the trust boundary rationale.
-package main
+package hooks
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
-	"pelicula-api/httputil"
 	"strings"
+
+	"pelicula-api/httputil"
+	"pelicula-api/internal/app/catalog"
 )
 
-// handleImportHook receives *arr import webhooks, normalizes the payload,
+// HandleImportHook receives *arr import webhooks, normalizes the payload,
 // and forwards a job to Procula.
-func handleImportHook(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleImportHook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -47,7 +49,7 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eventType, _ := raw["eventType"].(string)
-	// Only process Download (import) events; silently accept test pings
+	// Only process Download (import) events; silently accept test pings.
 	if strings.EqualFold(eventType, "test") {
 		httputil.WriteJSON(w, map[string]string{"status": "ok"})
 		return
@@ -58,43 +60,49 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	source, err := normalizeHookPayload(raw)
+	source, err := NormalizeHookPayload(raw)
 	if err != nil {
 		slog.Error("failed to normalize webhook", "component", "hooks", "error", err)
 		httputil.WriteError(w, "invalid webhook payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	slog.Info("import webhook received", "component", "hooks", "arr_type", source.ArrType, "title", source.Title, "type", source.Type, "path", source.Path, "episode_id", source.EpisodeID)
+	slog.Info("import webhook received", "component", "hooks",
+		"arr_type", source.ArrType, "title", source.Title,
+		"type", source.Type, "path", source.Path, "episode_id", source.EpisodeID)
 
 	// Forward to Procula via the typed client.
-	if err := forwardToProcula(r.Context(), source); err != nil {
+	if err := h.forwardToProcula(r.Context(), source); err != nil {
 		slog.Error("failed to forward to Procula", "component", "hooks", "error", err)
-		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx
+		// Don't fail the webhook — *arr doesn't retry sensibly on 5xx.
 		httputil.WriteJSON(w, map[string]string{"status": "queued", "warning": err.Error()})
 		return
 	}
 
-	// Upsert catalog record — best-effort, non-blocking
-	go func() {
-		if err := UpsertFromHook(catalogDB, source); err != nil {
-			slog.Error("catalog upsert from hook failed", "component", "hooks", "error", err)
-		}
-	}()
+	// Upsert catalog record — best-effort, non-blocking.
+	if h.CatalogDB != nil {
+		go func() {
+			if err := catalog.UpsertFromHook(h.CatalogDB, source); err != nil {
+				slog.Error("catalog upsert from hook failed", "component", "hooks", "error", err)
+			}
+		}()
+	}
 
 	// Mark any matching pending request as available now that the content has landed.
 	// Webhook type is "movie" or "episode"; requests use "movie" or "series".
-	reqType := source.Type
-	if reqType == "episode" {
-		reqType = "series"
+	if h.RequestStore != nil {
+		reqType := source.Type
+		if reqType == "episode" {
+			reqType = "series"
+		}
+		go h.RequestStore.MarkAvailable(reqType, source.TmdbID, source.TvdbID, source.Title, h.Notify) //nolint:errcheck
 	}
-	go requestStore.MarkAvailable(reqType, source.TmdbID, source.TvdbID, source.Title, notifyAppriseErr) //nolint:errcheck
 
 	// When SEEDING_REMOVE_ON_COMPLETE is set, delete the torrent from qBittorrent
 	// immediately after *arr has imported (and hardlinked) the file. The file itself
 	// is preserved; only the torrent entry is removed.
-	if os.Getenv("SEEDING_REMOVE_ON_COMPLETE") == "true" && source.DownloadHash != "" {
-		if err := services.Qbt.RemoveTorrent(r.Context(), source.DownloadHash); err != nil {
+	if os.Getenv("SEEDING_REMOVE_ON_COMPLETE") == "true" && source.DownloadHash != "" && h.Qbt != nil {
+		if err := h.Qbt.RemoveTorrent(r.Context(), source.DownloadHash); err != nil {
 			slog.Warn("remove-on-complete: failed to delete torrent", "component", "hooks",
 				"hash", shortHash(source.DownloadHash), "error", err)
 		} else {
@@ -106,24 +114,17 @@ func handleImportHook(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, map[string]string{"status": "queued"})
 }
 
-// isUnderPrefixes reports whether the cleaned path equals or is nested under
-// one of the given prefixes.
-func isUnderPrefixes(p string, prefixes []string) bool {
-	clean := filepath.Clean(p)
-	for _, prefix := range prefixes {
-		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
-			return true
-		}
+// forwardToProcula creates a job in Procula for the given source.
+func (h *Handler) forwardToProcula(ctx context.Context, source catalog.ProculaJobSource) error {
+	if _, err := h.Procula.CreateJob(ctx, source); err != nil {
+		return err
 	}
-	return false
+	return nil
 }
 
-// isAllowedWebhookPath checks that the path from a webhook payload is under a
-// known media directory, preventing path traversal to arbitrary filesystem locations.
-func isAllowedWebhookPath(p string) bool {
-	if isUnderPrefixes(p, []string{"/downloads", "/processing"}) {
-		return true
+func shortHash(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
 	}
-	clean := filepath.Clean(p)
-	return clean == "/media" || strings.HasPrefix(clean, "/media/")
+	return hash
 }

@@ -1,4 +1,4 @@
-package main
+package hooks_test
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"pelicula-api/internal/app/hooks"
 	proculaclient "pelicula-api/internal/clients/procula"
 )
 
@@ -16,31 +17,34 @@ func newFakeProcula(t *testing.T, path, body string) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(body))
+		w.Write([]byte(body)) //nolint:errcheck
 	})
 	return httptest.NewServer(mux)
 }
 
-// useFakeProcURL points procClient at the given test server URL for the duration of the test.
-func useFakeProcURL(t *testing.T, baseURL string) {
+// newHandler builds a Handler wired to the given fake Procula server.
+func newHandler(t *testing.T, fakeURL string) *hooks.Handler {
 	t.Helper()
-	old := procClient
-	procClient = proculaclient.New(baseURL, "")
-	t.Cleanup(func() { procClient = old })
+	return &hooks.Handler{
+		Procula:    proculaclient.New(fakeURL, ""),
+		HTTPClient: &http.Client{},
+		ProculaURL: fakeURL,
+		SonarrURL:  "",
+		RadarrURL:  "",
+		GetKeys:    func() (string, string, string) { return "", "", "" },
+		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+	}
 }
 
 func TestHandleStorageProxy(t *testing.T) {
+	t.Parallel()
 	fake := newFakeProcula(t, "/api/procula/storage", `{"volumes":[],"timestamp":"2026-04-06T00:00:00Z"}`)
 	defer fake.Close()
-	old := proculaURL
-	origSvc := services
-	proculaURL = fake.URL
-	services = NewServiceClients("/config")
-	t.Cleanup(func() { proculaURL = old; services = origSvc })
 
+	h := newHandler(t, fake.URL)
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
 	w := httptest.NewRecorder()
-	handleStorageProxy(w, req)
+	h.HandleStorageProxy(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -55,17 +59,14 @@ func TestHandleStorageProxy(t *testing.T) {
 }
 
 func TestHandleUpdatesProxy(t *testing.T) {
+	t.Parallel()
 	fake := newFakeProcula(t, "/api/procula/updates", `{"current_version":"dev","update_available":false}`)
 	defer fake.Close()
-	old := proculaURL
-	origSvc := services
-	proculaURL = fake.URL
-	services = NewServiceClients("/config")
-	t.Cleanup(func() { proculaURL = old; services = origSvc })
 
+	h := newHandler(t, fake.URL)
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)
 	w := httptest.NewRecorder()
-	handleUpdatesProxy(w, req)
+	h.HandleUpdatesProxy(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -80,53 +81,51 @@ func TestHandleUpdatesProxy(t *testing.T) {
 }
 
 func TestHandleStorageProxyMethodNotAllowed(t *testing.T) {
+	t.Parallel()
+	h := newHandler(t, "http://127.0.0.1:1")
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/storage", nil)
 	w := httptest.NewRecorder()
-	handleStorageProxy(w, req)
+	h.HandleStorageProxy(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", w.Code)
 	}
 }
 
 func TestHandleUpdatesProxyMethodNotAllowed(t *testing.T) {
+	t.Parallel()
+	h := newHandler(t, "http://127.0.0.1:1")
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/updates", nil)
 	w := httptest.NewRecorder()
-	handleUpdatesProxy(w, req)
+	h.HandleUpdatesProxy(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", w.Code)
 	}
 }
 
 func TestHandleStorageProxyBadGateway(t *testing.T) {
-	// Point PROCULA_URL at a port with nothing listening.
-	origSvc := services
-	t.Cleanup(func() { services = origSvc })
-	t.Setenv("PROCULA_URL", "http://127.0.0.1:1")
-	services = NewServiceClients("/config")
-
+	t.Parallel()
+	h := newHandler(t, "http://127.0.0.1:1")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil)
 	w := httptest.NewRecorder()
-	handleStorageProxy(w, req)
+	h.HandleStorageProxy(w, req)
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", w.Code)
 	}
 }
 
 func TestHandleUpdatesProxyBadGateway(t *testing.T) {
-	origSvc := services
-	t.Cleanup(func() { services = origSvc })
-	t.Setenv("PROCULA_URL", "http://127.0.0.1:1")
-	services = NewServiceClients("/config")
-
+	t.Parallel()
+	h := newHandler(t, "http://127.0.0.1:1")
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/updates", nil)
 	w := httptest.NewRecorder()
-	handleUpdatesProxy(w, req)
+	h.HandleUpdatesProxy(w, req)
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", w.Code)
 	}
 }
 
 func TestIsAllowedWebhookPath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		path string
 		want bool
@@ -149,17 +148,22 @@ func TestIsAllowedWebhookPath(t *testing.T) {
 		{"/processing/../../etc/passwd", false},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.path, func(t *testing.T) {
-			got := isAllowedWebhookPath(c.path)
+			t.Parallel()
+			got := hooks.IsAllowedWebhookPath(c.path)
 			if got != c.want {
-				t.Errorf("isAllowedWebhookPath(%q) = %v, want %v", c.path, got, c.want)
+				t.Errorf("IsAllowedWebhookPath(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
 	}
 }
 
 func TestNormalizeHookPayload(t *testing.T) {
+	t.Parallel()
+
 	t.Run("radarr movie payload", func(t *testing.T) {
+		t.Parallel()
 		raw := map[string]any{
 			"eventType":  "Download",
 			"downloadId": "ABC123",
@@ -177,7 +181,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 			},
 		}
 
-		source, err := normalizeHookPayload(raw)
+		source, err := hooks.NormalizeHookPayload(raw)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -211,6 +215,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 	})
 
 	t.Run("sonarr episode payload", func(t *testing.T) {
+		t.Parallel()
 		raw := map[string]any{
 			"eventType": "Download",
 			"series": map[string]any{
@@ -234,7 +239,7 @@ func TestNormalizeHookPayload(t *testing.T) {
 			},
 		}
 
-		source, err := normalizeHookPayload(raw)
+		source, err := hooks.NormalizeHookPayload(raw)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -262,17 +267,19 @@ func TestNormalizeHookPayload(t *testing.T) {
 	})
 
 	t.Run("missing movie and series key returns error", func(t *testing.T) {
+		t.Parallel()
 		raw := map[string]any{
 			"eventType": "Download",
 			"unknown":   map[string]any{},
 		}
-		_, err := normalizeHookPayload(raw)
+		_, err := hooks.NormalizeHookPayload(raw)
 		if err == nil {
 			t.Error("expected error for missing movie/series key")
 		}
 	})
 
 	t.Run("missing path returns error", func(t *testing.T) {
+		t.Parallel()
 		raw := map[string]any{
 			"movie": map[string]any{
 				"title": "Alien",
@@ -283,13 +290,14 @@ func TestNormalizeHookPayload(t *testing.T) {
 				"size": float64(1000000),
 			},
 		}
-		_, err := normalizeHookPayload(raw)
+		_, err := hooks.NormalizeHookPayload(raw)
 		if err == nil {
 			t.Error("expected error for missing path")
 		}
 	})
 
 	t.Run("path outside allowed dirs returns error", func(t *testing.T) {
+		t.Parallel()
 		raw := map[string]any{
 			"movie": map[string]any{
 				"title": "Alien",
@@ -298,27 +306,28 @@ func TestNormalizeHookPayload(t *testing.T) {
 				"path": "/etc/passwd",
 			},
 		}
-		_, err := normalizeHookPayload(raw)
+		_, err := hooks.NormalizeHookPayload(raw)
 		if err == nil {
 			t.Error("expected error for disallowed path")
 		}
 	})
 
 	t.Run("missing movieFile returns error", func(t *testing.T) {
+		t.Parallel()
 		raw := map[string]any{
 			"movie": map[string]any{
 				"title": "Alien",
 			},
 			// no movieFile — path will be empty → error
 		}
-		_, err := normalizeHookPayload(raw)
+		_, err := hooks.NormalizeHookPayload(raw)
 		if err == nil {
 			t.Error("expected error when movieFile absent")
 		}
 	})
 }
 
-// ── handleImportHook secret enforcement ───────────────────────────────────────
+// ── HandleImportHook secret enforcement ──────────────────────────────────────
 
 func newRadarrPayload() []byte {
 	raw := map[string]any{
@@ -338,17 +347,27 @@ func newRadarrPayload() []byte {
 	return b
 }
 
+func newImportHandler(fakeURL string) *hooks.Handler {
+	return &hooks.Handler{
+		Procula:    proculaclient.New(fakeURL, ""),
+		HTTPClient: &http.Client{},
+		ProculaURL: fakeURL,
+		GetKeys:    func() (string, string, string) { return "", "", "" },
+		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+	}
+}
+
 func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
+	// t.Setenv requires sequential execution (no t.Parallel).
 	// When WEBHOOK_SECRET is unset, the check is skipped (backward compat).
-	origSvc := services
-	t.Cleanup(func() { services = origSvc })
 	t.Setenv("WEBHOOK_SECRET", "")
-	services = NewServiceClients("/config")
+
+	h := newImportHandler("http://127.0.0.1:1") // Procula unreachable — intentional
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleImportHook(w, req)
+	h.HandleImportHook(w, req)
 
 	// Will fail trying to reach Procula — but must not return 401.
 	if w.Code == http.StatusUnauthorized {
@@ -357,15 +376,15 @@ func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
 }
 
 func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
-	origSvc := services
-	t.Cleanup(func() { services = origSvc })
+	// t.Setenv requires sequential execution (no t.Parallel).
 	t.Setenv("WEBHOOK_SECRET", "correct-secret")
-	services = NewServiceClients("/config")
+
+	h := newImportHandler("http://127.0.0.1:1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import?secret=wrong-secret", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleImportHook(w, req)
+	h.HandleImportHook(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 for wrong secret", w.Code)
@@ -373,15 +392,15 @@ func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
 }
 
 func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
-	origSvc := services
-	t.Cleanup(func() { services = origSvc })
+	// t.Setenv requires sequential execution (no t.Parallel).
 	t.Setenv("WEBHOOK_SECRET", "my-secret")
-	services = NewServiceClients("/config")
+
+	h := newImportHandler("http://127.0.0.1:1") // Procula unreachable — intentional
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import?secret=my-secret", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleImportHook(w, req)
+	h.HandleImportHook(w, req)
 
 	// Procula is unreachable in tests — but must not return 401.
 	if w.Code == http.StatusUnauthorized {
@@ -390,38 +409,40 @@ func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
 }
 
 func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
-	origSvc := services
-	t.Cleanup(func() { services = origSvc })
+	// t.Setenv requires sequential execution (no t.Parallel).
 	t.Setenv("WEBHOOK_SECRET", "required-secret")
-	services = NewServiceClients("/config")
+
+	h := newImportHandler("http://127.0.0.1:1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleImportHook(w, req)
+	h.HandleImportHook(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 when secret missing from query", w.Code)
 	}
 }
 
-// ── handleBrowse symlink escape ───────────────────────────────────────────────
-
 func TestHandleNotificationsProxy_PassesThroughDetailAndJobID(t *testing.T) {
+	t.Parallel()
 	proculaBody := `[{"id":"notif_1","timestamp":"2026-04-14T10:00:00Z","type":"validation_failed","message":"Validation failed: Dune","detail":"FFmpeg error: codec not supported","job_id":"abc12345"}]`
 	fake := newFakeProcula(t, "/api/procula/notifications", proculaBody)
 	defer fake.Close()
 
-	old := proculaURL
-	origSvc := services
-	proculaURL = fake.URL
-	services = NewServiceClients("/config")
-	t.Cleanup(func() { proculaURL = old; services = origSvc })
-	useFakeProcURL(t, fake.URL)
+	h := &hooks.Handler{
+		Procula:    proculaclient.New(fake.URL, ""),
+		HTTPClient: &http.Client{},
+		ProculaURL: fake.URL,
+		SonarrURL:  "",
+		RadarrURL:  "",
+		GetKeys:    func() (string, string, string) { return "", "", "" },
+		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/notifications", nil)
 	w := httptest.NewRecorder()
-	handleNotificationsProxy(w, req)
+	h.HandleNotificationsProxy(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -442,25 +463,5 @@ func TestHandleNotificationsProxy_PassesThroughDetailAndJobID(t *testing.T) {
 	}
 	if events[0].JobID != "abc12345" {
 		t.Errorf("JobID = %q, want %q", events[0].JobID, "abc12345")
-	}
-}
-
-func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {
-	// Create a symlink inside /tmp pointing to /etc, then try to browse via
-	// a path that resolves outside the allowed roots. We use a temp dir to
-	// simulate the layout since /downloads doesn't exist in tests.
-	//
-	// The handler checks isAllowedBrowsePath before EvalSymlinks, so a path
-	// that is under /downloads but resolves elsewhere would be caught by the
-	// second check after EvalSymlinks. We verify the forbidden response.
-	//
-	// Since we can't create a path under /downloads in tests, we exercise
-	// the simpler case: a path not under any root is immediately rejected.
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/browse?path=/etc/passwd", nil)
-	w := httptest.NewRecorder()
-	handleBrowse(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for path outside allowed roots", w.Code)
 	}
 }

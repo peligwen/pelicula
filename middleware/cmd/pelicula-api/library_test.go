@@ -783,3 +783,25 @@ func TestHandleJobRetry_MethodNotAllowed(t *testing.T) {
 		t.Errorf("status = %d, want 405", w.Code)
 	}
 }
+
+// ── handleBrowse symlink escape ───────────────────────────────────────────────
+
+func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {
+	// Create a symlink inside /tmp pointing to /etc, then try to browse via
+	// a path that resolves outside the allowed roots. We use a temp dir to
+	// simulate the layout since /downloads doesn't exist in tests.
+	//
+	// The handler checks isAllowedBrowsePath before EvalSymlinks, so a path
+	// that is under /downloads but resolves elsewhere would be caught by the
+	// second check after EvalSymlinks. We verify the forbidden response.
+	//
+	// Since we can't create a path under /downloads in tests, we exercise
+	// the simpler case: a path not under any root is immediately rejected.
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/browse?path=/etc/passwd", nil)
+	w := httptest.NewRecorder()
+	handleBrowse(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for path outside allowed roots", w.Code)
+	}
+}
