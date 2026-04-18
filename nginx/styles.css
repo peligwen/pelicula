@@ -1685,6 +1685,57 @@ body.side-collapsed .main { grid-template-columns: 1fr; }
     }
 }
 
+/* ── Drawer: full-screen below 768px ───────────────────────────────────── */
+@media (max-width: 768px) {
+    .drawer {
+        width: 100vw;
+        max-width: 100vw;
+        right: 0;
+        left: 0;
+        border-radius: 0;
+        border-left: none;
+    }
+    .drawer-header {
+        padding: 1rem 1rem 0.75rem;
+    }
+    .drawer-body {
+        padding: 1rem;
+    }
+}
+
+/* ── Modal: full-screen below 480px ────────────────────────────────────── */
+@media (max-width: 480px) {
+    .modal-overlay {
+        align-items: flex-end;
+        padding: 0;
+    }
+    .modal {
+        width: 100vw;
+        max-width: 100vw;
+        border-radius: 16px 16px 0 0;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    .modal-buttons {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    .modal-buttons .btn,
+    .modal-buttons button {
+        width: 100%;
+    }
+    .log-modal {
+        width: 100vw;
+        max-width: 100vw;
+        border-radius: 0;
+        height: 100dvh;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+    }
+}
+
 /* ── Alert glow on collapsed toggle ─────── */
 /* When the panel is collapsed AND something is unhealthy, pulse the
    toggle tab yellow so the user notices. Uses a gentle 1.4s animation
