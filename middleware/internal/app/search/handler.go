@@ -1,4 +1,6 @@
-package main
+// Package search implements the unified search handler (TMDB/TVDB/Prowlarr)
+// and the add-to-arr functionality for movies and series.
+package search
 
 import (
 	"encoding/json"
@@ -7,32 +9,49 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
-	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/library"
+	services "pelicula-api/internal/app/services"
 	"pelicula-api/internal/config"
 )
 
-// searchMode is read once at startup from the .env file and used by handleSearch
-// to decide whether to run the Prowlarr indexer filter pass.
-// Value is "" or "tmdb" for standard TMDB/TVDB search; "indexer" for Prowlarr filtering.
-var searchMode string
+// Handler holds all dependencies for the unified search endpoints.
+type Handler struct {
+	Services    *services.Clients
+	SonarrURL   string
+	RadarrURL   string
+	ProwlarrURL string
+	LibHandler  *library.Handler
+	tmdbKey     string // loaded at construction, not per-request
+	searchMode  string // "" or "tmdb" for TMDB/TVDB; "indexer" for Prowlarr filtering
 
-func initSearchMode() {
-	if vars, err := parseEnvFile(envPath); err == nil {
-		searchMode = vars["SEARCH_MODE"]
+	idxCache indexerCountCache
+	cache    struct {
+		mu      sync.Mutex
+		entries map[string]indexerSearchEntry
 	}
 }
 
-// indexerSearchCache caches raw Prowlarr /api/v1/search responses to avoid
-// hammering indexer APIs on every keypress when SEARCH_MODE=indexer.
-var indexerSearchCache = struct {
-	mu      sync.Mutex
-	entries map[string]indexerSearchEntry
-}{entries: make(map[string]indexerSearchEntry)}
+// New constructs a Handler. tmdbKey and searchMode are resolved at construction
+// from the parsed .env; no per-request .env reads occur.
+func New(svc *services.Clients, sonarrURL, radarrURL, prowlarrURL string, libHandler *library.Handler, tmdbKey, searchMode string) *Handler {
+	h := &Handler{
+		Services:    svc,
+		SonarrURL:   sonarrURL,
+		RadarrURL:   radarrURL,
+		ProwlarrURL: prowlarrURL,
+		LibHandler:  libHandler,
+		tmdbKey:     tmdbKey,
+		searchMode:  searchMode,
+	}
+	h.cache.entries = make(map[string]indexerSearchEntry)
+	return h
+}
+
+// ---- indexer search cache ----
 
 type indexerSearchEntry struct {
 	data      []byte
@@ -41,35 +60,96 @@ type indexerSearchEntry struct {
 
 const indexerSearchTTL = 2 * time.Minute
 
-func cachedIndexerSearch(prowlarrURL, prowlarrKey, query string) ([]byte, error) {
-	key := strings.ToLower(strings.TrimSpace(query))
+func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
+	_, _, prowlarrKey := h.Services.Keys()
+	key := ""
+	for _, c := range query {
+		if c >= 'A' && c <= 'Z' {
+			key += string(c + 32)
+		} else {
+			key += string(c)
+		}
+	}
+	// trim leading/trailing spaces
+	trimmed := ""
+	start, end := 0, len(key)
+	for start < len(key) && key[start] == ' ' {
+		start++
+	}
+	for end > start && key[end-1] == ' ' {
+		end--
+	}
+	trimmed = key[start:end]
 
-	indexerSearchCache.mu.Lock()
-	if e, ok := indexerSearchCache.entries[key]; ok && time.Since(e.fetchedAt) < indexerSearchTTL {
-		indexerSearchCache.mu.Unlock()
+	h.cache.mu.Lock()
+	if e, ok := h.cache.entries[trimmed]; ok && time.Since(e.fetchedAt) < indexerSearchTTL {
+		h.cache.mu.Unlock()
 		return e.data, nil
 	}
-	indexerSearchCache.mu.Unlock()
+	h.cache.mu.Unlock()
 
 	path := "/api/v1/search?query=" + url.QueryEscape(query) + "&type=search&limit=100"
-	data, err := services.ArrGet(prowlarrURL, prowlarrKey, path)
+	data, err := h.Services.ArrGet(h.ProwlarrURL, prowlarrKey, path)
 	if err != nil {
 		return nil, err
 	}
 
-	indexerSearchCache.mu.Lock()
+	h.cache.mu.Lock()
 	// Evict stale entries (lazy eviction — avoid unbounded growth)
-	for k, e := range indexerSearchCache.entries {
+	for k, e := range h.cache.entries {
 		if time.Since(e.fetchedAt) >= indexerSearchTTL {
-			delete(indexerSearchCache.entries, k)
+			delete(h.cache.entries, k)
 		}
 	}
-	indexerSearchCache.entries[key] = indexerSearchEntry{data: data, fetchedAt: time.Now()}
-	indexerSearchCache.mu.Unlock()
+	h.cache.entries[trimmed] = indexerSearchEntry{data: data, fetchedAt: time.Now()}
+	h.cache.mu.Unlock()
 
 	return data, nil
 }
 
+// ---- indexer count cache ----
+
+type indexerCountCache struct {
+	mu        sync.Mutex
+	count     *int
+	fetchedAt time.Time
+}
+
+const indexerCountTTL = 5 * time.Minute
+
+func (h *Handler) getIndexerCount() *int {
+	h.idxCache.mu.Lock()
+	defer h.idxCache.mu.Unlock()
+	if h.idxCache.count != nil && time.Since(h.idxCache.fetchedAt) < indexerCountTTL {
+		return h.idxCache.count
+	}
+	_, _, prowlarrKey := h.Services.Keys()
+	if prowlarrKey == "" {
+		return h.idxCache.count
+	}
+	data, err := h.Services.ArrGet(h.ProwlarrURL, prowlarrKey, "/api/v1/indexer")
+	if err != nil {
+		return h.idxCache.count
+	}
+	var indexers []map[string]any
+	if json.Unmarshal(data, &indexers) != nil {
+		return h.idxCache.count
+	}
+	n := len(indexers)
+	h.idxCache.count = &n
+	h.idxCache.fetchedAt = time.Now()
+	return h.idxCache.count
+}
+
+func (h *Handler) invalidateIndexerCount() {
+	h.idxCache.mu.Lock()
+	h.idxCache.fetchedAt = time.Time{}
+	h.idxCache.mu.Unlock()
+}
+
+// ---- SearchResult type ----
+
+// SearchResult is the JSON response type for the unified search endpoint.
 type SearchResult struct {
 	Type     string `json:"type"` // "movie" or "series"
 	Title    string `json:"title"`
@@ -88,7 +168,10 @@ type SearchResult struct {
 	SeasonCount   int      `json:"seasonCount,omitempty"` // series only
 }
 
-func handleSearch(w http.ResponseWriter, r *http.Request) {
+// ---- Handlers ----
+
+// HandleSearch is the unified TMDB/TVDB/Prowlarr search handler.
+func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -107,24 +190,22 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	sonarrKey, radarrKey, prowlarrKey := services.Keys()
-
-	// searchMode is initialised once at startup (see initSearchMode); no per-request
-	// .env read needed — the value is stable for the lifetime of the process.
+	sonarrKey, radarrKey, prowlarrKey := h.Services.Keys()
+	_ = prowlarrKey // used below in indexer mode
 
 	// Search Radarr (movies)
 	if typeFilter != "series" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
+			data, err := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
 			if err != nil {
 				slog.Error("radarr search error", "component", "search", "error", err)
 				return
 			}
 
 			// Get existing movies to check "added" status
-			existingData, _ := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
+			existingData, _ := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie")
 			existingIDs := make(map[int]bool)
 			var existing []map[string]any
 			if json.Unmarshal(existingData, &existing) == nil {
@@ -163,13 +244,13 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
+			data, err := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
 			if err != nil {
 				slog.Error("sonarr search error", "component", "search", "error", err)
 				return
 			}
 
-			existingData, _ := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series")
+			existingData, _ := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series")
 			existingIDs := make(map[int]bool)
 			var existing []map[string]any
 			if json.Unmarshal(existingData, &existing) == nil {
@@ -212,11 +293,11 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Search Prowlarr indexers (indexer mode only)
 	var availTmdbIDs map[int]bool // nil = don't filter (error or not in indexer mode)
 	var availTvdbIDs map[int]bool
-	if searchMode == "indexer" {
+	if h.searchMode == "indexer" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := cachedIndexerSearch(prowlarrURL, prowlarrKey, q)
+			data, err := h.cachedIndexerSearch(q)
 			if err != nil {
 				slog.Warn("prowlarr search unavailable, degrading to unfiltered results", "component", "search", "error", err)
 				return // nil maps = no filtering
@@ -245,7 +326,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	// Filter to indexer availability when in indexer mode
-	if searchMode == "indexer" && availTmdbIDs != nil {
+	if h.searchMode == "indexer" && availTmdbIDs != nil {
 		filtered := movies[:0]
 		for _, m := range movies {
 			if availTmdbIDs[m.TmdbID] {
@@ -254,7 +335,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		movies = filtered
 	}
-	if searchMode == "indexer" && availTvdbIDs != nil {
+	if h.searchMode == "indexer" && availTvdbIDs != nil {
 		filtered := series[:0]
 		for _, s := range series {
 			if availTvdbIDs[s.TvdbID] {
@@ -281,7 +362,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, map[string]any{"results": results})
 }
 
-func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
+// HandleSearchAdd handles adding a movie or series to Radarr/Sonarr.
+func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -311,13 +393,13 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch req.Type {
 	case "movie":
-		arrID, err = addMovieInternal(req.TmdbID, radarrProfileID, radarrRoot)
+		arrID, err = h.addMovieInternal(req.TmdbID, radarrProfileID, radarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	case "series":
-		arrID, err = addSeriesInternal(req.TvdbID, sonarrProfileID, sonarrRoot)
+		arrID, err = h.addSeriesInternal(req.TvdbID, sonarrProfileID, sonarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 			return
@@ -333,9 +415,9 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 // addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.
 // If profileID is 0 the first available quality profile is used.
 // If rootPath is "" the first radarr library's container path is used.
-func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
-	_, radarrKey, _ := services.Keys()
-	data, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
+func (h *Handler) addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
+	_, radarrKey, _ := h.Services.Keys()
+	data, err := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
 	if err != nil {
 		return 0, fmt.Errorf("look up movie: %w", err)
 	}
@@ -345,7 +427,7 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 	}
 
 	if profileID == 0 {
-		profData, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
+		profData, err := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/qualityprofile")
 		if err == nil {
 			var profiles []map[string]any
 			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
@@ -359,7 +441,7 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = libHandler.FirstLibraryPath("radarr", "/media/movies")
+		rootPath = h.LibHandler.FirstLibraryPath("radarr", "/media/movies")
 	}
 
 	payload := map[string]any{
@@ -372,21 +454,21 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 			"searchForMovie": true,
 		},
 	}
-	resp, err := services.ArrPost(radarrURL, radarrKey, "/api/v3/movie", payload)
+	resp, err := h.Services.ArrPost(h.RadarrURL, radarrKey, "/api/v3/movie", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add movie: %w", err)
 	}
 	var added map[string]any
-	json.Unmarshal(resp, &added)
+	json.Unmarshal(resp, &added) //nolint:errcheck
 	return int(floatVal(added, "id")), nil
 }
 
 // addSeriesInternal adds a series to Sonarr and returns the Sonarr internal ID.
 // If profileID is 0 the first available quality profile is used.
 // If rootPath is "" the first sonarr library's container path is used.
-func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
-	sonarrKey, _, _ := services.Keys()
-	data, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
+func (h *Handler) addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
+	sonarrKey, _, _ := h.Services.Keys()
+	data, err := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
 	if err != nil {
 		return 0, fmt.Errorf("look up series: %w", err)
 	}
@@ -397,7 +479,7 @@ func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 	show := shows[0]
 
 	if profileID == 0 {
-		profData, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		profData, err := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/qualityprofile")
 		if err == nil {
 			var profiles []map[string]any
 			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
@@ -411,7 +493,7 @@ func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = libHandler.FirstLibraryPath("sonarr", "/media/tv")
+		rootPath = h.LibHandler.FirstLibraryPath("sonarr", "/media/tv")
 	}
 
 	payload := map[string]any{
@@ -425,24 +507,24 @@ func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 			"searchForMissingEpisodes": true,
 		},
 	}
-	resp, err := services.ArrPost(sonarrURL, sonarrKey, "/api/v3/series", payload)
+	resp, err := h.Services.ArrPost(h.SonarrURL, sonarrKey, "/api/v3/series", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add series: %w", err)
 	}
 	var added map[string]any
-	json.Unmarshal(resp, &added)
+	json.Unmarshal(resp, &added) //nolint:errcheck
 	return int(floatVal(added, "id")), nil
 }
 
-// handleArrMeta returns quality profiles and root folders from Radarr and Sonarr.
+// HandleArrMeta returns quality profiles and root folders from Radarr and Sonarr.
 // Used by the admin settings UI to populate request profile dropdowns.
-func handleArrMeta(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Services.Keys()
 
 	type profileEntry struct {
 		ID   int    `json:"id"`
@@ -457,7 +539,7 @@ func handleArrMeta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fetchProfiles := func(baseURL, apiKey string) []profileEntry {
-		data, err := services.ArrGet(baseURL, apiKey, "/api/v3/qualityprofile")
+		data, err := h.Services.ArrGet(baseURL, apiKey, "/api/v3/qualityprofile")
 		if err != nil {
 			return nil
 		}
@@ -475,7 +557,7 @@ func handleArrMeta(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 	fetchRoots := func(baseURL, apiKey string) []rootEntry {
-		data, err := services.ArrGet(baseURL, apiKey, "/api/v3/rootfolder")
+		data, err := h.Services.ArrGet(baseURL, apiKey, "/api/v3/rootfolder")
 		if err != nil {
 			return nil
 		}
@@ -492,15 +574,17 @@ func handleArrMeta(w http.ResponseWriter, r *http.Request) {
 
 	httputil.WriteJSON(w, map[string]any{
 		"radarr": arrMeta{
-			QualityProfiles: fetchProfiles(radarrURL, radarrKey),
-			RootFolders:     fetchRoots(radarrURL, radarrKey),
+			QualityProfiles: fetchProfiles(h.RadarrURL, radarrKey),
+			RootFolders:     fetchRoots(h.RadarrURL, radarrKey),
 		},
 		"sonarr": arrMeta{
-			QualityProfiles: fetchProfiles(sonarrURL, sonarrKey),
-			RootFolders:     fetchRoots(sonarrURL, sonarrKey),
+			QualityProfiles: fetchProfiles(h.SonarrURL, sonarrKey),
+			RootFolders:     fetchRoots(h.SonarrURL, sonarrKey),
 		},
 	})
 }
+
+// ---- private helpers ----
 
 // extractPoster returns the remoteUrl of the first poster image in an *arr
 // images array, or "" if none is found.
@@ -548,17 +632,16 @@ func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
 }
 
-// arrFulfiller is the production clients.Fulfiller backed by Sonarr/Radarr.
-type arrFulfiller struct{}
-
-// NewArrFulfiller returns a clients.Fulfiller that delegates to the existing
-// package-level addMovieInternal/addSeriesInternal helpers.
-func NewArrFulfiller() clients.Fulfiller { return &arrFulfiller{} }
-
-func (f *arrFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
-	return addMovieInternal(tmdbID, profileID, rootPath)
+func strVal(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
-func (f *arrFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
-	return addSeriesInternal(tvdbID, profileID, rootPath)
+func floatVal(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
 }

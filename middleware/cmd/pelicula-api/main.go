@@ -30,6 +30,7 @@ import (
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/missingwatcher"
+	"pelicula-api/internal/app/search"
 	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/app/settings"
 	appsetup "pelicula-api/internal/app/setup"
@@ -169,7 +170,13 @@ func main() {
 		}
 	}
 	svc := appservices.New(cfg, jellyfinKey)
-	initSearchMode()
+
+	tmdbKey := ""
+	searchMode := ""
+	if vars, err := parseEnvFile(envPath); err == nil {
+		tmdbKey = vars["TMDB_API_KEY"]
+		searchMode = vars["SEARCH_MODE"]
+	}
 
 	libCfg, err := library.LoadLibraries("/config/pelicula")
 	if err != nil {
@@ -224,8 +231,10 @@ func main() {
 		jfapp.ServiceUser,
 	)
 
+	searchHandler := search.New(svc, sonarrURL, radarrURL, prowlarrURL, libHandler, tmdbKey, searchMode)
+
 	invites := peligrosa.NewInviteStore(db, jellyfinClient)
-	requests := peligrosa.NewRequestStore(reporeqs.New(db), NewArrFulfiller())
+	requests := peligrosa.NewRequestStore(reporeqs.New(db), search.NewArrFulfiller(searchHandler))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -401,11 +410,11 @@ func main() {
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(app.hooksHandler.HandleUpdatesProxy)))
 
 	// admin only: *arr metadata for settings dropdowns
-	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(handleArrMeta)))
+	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(searchHandler.HandleArrMeta)))
 
 	// manager+: search and add content, pause/resume downloads
-	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(handleSearch)))
-	mux.Handle("/api/pelicula/search/add", auth.GuardManager(http.HandlerFunc(handleSearchAdd)))
+	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(searchHandler.HandleSearch)))
+	mux.Handle("/api/pelicula/search/add", auth.GuardManager(http.HandlerFunc(searchHandler.HandleSearchAdd)))
 	mux.Handle("/api/pelicula/downloads/pause", auth.GuardManager(http.HandlerFunc(app.dlHandler.HandleDownloadPause)))
 
 	// admin only: destructive actions
