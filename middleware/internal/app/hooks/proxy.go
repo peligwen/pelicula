@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"pelicula-api/httputil"
@@ -72,7 +71,7 @@ func (h *Handler) HandleJellyfinRefresh(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Verify Procula API key so only Procula can trigger refreshes.
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+	if key := strings.TrimSpace(h.ProculaAPIKey); key != "" {
 		provided := r.Header.Get("X-API-Key")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(key)) == 0 {
 			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
@@ -164,7 +163,7 @@ func (h *Handler) proxyProculaMutate(path string) http.HandlerFunc {
 		if ct := r.Header.Get("Content-Type"); ct != "" {
 			req.Header.Set("Content-Type", ct)
 		}
-		if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
+		if key := strings.TrimSpace(h.ProculaAPIKey); key != "" {
 			req.Header.Set("X-API-Key", key)
 		}
 		resp, err := h.httpClient().Do(req)

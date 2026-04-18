@@ -266,6 +266,7 @@ func main() {
 			Procula:                procClient,
 			HTTPClient:             &http.Client{Timeout: 10 * time.Second},
 			ProculaURL:             proculaURL,
+			ProculaAPIKey:          cfg.ProculaAPIKey,
 			SonarrURL:              sonarrURL,
 			RadarrURL:              radarrURL,
 			GetKeys:                func() (string, string, string) { return svc.Keys() },

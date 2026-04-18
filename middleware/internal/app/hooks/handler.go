@@ -28,6 +28,10 @@ type Handler struct {
 	// Set from PROCULA_URL env var by the caller.
 	ProculaURL string
 
+	// ProculaAPIKey is the API key for authenticating mutating requests to Procula.
+	// Set from PROCULA_API_KEY env var by the caller.
+	ProculaAPIKey string
+
 	// SonarrURL and RadarrURL are used when fetching *arr history for the
 	// notifications endpoint.
 	SonarrURL string
