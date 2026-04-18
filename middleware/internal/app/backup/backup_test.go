@@ -12,6 +12,7 @@ import (
 
 	"pelicula-api/internal/app/backup"
 	"pelicula-api/internal/peligrosa"
+	reporeqs "pelicula-api/internal/repo/requests"
 
 	_ "modernc.org/sqlite"
 )
@@ -408,7 +409,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 func TestRequestStoreInsertFull(t *testing.T) {
 	t.Parallel()
 	db := testDB(t)
-	store := peligrosa.NewRequestStore(db, &stubFulfiller{})
+	store := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
 
 	now := time.Now().UTC().Truncate(time.Second)
 	req := peligrosa.RequestExport{

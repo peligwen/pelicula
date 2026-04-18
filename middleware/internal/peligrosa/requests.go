@@ -5,7 +5,7 @@
 package peligrosa
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,7 +17,7 @@ import (
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"pelicula-api/internal/config"
-	"pelicula-api/internal/repo/dbutil"
+	reporeqs "pelicula-api/internal/repo/requests"
 )
 
 // RequestState represents the lifecycle state of a media request.
@@ -97,168 +97,87 @@ type RequestExport struct {
 // RequestStore persists media requests in SQLite.
 // SQLite handles concurrency; no additional mutex is needed.
 type RequestStore struct {
-	db        *sql.DB
+	repo      *reporeqs.Store
 	fulfiller clients.Fulfiller
 }
 
-func NewRequestStore(db *sql.DB, fulfiller clients.Fulfiller) *RequestStore {
-	return &RequestStore{db: db, fulfiller: fulfiller}
+func NewRequestStore(repo *reporeqs.Store, fulfiller clients.Fulfiller) *RequestStore {
+	return &RequestStore{repo: repo, fulfiller: fulfiller}
 }
 
-// loadHistory fetches the event history for a request from request_events.
-func (s *RequestStore) loadHistory(id string) ([]RequestEvent, error) {
-	rows, err := s.db.Query(
-		`SELECT at, state, actor, note FROM request_events WHERE request_id = ? ORDER BY at`,
-		id,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var history []RequestEvent
-	for rows.Next() {
-		var ev RequestEvent
-		var atStr string
-		if err := rows.Scan(&atStr, &ev.State, &ev.Actor, &ev.Note); err != nil {
-			continue
+// toMediaRequest converts a repo Request to a peligrosa MediaRequest.
+func toMediaRequest(r *reporeqs.Request) *MediaRequest {
+	history := make([]RequestEvent, len(r.History))
+	for i, ev := range r.History {
+		history[i] = RequestEvent{
+			At:    ev.At,
+			State: RequestState(ev.State),
+			Actor: ev.Actor,
+			Note:  ev.Note,
 		}
-		if t, parseErr := dbutil.ParseTime(atStr); parseErr == nil {
-			ev.At = t
-		}
-		history = append(history, ev)
 	}
-	return history, nil
+	return &MediaRequest{
+		ID:          r.ID,
+		Type:        r.Type,
+		TmdbID:      r.TmdbID,
+		TvdbID:      r.TvdbID,
+		Title:       r.Title,
+		Year:        r.Year,
+		Poster:      r.Poster,
+		RequestedBy: r.RequestedBy,
+		State:       RequestState(r.State),
+		Reason:      r.Reason,
+		ArrID:       r.ArrID,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
+		History:     history,
+	}
 }
 
-// scanRequest reads one row from requests and populates its History.
-func (s *RequestStore) scanRequest(row *sql.Row) (*MediaRequest, error) {
-	var req MediaRequest
-	var createdAt, updatedAt string
-	var poster, reason sql.NullString
-	var arrID sql.NullInt64
-
-	err := row.Scan(
-		&req.ID, &req.Type, &req.TmdbID, &req.TvdbID,
-		&req.Title, &req.Year, &poster,
-		&req.RequestedBy, &req.State, &reason, &arrID,
-		&createdAt, &updatedAt,
-	)
-	if err != nil {
-		return nil, err
+// toRepoRequest converts a peligrosa MediaRequest to a repo Request.
+func toRepoRequest(m *MediaRequest) *reporeqs.Request {
+	history := make([]reporeqs.Event, len(m.History))
+	for i, ev := range m.History {
+		history[i] = reporeqs.Event{
+			RequestID: m.ID,
+			At:        ev.At,
+			State:     reporeqs.State(ev.State),
+			Actor:     ev.Actor,
+			Note:      ev.Note,
+		}
 	}
-	if poster.Valid {
-		req.Poster = poster.String
+	return &reporeqs.Request{
+		ID:          m.ID,
+		Type:        m.Type,
+		TmdbID:      m.TmdbID,
+		TvdbID:      m.TvdbID,
+		Title:       m.Title,
+		Year:        m.Year,
+		Poster:      m.Poster,
+		RequestedBy: m.RequestedBy,
+		State:       reporeqs.State(m.State),
+		Reason:      m.Reason,
+		ArrID:       m.ArrID,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+		History:     history,
 	}
-	if reason.Valid {
-		req.Reason = reason.String
-	}
-	if arrID.Valid {
-		req.ArrID = int(arrID.Int64)
-	}
-	if t, parseErr := dbutil.ParseTime(createdAt); parseErr == nil {
-		req.CreatedAt = t
-	}
-	if t, parseErr := dbutil.ParseTime(updatedAt); parseErr == nil {
-		req.UpdatedAt = t
-	}
-
-	history, _ := s.loadHistory(req.ID)
-	if history == nil {
-		history = []RequestEvent{}
-	}
-	req.History = history
-	return &req, nil
 }
 
 func (s *RequestStore) All() []*MediaRequest {
-	rows, err := s.db.Query(
-		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
-		        requested_by, state, reason, arr_id, created_at, updated_at
-		 FROM requests ORDER BY created_at`,
-	)
+	all, err := s.repo.All(context.Background())
 	if err != nil {
+		slog.Warn("requests: All query error", "component", "requests", "error", err)
 		return []*MediaRequest{}
 	}
-
-	// Collect rows first, then close before making additional queries.
-	// (SQLite MaxOpenConns=1: keeping rows open while issuing another query deadlocks.)
-	var result []*MediaRequest
-	var ids []string
-	for rows.Next() {
-		var req MediaRequest
-		var createdAt, updatedAt string
-		var poster, reason sql.NullString
-		var arrID sql.NullInt64
-
-		if err := rows.Scan(
-			&req.ID, &req.Type, &req.TmdbID, &req.TvdbID,
-			&req.Title, &req.Year, &poster,
-			&req.RequestedBy, &req.State, &reason, &arrID,
-			&createdAt, &updatedAt,
-		); err != nil {
-			continue
-		}
-		if poster.Valid {
-			req.Poster = poster.String
-		}
-		if reason.Valid {
-			req.Reason = reason.String
-		}
-		if arrID.Valid {
-			req.ArrID = int(arrID.Int64)
-		}
-		req.CreatedAt, _ = dbutil.ParseTime(createdAt)
-		req.UpdatedAt, _ = dbutil.ParseTime(updatedAt)
-		result = append(result, &req)
-		ids = append(ids, req.ID)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("requests: all rows iteration error", "component", "requests", "error", err)
-	}
-	rows.Close() // must close before history query
-
-	if len(result) == 0 {
-		return []*MediaRequest{}
-	}
-
-	// Fetch all history events in one query and group by request_id in memory,
-	// avoiding an N+1 pattern (one loadHistory call per request row).
-	historyMap := make(map[string][]RequestEvent, len(ids))
-	for _, id := range ids {
-		historyMap[id] = []RequestEvent{} // ensure every request has a non-nil slice
-	}
-
-	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-	query := "SELECT request_id, at, state, actor, note FROM request_events WHERE request_id IN (" +
-		strings.Join(placeholders, ",") + ") ORDER BY at"
-	evRows, err := s.db.Query(query, args...)
-	if err == nil {
-		defer evRows.Close()
-		for evRows.Next() {
-			var ev RequestEvent
-			var requestID, atStr string
-			if err := evRows.Scan(&requestID, &atStr, &ev.State, &ev.Actor, &ev.Note); err != nil {
-				continue
-			}
-			ev.At, _ = dbutil.ParseTime(atStr)
-			historyMap[requestID] = append(historyMap[requestID], ev)
-		}
-	}
-
-	for _, req := range result {
-		req.History = historyMap[req.ID]
+	result := make([]*MediaRequest, len(all))
+	for i, r := range all {
+		result[i] = toMediaRequest(r)
 	}
 	return result
 }
 
 // findActive returns the first non-terminal request matching type + tmdbID or tvdbID.
-// Must be called without holding any lock.
 func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequest {
 	all := s.All()
 	for _, r := range all {
@@ -276,34 +195,27 @@ func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequ
 }
 
 func (s *RequestStore) get(id string) *MediaRequest {
-	req, err := s.scanRequest(s.db.QueryRow(
-		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
-		        requested_by, state, reason, arr_id, created_at, updated_at
-		 FROM requests WHERE id = ?`, id,
-	))
+	r, err := s.repo.Get(context.Background(), id)
 	if err != nil {
 		return nil
 	}
-	return req
+	return toMediaRequest(r)
 }
 
 // insertEvent appends a state-transition event to request_events.
 func (s *RequestStore) insertEvent(id string, ev RequestEvent) error {
-	_, err := s.db.Exec(
-		`INSERT INTO request_events (request_id, at, state, actor, note) VALUES (?, ?, ?, ?, ?)`,
-		id, ev.At.UTC().Format(time.RFC3339Nano), string(ev.State), ev.Actor, ev.Note,
-	)
-	return err
+	return s.repo.InsertEvent(context.Background(), reporeqs.Event{
+		RequestID: id,
+		At:        ev.At,
+		State:     reporeqs.State(ev.State),
+		Actor:     ev.Actor,
+		Note:      ev.Note,
+	})
 }
 
 // updateRequest updates mutable fields on an existing request row.
 func (s *RequestStore) updateRequest(req *MediaRequest) error {
-	_, err := s.db.Exec(
-		`UPDATE requests SET state=?, reason=?, arr_id=?, updated_at=? WHERE id=?`,
-		string(req.State), req.Reason, req.ArrID,
-		req.UpdatedAt.UTC().Format(time.RFC3339Nano), req.ID,
-	)
-	return err
+	return s.repo.Update(context.Background(), toRepoRequest(req))
 }
 
 func generateRequestID() string {
@@ -320,25 +232,33 @@ func generateRequestID() string {
 // fields including the ID, timestamps, and event history. Silently succeeds
 // if the ID already exists (idempotent restore).
 func (s *RequestStore) InsertFull(req RequestExport) error {
-	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
-		                                 requested_by, state, reason, arr_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
-		req.RequestedBy, string(req.State), req.Reason, req.ArrID,
-		req.CreatedAt.UTC().Format(time.RFC3339Nano), req.UpdatedAt.UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		return err
+	history := make([]reporeqs.Event, len(req.History))
+	for i, ev := range req.History {
+		history[i] = reporeqs.Event{
+			RequestID: req.ID,
+			At:        ev.At,
+			State:     reporeqs.State(ev.State),
+			Actor:     ev.Actor,
+			Note:      ev.Note,
+		}
 	}
-	// Insert history events, ignoring duplicates.
-	for _, ev := range req.History {
-		s.db.Exec( //nolint:errcheck — best-effort
-			`INSERT OR IGNORE INTO request_events (request_id, at, state, actor, note) VALUES (?, ?, ?, ?, ?)`,
-			req.ID, ev.At.UTC().Format(time.RFC3339Nano), string(ev.State), ev.Actor, ev.Note,
-		)
+	r := &reporeqs.Request{
+		ID:          req.ID,
+		Type:        req.Type,
+		TmdbID:      req.TmdbID,
+		TvdbID:      req.TvdbID,
+		Title:       req.Title,
+		Year:        req.Year,
+		Poster:      req.Poster,
+		RequestedBy: req.RequestedBy,
+		State:       reporeqs.State(req.State),
+		Reason:      req.Reason,
+		ArrID:       req.ArrID,
+		CreatedAt:   req.CreatedAt,
+		UpdatedAt:   req.UpdatedAt,
+		History:     history,
 	}
-	return nil
+	return s.repo.InsertFull(context.Background(), r)
 }
 
 // MarkAvailable transitions a request to "available" when its content has been imported.
@@ -482,15 +402,7 @@ func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   now,
 	}
 
-	_, err := p.Requests.db.Exec(
-		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
-		                       requested_by, state, reason, arr_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?)`,
-		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
-		req.RequestedBy, string(req.State),
-		req.CreatedAt.Format(time.RFC3339Nano), req.UpdatedAt.Format(time.RFC3339Nano),
-	)
-	if err != nil {
+	if err := p.Requests.repo.Insert(context.Background(), toRepoRequest(req)); err != nil {
 		slog.Error("failed to save request", "component", "requests", "error", err)
 		httputil.WriteError(w, "failed to save request", http.StatusInternalServerError)
 		return
@@ -681,15 +593,12 @@ func (p *Deps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id stri
 
 // HandleRequestDelete hard-deletes a media request record.
 func (rs *RequestStore) HandleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
-	res, err := rs.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
-	if err != nil {
+	if err := rs.repo.Delete(context.Background(), id); err == reporeqs.ErrNotFound {
+		httputil.WriteError(w, "request not found", http.StatusNotFound)
+		return
+	} else if err != nil {
 		slog.Error("failed to delete request", "component", "requests", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	}
 	httputil.WriteJSON(w, map[string]string{"status": "deleted"})

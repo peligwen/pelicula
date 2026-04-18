@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"pelicula-api/internal/peligrosa"
+	reporeqs "pelicula-api/internal/repo/requests"
 )
 
 // migrateTestFulfiller is a no-op Fulfiller for migrate tests.
@@ -201,7 +202,7 @@ func TestMigrateRequestsJSON_Inserts(t *testing.T) {
 		t.Error("expected requests.json to be renamed")
 	}
 
-	store := peligrosa.NewRequestStore(db, &migrateTestFulfiller{})
+	store := peligrosa.NewRequestStore(reporeqs.New(db), &migrateTestFulfiller{})
 	all := store.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(all))

@@ -30,6 +30,7 @@ import (
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/peligrosa"
+	reporeqs "pelicula-api/internal/repo/requests"
 
 	_ "modernc.org/sqlite"
 )
@@ -194,7 +195,7 @@ func main() {
 	)
 
 	invites := peligrosa.NewInviteStore(db, jellyfinClient)
-	requests := peligrosa.NewRequestStore(db, NewArrFulfiller())
+	requests := peligrosa.NewRequestStore(reporeqs.New(db), NewArrFulfiller())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

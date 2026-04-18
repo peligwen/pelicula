@@ -7,13 +7,15 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	reporeqs "pelicula-api/internal/repo/requests"
 )
 
 // newRequestStore returns a RequestStore backed by a test database.
 func newRequestStore(t *testing.T) *RequestStore {
 	t.Helper()
 	db := testDB(t)
-	return NewRequestStore(db, &fakeFulfiller{})
+	return NewRequestStore(reporeqs.New(db), &fakeFulfiller{})
 }
 
 // insertRequest is a test helper that inserts a MediaRequest directly into the DB.
@@ -27,7 +29,7 @@ func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
 	if updatedAt.IsZero() {
 		updatedAt = now
 	}
-	_, err := s.db.Exec(
+	_, err := s.repo.DB().Exec(
 		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
 		                       requested_by, state, reason, arr_id, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -55,7 +57,7 @@ func TestNewRequestStore_Empty(t *testing.T) {
 func TestNewRequestStore_LoadsExistingData(t *testing.T) {
 	// Use a shared DB so data is visible across two store instances.
 	db := testDB(t)
-	s1 := NewRequestStore(db, &fakeFulfiller{})
+	s1 := NewRequestStore(reporeqs.New(db), &fakeFulfiller{})
 
 	req := &MediaRequest{
 		ID:        "req_123_abc",
@@ -68,7 +70,7 @@ func TestNewRequestStore_LoadsExistingData(t *testing.T) {
 	}
 	insertRequest(t, s1, req)
 
-	s2 := NewRequestStore(db, &fakeFulfiller{})
+	s2 := NewRequestStore(reporeqs.New(db), &fakeFulfiller{})
 	all := s2.All()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request after load, got %d", len(all))
