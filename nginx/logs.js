@@ -1,6 +1,7 @@
 // logs.js — Logs tab: aggregated container log stream, coloured by service.
-(function () {
 'use strict';
+
+import { get } from '/api.js';
 
 const ALL_SERVICES = [
     'pelicula-api', 'procula', 'nginx',
@@ -11,12 +12,10 @@ const ALL_SERVICES = [
 const logsState = {
     loaded: false,
     loading: false,
-    activeFilter: null, // null = show all; string = show only that service
+    activeFilter: null,
     lastEntries: [],
     userScrolled: false,
 };
-
-function lfetch(url) { return fetch(url, { credentials: 'same-origin' }); }
 
 function initScrollAnchor(out) {
     if (out._scrollListenerAttached) return;
@@ -35,9 +34,8 @@ async function loadLogs() {
     out.textContent = 'Loading\u2026';
     const services = logsState.activeFilter || ALL_SERVICES.join(',');
     try {
-        const res = await lfetch('/api/pelicula/logs/aggregate?tail=200&services=' + encodeURIComponent(services));
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
+        const data = await get('/api/pelicula/logs/aggregate?tail=200&services=' + encodeURIComponent(services));
+        if (data === null) { out.textContent = 'Session expired.'; return; }
         logsState.lastEntries = data.entries || [];
         renderLogs(out, logsState.lastEntries);
         logsState.loaded = true;
@@ -59,7 +57,6 @@ function renderLogs(out, entries) {
         const ts = e.ts ? new Date(e.ts) : null;
         const isValid = ts && !isNaN(ts);
 
-        // date separator — resets hour tracking so no redundant hour sep follows
         const dateStr = isValid ? ts.toLocaleDateString('en-US', {month:'short', day:'numeric'}) : null;
         if (dateStr && dateStr !== lastDate) {
             const sep = document.createElement('div');
@@ -69,7 +66,6 @@ function renderLogs(out, entries) {
             lastDate = dateStr;
             lastHour = isValid ? ts.getHours() : null;
         } else if (isValid) {
-            // hour separator — only within the same day, skip the top-of-day hour
             const hour = ts.getHours();
             if (lastHour !== null && hour !== lastHour) {
                 const sep = document.createElement('div');
@@ -114,8 +110,6 @@ function renderFilters() {
         chip.className = 'logs-filter-chip logs-svc-' + svc + (isActive ? ' active' : '');
         chip.textContent = svc;
         chip.addEventListener('click', () => {
-            // clicking the active filter clears it (back to show all);
-            // clicking any other sets it as the exclusive filter
             logsState.activeFilter = logsState.activeFilter === svc ? null : svc;
             renderFilters();
             const out = document.getElementById('logs-stream');
@@ -130,13 +124,11 @@ function renderFilters() {
     wrap.replaceChildren(frag);
 }
 
-// logsRefresh is called by the refresh button in the header.
 window.logsRefresh = function() {
     logsState.userScrolled = false;
     loadLogs();
 };
 
-// renderLogsFromSSE is called by sse.js on each 'logs' SSE event.
 window.renderLogsFromSSE = function(data) {
     const out = document.getElementById('logs-stream');
     if (!out) return;
@@ -154,8 +146,6 @@ window.openLogsSheet = function () {
     logsState.userScrolled = false;
     renderFilters();
     if (window.sseIsActive && window.sseIsActive()) {
-        // SSE is active — render from cache immediately if we have it,
-        // otherwise fall through to a one-time fetch so the sheet isn't blank.
         if (logsState.lastEntries.length > 0) {
             const out = document.getElementById('logs-stream');
             if (out) renderLogs(out, logsState.lastEntries);
@@ -171,5 +161,3 @@ window.closeLogsSheet = function () {
     if (sheet) sheet.classList.add('hidden');
     if (backdrop) backdrop.classList.add('hidden');
 };
-
-})();

@@ -1,6 +1,20 @@
+import { initStore, mount, html, raw, router, openDrawer, closeDrawer } from './framework.js';
+import { get, post, put, del } from './api.js';
+import './search.js';
+import './catalog.js';
+import './settings.js';
+import './users.js';
+import './downloads.js';
+import './activity.js';
+import './logs.js';
+import './jobs.js';
+import './services.js';
+import './notifications.js';
+import './sse.js';
+
 // ── App store ────────────────────────────
 // Initialised here; framework.js must be loaded first.
-const store = PeliculaFW.initStore({
+const store = initStore({
     role: 'admin',        // 'admin' | 'manager' | 'viewer'
     username: '',
 });
@@ -18,23 +32,16 @@ function _effectiveLibraryPath(name, extPath, slug) {
 async function _ensureLibraryDir() {
     if (_libraryDir) return;
     try {
-        const r = await tfetch('/api/pelicula/settings');
+        const r = await get('/api/pelicula/settings');
         if (r.ok) { const s = await r.json(); _libraryDir = s.library_dir || ''; }
     } catch {}
-}
-// ── Resilient fetch (auto-abort after ms) ──
-function tfetch(url, opts, ms) {
-    ms = ms || 4000;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), ms);
-    return fetch(url, Object.assign({}, opts, {signal: ctrl.signal})).finally(() => clearTimeout(t));
 }
 
 // ── Auth ──────────────────────────────────
 
 async function checkAuth() {
     try {
-        const res = await tfetch('/api/pelicula/auth/check');
+        const res = await get('/api/pelicula/auth/check');
         const data = await res.json();
         if (!data.valid) {
             document.getElementById('login-overlay').classList.remove('hidden');
@@ -136,7 +143,7 @@ document.getElementById('login-form').addEventListener('submit', e => { e.preven
 // ── Status + Indexer check ────────────────
 async function checkStatus() {
     try {
-        const res = await tfetch('/api/pelicula/status');
+        const res = await get('/api/pelicula/status');
         if (!res.ok) return;
         const data = await res.json();
         const statusBar = document.getElementById('indexer-status');
@@ -202,17 +209,14 @@ function initSidePanelState() {
     setSidePanelCollapsed(_isMobileViewport());
 }
 
-// Toggle button opens/closes the panel.
-document.addEventListener('DOMContentLoaded', () => {
-    initSidePanelState();
-    const toggle = document.getElementById('side-toggle');
-    if (toggle) {
-        toggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleSidePanel();
-        });
-    }
-});
+initSidePanelState();
+const toggle = document.getElementById('side-toggle');
+if (toggle) {
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleSidePanel();
+    });
+}
 
 // Click-outside-to-close: only on mobile, only when panel is currently open.
 document.addEventListener('click', (e) => {
@@ -237,11 +241,11 @@ document.addEventListener('click', (e) => {
 
 async function checkNotifications() {
     try {
-        const res = await tfetch('/api/pelicula/notifications');
+        const res = await get('/api/pelicula/notifications');
         if (!res.ok) return;
         const events = await res.json();
-        renderNotifications(events);
-        renderActivity(events);
+        window.renderNotifications(events);
+        window.renderActivity(events);
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
 
@@ -249,8 +253,8 @@ async function checkNotifications() {
 async function checkStorage() {
     try {
         const [storageRes, libsRes] = await Promise.all([
-            tfetch('/api/pelicula/storage'),
-            tfetch('/api/pelicula/libraries'),
+            get('/api/pelicula/storage'),
+            get('/api/pelicula/libraries'),
         ]);
         if (!storageRes.ok) return;
         const data = await storageRes.json();
@@ -269,7 +273,7 @@ async function checkStorage() {
 // Load threshold settings into the Settings lane (admin only, best-effort)
 async function loadStorageSettings() {
     try {
-        const res = await tfetch('/api/pelicula/procula-settings');
+        const res = await get('/api/pelicula/procula-settings');
         if (!res.ok) return;
         const cfg = await res.json();
         const warnEl = document.getElementById('sm-warn-pct');
@@ -286,11 +290,9 @@ async function saveStorageThreshold() {
     const crit = parseInt(document.getElementById('sm-crit-pct')?.value, 10);
     if (isNaN(warn) || isNaN(crit)) return;
     try {
-        const res = await tfetch('/api/pelicula/procula-settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ storage_warning_pct: warn, storage_critical_pct: crit })
-        });
+        const res = await post('/api/pelicula/procula-settings',
+            { storage_warning_pct: warn, storage_critical_pct: crit }
+        );
         if (res.ok) {
             ['sm-warn-pct', 'sm-crit-pct'].forEach(id => {
                 const el = document.getElementById(id);
@@ -306,7 +308,7 @@ async function scanStorageNow() {
     const btn = document.getElementById('storage-scan-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Scanning\u2026'; }
     try {
-        await tfetch('/api/pelicula/storage/scan', { method: 'POST' });
+        await post('/api/pelicula/storage/scan');
         await checkStorage();
     } catch (e) { console.warn('[pelicula] scan error:', e); }
     if (btn) { btn.disabled = false; btn.textContent = 'Scan now'; }
@@ -659,17 +661,9 @@ async function saveLibraryForm(slug, mode) {
     try {
         let res;
         if (mode === 'edit') {
-            res = await tfetch('/api/pelicula/libraries/' + encodeURIComponent(slug), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
+            res = await put('/api/pelicula/libraries/' + encodeURIComponent(slug), body);
         } else {
-            res = await tfetch('/api/pelicula/libraries', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
+            res = await post('/api/pelicula/libraries', body);
         }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -686,7 +680,7 @@ async function saveLibraryForm(slug, mode) {
 async function deleteLibraryFromLane(slug) {
     const errEl = document.getElementById('lib-form-error');
     try {
-        const res = await tfetch('/api/pelicula/libraries/' + encodeURIComponent(slug), { method: 'DELETE' });
+        const res = await del('/api/pelicula/libraries/' + encodeURIComponent(slug));
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             if (errEl) errEl.textContent = err.error || 'Failed to delete';
@@ -703,7 +697,7 @@ async function deleteLibraryFromLane(slug) {
 // ── Update checker ────────────────────────
 async function checkUpdates() {
     try {
-        const res = await fetch('/api/pelicula/updates');
+        const res = await get('/api/pelicula/updates');
         if (!res.ok) return;
         const data = await res.json();
         if (!data || typeof data !== 'object') return;
@@ -717,7 +711,7 @@ async function checkUpdates() {
 // ── Processing section ────────────────────
 async function checkProcessing() {
     try {
-        const res = await tfetch('/api/pelicula/processing');
+        const res = await get('/api/pelicula/processing');
         if (!res.ok) return;
         const data = await res.json();
         renderProcessing(data);
@@ -833,15 +827,15 @@ function renderJobCard(j) {
 
 async function retryJob(id) {
     try {
-        await fetch(`/api/procula/jobs/${id}/retry`, {method: 'POST'});
-        setTimeout(checkDownloads, 500);
+        await post(`/api/procula/jobs/${id}/retry`);
+        setTimeout(window.checkDownloads, 500);
     } catch (e) { console.warn('[pelicula] retry error:', e); }
 }
 
 async function cancelJob(id) {
     try {
-        await fetch(`/api/procula/jobs/${id}/cancel`, {method: 'POST'});
-        setTimeout(checkDownloads, 500);
+        await post(`/api/procula/jobs/${id}/cancel`);
+        setTimeout(window.checkDownloads, 500);
     } catch (e) { console.warn('[pelicula] cancel error:', e); }
 }
 
@@ -850,19 +844,15 @@ function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 async function resubJob(id) {
     try {
         // Resolve arr context from the job, then dispatch via the action bus.
-        const jobRes = await tfetch(`/api/pelicula/procula/jobs/${id}`);
+        const jobRes = await get(`/api/pelicula/procula/jobs/${id}`);
         if (!jobRes.ok) { console.warn('[pelicula] resub: job fetch failed', jobRes.status); return; }
         const job = await jobRes.json();
         const src = job.source || {};
         if (!src.arr_type || !src.arr_id) { console.warn('[pelicula] resub: missing arr context on job', id); return; }
-        const res = await tfetch('/api/pelicula/procula/actions', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                action: 'subtitle_search',
-                target: {arr_type: src.arr_type, arr_id: src.arr_id, episode_id: src.episode_id || 0},
-                params: {languages: ['en']},
-            }),
+        const res = await post('/api/pelicula/procula/actions', {
+            action: 'subtitle_search',
+            target: {arr_type: src.arr_type, arr_id: src.arr_id, episode_id: src.episode_id || 0},
+            params: {languages: ['en']},
         });
         if (!res.ok) console.warn('[pelicula] resub failed:', res.status);
     } catch (e) { console.warn('[pelicula] resub error:', e); }
@@ -875,13 +865,13 @@ let lastRefreshAt = 0;
 async function refresh() {
     console.log('[pelicula] refresh start');
     const results = await Promise.allSettled([
-        checkServices(), checkVPN(), checkDownloads(), checkStatus(),
-        checkNotifications(), checkStorage(), loadSessions(), checkHost()
+        window.checkServices(), window.checkVPN(), window.checkDownloads(), checkStatus(),
+        checkNotifications(), checkStorage(), window.loadSessions(), window.checkHost()
     ]);
     const failed = results.filter(r => r.status === 'rejected').length;
     console.log('[pelicula] refresh done' + (failed ? ' (' + failed + ' failed)' : ''));
     lastRefreshAt = Date.now();
-    updateTimestamp();
+    window.updateTimestamp();
     updateStaleBanner();
 }
 
@@ -906,6 +896,7 @@ function _ensureStorageExplorerLoaded() {
     if (window._seLoaded) return;
     window._seLoaded = true;
     const s = document.createElement('script');
+    s.type = 'module';
     s.src = '/import.js';
     s.onerror = () => {
         window._seLoaded = false;
@@ -945,7 +936,7 @@ function toggleStorageSettings() {
 }
 
 function openStorageExplorer() {
-    if (window.switchTab) switchTab('storage');
+    if (window.switchTab) window.switchTab('storage');
     switchStorageTab('explorer');
 }
 
@@ -956,7 +947,7 @@ function closeStorageExplorer() {
 async function checkVPNStatus() {
     try {
         if (document.querySelector('.vpn-banner')) return;
-        const res = await tfetch('/api/pelicula/status');
+        const res = await get('/api/pelicula/status');
         if (!res.ok) return;
         const data = await res.json();
         if (data.vpn_configured === false) {
@@ -998,6 +989,20 @@ window.closeLibraryModal     = closeLibraryModal;
 window.saveLibraryModal      = saveLibraryModal;
 window.deleteLibraryModal    = deleteLibraryModal;
 window.deleteLibraryFromLane = deleteLibraryFromLane;
+window.retryFromBtn          = retryFromBtn;
+window.cancelJobFromBtn      = cancelJobFromBtn;
+window.resubFromBtn          = resubFromBtn;
+window.retryJob              = retryJob;
+window.cancelJob             = cancelJob;
+window.toggleStorageDisk     = toggleStorageDisk;
+window.toggleSidePanel       = toggleSidePanel;
+window.toggleStorageSettings = toggleStorageSettings;
+window.openStorageExplorer   = openStorageExplorer;
+window.closeStorageExplorer  = closeStorageExplorer;
+window.switchStorageTab      = switchStorageTab;
+window.scanStorageNow        = scanStorageNow;
+window.toggleTheme           = toggleTheme;
+window.setThemePref          = setThemePref;
 
 // ── Job drawer ────────────────────────────
 window.openJobDrawer = async function(jobId) {
@@ -1008,13 +1013,13 @@ window.openJobDrawer = async function(jobId) {
     const body = document.getElementById('drawer-body');
     const actions = document.getElementById('drawer-actions');
     if (!drawer) return;
-    PeliculaFW.openDrawer(drawer, backdrop);
+    openDrawer(drawer, backdrop);
     title.textContent = 'Job Details';
     sub.textContent = jobId;
     body.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">Loading\u2026</div>';
     actions.innerHTML = '';
     try {
-        const res = await fetch('/api/procula/jobs/' + encodeURIComponent(jobId));
+        const res = await get('/api/procula/jobs/' + encodeURIComponent(jobId));
         if (!res.ok) throw new Error('Not found');
         const j = await res.json();
         title.textContent = (j.source && j.source.title) ? j.source.title : jobId;
@@ -1070,7 +1075,7 @@ window.openJobDrawer = async function(jobId) {
 };
 
 window.closeJobDrawer = function() {
-    PeliculaFW.closeDrawer(
+    closeDrawer(
         document.getElementById('job-drawer'),
         document.getElementById('drawer-backdrop')
     );
@@ -1104,7 +1109,7 @@ window.switchTab = function(tab, fromHash) {
 };
 
 // Drive tab navigation from hash changes (back/forward, deep links, manual hash edits)
-PeliculaFW.router.listen(function(route) {
+router.listen(function(route) {
     var tab = route.tab || 'search';
     if (_validTabs.has(tab)) window.switchTab(tab, true);
 });
@@ -1166,10 +1171,8 @@ function _syncAppearanceRadio() {
 }
 
 // Init theme icon on load and sync with system preference changes
-document.addEventListener('DOMContentLoaded', function() {
-    updateThemeIcon();
-    _syncAppearanceRadio();
-});
+updateThemeIcon();
+_syncAppearanceRadio();
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
     updateThemeIcon();
     _syncAppearanceRadio();
@@ -1177,12 +1180,10 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', fun
 
 // Mount deferred components (registered by search.js et al., which load with defer —
 // DOMContentLoaded fires after all deferred scripts have executed).
-document.addEventListener('DOMContentLoaded', function() {
-    PeliculaFW.mount('search', document.getElementById('search-section'));
-    PeliculaFW.mount('downloads', null);
-    PeliculaFW.mount('activity', document.getElementById('activity-section'));
-    PeliculaFW.mount('notifications', document.getElementById('bell-wrap'));
-    PeliculaFW.mount('settings', document.getElementById('settings-section'));
-    PeliculaFW.mount('users', document.getElementById('users-section'));
-    PeliculaFW.mount('services', document.querySelector('.pane-side'));
-});
+mount('search', document.getElementById('search-section'));
+mount('downloads', null);
+mount('activity', document.getElementById('activity-section'));
+mount('notifications', document.getElementById('bell-wrap'));
+mount('settings', document.getElementById('settings-section'));
+mount('users', document.getElementById('users-section'));
+mount('services', document.querySelector('.pane-side'));

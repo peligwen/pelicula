@@ -3,13 +3,16 @@
 // to existing render functions on window. When SSE is active, polling stops.
 // When SSE drops (after 3 retries), polling resumes and SSE auto-reconnects.
 'use strict';
-(function() {
-    if (typeof EventSource === 'undefined') return; // unsupported browser guard
 
-    var source = null;
-    var retryCount = 0;
-    var sseActive = false;
-    var _started = false;
+if (typeof EventSource === 'undefined') {
+    window.connectSSE    = function() {};
+    window.disconnectSSE = function() {};
+    window.sseIsActive   = function() { return false; };
+} else {
+    let source = null;
+    let retryCount = 0;
+    let sseActive = false;
+    let _started = false;
 
     function connect() {
         if (source) source.close();
@@ -31,16 +34,14 @@
         };
 
         // services event: same shape as /api/pelicula/status
-        // updateServicesFromData(data) is exported by services.js
         source.addEventListener('services', function(e) {
             try {
-                var data = JSON.parse(e.data);
+                const data = JSON.parse(e.data);
                 if (window.updateServicesFromData) window.updateServicesFromData(data);
             } catch(err) { console.warn('[sse] services parse error', err); }
         });
 
-        // downloads event: shape may differ from /api/pelicula/downloads
-        // Trigger a targeted re-fetch rather than trying to render raw SSE data
+        // downloads event: trigger a targeted re-fetch
         source.addEventListener('downloads', function() {
             if (window.checkDownloads) window.checkDownloads();
         });
@@ -48,23 +49,21 @@
         // notifications event: array shape matches renderNotifications
         source.addEventListener('notifications', function(e) {
             try {
-                var data = JSON.parse(e.data);
+                const data = JSON.parse(e.data);
                 if (window.renderNotifications) window.renderNotifications(data);
                 if (window.renderActivity) window.renderActivity(data);
             } catch(err) { console.warn('[sse] notifications parse error', err); }
         });
 
-        // storage event: same shape as /api/pelicula/storage (procula proxy)
-        // Trigger targeted re-fetch for simplicity (multiple render functions involved)
+        // storage event: trigger targeted re-fetch
         source.addEventListener('storage', function() {
             if (window.checkStorage) window.checkStorage();
         });
 
-        // logs event: {entries: [{service, line, ts},...]} — interleaved across services,
-        // newest first. renderLogsFromSSE is exported by logs.js.
+        // logs event: {entries: [{service, line, ts},...]}
         source.addEventListener('logs', function(e) {
             try {
-                var data = JSON.parse(e.data);
+                const data = JSON.parse(e.data);
                 if (window.renderLogsFromSSE) window.renderLogsFromSSE(data);
             } catch(err) { console.warn('[sse] logs parse error', err); }
         });
@@ -97,4 +96,4 @@
         enablePollers();
     };
     window.sseIsActive = function() { return sseActive; };
-}());
+}

@@ -326,6 +326,18 @@ function announce(msg) {
     requestAnimationFrame(function () { el.textContent = msg; });
 }
 
-// ── Exports (assigned to window for plain-script use) ─────────────────────────
+// ── Exports ───────────────────────────────────────────────────────────────────
+// Named ES module exports — import individual helpers in each module file.
+export { createStore, initStore };
+export { component, mount, unmount };
+export { html, raw };
+export { byTestId, setText, esc as escHtml };
+export { router };
+export { trapFocus, releaseFocus };
+export { openDrawer, closeDrawer };
+export { createPoller };
+export { onTab, toast, announce };
 
+// Legacy window global retained during the onclick → event-delegation migration.
+// Removed in Phase 3.2 once all inline handlers are replaced.
 window.PeliculaFW = { createStore, component, mount, unmount, html, raw, initStore, byTestId, setText, esc: _escapeHtml, router, trapFocus, releaseFocus, openDrawer, closeDrawer, createPoller, onTab, toast, announce };

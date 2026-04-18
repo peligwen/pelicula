@@ -1,12 +1,10 @@
 // jobs.js — Jobs tab: every procula job grouped by state
-(function () {
 'use strict';
 
-const jobsState = { loaded: false, loading: false };
+import { get } from '/api.js';
+import { onTab } from '/framework.js';
 
-function jobsFetch(url) {
-    return fetch(url, { credentials: 'same-origin' });
-}
+const jobsState = { loaded: false, loading: false };
 
 async function loadJobs() {
     if (jobsState.loading) return;
@@ -15,9 +13,8 @@ async function loadJobs() {
     if (!root) { jobsState.loading = false; return; }
     root.replaceChildren(makeMsg('Loading\u2026'));
     try {
-        const res = await jobsFetch('/api/pelicula/jobs');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
+        const data = await get('/api/pelicula/jobs');
+        if (data === null) { root.replaceChildren(makeMsg('Session expired.')); return; }
         renderJobs(root, data.groups || {});
         jobsState.loaded = true;
     } catch (e) {
@@ -91,10 +88,8 @@ function makeMsg(text, isError) {
 
 window.jobsRefresh = function () { jobsState.loaded = false; loadJobs(); };
 
-PeliculaFW.onTab('jobs', function () {
+onTab('jobs', function () {
     if (!jobsState.loaded) loadJobs();
 });
 
 if (document.body && document.body.dataset.tab === 'jobs') loadJobs();
-
-})();
