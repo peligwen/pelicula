@@ -402,8 +402,8 @@ func main() {
 	mux.Handle("/api/pelicula/users/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(app.jfHandler.HandleUsersWithID))))
 
 	// admin only: role management
-	mux.Handle("/api/pelicula/operators", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperators))))
-	mux.Handle("/api/pelicula/operators/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(handleOperatorsWithID))))
+	mux.Handle("/api/pelicula/operators", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(auth.HandleOperators))))
+	mux.Handle("/api/pelicula/operators/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(auth.HandleOperatorsWithID))))
 
 	// viewer+: active Jellyfin sessions
 	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(app.jfHandler.HandleSessions)))

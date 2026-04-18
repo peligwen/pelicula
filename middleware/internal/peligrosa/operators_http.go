@@ -1,36 +1,35 @@
-package main
+package peligrosa
 
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"pelicula-api/httputil"
 	jfapp "pelicula-api/internal/app/jellyfin"
-	"pelicula-api/internal/peligrosa"
-	"strings"
 )
 
-// handleOperators handles GET /api/pelicula/operators — returns all role entries.
-func handleOperators(w http.ResponseWriter, r *http.Request) {
+// HandleOperators handles GET /api/pelicula/operators — returns all role entries.
+func (a *Auth) HandleOperators(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if authMiddleware == nil {
-		httputil.WriteJSON(w, []peligrosa.RolesEntry{})
+	if a == nil {
+		httputil.WriteJSON(w, []RolesEntry{})
 		return
 	}
-	store := authMiddleware.Roles()
+	store := a.Roles()
 	if store == nil {
-		httputil.WriteJSON(w, []peligrosa.RolesEntry{})
+		httputil.WriteJSON(w, []RolesEntry{})
 		return
 	}
 	httputil.WriteJSON(w, store.All())
 }
 
-// handleOperatorsWithID handles POST /api/pelicula/operators/{id} (set role)
+// HandleOperatorsWithID handles POST /api/pelicula/operators/{id} (set role)
 // and DELETE /api/pelicula/operators/{id} (remove entry).
-func handleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
+func (a *Auth) HandleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/pelicula/operators/")
 	if !jfapp.ValidJellyfinID(id) {
 		httputil.WriteError(w, "invalid user ID", http.StatusBadRequest)
@@ -40,8 +39,8 @@ func handleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var req struct {
-			Role     peligrosa.UserRole `json:"role"`
-			Username string             `json:"username"`
+			Role     UserRole `json:"role"`
+			Username string   `json:"username"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httputil.WriteError(w, "invalid JSON", http.StatusBadRequest)
@@ -49,17 +48,17 @@ func handleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 		}
 		// Validate role before touching the store.
 		switch req.Role {
-		case peligrosa.RoleViewer, peligrosa.RoleManager, peligrosa.RoleAdmin:
+		case RoleViewer, RoleManager, RoleAdmin:
 			// valid
 		default:
 			httputil.WriteError(w, "role must be viewer, manager, or admin", http.StatusBadRequest)
 			return
 		}
-		if authMiddleware == nil {
+		if a == nil {
 			httputil.WriteError(w, "roles store unavailable", http.StatusInternalServerError)
 			return
 		}
-		store := authMiddleware.Roles()
+		store := a.Roles()
 		if store == nil {
 			httputil.WriteError(w, "roles store unavailable", http.StatusInternalServerError)
 			return
@@ -70,11 +69,11 @@ func handleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 		}
 		httputil.WriteJSON(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
-		if authMiddleware == nil {
+		if a == nil {
 			httputil.WriteError(w, "roles store unavailable", http.StatusInternalServerError)
 			return
 		}
-		store := authMiddleware.Roles()
+		store := a.Roles()
 		if store == nil {
 			httputil.WriteError(w, "roles store unavailable", http.StatusInternalServerError)
 			return

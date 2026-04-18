@@ -1,4 +1,4 @@
-package main
+package peligrosa
 
 import (
 	"bytes"
@@ -9,10 +9,10 @@ import (
 )
 
 func TestHandleOperatorsGetNilStore(t *testing.T) {
-	// authMiddleware is nil in package-level tests; handleOperators must return []
+	// (*Auth)(nil) receiver — HandleOperators must return []
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/operators", nil)
 	w := httptest.NewRecorder()
-	handleOperators(w, req)
+	(*Auth)(nil).HandleOperators(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -29,7 +29,7 @@ func TestHandleOperatorsWithID_InvalidRole(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/operators/aabbccddeeff00112233445566778899", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleOperatorsWithID(w, req)
+	(*Auth)(nil).HandleOperatorsWithID(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
