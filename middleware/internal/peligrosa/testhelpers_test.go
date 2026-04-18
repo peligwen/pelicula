@@ -97,6 +97,11 @@ func createTestSchema(db *sql.DB) error {
 			created_at TEXT NOT NULL,
 			expires_at TEXT NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS rate_limits (
+			ip           TEXT PRIMARY KEY,
+			fail_count   INTEGER NOT NULL DEFAULT 0,
+			window_start TEXT NOT NULL
+		);
 	`)
 	return err
 }

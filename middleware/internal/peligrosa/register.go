@@ -37,7 +37,7 @@ func (d *Deps) HandleGeneratePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := httputil.ClientIP(r)
-	if d.Auth != nil && d.Auth.isRateLimited(ip) {
+	if d.Auth != nil && d.Auth.isRateLimited(r.Context(), ip) {
 		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
@@ -82,7 +82,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Rate-limit by IP — reuse the auth limiter.
 	ip := httputil.ClientIP(r)
-	if a != nil && a.isRateLimited(ip) {
+	if a != nil && a.isRateLimited(r.Context(), ip) {
 		initialSetupMu.Unlock()
 		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
@@ -135,7 +135,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		initialSetupMu.Unlock()
 		if a != nil {
-			a.recordFailure(ip)
+			a.recordFailure(r.Context(), ip)
 		}
 		slog.Error("open registration failed", "component", "register", "username", req.Username, "error", err)
 		httputil.WriteError(w, "Could not create account — Jellyfin may still be starting up. Wait a moment and try again.", http.StatusBadGateway)

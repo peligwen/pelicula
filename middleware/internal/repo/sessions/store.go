@@ -181,22 +181,27 @@ func (s *Store) RateLimitUpsert(ctx context.Context, ip string, window time.Time
 	windowStr := dbutil.FormatTime(window)
 	nowStr := dbutil.FormatTime(time.Now())
 
+	// window_start stores the timestamp of the first failure in the current
+	// window (not the boundary). The boundary (windowStr) is used only to
+	// decide whether to reset: if the stored window_start is older than the
+	// boundary, the window has expired.
+	//
 	// Single statement:
-	// - If no row: insert with fail_count=1.
+	// - If no row: insert with fail_count=1 and window_start=now.
 	// - If the stored window_start is still within the current window: increment.
-	// - If the stored window_start is older than the window boundary: reset to 1.
+	// - If the stored window_start is older than the window boundary: reset to 1, window_start=now.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO rate_limits (ip, fail_count, window_start) VALUES (?, 1, ?)
 		ON CONFLICT(ip) DO UPDATE SET
-			fail_count   = CASE WHEN window_start >= excluded.window_start
+			fail_count   = CASE WHEN window_start >= ?
 			                    THEN fail_count + 1
 			                    ELSE 1
 			               END,
-			window_start = CASE WHEN window_start >= excluded.window_start
+			window_start = CASE WHEN window_start >= ?
 			                    THEN window_start
 			                    ELSE ?
 			               END`,
-		ip, windowStr, nowStr,
+		ip, nowStr, windowStr, windowStr, nowStr,
 	)
 	if err != nil {
 		return 0, err
@@ -206,6 +211,26 @@ func (s *Store) RateLimitUpsert(ctx context.Context, ip string, window time.Time
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT fail_count FROM rate_limits WHERE ip = ?`, ip,
 	).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// RateLimitCount returns the current fail_count for the given IP within the
+// active window. Returns 0 when no row exists or the stored window_start is
+// older than the window boundary (i.e. the window has expired and the count
+// would reset on the next failure). This is a read-only query — it does not
+// modify the table.
+func (s *Store) RateLimitCount(ctx context.Context, ip string, window time.Time) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT fail_count FROM rate_limits WHERE ip = ? AND window_start >= ?`,
+		ip, dbutil.FormatTime(window),
+	).Scan(&count)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
 		return 0, err
 	}
 	return count, nil

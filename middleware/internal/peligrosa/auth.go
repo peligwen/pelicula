@@ -22,6 +22,11 @@ import (
 	"pelicula-api/internal/repo/sessions"
 )
 
+const (
+	rateLimitThreshold = 5
+	rateLimitWindow    = 5 * time.Minute
+)
+
 type UserRole string
 
 const (
@@ -41,11 +46,6 @@ type session struct {
 	expiry   time.Time
 }
 
-// loginAttempts tracks recent failed login timestamps per IP for rate limiting.
-type loginAttempts struct {
-	times []time.Time
-}
-
 // Auth handles authentication and authorization.
 // The only auth mode is "jellyfin": credentials are verified against Jellyfin
 // and roles are stored in rolesStore. Host-machine callers (nginx upstream +
@@ -61,7 +61,6 @@ type Auth struct {
 	sessionsStore *sessions.Store        // always non-nil (initialised from db in NewAuth)
 	jellyfin      clients.JellyfinClient // used for Jellyfin auth calls
 	sessions      map[string]session
-	failures      map[string]*loginAttempts // IP → recent failure timestamps
 	mu            sync.RWMutex
 }
 
@@ -81,7 +80,6 @@ func NewAuth(cfg AuthConfig) *Auth {
 	a := &Auth{
 		db:       cfg.DB,
 		sessions: make(map[string]session),
-		failures: make(map[string]*loginAttempts),
 		jellyfin: cfg.Jellyfin,
 	}
 	a.rolesStore = NewRolesStore(cfg.DB)
@@ -118,73 +116,60 @@ func (a *Auth) loadSessionsFromDB() {
 }
 
 // cleanupSessions periodically removes expired sessions and stale rate-limit
-// entries to prevent unbounded memory growth.
+// entries to prevent unbounded DB growth.
 func (a *Auth) cleanupSessions() {
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
 		now := time.Now()
-		window := now.Add(-5 * time.Minute)
 		a.mu.Lock()
 		for token, sess := range a.sessions {
 			if now.After(sess.expiry) {
 				delete(a.sessions, token)
 			}
 		}
-		for ip, fa := range a.failures {
-			var recent []time.Time
-			for _, t := range fa.times {
-				if t.After(window) {
-					recent = append(recent, t)
-				}
-			}
-			if len(recent) == 0 {
-				delete(a.failures, ip)
-			} else {
-				fa.times = recent
-			}
-		}
 		a.mu.Unlock()
 
-		// Purge expired session rows from SQLite as well.
+		ctx := context.Background()
 		if a.sessionsStore != nil {
-			if err := a.sessionsStore.PruneExpired(context.Background()); err != nil {
+			if err := a.sessionsStore.PruneExpired(ctx); err != nil {
 				slog.Warn("cleanup: failed to delete expired sessions", "component", "auth", "error", err)
+			}
+			// Prune rate-limit rows whose window has long expired (2× the window).
+			if err := a.sessionsStore.PruneRateLimit(ctx, now.Add(-2*rateLimitWindow)); err != nil {
+				slog.Warn("cleanup: failed to prune rate-limit entries", "component", "auth", "error", err)
 			}
 		}
 	}
 }
 
-// isRateLimited returns true if the IP has exceeded 5 failed logins in 5 minutes.
-func (a *Auth) isRateLimited(ip string) bool {
-	window := time.Now().Add(-5 * time.Minute)
-	a.mu.RLock()
-	fa, ok := a.failures[ip]
-	if !ok {
-		a.mu.RUnlock()
+// isRateLimited returns true if the IP has reached or exceeded the threshold of
+// failed logins within the current rate-limit window. Uses a read-only DB query
+// so it does not affect the count — only recordFailure increments it.
+func (a *Auth) isRateLimited(ctx context.Context, ip string) bool {
+	if a.sessionsStore == nil {
 		return false
 	}
-	count := 0
-	for _, t := range fa.times {
-		if t.After(window) {
-			count++
-		}
+	window := time.Now().Add(-rateLimitWindow)
+	count, err := a.sessionsStore.RateLimitCount(ctx, ip, window)
+	if err != nil {
+		slog.Warn("rate-limit check failed — allowing request", "component", "auth", "ip", ip, "error", err)
+		return false
 	}
-	a.mu.RUnlock()
-	return count >= 5
+	return count >= rateLimitThreshold
 }
 
-// recordFailure records a failed login attempt for rate limiting.
-// Rate limits are kept purely in-memory: the 5-minute window is shorter than
-// any realistic restart time, so persistence provides no meaningful value.
-func (a *Auth) recordFailure(ip string) {
-	now := time.Now()
-	a.mu.Lock()
-	if a.failures[ip] == nil {
-		a.failures[ip] = &loginAttempts{}
+// recordFailure increments the fail count for ip in the DB-backed rate_limits
+// table. This persists across restarts so brute-force attempts cannot be reset
+// by bouncing the process.
+func (a *Auth) recordFailure(ctx context.Context, ip string) {
+	if a.sessionsStore == nil {
+		return
 	}
-	a.failures[ip].times = append(a.failures[ip].times, now)
-	a.mu.Unlock()
+	window := time.Now().Add(-rateLimitWindow)
+	if _, err := a.sessionsStore.RateLimitUpsert(ctx, ip, window); err != nil {
+		slog.Warn("failed to record login failure", "component", "auth", "ip", ip, "error", err)
+	}
 }
 
 // Guard wraps a handler; requires a valid session regardless of role.
@@ -260,7 +245,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := httputil.ClientIP(r)
-	if a.isRateLimited(ip) {
+	if a.isRateLimited(r.Context(), ip) {
 		httputil.WriteError(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
 		return
 	}
@@ -279,7 +264,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var httpErr *clients.JellyfinHTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
-			a.recordFailure(ip)
+			a.recordFailure(r.Context(), ip)
 			httputil.WriteError(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}

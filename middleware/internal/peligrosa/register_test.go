@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"pelicula-api/internal/repo/sessions"
 )
 
 // setOpenRegistration saves and restores OpenRegistration for the test duration.
@@ -122,12 +125,13 @@ func TestOpenRegister_Success(t *testing.T) {
 		})
 	})
 
-	store := NewRolesStore(testDB(t))
+	db := testDB(t)
+	store := NewRolesStore(db)
 	auth := &Auth{
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
-		jellyfin:   jc,
+		sessions:      make(map[string]session),
+		rolesStore:    store,
+		sessionsStore: sessions.New(db),
+		jellyfin:      jc,
 	}
 
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
@@ -157,15 +161,16 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 		})
 	})
 
-	store := NewRolesStore(testDB(t))
+	db := testDB(t)
+	store := NewRolesStore(db)
 	// Seed an existing admin so IsEmpty() returns false — this test verifies
 	// that subsequent registrants get viewer, not admin.
 	_ = store.Upsert("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
 	auth := &Auth{
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
-		jellyfin:   jc,
+		sessions:      make(map[string]session),
+		rolesStore:    store,
+		sessionsStore: sessions.New(db),
+		jellyfin:      jc,
 	}
 
 	body := strings.NewReader(`{"username":"bob","password":"secret123"}`)
@@ -202,12 +207,13 @@ func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
 	})
 
 	// Fresh roles store — IsEmpty() returns true.
-	store := NewRolesStore(testDB(t))
+	db := testDB(t)
+	store := NewRolesStore(db)
 	auth := &Auth{
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
-		jellyfin:   jc,
+		sessions:      make(map[string]session),
+		rolesStore:    store,
+		sessionsStore: sessions.New(db),
+		jellyfin:      jc,
 	}
 
 	body := strings.NewReader(`{"username":"gwen","password":"secret123"}`)
@@ -237,12 +243,13 @@ func TestOpenRegister_UsernameTaken_Returns409(t *testing.T) {
 		})
 	})
 
-	store := NewRolesStore(testDB(t))
+	db := testDB(t)
+	store := NewRolesStore(db)
 	auth := &Auth{
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
-		jellyfin:   jc,
+		sessions:      make(map[string]session),
+		rolesStore:    store,
+		sessionsStore: sessions.New(db),
+		jellyfin:      jc,
 	}
 
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)
@@ -261,11 +268,19 @@ func TestOpenRegister_UsernameTaken_Returns409(t *testing.T) {
 
 func TestOpenRegister_RateLimited_Returns429(t *testing.T) {
 	setOpenRegistration(t, true)
-	auth := newTestAuth()
+	db := testDB(t)
+	auth := &Auth{
+		sessions:      make(map[string]session),
+		sessionsStore: sessions.New(db),
+	}
 
 	ip := "10.0.0.99"
-	for i := 0; i < 5; i++ {
-		auth.recordFailure(ip)
+	// Seed 5 failures directly via the store to trigger the rate limit.
+	window := time.Now().Add(-rateLimitWindow)
+	for i := 0; i < rateLimitThreshold; i++ {
+		if _, err := auth.sessionsStore.RateLimitUpsert(t.Context(), ip, window); err != nil {
+			t.Fatalf("seed failure %d: %v", i+1, err)
+		}
 	}
 
 	body := strings.NewReader(`{"username":"alice","password":"secret123"}`)

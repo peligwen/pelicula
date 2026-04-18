@@ -428,7 +428,7 @@ func (s *InviteStore) HandleInviteCheck(w http.ResponseWriter, r *http.Request, 
 func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token string) {
 	// Rate-limit by IP — reuse the auth limiter to prevent brute-force token abuse.
 	ip := httputil.ClientIP(r)
-	if p.Auth != nil && p.Auth.isRateLimited(ip) {
+	if p.Auth != nil && p.Auth.isRateLimited(r.Context(), ip) {
 		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
@@ -483,7 +483,7 @@ func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token 
 			return
 		}
 		if p.Auth != nil {
-			p.Auth.recordFailure(ip)
+			p.Auth.recordFailure(r.Context(), ip)
 		}
 		slog.Error("invite redemption failed", "component", "invites", "username", req.Username, "error", err)
 		httputil.WriteError(w, "could not create account", http.StatusBadGateway)

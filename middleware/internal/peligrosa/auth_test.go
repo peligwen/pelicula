@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/repo/sessions"
 )
 
 // fakeJellyfinAuthServer starts an httptest.Server with a /Users/AuthenticateByName
@@ -46,26 +47,28 @@ func boolStr(b bool) string {
 func newTestAuth() *Auth {
 	return &Auth{
 		sessions: make(map[string]session),
-		failures: make(map[string]*loginAttempts),
 	}
 }
 
 // newTestJellyfinAuth creates an Auth for testing.
 // store may be nil — a fresh RolesStore backed by a test DB is used.
 // jfClient should point at an httptest.Server serving the Jellyfin API.
+// A sessionsStore backed by the same test DB is always wired so that
+// DB-backed rate limiting works in tests that exercise HandleLogin.
 func newTestJellyfinAuth(t *testing.T, store *RolesStore, jfClient *fakeJellyfinHTTPClient) *Auth {
 	t.Helper()
+	db := testDB(t)
 	if store == nil {
-		store = NewRolesStore(testDB(t))
+		store = NewRolesStore(db)
 	}
 	var jc *fakeJellyfinHTTPClient
 	if jfClient != nil {
 		jc = jfClient
 	}
 	a := &Auth{
-		sessions:   make(map[string]session),
-		failures:   make(map[string]*loginAttempts),
-		rolesStore: store,
+		sessions:      make(map[string]session),
+		rolesStore:    store,
+		sessionsStore: sessions.New(db),
 	}
 	if jc != nil {
 		a.jellyfin = jc
@@ -148,8 +151,12 @@ func TestLogin_RateLimited(t *testing.T) {
 	_, jc := fakeJellyfinAuthServer(t, true, true)
 	a := newTestJellyfinAuth(t, nil, jc)
 	ip := "1.2.3.4"
-	for i := 0; i < 5; i++ {
-		a.recordFailure(ip)
+	// Seed 5 failures directly via the store to simulate prior failed attempts.
+	window := time.Now().Add(-rateLimitWindow)
+	for i := 0; i < rateLimitThreshold; i++ {
+		if _, err := a.sessionsStore.RateLimitUpsert(t.Context(), ip, window); err != nil {
+			t.Fatalf("seed failure %d: %v", i+1, err)
+		}
 	}
 
 	t.Run("blocked IP", func(t *testing.T) {

@@ -333,19 +333,22 @@ func TestRateLimitUpsert_Increments(t *testing.T) {
 func TestRateLimitUpsert_ResetsOnExpiredWindow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := sessions.New(newTestDB(t))
+	db := newTestDB(t)
+	s := sessions.New(db)
 
 	ip := "5.6.7.8"
 
-	// Record 3 failures in the "old" window.
-	oldWindow := time.Now().Add(-10 * time.Minute)
-	for range 3 {
-		if _, err := s.RateLimitUpsert(ctx, ip, oldWindow); err != nil {
-			t.Fatalf("RateLimitUpsert old window: %v", err)
-		}
+	// Directly insert a row with window_start set to 10 minutes ago to simulate
+	// failures that occurred outside the current 5-minute window.
+	oldTime := time.Now().Add(-10 * time.Minute).UTC()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO rate_limits (ip, fail_count, window_start) VALUES (?, 3, ?)`,
+		ip, oldTime.Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("seed old row: %v", err)
 	}
 
-	// A new window boundary that is after the stored window_start resets the counter.
+	// A new failure with a boundary that is after the stored window_start resets the counter.
 	newWindow := time.Now().Add(-1 * time.Minute)
 	count, err := s.RateLimitUpsert(ctx, ip, newWindow)
 	if err != nil {
@@ -383,18 +386,25 @@ func TestRateLimitUpsert_IndependentIPs(t *testing.T) {
 func TestPruneRateLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := sessions.New(newTestDB(t))
+	db := newTestDB(t)
+	s := sessions.New(db)
 
-	oldWindow := time.Now().Add(-10 * time.Minute)
-	recentWindow := time.Now().Add(-1 * time.Minute)
-
-	// Insert an old entry (will be pruned).
-	if _, err := s.RateLimitUpsert(ctx, "old-ip", oldWindow); err != nil {
-		t.Fatalf("upsert old-ip: %v", err)
+	// Directly insert rows with controlled timestamps to test pruning:
+	//   old-ip: window_start 10 minutes ago (should be pruned by a 5-min cutoff)
+	//   recent-ip: window_start 1 minute ago (should survive)
+	oldStart := time.Now().Add(-10 * time.Minute).UTC()
+	recentStart := time.Now().Add(-1 * time.Minute).UTC()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO rate_limits (ip, fail_count, window_start) VALUES (?, 1, ?)`,
+		"old-ip", oldStart.Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("insert old-ip: %v", err)
 	}
-	// Insert a recent entry (must survive).
-	if _, err := s.RateLimitUpsert(ctx, "recent-ip", recentWindow); err != nil {
-		t.Fatalf("upsert recent-ip: %v", err)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO rate_limits (ip, fail_count, window_start) VALUES (?, 1, ?)`,
+		"recent-ip", recentStart.Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("insert recent-ip: %v", err)
 	}
 
 	// Prune entries older than 5 minutes ago.
@@ -403,7 +413,7 @@ func TestPruneRateLimit(t *testing.T) {
 		t.Fatalf("PruneRateLimit: %v", err)
 	}
 
-	// old-ip must be gone — verify by upserting and getting count=1 (reset).
+	// old-ip must be gone — verify by upserting and getting count=1 (fresh insert).
 	count, err := s.RateLimitUpsert(ctx, "old-ip", time.Now().Add(-1*time.Minute))
 	if err != nil {
 		t.Fatalf("upsert old-ip after prune: %v", err)
@@ -412,8 +422,10 @@ func TestPruneRateLimit(t *testing.T) {
 		t.Errorf("old-ip count after prune = %d, want 1 (row was pruned, re-inserted fresh)", count)
 	}
 
-	// recent-ip must still be present (not pruned).
-	count, err = s.RateLimitUpsert(ctx, "recent-ip", recentWindow)
+	// recent-ip must still be present (not pruned) — upsert should increment to 2.
+	// Use a boundary of 2 minutes to ensure recent-ip (inserted 1 min ago) is
+	// clearly within the active window.
+	count, err = s.RateLimitUpsert(ctx, "recent-ip", time.Now().Add(-2*time.Minute))
 	if err != nil {
 		t.Fatalf("upsert recent-ip after prune: %v", err)
 	}
