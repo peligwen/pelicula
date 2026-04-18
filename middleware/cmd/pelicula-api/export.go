@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"pelicula-api/httputil"
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 	"sync"
 	"time"
 )

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	_ "modernc.org/sqlite"
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 )
 
 func newTestRolesDB(t *testing.T) *sql.DB {

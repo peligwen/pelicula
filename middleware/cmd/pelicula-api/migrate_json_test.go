@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 )
 
 // migrateTestFulfiller is a no-op Fulfiller for migrate tests.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 )
 
 // exportTestFulfiller is a no-op Fulfiller for export tests.

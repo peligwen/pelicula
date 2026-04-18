@@ -14,11 +14,12 @@ These packages are imported by production code and carry real logic.
 | `internal/clients/qbt` | `cmd/pelicula-api/services.go` | qBittorrent typed client |
 | `internal/clients/bazarr` | `cmd/pelicula-api/autowire.go` | Replaces raw `bzGet()`/`bzPostForm()` |
 | `internal/clients/procula` | `cmd/pelicula-api/main.go` | Procula job/status/notification client |
-| `internal/repo/dbutil` | `peligrosa/auth.go`, `peligrosa/invites.go`, `peligrosa/requests.go` | `ParseTime` replaces all RFC3339 dual-parse pairs |
+| `internal/repo/dbutil` | `internal/peligrosa/auth.go`, `internal/peligrosa/invites.go`, `internal/peligrosa/requests.go` | `ParseTime` replaces all RFC3339 dual-parse pairs |
 | `internal/app/catalog` | `cmd/pelicula-api/main.go` | `OpenCatalogDB`, `RunQueuePoller` — used at startup |
 | `internal/app/downloads` | `cmd/pelicula-api/main.go` | `downloads.Handler` wired for all download mux routes |
 | `internal/app/health` | `cmd/pelicula-api/main.go` | `health.Handler` wired for `/api/pelicula/health` |
 | `internal/app/sse` | `cmd/pelicula-api/main.go` | `sse.Hub` + `sse.Poller` are the live SSE broadcaster and handler |
+| `internal/peligrosa` | `cmd/pelicula-api/main.go`, `globals.go`, `operators.go`, `export.go`, `migrate_json.go` | Moved from `peligrosa/`; auth, invites, requests, registration, roles, routes |
 
 ## Scaffolding stubs (Phase 2.1 targets)
 
@@ -29,7 +30,7 @@ These directories contain `doc.go` or minimal stubs. They exist to establish the
 | `internal/app/autowire` | `cmd/pelicula-api/autowire.go` (~450 LOC) | Package split |
 | `internal/app/backup` | `cmd/pelicula-api/export.go` (~750 LOC) | Package split |
 | `internal/app/library` | `cmd/pelicula-api/library_scan.go`, `library_proxy.go`, `library_apply.go` | Package split |
-| `internal/peligrosa` | `peligrosa/` subpackage — move to `internal/peligrosa/` | Package split |
+| ~~`internal/peligrosa`~~ | ~~`peligrosa/` subpackage — move to `internal/peligrosa/`~~ | Done — see "Wired and live" |
 | `internal/repo` | Full SQL repo per table (invites, requests, roles, sessions, catalog) | Phase 2.2 repo layer |
 | `internal/config` | `cmd/pelicula-api/main.go` env loading | Package split |
 

@@ -23,7 +23,7 @@ import (
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/config"
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 
 	_ "modernc.org/sqlite"
 )

@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 	"time"
 )
 

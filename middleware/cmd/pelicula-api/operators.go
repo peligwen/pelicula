@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"pelicula-api/httputil"
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 	"strings"
 )
 

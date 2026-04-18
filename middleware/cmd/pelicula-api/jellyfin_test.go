@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"pelicula-api/httputil"
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 	"strings"
 	"sync/atomic"
 	"testing"

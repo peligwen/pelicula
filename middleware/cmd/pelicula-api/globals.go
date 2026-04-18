@@ -11,7 +11,7 @@ package main
 import (
 	"database/sql"
 
-	"pelicula-api/peligrosa"
+	"pelicula-api/internal/peligrosa"
 )
 
 // services is the package-level ServiceClients instance, used by all handler
