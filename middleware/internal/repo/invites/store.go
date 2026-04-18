@@ -289,20 +289,12 @@ func (s *Store) ReleaseSlot(ctx context.Context, token string) error {
 }
 
 // InsertRedemption records a successful invite redemption in the redemptions
-// table. Called as the third phase of the redemption protocol, inside a new
-// transaction managed by the caller.
+// table. Called as the third phase of the redemption protocol. A single INSERT
+// is already atomic, so no explicit transaction is needed.
 func (s *Store) InsertRedemption(ctx context.Context, token, username, jellyfinID string, redeemedAt time.Time) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO redemptions (invite_token, username, jellyfin_id, redeemed_at) VALUES (?, ?, ?, ?)`,
 		token, username, jellyfinID, dbutil.FormatTime(redeemedAt),
 	)
-	if err != nil {
-		tx.Rollback() //nolint:errcheck
-		return err
-	}
-	return tx.Commit()
+	return err
 }

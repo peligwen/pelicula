@@ -375,22 +375,20 @@ func TestInsertRedemption(t *testing.T) {
 	}
 }
 
-// ── CAS race: two concurrent full-reserve-and-commit cycles ──────────────────
+// ── CAS sequential exhaustion ─────────────────────────────────────────────────
 
-// TestReserveSlot_CASRace verifies the two-phase slot reservation protocol
-// under concurrent load: each goroutine calls ReserveSlot, checks active-state,
-// then commits or rolls back. With max_uses=1, exactly one goroutine should see
-// uses=0 at read time (active), and the second should see uses=1 (exhausted).
+// TestReserveSlot_SequentialExhaustion verifies the logical invariant of the
+// two-phase slot reservation protocol: with max_uses=1, exactly one caller
+// succeeds and the second is correctly rejected.
 //
-// SQLite serialises writes via MaxOpenConns=1. ReserveSlot holds the connection
-// only for the duration of one transaction, so two sequential (serialised) races
-// produce the correct CAS ordering.
-//
-// Note: we cannot hold open transactions across goroutines and then call
-// wg.Wait(), because with MaxOpenConns=1 the second BeginTx would block
-// forever waiting for the connection held by the first open tx. Instead each
-// goroutine completes its full reserve+commit cycle before returning.
-func TestReserveSlot_CASRace(t *testing.T) {
+// Despite the goroutine wrapper this is a sequential test, not a concurrent
+// one. SQLite's single-writer constraint means MaxOpenConns=1 serialises both
+// goroutines at the connection pool — each ReserveSlot transaction completes
+// before the next begins. True concurrent transaction testing requires WAL mode
+// with multiple connections open simultaneously; that is tested separately in
+// integration. Here we validate only the logical ordering invariant: the second
+// caller sees uses=1 (committed by the first) and therefore rolls back.
+func TestReserveSlot_SequentialExhaustion(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := invites.New(newTestDB(t))
