@@ -60,6 +60,18 @@
 .cat-list {
     display: flex;
     flex-direction: column;
+    container-type: inline-size;
+}
+
+@container (inline-size < 480px) {
+    .cat-row {
+        flex-wrap: wrap;
+    }
+    .cat-row-meta {
+        order: 3;
+        margin-right: 0;
+        flex-basis: 100%;
+    }
 }
 
 /* ── Rows ────────────────────────────────────────────────────────────────── */

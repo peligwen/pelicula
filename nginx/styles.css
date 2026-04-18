@@ -308,7 +308,7 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .filter-btn:hover { background: var(--pink-l); border-color: rgba(240,96,168,0.4); color: var(--pink); }
 .filter-btn.active { background: var(--pink-l); border-color: rgba(240,96,168,0.4); color: var(--pink); }
 
-.search-results { margin-bottom: 1.25rem; display: none; max-height: 60vh; overflow-y: auto; }
+.search-results { margin-bottom: 1.25rem; display: none; max-height: 60vh; overflow-y: auto; container-type: inline-size; }
 .search-results.visible { display: block; }
 .search-results.collapsed .search-card:not(:first-child) { display: none; }
 .search-results.collapsed { display: block; }
@@ -348,6 +348,22 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     padding: 0.1rem 0.5rem; font-size: 0.7rem; color: var(--muted); white-space: nowrap;
 }
 .search-detail-rating { color: var(--ink); font-weight: 700; }
+
+@container (inline-size < 480px) {
+    .search-card {
+        flex-direction: column;
+    }
+    .search-card img,
+    .search-card .no-poster {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 2 / 3;
+        flex-shrink: unset;
+    }
+    .search-add {
+        align-self: flex-start;
+    }
+}
 
 .search-add {
     padding: 0.35rem 0.85rem;
@@ -1211,6 +1227,13 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .um-metrics {
     display: grid; grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem; margin-bottom: 0.7rem;
+    container-type: inline-size;
+}
+
+@container (inline-size < 480px) {
+    .um-metrics {
+        grid-template-columns: 1fr;
+    }
 }
 .um-metric {
     padding: 0.65rem 0.9rem; border-radius: 16px;
