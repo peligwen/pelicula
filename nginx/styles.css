@@ -387,7 +387,7 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .search-request:hover { background: var(--pink); color: #fff; border-color: var(--pink); }
 
 /* ── Sections ──────────────────────────────────────────────────────────── */
-.section { margin-bottom: 1.5rem; }
+.section { margin-bottom: 1.5rem; container-type: inline-size; }
 .section-header {
     font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800;
     font-size: 0.72rem; color: var(--pink);
@@ -1227,7 +1227,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .um-metrics {
     display: grid; grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem; margin-bottom: 0.7rem;
-    container-type: inline-size;
 }
 
 @container (inline-size < 480px) {
