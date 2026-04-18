@@ -76,6 +76,13 @@
 
   /* Shadow base */
   --shadow-color: rgba(180,140,220,0.12);
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
 }
 
 /* Dark Starry Foggy Lavender — auto-activates with system dark mode */

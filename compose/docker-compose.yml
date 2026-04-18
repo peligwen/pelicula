@@ -306,6 +306,7 @@ services:
       - ./nginx/framework.js:/usr/share/nginx/html/framework.js:ro
       - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
       - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
+      - ./nginx/components.css:/usr/share/nginx/html/components.css:ro
       - ./nginx/import.html:/usr/share/nginx/html/import.html:ro
       - ./nginx/import.js:/usr/share/nginx/html/import.js:ro
       - ./nginx/import.css:/usr/share/nginx/html/import.css:ro

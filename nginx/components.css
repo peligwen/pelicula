@@ -1,0 +1,121 @@
+/* ── Shared UI primitives — consumed by all pages ──────────────────────── */
+/* This file has NO :root {} block — it consumes tokens from theme.css only. */
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    border-radius: 50px; cursor: pointer; font-weight: 700; border: none;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+    transition: opacity 0.15s, transform 0.1s;
+    padding: 0.6rem 1.25rem; font-size: 0.82rem;
+    text-decoration: none;
+}
+.btn:focus-visible {
+    outline: 3px solid var(--pink, #f060a8);
+    outline-offset: 2px;
+}
+.btn-primary {
+    background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
+    color: #fff; border: none; border-radius: 50px;
+    padding: 0.6rem 1.75rem; font-size: 0.82rem; font-weight: 800; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s, transform 0.1s;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
+.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-secondary {
+    background: var(--panel2, #fdf5ff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4)); border-radius: 50px;
+    padding: 0.6rem 1.25rem; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.06em; transition: all 0.15s;
+    color: var(--muted, #9080a8); text-decoration: none; display: inline-flex; align-items: center;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
+.btn-secondary:hover { background: var(--peri-l, #eaecfd); border-color: rgba(112,128,232,0.4); color: var(--periwinkle, #7080e8); }
+.btn-danger {
+    background: var(--pink-l, #fce8f4); color: var(--pink, #f060a8);
+    border: 1.5px solid rgba(240,96,168,0.4); border-radius: 50px;
+    padding: 0.5rem 1.25rem; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.06em; transition: all 0.15s;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
+.btn-danger:hover { background: var(--pink, #f060a8); color: #fff; }
+.btn-sm {
+    padding: 0.3rem 1rem; font-size: 0.7rem;
+}
+.btn-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: 1px solid var(--border2, rgba(180,140,220,0.4));
+    border-radius: 20px; cursor: pointer; color: var(--faint, #c8b8d8);
+    font-size: 1rem; padding: 0.25rem 0.45rem; line-height: 1;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.btn-icon:hover { color: var(--periwinkle, #7080e8); border-color: var(--periwinkle, #7080e8); background: var(--peri-l, #eaecfd); }
+
+/* ── Fields ─────────────────────────────────────────────────────────────── */
+.field {
+    display: flex; flex-direction: column; gap: 0.3rem;
+}
+.field-label {
+    display: block; font-size: 0.75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted, #9080a8);
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
+.field-help { font-size: 0.72rem; color: var(--muted, #9080a8); line-height: 1.5; margin-bottom: 0.5rem; }
+.field-help strong { color: var(--ink, #2a1f35); }
+.field-help code { background: var(--panel2, #fdf5ff); padding: 0.1rem 0.35rem; border-radius: 8px; font-size: 0.7rem; color: var(--periwinkle, #7080e8); border: 1px solid var(--border2, rgba(180,140,220,0.4)); }
+.field-error {
+    font-size: 0.72rem; color: var(--pink, #f060a8); line-height: 1.5; margin-bottom: 0.5rem;
+}
+
+/* ── Card ───────────────────────────────────────────────────────────────── */
+.card {
+    background: var(--panel, #fff);
+    border: 1px solid var(--border, rgba(180,140,220,0.25));
+    border-radius: 16px;
+    padding: 1rem;
+}
+
+/* ── Badge ──────────────────────────────────────────────────────────────── */
+.badge {
+    display: inline-flex; align-items: center;
+    background: var(--panel2, #fdf5ff);
+    border: 1px solid var(--border2, rgba(180,140,220,0.4));
+    padding: 2px 8px; font-size: 0.75rem; border-radius: 50px;
+    font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
+    white-space: nowrap;
+}
+
+/* ── Strength meter ─────────────────────────────────────────────────────── */
+.strength-meter {
+    height: 5px; border-radius: 50px;
+    background: var(--border, rgba(180,140,220,0.25));
+    margin-top: 0.35rem; overflow: hidden;
+}
+.strength-bar {
+    height: 100%; width: 0; border-radius: 50px;
+    transition: width 0.2s, background 0.2s;
+}
+.strength-bar.strength-1 { background: var(--status-err, var(--pink, #f060a8)); }
+.strength-bar.strength-2 { background: var(--status-warn, var(--lemon, #f8d040)); }
+.strength-bar.strength-3 { background: var(--status-ok, var(--mint, #40c8a8)); }
+.strength-bar.strength-4 { background: var(--status-ok, var(--mint, #40c8a8)); }
+
+/* ── Chip / pill ────────────────────────────────────────────────────────── */
+.chip {
+    display: inline-flex; align-items: center;
+    padding: 2px 10px; border-radius: 50px;
+    background: var(--panel2, #fdf5ff);
+    border: 1px solid var(--border, rgba(180,140,220,0.25));
+    font-size: 0.75rem;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
+.pill {
+    display: inline-flex; align-items: center;
+    padding: 2px 10px; border-radius: 50px;
+    background: var(--periwinkle, #7080e8); border: none;
+    color: #fff; font-size: 0.75rem;
+    font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
+}
