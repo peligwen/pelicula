@@ -1,6 +1,7 @@
-package main
+package migratejson
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 
 	"pelicula-api/internal/peligrosa"
 	reporeqs "pelicula-api/internal/repo/requests"
+
+	_ "modernc.org/sqlite"
 )
 
 // migrateTestFulfiller is a no-op Fulfiller for migrate tests.
@@ -19,6 +22,94 @@ func (f *migrateTestFulfiller) AddMovie(tmdbID, profileID int, rootPath string) 
 }
 func (f *migrateTestFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
 	return 0, nil
+}
+
+// testDB creates a fresh SQLite database with the pelicula schema in t.TempDir()
+// and returns it. The database is closed automatically when the test ends.
+func testDB(t *testing.T) *sql.DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("testDB: sql.Open: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		db.Close()
+		t.Fatalf("testDB: WAL: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		db.Close()
+		t.Fatalf("testDB: foreign_keys: %v", err)
+	}
+
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS roles (
+			jellyfin_id TEXT PRIMARY KEY,
+			username     TEXT NOT NULL,
+			role         TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS invites (
+			token      TEXT PRIMARY KEY,
+			label      TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			created_by TEXT NOT NULL,
+			expires_at TEXT,
+			max_uses   INTEGER,
+			uses       INTEGER NOT NULL DEFAULT 0,
+			revoked    INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS redemptions (
+			invite_token TEXT NOT NULL REFERENCES invites(token) ON DELETE CASCADE,
+			username     TEXT NOT NULL,
+			jellyfin_id  TEXT NOT NULL,
+			redeemed_at  TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS requests (
+			id           TEXT PRIMARY KEY,
+			type         TEXT NOT NULL,
+			tmdb_id      INTEGER NOT NULL DEFAULT 0,
+			tvdb_id      INTEGER NOT NULL DEFAULT 0,
+			title        TEXT NOT NULL,
+			year         INTEGER NOT NULL DEFAULT 0,
+			poster       TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL DEFAULT '',
+			state        TEXT NOT NULL,
+			reason       TEXT NOT NULL DEFAULT '',
+			arr_id       INTEGER NOT NULL DEFAULT 0,
+			created_at   TEXT NOT NULL,
+			updated_at   TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS request_events (
+			request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+			at         TEXT NOT NULL,
+			state      TEXT NOT NULL,
+			actor      TEXT NOT NULL DEFAULT '',
+			note       TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_events_request_id ON request_events(request_id)`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			token      TEXT PRIMARY KEY,
+			username   TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS rate_limits (
+			ip           TEXT PRIMARY KEY,
+			fail_count   INTEGER NOT NULL DEFAULT 0,
+			window_start TEXT NOT NULL
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			db.Close()
+			t.Fatalf("testDB: schema: %v", err)
+		}
+	}
+
+	t.Cleanup(func() { db.Close() })
+	return db
 }
 
 // ── migrateRolesJSON ──────────────────────────────────────────────────────────

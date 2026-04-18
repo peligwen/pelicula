@@ -33,6 +33,7 @@ import (
 	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/peligrosa"
+	"pelicula-api/internal/repo/migratejson"
 	reporeqs "pelicula-api/internal/repo/requests"
 
 	_ "modernc.org/sqlite"
@@ -191,7 +192,7 @@ func main() {
 		slog.Error("failed to open catalog database", "component", "main", "error", err)
 		os.Exit(1)
 	}
-	migrateAllJSON(db, "/config/pelicula")
+	migratejson.Run(db, "/config/pelicula")
 
 	jellyfinClient := NewJellyfinHTTPClient(&http.Client{Timeout: 10 * time.Second}, svc)
 

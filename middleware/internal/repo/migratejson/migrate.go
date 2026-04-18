@@ -1,8 +1,8 @@
-// migrate_json.go — one-time migration from legacy JSON flat files to SQLite.
+// migrate.go — one-time migration from legacy JSON flat files to SQLite.
 // Each function is idempotent: if the JSON file doesn't exist it returns nil.
 // On success the JSON file is renamed to <path>.migrated so it won't be
 // re-processed on the next restart.
-package main
+package migratejson
 
 import (
 	"database/sql"
@@ -14,10 +14,10 @@ import (
 	"time"
 )
 
-// migrateAllJSON orchestrates all JSON → SQLite migrations.
+// Run orchestrates all JSON → SQLite migrations.
 // configDir is the base directory that contains the pelicula sub-directory
 // (e.g. "/config/pelicula").
-func migrateAllJSON(db *sql.DB, configDir string) {
+func Run(db *sql.DB, configDir string) {
 	migrateRolesJSON(db, filepath.Join(configDir, "roles.json"))
 	migrateInvitesJSON(db, filepath.Join(configDir, "invites.json"))
 	migrateRequestsJSON(db, filepath.Join(configDir, "requests.json"))
