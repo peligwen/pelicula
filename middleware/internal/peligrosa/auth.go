@@ -5,6 +5,7 @@
 package peligrosa
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -18,7 +19,7 @@ import (
 
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
-	"pelicula-api/internal/repo/dbutil"
+	"pelicula-api/internal/repo/sessions"
 )
 
 type UserRole string
@@ -55,12 +56,13 @@ type loginAttempts struct {
 // restarts. Unit tests that do not exercise HandleLogin construct Auth directly
 // via newTestAuth() (which bypasses NewAuth) and omit db/rolesStore.
 type Auth struct {
-	db         *sql.DB                // always non-nil (NewAuth panics if DB is nil)
-	rolesStore *RolesStore            // always non-nil (initialised from db in NewAuth)
-	jellyfin   clients.JellyfinClient // used for Jellyfin auth calls
-	sessions   map[string]session
-	failures   map[string]*loginAttempts // IP → recent failure timestamps
-	mu         sync.RWMutex
+	db            *sql.DB                // always non-nil (NewAuth panics if DB is nil)
+	rolesStore    *RolesStore            // always non-nil (initialised from db in NewAuth)
+	sessionsStore *sessions.Store        // always non-nil (initialised from db in NewAuth)
+	jellyfin      clients.JellyfinClient // used for Jellyfin auth calls
+	sessions      map[string]session
+	failures      map[string]*loginAttempts // IP → recent failure timestamps
+	mu            sync.RWMutex
 }
 
 // AuthConfig holds parameters for NewAuth.
@@ -83,6 +85,7 @@ func NewAuth(cfg AuthConfig) *Auth {
 		jellyfin: cfg.Jellyfin,
 	}
 	a.rolesStore = NewRolesStore(cfg.DB)
+	a.sessionsStore = sessions.New(cfg.DB)
 	slog.Info("auth: Jellyfin credentials required for login", "component", "auth")
 	// Restore persisted sessions from DB into the in-memory map on startup.
 	a.loadSessionsFromDB()
@@ -102,27 +105,15 @@ func (a *Auth) Roles() *RolesStore {
 
 // loadSessionsFromDB reads non-expired sessions from SQLite into the in-memory map.
 func (a *Auth) loadSessionsFromDB() {
-	rows, err := a.db.Query(
-		`SELECT token, username, role, expires_at FROM sessions WHERE expires_at > ?`,
-		time.Now().UTC().Format(time.RFC3339),
-	)
+	active, err := a.sessionsStore.LookupActive(context.Background())
 	if err != nil {
 		slog.Warn("failed to load sessions from DB", "component", "auth", "error", err)
 		return
 	}
-	defer rows.Close()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for rows.Next() {
-		var token, username, role, expiresAt string
-		if err := rows.Scan(&token, &username, &role, &expiresAt); err != nil {
-			continue
-		}
-		t, err := dbutil.ParseTime(expiresAt)
-		if err != nil {
-			continue
-		}
-		a.sessions[token] = session{username: username, role: UserRole(role), expiry: t}
+	for _, s := range active {
+		a.sessions[s.Token] = session{username: s.Username, role: UserRole(s.Role), expiry: s.ExpiresAt}
 	}
 }
 
@@ -156,9 +147,8 @@ func (a *Auth) cleanupSessions() {
 		a.mu.Unlock()
 
 		// Purge expired session rows from SQLite as well.
-		if a.db != nil {
-			nowStr := now.UTC().Format(time.RFC3339)
-			if _, err := a.db.Exec(`DELETE FROM sessions WHERE expires_at <= ?`, nowStr); err != nil {
+		if a.sessionsStore != nil {
+			if err := a.sessionsStore.PruneExpired(context.Background()); err != nil {
 				slog.Warn("cleanup: failed to delete expired sessions", "component", "auth", "error", err)
 			}
 		}
@@ -324,14 +314,8 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	a.sessions[token] = session{username: req.Username, role: role, expiry: expiry}
 	a.mu.Unlock()
 
-	if a.db != nil {
-		_, err := a.db.Exec(
-			`INSERT OR REPLACE INTO sessions (token, username, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-			token, req.Username, string(role),
-			time.Now().UTC().Format(time.RFC3339),
-			expiry.UTC().Format(time.RFC3339),
-		)
-		if err != nil {
+	if a.sessionsStore != nil {
+		if err := a.sessionsStore.Create(r.Context(), token, req.Username, string(role), expiry); err != nil {
 			slog.Warn("failed to persist session", "component", "auth", "user", req.Username, "error", err)
 		}
 	}
@@ -361,8 +345,8 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		delete(a.sessions, cookie.Value)
 		a.mu.Unlock()
-		if a.db != nil {
-			if _, dbErr := a.db.Exec(`DELETE FROM sessions WHERE token = ?`, cookie.Value); dbErr != nil {
+		if a.sessionsStore != nil {
+			if dbErr := a.sessionsStore.Revoke(r.Context(), cookie.Value); dbErr != nil {
 				slog.Warn("failed to delete session from DB", "component", "auth", "error", dbErr)
 			}
 		}
