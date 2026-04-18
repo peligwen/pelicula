@@ -369,7 +369,7 @@ func jellyfinAuth(s *ServiceClients) (string, error) {
 	}
 
 	// Read .env once; check for API key first, then fall back to password auth.
-	// The API key is present when AutoWire has completed on a previous boot but
+	// The API key is present when autowire has completed on a previous boot but
 	// the container was restarted without a full down/up (Docker does not re-read
 	// .env on restart, so the env var is stale even though the file has the key).
 	vars, err := parseEnvFile(envPath)

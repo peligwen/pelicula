@@ -13,11 +13,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/autowire"
 	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/downloads"
 	"pelicula-api/internal/app/health"
@@ -44,6 +46,7 @@ type App struct {
 	dlHandler     *downloads.Handler
 	healthHandler *health.Handler
 	vpnConfigured bool
+	autowireState *autowire.AutowireState
 }
 
 // indexerCountCacheApp caches the Prowlarr indexer count.
@@ -172,9 +175,43 @@ func main() {
 	go poller.Run(ctx)
 	go catalog.RunQueuePoller(ctx, cdb, svc, urls.Radarr, urls.Sonarr)
 
-	// Auto-wire in background so the HTTP server starts immediately
+	// Build the Autowirer. wireJellyfin is a callback so Jellyfin-specific
+	// logic (envPath, envMu, wizard, API key persistence) stays in cmd/ until
+	// a future phase extracts it.
+	autowirer, autowireState := autowire.NewAutowirer(autowire.Config{
+		Svc: svc,
+		URLs: autowire.URLs{
+			Sonarr:      urls.Sonarr,
+			Radarr:      urls.Radarr,
+			Prowlarr:    urls.Prowlarr,
+			Bazarr:      envOr("BAZARR_URL", "http://bazarr:6767/bazarr"),
+			Jellyfin:    envOr("JELLYFIN_URL", "http://jellyfin:8096/jellyfin"),
+			QBT:         envOr("QBITTORRENT_URL", "http://gluetun:8080"),
+			PeliculaAPI: envOr("PELICULA_API_URL", "http://pelicula-api:8181"),
+		},
+		VPNConfigured: cfg.WireguardPrivateKey != "",
+		WebhookSecret: strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")),
+		SubLangs:      os.Getenv("PELICULA_SUB_LANGS"),
+		AudioLang:     os.Getenv("PELICULA_AUDIO_LANG"),
+		GetLibraries: func() []autowire.Library {
+			libs := GetLibraries()
+			out := make([]autowire.Library, 0, len(libs))
+			for _, l := range libs {
+				out = append(out, autowire.Library{
+					Name:          l.Name,
+					ContainerPath: l.ContainerPath(),
+					Arr:           l.Arr,
+				})
+			}
+			return out
+		},
+		WireJellyfin:           func() { wireJellyfin(svc) },
+		InvalidateIndexerCache: func() { indexerCount.invalidate() },
+	})
+
+	// Auto-wire in background so the HTTP server starts immediately.
 	go func() {
-		if err := AutoWire(svc); err != nil {
+		if err := autowirer.Run(ctx); err != nil {
 			slog.Error("autowire failed", "component", "main", "error", err)
 		}
 	}()
@@ -212,6 +249,7 @@ func main() {
 		requests:      requests,
 		statusTTL:     statusTTLCache{ttl: 5 * time.Second},
 		vpnConfigured: cfg.WireguardPrivateKey != "",
+		autowireState: autowireState,
 		dlHandler: &downloads.Handler{
 			Svc:       svc,
 			SonarrURL: urls.Sonarr,

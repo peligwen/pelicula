@@ -122,6 +122,51 @@ func (s *ServiceClients) IsWired() bool {
 	return s.wired
 }
 
+// SonarrRadarrKeys returns a snapshot of the Sonarr and Radarr API keys.
+// Implements autowire.ArrSvc.
+func (s *ServiceClients) SonarrRadarrKeys() (sonarr, radarr string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.SonarrKey, s.RadarrKey
+}
+
+// GetProwlarrKey returns a snapshot of the Prowlarr API key.
+// Implements autowire.ArrSvc.
+func (s *ServiceClients) GetProwlarrKey() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ProwlarrKey
+}
+
+// HTTPClient returns the shared HTTP client.
+// Implements autowire.ArrSvc.
+func (s *ServiceClients) HTTPClient() *http.Client {
+	return s.client
+}
+
+// ConfigDir returns the config directory root.
+// Implements autowire.ArrSvc.
+func (s *ServiceClients) ConfigDir() string {
+	return s.configDir
+}
+
+// SetBazarrClient installs the Bazarr typed client and persists the key.
+// Implements autowire.ArrSvc.
+func (s *ServiceClients) SetBazarrClient(apiKey string, client *bazarrclient.Client) {
+	s.mu.Lock()
+	s.BazarrKey = apiKey
+	s.Bazarr = client
+	s.mu.Unlock()
+}
+
+// BazarrClient returns the current Bazarr typed client (may be nil before wiring).
+// Implements autowire.ArrSvc.
+func (s *ServiceClients) BazarrClient() *bazarrclient.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Bazarr
+}
+
 func readAPIKey(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -1,122 +1,243 @@
-package main
+package autowire
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	bazarrclient "pelicula-api/internal/clients/bazarr"
 )
 
-var (
-	sonarrURL   = envOr("SONARR_URL", "http://sonarr:8989/sonarr")
-	radarrURL   = envOr("RADARR_URL", "http://radarr:7878/radarr")
-	prowlarrURL = envOr("PROWLARR_URL", "http://gluetun:9696/prowlarr")
-	bazarrURL   = envOr("BAZARR_URL", "http://bazarr:6767/bazarr")
-)
+// AutowireState holds completion state for the auto-wiring run.
+// The zero value is "not done".
+type AutowireState struct {
+	done atomic.Bool
+}
 
-func AutoWire(s *ServiceClients) error {
+// Done reports whether the auto-wiring run has completed successfully.
+func (s *AutowireState) Done() bool {
+	return s.done.Load()
+}
+
+// Library is the minimal library descriptor that Autowirer needs.
+// It mirrors cmd/pelicula-api.Library without depending on package main.
+type Library struct {
+	Name          string
+	ContainerPath string // resolved absolute path inside the container
+	Arr           string // "sonarr" | "radarr" | "none"
+}
+
+// ArrSvc is the subset of ServiceClients that the Autowirer uses.
+// Defined here (not in package main) so the package has no import cycle.
+type ArrSvc interface {
+	// ReloadKeys re-reads API keys from config files.
+	ReloadKeys()
+	// SonarrRadarrKeys returns the current Sonarr and Radarr keys.
+	SonarrRadarrKeys() (sonarr, radarr string)
+	// GetProwlarrKey returns the current Prowlarr key.
+	GetProwlarrKey() string
+	// SetWired marks the service as fully wired.
+	SetWired(v bool)
+	// ArrGet makes a GET request to a *arr service.
+	ArrGet(baseURL, apiKey, path string) ([]byte, error)
+	// ArrPost makes a POST request to a *arr service.
+	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+	// ArrPut makes a PUT request to a *arr service.
+	ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error)
+	// HTTPClient returns the shared HTTP client (used for health polling).
+	HTTPClient() *http.Client
+	// ConfigDir returns the config directory root (e.g. "/config").
+	ConfigDir() string
+	// SetBazarrClient installs the Bazarr typed client and key.
+	SetBazarrClient(apiKey string, client *bazarrclient.Client)
+	// BazarrClient returns the current Bazarr typed client (may be nil).
+	BazarrClient() *bazarrclient.Client
+}
+
+// URLs holds all the service endpoint URLs that the Autowirer needs.
+type URLs struct {
+	Sonarr      string
+	Radarr      string
+	Prowlarr    string
+	Bazarr      string
+	Jellyfin    string
+	QBT         string // qBittorrent (via gluetun network)
+	PeliculaAPI string // self-referencing URL for webhook registration
+}
+
+// Autowirer runs the *arr stack auto-wiring sequence on startup.
+// It has no package-level globals; all dependencies are fields.
+type Autowirer struct {
+	svc           ArrSvc
+	urls          URLs
+	vpnConfigured bool
+	webhookSecret string
+	subLangs      string // PELICULA_SUB_LANGS env value
+	audioLang     string // PELICULA_AUDIO_LANG env value (unused here, for Jellyfin)
+	getLibraries  func() []Library
+	wireJellyfin  func() // callback into cmd/ for Jellyfin-specific wiring
+	invalidateIdx func() // callback to clear indexer count cache
+	state         *AutowireState
+}
+
+// Config is the constructor argument bag for NewAutowirer.
+type Config struct {
+	Svc           ArrSvc
+	URLs          URLs
+	VPNConfigured bool
+	WebhookSecret string
+	SubLangs      string
+	AudioLang     string
+	// GetLibraries returns the current library slice (called at wiring time).
+	GetLibraries func() []Library
+	// WireJellyfin is called during Run() to wire Jellyfin.
+	// It may be nil if Jellyfin wiring is not needed (e.g. tests).
+	WireJellyfin func()
+	// InvalidateIndexerCache clears any cached indexer count.
+	// May be nil (no-op in that case).
+	InvalidateIndexerCache func()
+}
+
+// NewAutowirer constructs an Autowirer from Config.
+// The returned *AutowireState can be queried before Run completes.
+func NewAutowirer(cfg Config) (*Autowirer, *AutowireState) {
+	state := &AutowireState{}
+	a := &Autowirer{
+		svc:           cfg.Svc,
+		urls:          cfg.URLs,
+		vpnConfigured: cfg.VPNConfigured,
+		webhookSecret: cfg.WebhookSecret,
+		subLangs:      cfg.SubLangs,
+		audioLang:     cfg.AudioLang,
+		getLibraries:  cfg.GetLibraries,
+		wireJellyfin:  cfg.WireJellyfin,
+		invalidateIdx: cfg.InvalidateIndexerCache,
+		state:         state,
+	}
+	if a.getLibraries == nil {
+		a.getLibraries = func() []Library { return nil }
+	}
+	if a.invalidateIdx == nil {
+		a.invalidateIdx = func() {}
+	}
+	if a.wireJellyfin == nil {
+		a.wireJellyfin = func() {}
+	}
+	return a, state
+}
+
+// Run executes the auto-wiring sequence and blocks until it completes (or fails).
+// It is designed to be called in a goroutine from main so the HTTP server starts
+// immediately. ctx is honoured during the service-readiness polling loop.
+func (a *Autowirer) Run(ctx context.Context) error {
 	slog.Info("waiting for services to be ready", "component", "autowire")
 
-	if err := waitForServices(s); err != nil {
+	if err := a.waitForServices(ctx); err != nil {
 		return fmt.Errorf("services not ready: %w", err)
 	}
 
-	// Reload keys in case they were generated after initial container start
-	s.ReloadKeys()
+	// Reload keys in case they were generated after initial container start.
+	a.svc.ReloadKeys()
 
-	if s.SonarrKey == "" || s.RadarrKey == "" {
+	sonarrKey, radarrKey := a.svc.SonarrRadarrKeys()
+	if sonarrKey == "" || radarrKey == "" {
 		return fmt.Errorf("missing API keys (sonarr=%v radarr=%v)",
-			s.SonarrKey != "", s.RadarrKey != "")
+			sonarrKey != "", radarrKey != "")
 	}
 
 	slog.Info("services ready, checking configuration", "component", "autowire")
-
-	vpnConfigured := os.Getenv("WIREGUARD_PRIVATE_KEY") != ""
 
 	sonarrWired := true
 	radarrWired := true
 	prowlarrWired := true
 
-	if vpnConfigured {
-		if s.ProwlarrKey == "" {
+	if a.vpnConfigured {
+		prowlarrKey := a.svc.GetProwlarrKey()
+		if prowlarrKey == "" {
 			slog.Warn("Prowlarr API key not found — skipping download client and indexer wiring", "component", "autowire")
 			prowlarrWired = false
 		} else {
-			sonarrWired = wireDownloadClient(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", "tv-sonarr")
-			radarrWired = wireDownloadClient(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", "radarr")
-			prowlarrWired = wireProwlarrApp(s, "Sonarr", sonarrURL, s.SonarrKey) &&
-				wireProwlarrApp(s, "Radarr", radarrURL, s.RadarrKey)
+			sonarrWired = a.wireDownloadClient("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", "tv-sonarr")
+			radarrWired = a.wireDownloadClient("Radarr", a.urls.Radarr, radarrKey, "/api/v3", "radarr")
+			prowlarrWired = a.wireProwlarrApp("Sonarr", a.urls.Sonarr, sonarrKey) &&
+				a.wireProwlarrApp("Radarr", a.urls.Radarr, radarrKey)
 		}
 	} else {
 		slog.Info("VPN not configured — skipping download client and indexer wiring", "component", "autowire")
 	}
 
-	// Root folders are needed regardless of VPN (for library management + import)
-	for _, lib := range GetLibraries() {
+	// Root folders are needed regardless of VPN (for library management + import).
+	for _, lib := range a.getLibraries() {
 		switch lib.Arr {
 		case "sonarr":
-			wireRootFolder(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3", lib.ContainerPath())
+			a.wireRootFolder("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", lib.ContainerPath)
 		case "radarr":
-			wireRootFolder(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3", lib.ContainerPath())
+			a.wireRootFolder("Radarr", a.urls.Radarr, radarrKey, "/api/v3", lib.ContainerPath)
 		}
 	}
 
-	// Wire Procula import webhooks (useful even without VPN, for manual imports)
-	wireImportWebhook(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
-	wireImportWebhook(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
+	// Wire Procula import webhooks (useful even without VPN, for manual imports).
+	a.wireImportWebhook("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
+	a.wireImportWebhook("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
 
-	// Auto-configure Jellyfin: complete wizard, add media libraries
-	wireJellyfin(s)
+	// Auto-configure Jellyfin (via callback into cmd/).
+	a.wireJellyfin()
 
-	// Wire Bazarr: connect Sonarr/Radarr and set subtitle languages
-	wireBazarr(s)
+	// Wire Bazarr: connect Sonarr/Radarr and set subtitle languages.
+	a.wireBazarr()
 
 	if sonarrWired && radarrWired && prowlarrWired {
-		s.SetWired(true)
-		indexerCount.invalidate() // fresh indexer count after wiring
+		a.svc.SetWired(true)
+		a.invalidateIdx()
 		slog.Info("all services wired successfully", "component", "autowire")
 		// Force health re-check so stale "connection refused" errors clear from the *arr UI.
-		triggerHealthCheck(s, "Sonarr", sonarrURL, s.SonarrKey, "/api/v3")
-		triggerHealthCheck(s, "Radarr", radarrURL, s.RadarrKey, "/api/v3")
+		a.triggerHealthCheck("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
+		a.triggerHealthCheck("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
 	} else {
 		slog.Warn("some wiring failed — check logs above", "component", "autowire")
 	}
 
+	a.state.done.Store(true)
 	return nil
 }
 
-func triggerHealthCheck(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
-	_, err := s.ArrPost(baseURL, apiKey, apiPath+"/command", map[string]string{"name": "CheckHealth"})
+func (a *Autowirer) triggerHealthCheck(name, baseURL, apiKey, apiPath string) {
+	_, err := a.svc.ArrPost(baseURL, apiKey, apiPath+"/command", map[string]string{"name": "CheckHealth"})
 	if err != nil {
 		slog.Warn("failed to trigger health check", "component", "autowire", "service", name, "error", err)
 	}
 }
 
-func waitForServices(s *ServiceClients) error {
+func (a *Autowirer) waitForServices(ctx context.Context) error {
 	endpoints := map[string]string{
-		"sonarr":   sonarrURL + "/ping",
-		"radarr":   radarrURL + "/ping",
-		"jellyfin": jellyfinURL + "/System/Info/Public",
+		"sonarr":   a.urls.Sonarr + "/ping",
+		"radarr":   a.urls.Radarr + "/ping",
+		"jellyfin": a.urls.Jellyfin + "/System/Info/Public",
+		"bazarr":   a.urls.Bazarr + "/api/system/status",
 	}
-	endpoints["bazarr"] = bazarrURL + "/api/system/status"
-
-	vpnConfigured := os.Getenv("WIREGUARD_PRIVATE_KEY") != ""
-	if vpnConfigured {
-		endpoints["prowlarr"] = prowlarrURL + "/ping"
-		endpoints["qbittorrent"] = qbtBaseURL + "/"
+	if a.vpnConfigured {
+		endpoints["prowlarr"] = a.urls.Prowlarr + "/ping"
+		endpoints["qbittorrent"] = a.urls.QBT + "/"
 	}
 
+	client := a.svc.HTTPClient()
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		allReady := true
-		for _, url := range endpoints {
-			resp, err := s.client.Get(url)
+		for _, u := range endpoints {
+			resp, err := client.Get(u)
 			if err != nil {
 				allReady = false
 				break
@@ -136,9 +257,8 @@ func waitForServices(s *ServiceClients) error {
 	return fmt.Errorf("timeout waiting for services")
 }
 
-func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath, category string) bool {
-	// Check existing download clients
-	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/downloadclient")
+func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category string) bool {
+	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/downloadclient")
 	if err != nil {
 		slog.Error("failed to check download clients", "component", "autowire", "service", name, "error", err)
 		return false
@@ -157,7 +277,6 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath, categ
 		}
 	}
 
-	// Add qBittorrent download client
 	payload := map[string]any{
 		"name":           "qBittorrent",
 		"implementation": "QBittorrent",
@@ -174,7 +293,7 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath, categ
 		},
 	}
 
-	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/downloadclient", payload)
+	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/downloadclient", payload)
 	if err != nil {
 		slog.Error("failed to add qBittorrent download client", "component", "autowire", "service", name, "error", err)
 		return false
@@ -184,9 +303,8 @@ func wireDownloadClient(s *ServiceClients, name, baseURL, apiKey, apiPath, categ
 	return true
 }
 
-func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPath string) bool {
-	// Check existing root folders
-	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/rootfolder")
+func (a *Autowirer) wireRootFolder(name, baseURL, apiKey, apiPath, folderPath string) bool {
+	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/rootfolder")
 	if err != nil {
 		slog.Error("failed to check root folders", "component", "autowire", "service", name, "error", err)
 		return false
@@ -205,11 +323,7 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 		}
 	}
 
-	payload := map[string]any{
-		"path": folderPath,
-	}
-
-	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/rootfolder", payload)
+	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/rootfolder", map[string]any{"path": folderPath})
 	if err != nil {
 		slog.Error("failed to add root folder", "component", "autowire", "service", name, "path", folderPath, "error", err)
 		return false
@@ -221,8 +335,8 @@ func wireRootFolder(s *ServiceClients, name, baseURL, apiKey, apiPath, folderPat
 
 // wireImportWebhook adds a Procula import webhook notification to a *arr app.
 // It is idempotent — won't add a second "Procula" webhook if one already exists.
-func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string) {
-	data, err := s.ArrGet(baseURL, apiKey, apiPath+"/notification")
+func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
+	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/notification")
 	if err != nil {
 		slog.Error("failed to check notifications", "component", "autowire", "service", name, "error", err)
 		return
@@ -241,9 +355,9 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 		}
 	}
 
-	hookURL := envOr("PELICULA_API_URL", "http://pelicula-api:8181") + "/api/pelicula/hooks/import"
-	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
-		hookURL += "?secret=" + url.QueryEscape(secret)
+	hookURL := a.urls.PeliculaAPI + "/api/pelicula/hooks/import"
+	if a.webhookSecret != "" {
+		hookURL += "?secret=" + url.QueryEscape(a.webhookSecret)
 	}
 	payload := map[string]any{
 		"name":           "Procula",
@@ -262,12 +376,125 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 		"onApplicationUpdate": false,
 	}
 
-	_, err = s.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
+	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
 	if err != nil {
 		slog.Error("failed to add Procula webhook", "component", "autowire", "service", name, "error", err)
 		return
 	}
 	slog.Info("added Procula import webhook", "component", "autowire", "service", name, "url", hookURL)
+}
+
+func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
+	data, err := a.svc.ArrGet(a.urls.Prowlarr, a.svc.GetProwlarrKey(), "/api/v1/applications")
+	if err != nil {
+		slog.Error("failed to check Prowlarr applications", "component", "autowire", "error", err)
+		return false
+	}
+
+	var apps []map[string]any
+	if err := json.Unmarshal(data, &apps); err != nil {
+		slog.Error("failed to parse Prowlarr applications response", "component", "autowire", "error", err)
+		return false
+	}
+
+	prowlarrKey := a.svc.GetProwlarrKey()
+
+	for _, app := range apps {
+		if n, _ := app["name"].(string); n != appName {
+			continue
+		}
+
+		// App exists — check if prowlarrUrl or apiKey are stale and update if so.
+		fields, ok := app["fields"].([]any)
+		if !ok {
+			slog.Warn("unexpected fields type in Prowlarr app", "component", "autowire", "app", appName)
+			return false
+		}
+		needsUpdate := false
+		for _, f := range fields {
+			field, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch field["name"] {
+			case "prowlarrUrl":
+				if v, _ := field["value"].(string); normalizeURL(v) != normalizeURL(a.urls.Prowlarr) {
+					slog.Debug("prowlarr app URL mismatch", "component", "autowire", "app", appName, "have", v, "want", a.urls.Prowlarr)
+					needsUpdate = true
+				}
+			case "apiKey":
+				if v, _ := field["value"].(string); v != appAPIKey {
+					slog.Debug("prowlarr app key mismatch", "component", "autowire", "app", appName)
+					needsUpdate = true
+				}
+			}
+		}
+		if !needsUpdate {
+			slog.Info("Prowlarr app already connected, skipping", "component", "autowire", "app", appName)
+			return true
+		}
+
+		// Patch the fields in the existing payload and PUT.
+		for _, fRaw := range fields {
+			f, ok := fRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch f["name"] {
+			case "prowlarrUrl":
+				f["value"] = a.urls.Prowlarr
+			case "apiKey":
+				f["value"] = appAPIKey
+			}
+		}
+		idVal, ok := app["id"].(float64)
+		if !ok {
+			slog.Error("unexpected id type in Prowlarr app", "component", "autowire", "app", appName)
+			return false
+		}
+		id := int(idVal)
+		_, err = a.svc.ArrPut(a.urls.Prowlarr, prowlarrKey, fmt.Sprintf("/api/v1/applications/%d", id), app)
+		if err != nil {
+			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
+			return false
+		}
+		slog.Info("updated Prowlarr app (stale key or URL)", "component", "autowire", "app", appName)
+		return true
+	}
+
+	payload := map[string]any{
+		"name":           appName,
+		"implementation": appName,
+		"configContract": appName + "Settings",
+		"syncLevel":      "fullSync",
+		"fields": []map[string]any{
+			{"name": "prowlarrUrl", "value": a.urls.Prowlarr},
+			{"name": "baseUrl", "value": appURL},
+			{"name": "apiKey", "value": appAPIKey},
+		},
+	}
+
+	_, err = a.svc.ArrPost(a.urls.Prowlarr, prowlarrKey, "/api/v1/applications", payload)
+	if err != nil {
+		slog.Error("failed to connect Prowlarr app", "component", "autowire", "app", appName, "error", err)
+		return false
+	}
+
+	slog.Info("connected Prowlarr app", "component", "autowire", "app", appName)
+	return true
+}
+
+// normalizeURL strips trailing slashes and lowercases scheme+host so that
+// URL comparisons are not sensitive to Prowlarr's normalization behavior.
+func normalizeURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return strings.TrimRight(raw, "/")
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String()
 }
 
 // ── Bazarr ─────────────────────────────────────────────────────────────────
@@ -280,34 +507,34 @@ func wireImportWebhook(s *ServiceClients, name, baseURL, apiKey, apiPath string)
 // (a JSON-encoded list, not a separate endpoint). Bazarr only schedules its
 // background missing-subtitle searches when `use_sonarr`/`use_radarr` are
 // true, so this wiring is load-bearing for the whole subtitle pipeline.
-func wireBazarr(s *ServiceClients) {
+func (a *Autowirer) wireBazarr() {
 	slog.Info("checking Bazarr", "component", "autowire")
 
-	apiKey, err := readBazarrAPIKey(s.configDir)
+	apiKey, err := readBazarrAPIKey(a.svc.ConfigDir())
 	if err != nil {
 		slog.Warn("Bazarr API key not available yet", "component", "autowire", "error", err)
 		return
 	}
-	s.mu.Lock()
-	s.BazarrKey = apiKey
-	s.Bazarr = bazarrclient.New(bazarrURL, apiKey)
-	s.mu.Unlock()
+	a.svc.SetBazarrClient(apiKey, bazarrclient.New(a.urls.Bazarr, apiKey))
 
-	s.mu.RLock()
-	sonarrKey := s.SonarrKey
-	radarrKey := s.RadarrKey
-	s.mu.RUnlock()
+	sonarrKey, radarrKey := a.svc.SonarrRadarrKeys()
 	if sonarrKey == "" || radarrKey == "" {
 		slog.Warn("Bazarr wiring skipped, sonarr/radarr keys not ready", "component", "autowire")
 		return
 	}
 
-	subLangs := parseSubLangs(os.Getenv("PELICULA_SUB_LANGS"))
+	subLangs := parseSubLangs(a.subLangs)
 	if len(subLangs) == 0 {
 		subLangs = []string{"en"}
 	}
 
-	if bazarrAlreadyWired(s, sonarrKey, radarrKey) {
+	bzClient := a.svc.BazarrClient()
+	if bzClient == nil {
+		slog.Warn("Bazarr client not available after SetBazarrClient — skipping", "component", "autowire")
+		return
+	}
+
+	if bazarrAlreadyWired(bzClient, sonarrKey, radarrKey) {
 		slog.Info("Bazarr already wired, skipping", "component", "autowire")
 		return
 	}
@@ -358,7 +585,7 @@ func wireBazarr(s *ServiceClients) {
 		form.Add("settings-general-enabled_providers", p)
 	}
 
-	if err := s.Bazarr.SaveSettings(context.Background(), form); err != nil {
+	if err := bzClient.SaveSettings(context.Background(), form); err != nil {
 		slog.Error("failed to wire Bazarr", "component", "autowire", "error", err)
 		return
 	}
@@ -406,8 +633,8 @@ func buildPeliculaProfile(langs []string) map[string]any {
 	}
 }
 
-func bazarrAlreadyWired(s *ServiceClients, sonarrKey, radarrKey string) bool {
-	data, err := s.Bazarr.RawGet(context.Background(), "/api/system/settings")
+func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey string) bool {
+	data, err := bzClient.RawGet(context.Background(), "/api/system/settings")
 	if err != nil {
 		return false
 	}
@@ -441,7 +668,7 @@ func bazarrAlreadyWired(s *ServiceClients, sonarrKey, radarrKey string) bool {
 	if len(cur.General.EnabledProviders) == 0 {
 		return false
 	}
-	pdata, err := s.Bazarr.RawGet(context.Background(), "/api/system/languages/profiles")
+	pdata, err := bzClient.RawGet(context.Background(), "/api/system/languages/profiles")
 	if err != nil {
 		return false
 	}
@@ -506,116 +733,4 @@ func readBazarrAPIKey(configDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no auth.apikey found in bazarr config.yaml")
-}
-
-func wireProwlarrApp(s *ServiceClients, appName, appURL, appAPIKey string) bool {
-	// Check existing applications
-	data, err := s.ArrGet(prowlarrURL, s.ProwlarrKey, "/api/v1/applications")
-	if err != nil {
-		slog.Error("failed to check Prowlarr applications", "component", "autowire", "error", err)
-		return false
-	}
-
-	var apps []map[string]any
-	if err := json.Unmarshal(data, &apps); err != nil {
-		slog.Error("failed to parse Prowlarr applications response", "component", "autowire", "error", err)
-		return false
-	}
-
-	for _, a := range apps {
-		if n, _ := a["name"].(string); n != appName {
-			continue
-		}
-
-		// App exists — check if prowlarrUrl or apiKey are stale and update if so.
-		fields, ok := a["fields"].([]any)
-		if !ok {
-			slog.Warn("unexpected fields type in Prowlarr app", "component", "autowire", "app", appName)
-			return false
-		}
-		needsUpdate := false
-		for _, f := range fields {
-			field, ok := f.(map[string]any)
-			if !ok {
-				continue
-			}
-			switch field["name"] {
-			case "prowlarrUrl":
-				if v, _ := field["value"].(string); normalizeURL(v) != normalizeURL(prowlarrURL) {
-					slog.Debug("prowlarr app URL mismatch", "component", "autowire", "app", appName, "have", v, "want", prowlarrURL)
-					needsUpdate = true
-				}
-			case "apiKey":
-				if v, _ := field["value"].(string); v != appAPIKey {
-					slog.Debug("prowlarr app key mismatch", "component", "autowire", "app", appName)
-					needsUpdate = true
-				}
-			}
-		}
-		if !needsUpdate {
-			slog.Info("Prowlarr app already connected, skipping", "component", "autowire", "app", appName)
-			return true
-		}
-
-		// Patch the fields in the existing payload and PUT.
-		for _, fRaw := range fields {
-			f, ok := fRaw.(map[string]any)
-			if !ok {
-				continue
-			}
-			switch f["name"] {
-			case "prowlarrUrl":
-				f["value"] = prowlarrURL
-			case "apiKey":
-				f["value"] = appAPIKey
-			}
-		}
-		idVal, ok := a["id"].(float64)
-		if !ok {
-			slog.Error("unexpected id type in Prowlarr app", "component", "autowire", "app", appName)
-			return false
-		}
-		id := int(idVal)
-		_, err = s.ArrPut(prowlarrURL, s.ProwlarrKey, fmt.Sprintf("/api/v1/applications/%d", id), a)
-		if err != nil {
-			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
-			return false
-		}
-		slog.Info("updated Prowlarr app (stale key or URL)", "component", "autowire", "app", appName)
-		return true
-	}
-
-	payload := map[string]any{
-		"name":           appName,
-		"implementation": appName,
-		"configContract": appName + "Settings",
-		"syncLevel":      "fullSync",
-		"fields": []map[string]any{
-			{"name": "prowlarrUrl", "value": prowlarrURL},
-			{"name": "baseUrl", "value": appURL},
-			{"name": "apiKey", "value": appAPIKey},
-		},
-	}
-
-	_, err = s.ArrPost(prowlarrURL, s.ProwlarrKey, "/api/v1/applications", payload)
-	if err != nil {
-		slog.Error("failed to connect Prowlarr app", "component", "autowire", "app", appName, "error", err)
-		return false
-	}
-
-	slog.Info("connected Prowlarr app", "component", "autowire", "app", appName)
-	return true
-}
-
-// normalizeURL strips trailing slashes and lowercases scheme+host so that
-// URL comparisons are not sensitive to Prowlarr's normalization behavior.
-func normalizeURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return strings.TrimRight(raw, "/")
-	}
-	u.Scheme = strings.ToLower(u.Scheme)
-	u.Host = strings.ToLower(u.Host)
-	u.Path = strings.TrimRight(u.Path, "/")
-	return u.String()
 }
