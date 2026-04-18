@@ -1,4 +1,6 @@
-package main
+// Package missingwatcher periodically scans Sonarr/Radarr for monitored
+// content that has no files and triggers automatic searches.
+package missingwatcher
 
 import (
 	"encoding/json"
@@ -6,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	appservices "pelicula-api/internal/app/services"
+	services "pelicula-api/internal/app/services"
 )
 
 // searchCooldown tracks per-item search history to prevent hammering the *arr
@@ -66,18 +68,30 @@ func (c *searchCooldown) clear(id int) {
 	delete(c.entries, id)
 }
 
-var (
-	movieCooldown   = newSearchCooldown()
-	episodeCooldown = newSearchCooldown()
-)
+// Watcher periodically scans Sonarr/Radarr for monitored content without files.
+type Watcher struct {
+	Services  *services.Clients
+	SonarrURL string
+	RadarrURL string
+	movie     *searchCooldown
+	episode   *searchCooldown
+}
 
-// StartMissingWatcher runs in the background and periodically searches for
-// monitored content that has no files and no active queue entry. This ensures
-// that movies/series added directly through the Radarr/Sonarr UIs (which
-// don't auto-search by default) get picked up automatically.
-func StartMissingWatcher(s *appservices.Clients, interval time.Duration) {
-	// Wait for autowire to finish before starting
-	for !s.IsWired() {
+// New creates a Watcher wired to the given service clients and URLs.
+func New(svc *services.Clients, sonarrURL, radarrURL string) *Watcher {
+	return &Watcher{
+		Services:  svc,
+		SonarrURL: sonarrURL,
+		RadarrURL: radarrURL,
+		movie:     newSearchCooldown(),
+		episode:   newSearchCooldown(),
+	}
+}
+
+// Run blocks forever, calling scan every interval.
+// Waits for svc.IsWired() before starting.
+func (w *Watcher) Run(interval time.Duration) {
+	for !w.Services.IsWired() {
 		time.Sleep(5 * time.Second)
 	}
 
@@ -85,18 +99,18 @@ func StartMissingWatcher(s *appservices.Clients, interval time.Duration) {
 
 	for {
 		time.Sleep(interval)
-		searchMissingMovies(s)
-		searchMissingSeries(s)
+		w.searchMissingMovies()
+		w.searchMissingSeries()
 	}
 }
 
-func searchMissingMovies(s *appservices.Clients) {
-	_, radarrKey, _ := s.Keys()
+func (w *Watcher) searchMissingMovies() {
+	_, radarrKey, _ := w.Services.Keys()
 	if radarrKey == "" {
 		return
 	}
 
-	data, err := s.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
+	data, err := w.Services.ArrGet(w.RadarrURL, radarrKey, "/api/v3/movie")
 	if err != nil {
 		slog.Error("failed to fetch movies", "component", "watcher", "service", "radarr", "error", err)
 		return
@@ -108,7 +122,7 @@ func searchMissingMovies(s *appservices.Clients) {
 	}
 
 	// Get queue to avoid re-searching items already downloading
-	queuedIDs := radarrQueuedMovieIDs(s)
+	queuedIDs := w.radarrQueuedMovieIDs()
 
 	var missing []int
 	for _, m := range movies {
@@ -117,7 +131,7 @@ func searchMissingMovies(s *appservices.Clients) {
 		available, _ := m["isAvailable"].(bool)
 		id := int(floatVal(m, "id"))
 
-		if monitored && !hasFile && available && !queuedIDs[id] && movieCooldown.shouldSearch(id) {
+		if monitored && !hasFile && available && !queuedIDs[id] && w.movie.shouldSearch(id) {
 			missing = append(missing, id)
 		}
 	}
@@ -127,7 +141,7 @@ func searchMissingMovies(s *appservices.Clients) {
 	}
 
 	slog.Info("triggering search for missing movies", "component", "watcher", "service", "radarr", "count", len(missing))
-	_, err = s.ArrPost(radarrURL, radarrKey, "/api/v3/command", map[string]any{
+	_, err = w.Services.ArrPost(w.RadarrURL, radarrKey, "/api/v3/command", map[string]any{
 		"name":     "MoviesSearch",
 		"movieIds": missing,
 	})
@@ -136,10 +150,10 @@ func searchMissingMovies(s *appservices.Clients) {
 	}
 }
 
-func radarrQueuedMovieIDs(s *appservices.Clients) map[int]bool {
-	_, radarrKey, _ := s.Keys()
+func (w *Watcher) radarrQueuedMovieIDs() map[int]bool {
+	_, radarrKey, _ := w.Services.Keys()
 	ids := make(map[int]bool)
-	records, err := s.ArrGetAllQueueRecords(radarrURL, radarrKey, "/api/v3", "")
+	records, err := w.Services.ArrGetAllQueueRecords(w.RadarrURL, radarrKey, "/api/v3", "")
 	if err != nil {
 		return ids
 	}
@@ -151,13 +165,13 @@ func radarrQueuedMovieIDs(s *appservices.Clients) map[int]bool {
 	return ids
 }
 
-func searchMissingSeries(s *appservices.Clients) {
-	sonarrKey, _, _ := s.Keys()
+func (w *Watcher) searchMissingSeries() {
+	sonarrKey, _, _ := w.Services.Keys()
 	if sonarrKey == "" {
 		return
 	}
 
-	data, err := s.ArrGet(sonarrURL, sonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
+	data, err := w.Services.ArrGet(w.SonarrURL, sonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
 	if err != nil {
 		slog.Error("failed to fetch missing episodes", "component", "watcher", "service", "sonarr", "error", err)
 		return
@@ -171,13 +185,13 @@ func searchMissingSeries(s *appservices.Clients) {
 	}
 
 	// Get queue to avoid re-searching items already downloading
-	queuedEpisodes := sonarrQueuedEpisodeIDs(s)
+	queuedEpisodes := w.sonarrQueuedEpisodeIDs()
 
 	var missing []int
 	for _, ep := range wanted.Records {
 		monitored, _ := ep["monitored"].(bool)
 		id := int(floatVal(ep, "id"))
-		if monitored && !queuedEpisodes[id] && episodeCooldown.shouldSearch(id) {
+		if monitored && !queuedEpisodes[id] && w.episode.shouldSearch(id) {
 			missing = append(missing, id)
 		}
 	}
@@ -187,7 +201,7 @@ func searchMissingSeries(s *appservices.Clients) {
 	}
 
 	slog.Info("triggering search for missing episodes", "component", "watcher", "service", "sonarr", "count", len(missing))
-	_, err = s.ArrPost(sonarrURL, sonarrKey, "/api/v3/command", map[string]any{
+	_, err = w.Services.ArrPost(w.SonarrURL, sonarrKey, "/api/v3/command", map[string]any{
 		"name":       "EpisodeSearch",
 		"episodeIds": missing,
 	})
@@ -196,10 +210,10 @@ func searchMissingSeries(s *appservices.Clients) {
 	}
 }
 
-func sonarrQueuedEpisodeIDs(s *appservices.Clients) map[int]bool {
-	sonarrKey, _, _ := s.Keys()
+func (w *Watcher) sonarrQueuedEpisodeIDs() map[int]bool {
+	sonarrKey, _, _ := w.Services.Keys()
 	ids := make(map[int]bool)
-	records, err := s.ArrGetAllQueueRecords(sonarrURL, sonarrKey, "/api/v3", "")
+	records, err := w.Services.ArrGetAllQueueRecords(w.SonarrURL, sonarrKey, "/api/v3", "")
 	if err != nil {
 		return ids
 	}
@@ -209,4 +223,13 @@ func sonarrQueuedEpisodeIDs(s *appservices.Clients) map[int]bool {
 		}
 	}
 	return ids
+}
+
+// floatVal extracts a float64 from a map[string]any by key.
+// Returns 0 if the key is absent or the value is not a float64.
+func floatVal(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
 }

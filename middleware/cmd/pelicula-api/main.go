@@ -29,6 +29,7 @@ import (
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
+	"pelicula-api/internal/app/missingwatcher"
 	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
@@ -263,7 +264,7 @@ func main() {
 		}
 	}()
 
-	go StartMissingWatcher(svc, 2*time.Minute)
+	go missingwatcher.New(svc, sonarrURL, radarrURL).Run(2 * time.Minute)
 
 	if cfg.WireguardPrivateKey != "" {
 		go StartVPNWatchdog(svc)
