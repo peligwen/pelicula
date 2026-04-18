@@ -193,3 +193,53 @@
     flex-shrink: 0;
 }
 
+@media (max-width: 480px) {
+  /* Match items stack vertically */
+  .match-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .match-badge {
+    align-self: flex-start;
+  }
+
+  /* Browse entries stack label/size */
+  .browse-entry {
+    flex-wrap: wrap;
+  }
+  .browse-size {
+    width: 100%;
+    padding-left: 1.7rem; /* align under the name, past icon */
+  }
+
+  /* Reduce file-tree indent */
+  .browse-children {
+    padding-left: 0.75rem;
+  }
+
+  /* Action bar stacks on small screens */
+  .action-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    border-radius: 12px;
+    gap: 0.5rem;
+  }
+  .action-bar-right {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .action-bar-right .btn,
+  .action-bar-right button {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  /* Dup group header stacks */
+  .dup-group-header {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}
+

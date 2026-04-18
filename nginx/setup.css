@@ -237,3 +237,38 @@ input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink,
     margin-top: 0.75rem;
 }
 .hidden { display: none !important; }
+
+@media (max-width: 480px) {
+  /* Container breathing room */
+  .setup-container {
+    padding: 2rem 1rem;
+  }
+
+  /* Navigation buttons full-width, stacked */
+  .step-nav {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .step-nav .btn-primary,
+  .step-nav .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Step indicator condensed — hide label text, show number only */
+  .steps {
+    gap: 0.25rem;
+  }
+  .step {
+    padding: 0.3rem 0.4rem;
+    font-size: 0;        /* collapse the text node inside .step */
+  }
+  .step-num {
+    font-size: 0.65rem;  /* restore size for the number element */
+  }
+
+  /* Remote ports side-by-side grid → single column */
+  .remote-ports-row {
+    grid-template-columns: 1fr;
+  }
+}
