@@ -141,7 +141,7 @@ func TestMaxUsesExhausted(t *testing.T) {
 	inv, _ := s.CreateInvite("admin", "", nil, &two)
 
 	// Directly set uses=2 in the DB to simulate exhaustion.
-	if _, err := s.db.Exec(`UPDATE invites SET uses = 2 WHERE token = ?`, inv.Token); err != nil {
+	if _, err := s.db().Exec(`UPDATE invites SET uses = 2 WHERE token = ?`, inv.Token); err != nil {
 		t.Fatalf("failed to set uses: %v", err)
 	}
 

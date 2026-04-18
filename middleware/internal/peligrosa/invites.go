@@ -5,6 +5,7 @@
 package peligrosa
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -15,7 +16,7 @@ import (
 	"net/http"
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
-	"pelicula-api/internal/repo/dbutil"
+	repoinvites "pelicula-api/internal/repo/invites"
 	"strings"
 	"time"
 )
@@ -62,10 +63,10 @@ type InviteWithState struct {
 	State string `json:"state"`
 }
 
-// InviteStore persists invites in SQLite.
+// InviteStore manages invite lifecycle, delegating all SQL to the repo layer.
 // SQLite handles concurrency; no additional mutex is needed.
 type InviteStore struct {
-	db       *sql.DB
+	repo     *repoinvites.Store
 	jellyfin clients.JellyfinClient
 }
 
@@ -73,7 +74,12 @@ type InviteStore struct {
 // jc may be nil when the store is used in contexts that never call Redeem
 // (e.g. export/import tests).
 func NewInviteStore(db *sql.DB, jc clients.JellyfinClient) *InviteStore {
-	return &InviteStore{db: db, jellyfin: jc}
+	return &InviteStore{repo: repoinvites.New(db), jellyfin: jc}
+}
+
+// db returns the underlying *sql.DB for in-package test use (e.g. seeding rows).
+func (s *InviteStore) db() *sql.DB {
+	return s.repo.DB()
 }
 
 // generateInviteToken returns a 32-byte URL-safe base64 token (43 chars, no padding).
@@ -110,145 +116,92 @@ func validLabel(s string) bool {
 	return true
 }
 
-// scanInvite reads one row from the invites table plus its redemptions.
-func (s *InviteStore) scanInvite(token string) (Invite, error) {
-	var inv Invite
-	var createdAt string
-	var expiresAt sql.NullString
-	var maxUses sql.NullInt64
-	var revoked int
+// repoInviteToInvite converts a repo InviteWithRedemptions to the peligrosa Invite type.
+func repoInviteToInvite(r repoinvites.InviteWithRedemptions) Invite {
+	inv := Invite{
+		Token:     r.Token,
+		Label:     r.Label,
+		CreatedAt: r.CreatedAt,
+		CreatedBy: r.CreatedBy,
+		ExpiresAt: r.ExpiresAt,
+		MaxUses:   r.MaxUses,
+		Uses:      r.Uses,
+		Revoked:   r.Revoked,
+	}
+	for _, red := range r.RedeemedBy {
+		inv.RedeemedBy = append(inv.RedeemedBy, Redemption{
+			Username:   red.Username,
+			JellyfinID: red.JellyfinID,
+			RedeemedAt: red.RedeemedAt,
+		})
+	}
+	return inv
+}
 
-	err := s.db.QueryRow(
-		`SELECT token, label, created_at, created_by, expires_at, max_uses, uses, revoked
-		 FROM invites WHERE token = ?`, token,
-	).Scan(&inv.Token, &inv.Label, &createdAt, &inv.CreatedBy,
-		&expiresAt, &maxUses, &inv.Uses, &revoked)
-	if err != nil {
-		return Invite{}, err
+// repoInviteRowToInvite converts a bare repo Invite (no redemptions) to a peligrosa Invite.
+func repoInviteRowToInvite(r repoinvites.Invite) Invite {
+	return Invite{
+		Token:     r.Token,
+		Label:     r.Label,
+		CreatedAt: r.CreatedAt,
+		CreatedBy: r.CreatedBy,
+		ExpiresAt: r.ExpiresAt,
+		MaxUses:   r.MaxUses,
+		Uses:      r.Uses,
+		Revoked:   r.Revoked,
 	}
-	inv.Revoked = revoked != 0
-	if t, err := dbutil.ParseTime(createdAt); err == nil {
-		inv.CreatedAt = t
-	}
-	if expiresAt.Valid {
-		if t, err := dbutil.ParseTime(expiresAt.String); err == nil {
-			inv.ExpiresAt = &t
-		}
-	}
-	if maxUses.Valid {
-		n := int(maxUses.Int64)
-		inv.MaxUses = &n
-	}
-
-	// Load redemptions.
-	rows, err := s.db.Query(
-		`SELECT username, jellyfin_id, redeemed_at FROM redemptions WHERE invite_token = ? ORDER BY redeemed_at`,
-		token,
-	)
-	if err != nil {
-		return inv, nil // non-fatal — invite data is valid
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var r Redemption
-		var redeemedAt string
-		if err := rows.Scan(&r.Username, &r.JellyfinID, &redeemedAt); err != nil {
-			continue
-		}
-		if t, err := dbutil.ParseTime(redeemedAt); err == nil {
-			r.RedeemedAt = t
-		}
-		inv.RedeemedBy = append(inv.RedeemedBy, r)
-	}
-	return inv, nil
 }
 
 // CreateInvite adds a new invite and persists it.
 func (s *InviteStore) CreateInvite(createdBy, label string, expiresAt *time.Time, maxUses *int) (Invite, error) {
-	inv := Invite{
+	inv := repoinvites.Invite{
 		Token:     generateInviteToken(),
 		Label:     label,
 		CreatedAt: time.Now().UTC(),
 		CreatedBy: createdBy,
 		ExpiresAt: expiresAt,
 		MaxUses:   maxUses,
+		Uses:      0,
+		Revoked:   false,
 	}
-
-	var expiresAtStr interface{}
-	if expiresAt != nil {
-		expiresAtStr = expiresAt.UTC().Format(time.RFC3339)
-	}
-	var maxUsesVal interface{}
-	if maxUses != nil {
-		maxUsesVal = *maxUses
-	}
-
-	_, err := s.db.Exec(
-		`INSERT INTO invites (token, label, created_at, created_by, expires_at, max_uses, uses, revoked)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, 0)`,
-		inv.Token, inv.Label, inv.CreatedAt.Format(time.RFC3339),
-		inv.CreatedBy, expiresAtStr, maxUsesVal,
-	)
-	if err != nil {
+	if err := s.repo.Create(context.Background(), inv); err != nil {
 		return Invite{}, err
 	}
-	return inv, nil
+	return repoInviteRowToInvite(inv), nil
 }
 
 // InsertFull inserts an invite record from a backup export, preserving all
 // fields including the token and timestamps. Silently succeeds if the token
 // already exists (idempotent restore).
 func (s *InviteStore) InsertFull(inv InviteExport) error {
-	var expiresAtStr interface{}
-	if inv.ExpiresAt != nil {
-		expiresAtStr = inv.ExpiresAt.UTC().Format(time.RFC3339)
-	}
-	var maxUsesVal interface{}
-	if inv.MaxUses != nil {
-		maxUsesVal = *inv.MaxUses
-	}
-	revokedInt := 0
-	if inv.Revoked {
-		revokedInt = 1
-	}
-	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO invites (token, label, created_at, created_by, expires_at, max_uses, uses, revoked)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		inv.Token, inv.Label, inv.CreatedAt.UTC().Format(time.RFC3339),
-		inv.CreatedBy, expiresAtStr, maxUsesVal, inv.Uses, revokedInt,
-	)
-	return err
+	return s.repo.InsertFull(context.Background(), repoinvites.Invite{
+		Token:     inv.Token,
+		Label:     inv.Label,
+		CreatedAt: inv.CreatedAt,
+		CreatedBy: inv.CreatedBy,
+		ExpiresAt: inv.ExpiresAt,
+		MaxUses:   inv.MaxUses,
+		Uses:      inv.Uses,
+		Revoked:   inv.Revoked,
+	})
 }
 
 // ListInvites returns all invites with their derived states.
 func (s *InviteStore) ListInvites() []InviteWithState {
-	rows, err := s.db.Query(
-		`SELECT token FROM invites ORDER BY created_at DESC`,
-	)
+	ctx := context.Background()
+	tokens, err := s.repo.ListTokens(ctx)
 	if err != nil {
+		slog.Warn("invites: ListInvites failed to load tokens", "component", "invites", "error", err)
 		return []InviteWithState{}
 	}
 
-	// Collect tokens first, then close before making per-invite queries.
-	// (SQLite MaxOpenConns=1: keeping rows open while issuing another query deadlocks.)
-	var tokens []string
-	for rows.Next() {
-		var token string
-		if err := rows.Scan(&token); err == nil {
-			tokens = append(tokens, token)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("invites: ListInvites rows iteration error", "component", "invites", "error", err)
-	}
-	rows.Close() // must close before scanInvite queries
-
 	result := make([]InviteWithState, 0, len(tokens))
 	for _, token := range tokens {
-		inv, err := s.scanInvite(token)
+		r, err := s.repo.Get(ctx, token)
 		if err != nil {
 			continue
 		}
+		inv := repoInviteToInvite(r)
 		result = append(result, InviteWithState{Invite: inv, State: inv.state()})
 	}
 	return result
@@ -257,13 +210,14 @@ func (s *InviteStore) ListInvites() []InviteWithState {
 // CheckInvite looks up a token and returns its state without consuming it.
 // Returns ("", found=false) if the token does not exist.
 func (s *InviteStore) CheckInvite(token string) (string, bool) {
-	inv, err := s.scanInvite(token)
-	if err == sql.ErrNoRows {
+	r, err := s.repo.Get(context.Background(), token)
+	if errors.Is(err, repoinvites.ErrNotFound) {
 		return "", false
 	}
 	if err != nil {
 		return "", false
 	}
+	inv := repoInviteToInvite(r)
 	return inv.state(), true
 }
 
@@ -277,54 +231,23 @@ var ErrInviteNotActive = errors.New("invite is not active")
 // redemption. A slot is reserved under a transaction before the Jellyfin call to
 // prevent concurrent over-use; the slot is released (decremented) on failure.
 func (s *InviteStore) Redeem(token, username, password string) error {
-	// Phase 1: validate and atomically reserve a slot (BEGIN tx).
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	var inv Invite
-	var createdAt string
-	var expiresAt sql.NullString
-	var maxUses sql.NullInt64
-	var revoked int
+	ctx := context.Background()
 
-	err = tx.QueryRow(
-		`SELECT token, label, created_at, created_by, expires_at, max_uses, uses, revoked
-		 FROM invites WHERE token = ?`, token,
-	).Scan(&inv.Token, &inv.Label, &createdAt, &inv.CreatedBy,
-		&expiresAt, &maxUses, &inv.Uses, &revoked)
-	if err == sql.ErrNoRows {
-		tx.Rollback() //nolint:errcheck
+	// Phase 1: validate and atomically reserve a slot (BEGIN tx).
+	repoInv, tx, err := s.repo.ReserveSlot(ctx, token)
+	if errors.Is(err, repoinvites.ErrNotFound) {
 		return ErrInviteNotFound
 	}
 	if err != nil {
-		tx.Rollback() //nolint:errcheck
 		return err
 	}
-	inv.Revoked = revoked != 0
-	if t, parseErr := dbutil.ParseTime(createdAt); parseErr == nil {
-		inv.CreatedAt = t
-	}
-	if expiresAt.Valid {
-		if t, parseErr := dbutil.ParseTime(expiresAt.String); parseErr == nil {
-			inv.ExpiresAt = &t
-		}
-	}
-	if maxUses.Valid {
-		n := int(maxUses.Int64)
-		inv.MaxUses = &n
-	}
 
+	inv := repoInviteRowToInvite(repoInv)
 	if !inv.isActive() {
 		tx.Rollback() //nolint:errcheck
 		return ErrInviteNotActive
 	}
 
-	// Reserve the slot by pre-incrementing uses.
-	if _, err := tx.Exec(`UPDATE invites SET uses = uses + 1 WHERE token = ?`, token); err != nil {
-		tx.Rollback() //nolint:errcheck
-		return err
-	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -333,57 +256,38 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 	jellyfinID, err := s.jellyfin.CreateUser(username, password)
 	if err != nil {
 		// Release the slot so the invite can be reused.
-		if _, rollErr := s.db.Exec(`UPDATE invites SET uses = uses - 1 WHERE token = ?`, token); rollErr != nil {
+		if rollErr := s.repo.ReleaseSlot(ctx, token); rollErr != nil {
 			slog.Warn("failed to release invite slot after Jellyfin error",
 				"component", "invites", "token", token[:8]+"…", "error", rollErr)
 		}
 		return err
 	}
 
-	// Phase 3: record the audit entry (BEGIN tx).
-	tx2, err := s.db.Begin()
-	if err != nil {
-		slog.Error("invite slot used but audit record lost — could not begin tx",
-			"component", "invites", "username", username, "error", err)
-		return fmt.Errorf("audit record failed: %w", err)
-	}
-	_, err = tx2.Exec(
-		`INSERT INTO redemptions (invite_token, username, jellyfin_id, redeemed_at) VALUES (?, ?, ?, ?)`,
-		token, username, jellyfinID, time.Now().UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		tx2.Rollback() //nolint:errcheck
+	// Phase 3: record the audit entry.
+	if err := s.repo.InsertRedemption(ctx, token, username, jellyfinID, time.Now().UTC()); err != nil {
 		slog.Error("invite redeemed but audit record lost", "component", "invites",
 			"username", username, "error", err)
 		return fmt.Errorf("audit record failed: %w", err)
 	}
-	return tx2.Commit()
+	return nil
 }
 
 // Revoke marks an invite as revoked.
 func (s *InviteStore) Revoke(token string) error {
-	res, err := s.db.Exec(`UPDATE invites SET revoked = 1 WHERE token = ?`, token)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	err := s.repo.Revoke(context.Background(), token)
+	if errors.Is(err, repoinvites.ErrNotFound) {
 		return ErrInviteNotFound
 	}
-	return nil
+	return err
 }
 
 // Delete hard-deletes an invite record.
 func (s *InviteStore) Delete(token string) error {
-	res, err := s.db.Exec(`DELETE FROM invites WHERE token = ?`, token)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	err := s.repo.Delete(context.Background(), token)
+	if errors.Is(err, repoinvites.ErrNotFound) {
 		return ErrInviteNotFound
 	}
-	return nil
+	return err
 }
 
 // ── HTTP handlers ──────────────────────────────────────────────────────────────
