@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	appservices "pelicula-api/internal/app/services"
 )
 
 // ── Timing constants ───────────────────────────────────────────────────────────
@@ -134,7 +136,7 @@ func wdTick(port int, s wdInternalState) (wdInternalState, watchdogAction) {
 
 // syncQbtListenPort tells qBittorrent to listen on port via the preferences API.
 // Uses form encoding: POST /api/v2/app/setPreferences with json={"listen_port":N}
-func syncQbtListenPort(s *ServiceClients, port int) error {
+func syncQbtListenPort(s *appservices.Clients, port int) error {
 	if err := s.Qbt.SetPreferences(context.Background(), port); err != nil {
 		slog.Error("failed to sync qBittorrent listen port",
 			"component", "vpn_watchdog", "port", port, "error", err)
@@ -149,7 +151,7 @@ func syncQbtListenPort(s *ServiceClients, port int) error {
 // StartVPNWatchdog monitors VPN port forwarding and keeps qBittorrent's listen
 // port in sync. Call as a goroutine from main(). Only active when VPN is
 // configured (caller should guard on WIREGUARD_PRIVATE_KEY).
-func StartVPNWatchdog(s *ServiceClients) {
+func StartVPNWatchdog(s *appservices.Clients) {
 	ticker := time.NewTicker(watchdogInterval)
 	defer ticker.Stop()
 

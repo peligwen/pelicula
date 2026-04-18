@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	appservices "pelicula-api/internal/app/services"
 )
 
 // searchCooldown tracks per-item search history to prevent hammering the *arr
@@ -73,7 +75,7 @@ var (
 // monitored content that has no files and no active queue entry. This ensures
 // that movies/series added directly through the Radarr/Sonarr UIs (which
 // don't auto-search by default) get picked up automatically.
-func StartMissingWatcher(s *ServiceClients, interval time.Duration) {
+func StartMissingWatcher(s *appservices.Clients, interval time.Duration) {
 	// Wait for autowire to finish before starting
 	for !s.IsWired() {
 		time.Sleep(5 * time.Second)
@@ -88,7 +90,7 @@ func StartMissingWatcher(s *ServiceClients, interval time.Duration) {
 	}
 }
 
-func searchMissingMovies(s *ServiceClients) {
+func searchMissingMovies(s *appservices.Clients) {
 	_, radarrKey, _ := s.Keys()
 	if radarrKey == "" {
 		return
@@ -134,7 +136,7 @@ func searchMissingMovies(s *ServiceClients) {
 	}
 }
 
-func radarrQueuedMovieIDs(s *ServiceClients) map[int]bool {
+func radarrQueuedMovieIDs(s *appservices.Clients) map[int]bool {
 	_, radarrKey, _ := s.Keys()
 	ids := make(map[int]bool)
 	records, err := s.ArrGetAllQueueRecords(radarrURL, radarrKey, "/api/v3", "")
@@ -149,7 +151,7 @@ func radarrQueuedMovieIDs(s *ServiceClients) map[int]bool {
 	return ids
 }
 
-func searchMissingSeries(s *ServiceClients) {
+func searchMissingSeries(s *appservices.Clients) {
 	sonarrKey, _, _ := s.Keys()
 	if sonarrKey == "" {
 		return
@@ -194,7 +196,7 @@ func searchMissingSeries(s *ServiceClients) {
 	}
 }
 
-func sonarrQueuedEpisodeIDs(s *ServiceClients) map[int]bool {
+func sonarrQueuedEpisodeIDs(s *appservices.Clients) map[int]bool {
 	sonarrKey, _, _ := s.Keys()
 	ids := make(map[int]bool)
 	records, err := s.ArrGetAllQueueRecords(sonarrURL, sonarrKey, "/api/v3", "")

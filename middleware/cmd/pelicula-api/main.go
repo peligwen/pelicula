@@ -27,6 +27,7 @@ import (
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
+	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
 	"pelicula-api/internal/clients/apprise"
@@ -41,7 +42,7 @@ import (
 
 // App holds all wired-up application state. No package-level globals.
 type App struct {
-	svc            *ServiceClients
+	svc            *appservices.Clients
 	urls           config.URLs
 	sseHub         *sse.Hub
 	ssePoller      *sse.Poller
@@ -73,7 +74,7 @@ type indexerCountCacheApp struct {
 
 const indexerCountTTL = 5 * time.Minute
 
-func (c *indexerCountCacheApp) get(svc *ServiceClients) *int {
+func (c *indexerCountCacheApp) get(svc *appservices.Clients) *int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.count != nil && time.Since(c.fetchedAt) < indexerCountTTL {
@@ -153,7 +154,13 @@ func main() {
 		return
 	}
 
-	svc := NewServiceClients("/config")
+	jellyfinKey := cfg.JellyfinAPIKey
+	if jellyfinKey == "" {
+		if vars, err := parseEnvFile(envPath); err == nil {
+			jellyfinKey = vars["JELLYFIN_API_KEY"]
+		}
+	}
+	svc := appservices.New(cfg, jellyfinKey)
 	initSearchMode()
 
 	libCfg, err := library.LoadLibraries("/config/pelicula")

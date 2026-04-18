@@ -5,7 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	appservices "pelicula-api/internal/app/services"
 	qbtclient "pelicula-api/internal/clients/qbt"
+	"pelicula-api/internal/config"
 )
 
 // Ensure test constants match the real ones defined in vpn_watchdog.go.
@@ -161,10 +163,8 @@ func TestSyncQbtListenPort_CallsSetPreferences(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &ServiceClients{
-		client: &http.Client{},
-		Qbt:    qbtclient.New(srv.URL),
-	}
+	s := appservices.New(&config.Config{}, "")
+	s.Qbt = qbtclient.New(srv.URL)
 	if err := syncQbtListenPort(s, 51413); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,10 +176,8 @@ func TestSyncQbtListenPort_CallsSetPreferences(t *testing.T) {
 }
 
 func TestSyncQbtListenPort_ToleratesError(t *testing.T) {
-	s := &ServiceClients{
-		client: &http.Client{},
-		Qbt:    qbtclient.New("http://127.0.0.1:0"), // nothing listening
-	}
+	s := appservices.New(&config.Config{}, "")
+	s.Qbt = qbtclient.New("http://127.0.0.1:0") // nothing listening
 	err := syncQbtListenPort(s, 51413)
 	if err == nil {
 		t.Fatal("expected error when nothing is listening, got nil")

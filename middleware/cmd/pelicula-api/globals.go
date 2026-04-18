@@ -12,15 +12,16 @@ import (
 	"database/sql"
 
 	"pelicula-api/internal/app/library"
+	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/clients/apprise"
 	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/peligrosa"
 )
 
-// services is the package-level ServiceClients instance, used by all handler
+// services is the package-level Clients instance, used by all handler
 // and helper functions that haven't been migrated to accept it as a parameter.
 // Set by main() once constructed; never nil after startup.
-var services *ServiceClients
+var services *appservices.Clients
 
 // authMiddleware is the peligrosa Auth instance, used by operator/export handlers.
 // Set by main() once constructed.

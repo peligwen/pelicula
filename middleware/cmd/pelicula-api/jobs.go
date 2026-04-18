@@ -16,7 +16,7 @@ func handleJobsList(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	resp, err := services.client.Get(proculaURL + "/api/procula/jobs")
+	resp, err := services.HTTPClient().Get(proculaURL + "/api/procula/jobs")
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return

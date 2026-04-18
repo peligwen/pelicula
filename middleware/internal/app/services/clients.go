@@ -1,4 +1,6 @@
-package main
+// Package services provides the ServiceClients aggregator (now named Clients)
+// that holds typed API clients and HTTP helpers for all downstream services.
+package services
 
 import (
 	"bytes"
@@ -14,14 +16,26 @@ import (
 	"sync"
 	"time"
 
+	"pelicula-api/internal/config"
+
 	arrclient "pelicula-api/internal/clients/arr"
 	bazarrclient "pelicula-api/internal/clients/bazarr"
 	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
-type ServiceClients struct {
+// Clients aggregates all downstream service clients and HTTP helpers.
+type Clients struct {
 	configDir string
 	client    *http.Client
+
+	// URL fields — set from cfg.URLs in New(); never use package-level globals.
+	sonarrURL   string
+	radarrURL   string
+	prowlarrURL string
+	qbtURL      string
+	bazarrURL   string
+	jellyfinURL string
+	proculaURL  string
 
 	SonarrKey      string
 	RadarrKey      string
@@ -48,45 +62,42 @@ type xmlConfig struct {
 	ApiKey  string   `xml:"ApiKey"`
 }
 
-// qbtBaseURL is the base URL for qBittorrent (runs on gluetun's network namespace).
-// No password is required: qBittorrent's config.xml is seeded with the Docker subnet
-// (172.16.0.0/12) in the IP bypass whitelist, so requests from within the Docker
-// network are admitted without credentials.
-var qbtBaseURL = envOr("QBITTORRENT_URL", "http://gluetun:8080")
-
-func NewServiceClients(configDir string) *ServiceClients {
-	s := &ServiceClients{
-		configDir: configDir,
-		client:    &http.Client{Timeout: 10 * time.Second},
-		Qbt:       qbtclient.New(qbtBaseURL),
+// New constructs a Clients instance from the given config. jellyfinAPIKey is
+// pre-resolved by the caller (with .env fallback) to avoid an import cycle on
+// parseEnvFile / envPath which live in cmd/.
+func New(cfg *config.Config, jellyfinAPIKey string) *Clients {
+	c := &Clients{
+		configDir:   cfg.ConfigDir,
+		client:      &http.Client{Timeout: 10 * time.Second},
+		sonarrURL:   cfg.URLs.Sonarr,
+		radarrURL:   cfg.URLs.Radarr,
+		prowlarrURL: cfg.URLs.Prowlarr,
+		qbtURL:      cfg.URLs.QBT,
+		bazarrURL:   cfg.URLs.Bazarr,
+		jellyfinURL: cfg.URLs.Jellyfin,
+		proculaURL:  cfg.URLs.Procula,
 	}
-	s.JellyfinAPIKey = os.Getenv("JELLYFIN_API_KEY")
-	// If the env var is empty (e.g. container restarted without a full down/up),
-	// fall back to reading the key from the mounted .env file directly.
-	if s.JellyfinAPIKey == "" {
-		if vars, err := parseEnvFile(envPath); err == nil {
-			s.JellyfinAPIKey = vars["JELLYFIN_API_KEY"]
-		}
-	}
-	s.loadKeys()
-	return s
+	c.Qbt = qbtclient.New(c.qbtURL)
+	c.JellyfinAPIKey = jellyfinAPIKey
+	c.loadKeys()
+	return c
 }
 
-func (s *ServiceClients) loadKeys() {
+func (c *Clients) loadKeys() {
 	// Read outside the lock to avoid holding it during file I/O
-	sonarr := readAPIKey(s.configDir + "/sonarr/config.xml")
-	radarr := readAPIKey(s.configDir + "/radarr/config.xml")
-	prowlarr := readAPIKey(s.configDir + "/prowlarr/config.xml")
+	sonarr := readAPIKey(c.configDir + "/sonarr/config.xml")
+	radarr := readAPIKey(c.configDir + "/radarr/config.xml")
+	prowlarr := readAPIKey(c.configDir + "/prowlarr/config.xml")
 
-	s.mu.Lock()
-	s.SonarrKey = sonarr
-	s.RadarrKey = radarr
-	s.ProwlarrKey = prowlarr
+	c.mu.Lock()
+	c.SonarrKey = sonarr
+	c.RadarrKey = radarr
+	c.ProwlarrKey = prowlarr
 	// (Re-)initialise typed clients so they always carry the current key.
-	s.Sonarr = arrclient.New(sonarrURL, sonarr)
-	s.Radarr = arrclient.New(radarrURL, radarr)
-	s.Prowlarr = arrclient.New(prowlarrURL, prowlarr)
-	s.mu.Unlock()
+	c.Sonarr = arrclient.New(c.sonarrURL, sonarr)
+	c.Radarr = arrclient.New(c.radarrURL, radarr)
+	c.Prowlarr = arrclient.New(c.prowlarrURL, prowlarr)
+	c.mu.Unlock()
 
 	if sonarr != "" {
 		slog.Info("loaded API key", "component", "services", "service", "sonarr")
@@ -99,72 +110,72 @@ func (s *ServiceClients) loadKeys() {
 	}
 }
 
-func (s *ServiceClients) ReloadKeys() {
-	s.loadKeys()
+func (c *Clients) ReloadKeys() {
+	c.loadKeys()
 }
 
 // Keys returns a snapshot of the API keys under read lock.
-func (s *ServiceClients) Keys() (sonarr, radarr, prowlarr string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.SonarrKey, s.RadarrKey, s.ProwlarrKey
+func (c *Clients) Keys() (sonarr, radarr, prowlarr string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SonarrKey, c.RadarrKey, c.ProwlarrKey
 }
 
-func (s *ServiceClients) SetWired(v bool) {
-	s.mu.Lock()
-	s.wired = v
-	s.mu.Unlock()
+func (c *Clients) SetWired(v bool) {
+	c.mu.Lock()
+	c.wired = v
+	c.mu.Unlock()
 }
 
-func (s *ServiceClients) IsWired() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.wired
+func (c *Clients) IsWired() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.wired
 }
 
 // SonarrRadarrKeys returns a snapshot of the Sonarr and Radarr API keys.
 // Implements autowire.ArrSvc.
-func (s *ServiceClients) SonarrRadarrKeys() (sonarr, radarr string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.SonarrKey, s.RadarrKey
+func (c *Clients) SonarrRadarrKeys() (sonarr, radarr string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SonarrKey, c.RadarrKey
 }
 
 // GetProwlarrKey returns a snapshot of the Prowlarr API key.
 // Implements autowire.ArrSvc.
-func (s *ServiceClients) GetProwlarrKey() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.ProwlarrKey
+func (c *Clients) GetProwlarrKey() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ProwlarrKey
 }
 
 // HTTPClient returns the shared HTTP client.
 // Implements autowire.ArrSvc.
-func (s *ServiceClients) HTTPClient() *http.Client {
-	return s.client
+func (c *Clients) HTTPClient() *http.Client {
+	return c.client
 }
 
 // ConfigDir returns the config directory root.
 // Implements autowire.ArrSvc.
-func (s *ServiceClients) ConfigDir() string {
-	return s.configDir
+func (c *Clients) ConfigDir() string {
+	return c.configDir
 }
 
 // SetBazarrClient installs the Bazarr typed client and persists the key.
 // Implements autowire.ArrSvc.
-func (s *ServiceClients) SetBazarrClient(apiKey string, client *bazarrclient.Client) {
-	s.mu.Lock()
-	s.BazarrKey = apiKey
-	s.Bazarr = client
-	s.mu.Unlock()
+func (c *Clients) SetBazarrClient(apiKey string, client *bazarrclient.Client) {
+	c.mu.Lock()
+	c.BazarrKey = apiKey
+	c.Bazarr = client
+	c.mu.Unlock()
 }
 
 // BazarrClient returns the current Bazarr typed client (may be nil before wiring).
 // Implements autowire.ArrSvc.
-func (s *ServiceClients) BazarrClient() *bazarrclient.Client {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.Bazarr
+func (c *Clients) BazarrClient() *bazarrclient.Client {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Bazarr
 }
 
 func readAPIKey(path string) string {
@@ -182,7 +193,7 @@ func readAPIKey(path string) string {
 // arrDo is the shared implementation for all *arr-compatible HTTP calls.
 // The apiKey is sent as X-Api-Key. For POST/PUT a JSON payload is required;
 // for GET/DELETE pass nil.
-func (s *ServiceClients) arrDo(method, baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (c *Clients) arrDo(method, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -199,7 +210,7 @@ func (s *ServiceClients) arrDo(method, baseURL, apiKey, path string, payload any
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := s.client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -215,18 +226,18 @@ func (s *ServiceClients) arrDo(method, baseURL, apiKey, path string, payload any
 }
 
 // ArrGet makes a GET request to a *arr service.
-func (s *ServiceClients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
-	return s.arrDo("GET", baseURL, apiKey, path, nil)
+func (c *Clients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+	return c.arrDo("GET", baseURL, apiKey, path, nil)
 }
 
 // ArrPost makes a POST request to a *arr service.
-func (s *ServiceClients) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return s.arrDo("POST", baseURL, apiKey, path, payload)
+func (c *Clients) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return c.arrDo("POST", baseURL, apiKey, path, payload)
 }
 
 // QbtGet makes a GET request to qBittorrent (via Docker network, auth bypass).
-func (s *ServiceClients) QbtGet(path string) ([]byte, error) {
-	resp, err := s.client.Get(qbtBaseURL + path)
+func (c *Clients) QbtGet(path string) ([]byte, error) {
+	resp, err := c.client.Get(c.qbtURL + path)
 	if err != nil {
 		return nil, err
 	}
@@ -242,13 +253,13 @@ func (s *ServiceClients) QbtGet(path string) ([]byte, error) {
 }
 
 // QbtPost makes a form-encoded POST request to qBittorrent.
-func (s *ServiceClients) QbtPost(path string, form string) error {
-	req, err := http.NewRequest("POST", qbtBaseURL+path, bytes.NewBufferString(form))
+func (c *Clients) QbtPost(path string, form string) error {
+	req, err := http.NewRequest("POST", c.qbtURL+path, bytes.NewBufferString(form))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := s.client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -260,13 +271,13 @@ func (s *ServiceClients) QbtPost(path string, form string) error {
 }
 
 // ArrDelete makes a DELETE request to a *arr service.
-func (s *ServiceClients) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
-	return s.arrDo("DELETE", baseURL, apiKey, path, nil)
+func (c *Clients) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
+	return c.arrDo("DELETE", baseURL, apiKey, path, nil)
 }
 
 // ArrPut makes a PUT request to a *arr service.
-func (s *ServiceClients) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return s.arrDo("PUT", baseURL, apiKey, path, payload)
+func (c *Clients) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return c.arrDo("PUT", baseURL, apiKey, path, payload)
 }
 
 // redactedURL returns the URL string with the "apikey" query parameter value
@@ -287,42 +298,49 @@ func redactedURL(u *url.URL) string {
 
 // GetJellyfinAPIKey returns the cached Jellyfin API key.
 // Implements catalog.JellyfinMetaClient.
-func (s *ServiceClients) GetJellyfinAPIKey() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.JellyfinAPIKey
+func (c *Clients) GetJellyfinAPIKey() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.JellyfinAPIKey
 }
 
 // GetJellyfinUserID returns the cached Jellyfin user ID for pelicula-internal.
 // Implements catalog.JellyfinMetaClient.
-func (s *ServiceClients) GetJellyfinUserID() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.JellyfinUserID
+func (c *Clients) GetJellyfinUserID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.JellyfinUserID
+}
+
+// SetJellyfinAPIKey stores the Jellyfin API key.
+func (c *Clients) SetJellyfinAPIKey(key string) {
+	c.mu.Lock()
+	c.JellyfinAPIKey = key
+	c.mu.Unlock()
 }
 
 // SetJellyfinUserID stores the resolved Jellyfin user ID.
 // Implements catalog.JellyfinMetaClient.
-func (s *ServiceClients) SetJellyfinUserID(id string) {
-	s.mu.Lock()
-	s.JellyfinUserID = id
-	s.mu.Unlock()
+func (c *Clients) SetJellyfinUserID(id string) {
+	c.mu.Lock()
+	c.JellyfinUserID = id
+	c.mu.Unlock()
 }
 
 // JellyfinGet makes an authenticated GET request to Jellyfin.
 // Implements catalog.JellyfinMetaClient.
-func (s *ServiceClients) JellyfinGet(path, apiKey string) ([]byte, error) {
-	return jellyfinGet(s, path, apiKey)
+func (c *Clients) JellyfinGet(path, apiKey string) ([]byte, error) {
+	return c.jellyfinGet(path, apiKey)
 }
 
 // ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.
-func (s *ServiceClients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+func (c *Clients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	const pageSize = 100
 	var all []map[string]any
 	page := 1
 	for {
 		path := fmt.Sprintf("%s/queue?pageSize=%d&page=%d%s", apiVer, pageSize, page, extraParams)
-		data, err := s.ArrGet(baseURL, apiKey, path)
+		data, err := c.ArrGet(baseURL, apiKey, path)
 		if err != nil {
 			return all, err
 		}
@@ -345,16 +363,16 @@ func (s *ServiceClients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraPar
 // CheckHealth checks if each service is reachable.
 // Each check uses a per-request 2-second context timeout so one dead backend
 // cannot block the entire call.
-func (s *ServiceClients) CheckHealth() map[string]string {
+func (c *Clients) CheckHealth() map[string]string {
 	results := make(map[string]string)
 	checks := map[string]string{
-		"sonarr":      sonarrURL + "/ping",
-		"radarr":      radarrURL + "/ping",
-		"prowlarr":    prowlarrURL + "/ping",
-		"qbittorrent": qbtBaseURL + "/",
-		"jellyfin":    jellyfinURL + "/health",
-		"procula":     proculaURL + "/ping",
-		"bazarr":      bazarrURL + "/",
+		"sonarr":      c.sonarrURL + "/ping",
+		"radarr":      c.radarrURL + "/ping",
+		"prowlarr":    c.prowlarrURL + "/ping",
+		"qbittorrent": c.qbtURL + "/",
+		"jellyfin":    c.jellyfinURL + "/health",
+		"procula":     c.proculaURL + "/ping",
+		"bazarr":      c.bazarrURL + "/",
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -368,7 +386,7 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
 			status := "down"
 			if err == nil {
-				resp, err := s.client.Do(req)
+				resp, err := c.client.Do(req)
 				if err == nil {
 					resp.Body.Close()
 					if resp.StatusCode < 400 {
@@ -385,3 +403,6 @@ func (s *ServiceClients) CheckHealth() map[string]string {
 	wg.Wait()
 	return results
 }
+
+// ensure redactedURL is used (it's a utility; suppress unused warning if needed)
+var _ = redactedURL

@@ -18,6 +18,7 @@ import (
 	"pelicula-api/clients"
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
+	appservices "pelicula-api/internal/app/services"
 	jfclient "pelicula-api/internal/clients/jellyfin"
 )
 
@@ -39,20 +40,20 @@ type jellyfinHTTPError = clients.JellyfinHTTPError
 // jfClient returns a *jfclient.Client pointed at the current jellyfinURL,
 // using the shared HTTP client from ServiceClients. Overriding jellyfinURL
 // in tests automatically redirects all calls to the httptest.Server.
-func jfClient(s *ServiceClients) *jfclient.Client {
-	return jfclient.NewWithHTTPClient(jellyfinURL, s.client)
+func jfClient(s *appservices.Clients) *jfclient.Client {
+	return jfclient.NewWithHTTPClient(jellyfinURL, s.HTTPClient())
 }
 
 // jellyfinHTTPClient is the production implementation of clients.JellyfinClient.
 // It forwards to the internal jellyfin packages.
 type jellyfinHTTPClient struct {
 	httpClient *http.Client
-	services   *ServiceClients
+	services   *appservices.Clients
 }
 
 // NewJellyfinHTTPClient returns a clients.JellyfinClient backed by the given http.Client
 // (for authenticate calls) and ServiceClients (for user CRUD that needs API key auth).
-func NewJellyfinHTTPClient(hc *http.Client, s *ServiceClients) clients.JellyfinClient {
+func NewJellyfinHTTPClient(hc *http.Client, s *appservices.Clients) clients.JellyfinClient {
 	return &jellyfinHTTPClient{httpClient: hc, services: s}
 }
 
@@ -80,11 +81,8 @@ func (c *jellyfinHTTPClient) CreateUser(username, password string) (string, erro
 
 // jellyfinAuth returns a valid Jellyfin token for the service account.
 // Uses persistent API key if available, falling back to reading from .env.
-func jellyfinAuth(s *ServiceClients) (string, error) {
-	s.mu.RLock()
-	apiKey := s.JellyfinAPIKey
-	s.mu.RUnlock()
-	if apiKey != "" {
+func jellyfinAuth(s *appservices.Clients) (string, error) {
+	if apiKey := s.GetJellyfinAPIKey(); apiKey != "" {
 		return apiKey, nil
 	}
 
@@ -93,9 +91,7 @@ func jellyfinAuth(s *ServiceClients) (string, error) {
 		return "", fmt.Errorf("no API key and cannot read .env: %w", err)
 	}
 	if fileKey := vars["JELLYFIN_API_KEY"]; fileKey != "" {
-		s.mu.Lock()
-		s.JellyfinAPIKey = fileKey
-		s.mu.Unlock()
+		s.SetJellyfinAPIKey(fileKey)
 		slog.Info("loaded Jellyfin API key from .env file", "component", "jellyfin")
 		return fileKey, nil
 	}
@@ -129,15 +125,9 @@ func jellyfinAuth(s *ServiceClients) (string, error) {
 	return token, nil
 }
 
-// jellyfinGet makes a GET request to Jellyfin with the Emby authorization header.
-// Used by services.go to implement catalog.JellyfinMetaClient.
-func jellyfinGet(s *ServiceClients, path, token string) ([]byte, error) {
-	return jfClient(s).Get(path, token)
-}
-
 // wireJellyfin auto-configures Jellyfin: completes the startup wizard (if needed)
 // and adds Movies + TV Shows libraries pointing to the same folders used everywhere else.
-func wireJellyfin(s *ServiceClients, lh *library.Handler) {
+func wireJellyfin(s *appservices.Clients, lh *library.Handler) {
 	jfc := jfClient(s)
 
 	info, err := jfapp.SystemInfo(jfc)
@@ -171,7 +161,7 @@ func wireJellyfin(s *ServiceClients, lh *library.Handler) {
 		token = authToken
 	}
 
-	if s.JellyfinAPIKey == "" {
+	if s.GetJellyfinAPIKey() == "" {
 		apiKey, err := jfapp.CreateAPIKey(jfc, token)
 		if err != nil {
 			slog.Error("failed to create Jellyfin API key", "component", "autowire", "error", err)
@@ -180,9 +170,7 @@ func wireJellyfin(s *ServiceClients, lh *library.Handler) {
 				return
 			}
 		} else {
-			s.mu.Lock()
-			s.JellyfinAPIKey = apiKey
-			s.mu.Unlock()
+			s.SetJellyfinAPIKey(apiKey)
 			token = apiKey
 
 			if !wizardDone {
@@ -240,14 +228,14 @@ func wireJellyfin(s *ServiceClients, lh *library.Handler) {
 
 // TriggerLibraryRefresh asks Jellyfin to scan all libraries.
 // Called by the middleware's /api/pelicula/jellyfin/refresh endpoint (invoked by Procula).
-func TriggerLibraryRefresh(s *ServiceClients) error {
+func TriggerLibraryRefresh(s *appservices.Clients) error {
 	jfc := jfClient(s)
 	return jfapp.TriggerLibraryRefresh(jfc, func() (string, error) { return jellyfinAuth(s) })
 }
 
 // CreateJellyfinUser creates a new Jellyfin user with the given name and password.
 // Returns the new user's Jellyfin ID on success.
-func CreateJellyfinUser(s *ServiceClients, username, password string) (string, error) {
+func CreateJellyfinUser(s *appservices.Clients, username, password string) (string, error) {
 	h := &jfapp.Handler{
 		Client:      jfClient(s),
 		Auth:        func() (string, error) { return jellyfinAuth(s) },

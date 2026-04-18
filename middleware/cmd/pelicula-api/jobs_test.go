@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	appservices "pelicula-api/internal/app/services"
+	"pelicula-api/internal/config"
 )
 
 func TestHandleJobsListGroupsByState(t *testing.T) {
@@ -24,8 +27,7 @@ func TestHandleJobsListGroupsByState(t *testing.T) {
 	orig := proculaURL
 	origSvc := services
 	proculaURL = upstream.URL
-	services = &ServiceClients{}
-	services.client = &http.Client{}
+	services = appservices.New(&config.Config{}, "")
 	t.Cleanup(func() { proculaURL = orig; services = origSvc })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/jobs", nil)

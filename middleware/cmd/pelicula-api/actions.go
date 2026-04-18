@@ -38,7 +38,7 @@ func handleActionsRegistry(w http.ResponseWriter, r *http.Request) {
 		w.Write(registryCache.body) //nolint:errcheck
 		return
 	}
-	resp, err := services.client.Get(proculaURL + "/api/procula/actions/registry")
+	resp, err := services.HTTPClient().Get(proculaURL + "/api/procula/actions/registry")
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -80,7 +80,7 @@ func handleActionsCreate(w http.ResponseWriter, r *http.Request) {
 	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
 		upstream.Header.Set("X-API-Key", key)
 	}
-	resp, err := services.client.Do(upstream)
+	resp, err := services.HTTPClient().Do(upstream)
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
