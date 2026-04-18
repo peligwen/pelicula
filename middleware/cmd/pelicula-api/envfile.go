@@ -1,9 +1,9 @@
 package main
 
-// envfile.go — package-level wrappers for .env file I/O, delegating to
-// internal/app/settings. These exist so that cmd/ files that have not yet
-// been migrated (search.go, main.go, jfWirer injection) can call
-// parseEnvFile/writeEnvFile without importing the settings package directly.
+// envfile.go — transitional shim: thin wrappers so cmd-level callers
+// (search.go, main.go, jfapp.NewWirer) can use settings.ParseEnvFile /
+// WriteEnvFile under their existing identifier names until those call sites
+// are migrated or extracted. Remove this file when all callers are gone.
 
 import "pelicula-api/internal/app/settings"
 

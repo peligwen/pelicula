@@ -435,7 +435,10 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 
 // ParseEnvFile reads a .env file and returns a key→value map.
 // Handles quoted values, comments (#), and blank lines.
-// Exported so cmd/ callers (jfWirer, main, search) can use it directly.
+//
+// Exported transitionally so cmd/ callers (search.go, main.go, jfapp.NewWirer)
+// can delegate through the envfile.go shim without importing this package
+// directly. Re-privatize once those call sites are migrated or extracted.
 func ParseEnvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -467,8 +470,11 @@ func ParseEnvFile(path string) (map[string]string, error) {
 
 // WriteEnvFile writes a .env file from the provided key-value map.
 // Known keys are written in canonical order; any extra keys follow.
-// Exported so cmd/ callers (jfWirer) can use it directly.
 // Caller is responsible for holding any relevant mutex before calling.
+//
+// Exported transitionally so cmd/ callers (search.go, main.go, jfapp.NewWirer)
+// can delegate through the envfile.go shim without importing this package
+// directly. Re-privatize once those call sites are migrated or extracted.
 func WriteEnvFile(path string, vars map[string]string) error {
 	// Canonical order matching the setup wizard (.env produced by internal/app/setup)
 	order := []string{

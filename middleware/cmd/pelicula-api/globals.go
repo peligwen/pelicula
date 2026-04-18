@@ -23,9 +23,11 @@ import (
 // Used by jfWirer (jellyfin wiring) and settings handler construction in main().
 const envPath = "/project/.env"
 
-// envMu serialises reads and writes to the .env file so concurrent operations
-// cannot interleave their read-modify-write cycles.
-// Used by jfWirer (passed as &envMu). The settings Handler has its own mutex.
+// envMu serialises .env reads/writes in cmd-level callers (jfWirer).
+// settings.Handler.mu is a SEPARATE mutex that guards the same file for
+// HTTP-request-path writes. These two mutexes are intentionally independent
+// while the settings handler is being extracted; unifying them is deferred
+// to a later cleanup pass.
 var envMu sync.Mutex
 
 // services is the package-level Clients instance, used by all handler
