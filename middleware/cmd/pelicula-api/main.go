@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/actions"
 	"pelicula-api/internal/app/adminops"
 	"pelicula-api/internal/app/autowire"
 	"pelicula-api/internal/app/backup"
@@ -347,6 +348,8 @@ func main() {
 	requestStore = requests
 	mainDB = db
 
+	actionsHandler := actions.New(services.HTTPClient(), proculaURL, strings.TrimSpace(os.Getenv("PROCULA_API_KEY")))
+
 	mux := http.NewServeMux()
 
 	// Health check — no auth, called by bash check-vpn
@@ -444,8 +447,8 @@ func main() {
 	mux.Handle("/api/pelicula/jobs", auth.Guard(http.HandlerFunc(handleJobsList)))
 
 	// admin only: action bus
-	mux.Handle("/api/pelicula/actions", auth.GuardAdmin(http.HandlerFunc(handleActionsCreate)))
-	mux.Handle("/api/pelicula/actions/registry", auth.Guard(http.HandlerFunc(handleActionsRegistry)))
+	mux.Handle("/api/pelicula/actions", auth.GuardAdmin(http.HandlerFunc(actionsHandler.HandleCreate)))
+	mux.Handle("/api/pelicula/actions/registry", auth.Guard(http.HandlerFunc(actionsHandler.HandleRegistry)))
 
 	// admin only: VPN speed test
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(app.sysinfoHandler.ServeSpeedtest)))
