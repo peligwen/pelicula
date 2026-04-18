@@ -1186,10 +1186,8 @@ component('catalog', function (el, store, _props) {
         }
     };
 
-    // ── Public API (window.*) ─────────────────────────────────────────────────
-    window.catLoad = function () { loadCatalog(); };
-
-    window.catResync = async function (btn) {
+    // ── Catalog controls ──────────────────────────────────────────────────────
+    async function catResync(btn) {
         btn.disabled = true;
         try {
             await post('/api/pelicula/catalog/backfill', {});
@@ -1202,20 +1200,23 @@ component('catalog', function (el, store, _props) {
         } finally {
             btn.disabled = false;
         }
-    };
+    }
 
-    window.catSearch = function (value) {
+    function catSearch(value) {
         store.set('catalog.query', (value || '').trim());
         store.set('catalog.loaded', false);
         loadCatalog();
-    };
+    }
 
-    window.catSetType = function (btn, type) {
+    function catSetType(btn, type) {
         store.set('catalog.type', type);
         store.set('catalog.loaded', false);
         document.querySelectorAll('.cat-chip').forEach(b => b.classList.toggle('cat-chip-active', b.dataset.type === type));
         loadCatalog();
-    };
+    }
+
+    // ── Public API (window.*) ─────────────────────────────────────────────────
+    window.catLoad = function () { loadCatalog(); };
 
     window.catOpenDetail = function (path) { openDetail(path); };
 
@@ -1236,6 +1237,16 @@ component('catalog', function (el, store, _props) {
     // ── Subscribe to store changes ────────────────────────────────────────────
     store.subscribe('catalog.items', renderCatalog);
     store.subscribe('catalog.flaggedRows', renderAttention);
+
+    // ── Event delegation for catalog controls ─────────────────────────────────
+    document.getElementById('cat-search').addEventListener('input', e => catSearch(e.target.value));
+
+    document.querySelector('.cat-type-chips').addEventListener('click', e => {
+        const chip = e.target.closest('.cat-chip');
+        if (chip) catSetType(chip, chip.dataset.type);
+    });
+
+    document.getElementById('cat-resync-btn').addEventListener('click', e => catResync(e.currentTarget));
 
     // ── Replace drawer ────────────────────────────────────────────────────────
 

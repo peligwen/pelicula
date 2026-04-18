@@ -408,19 +408,26 @@ component('services', function (el, storeProxy) {
     };
 });
 
+// ── Static button listeners ───────────────────────────────────────────────
+document.getElementById('svc-refresh-btn').addEventListener('click', manualRefreshServices);
+document.getElementById('svc-menu-btn').addEventListener('click', toggleStackMenu);
+document.getElementById('svc-stack-restart-btn').addEventListener('click', stackRestart);
+document.getElementById('log-copy-btn').addEventListener('click', copyServiceLogs);
+document.getElementById('log-refresh-btn').addEventListener('click', refreshServiceLogs);
+document.getElementById('log-close-btn').addEventListener('click', closeLogModal);
+document.getElementById('btn-speedtest').addEventListener('click', runSpeedTest);
+
+// Service log button delegation — data-svc set in HTML
+document.getElementById('svc-sidebar-list').addEventListener('click', e => {
+    const btn = e.target.closest('.svc-row-log[data-svc]');
+    if (btn) showServiceLogs(e, btn.dataset.svc);
+});
+
 // ── Window exports ────────────────────────────────────────────────────────
 window.checkServices          = checkServices;
 window.updateServicesFromData = updateServicesFromData;
 window.checkVPN               = checkVPN;
 window.checkHost              = checkHost;
 window.updateTimestamp        = updateTimestamp;
-window.manualRefreshServices  = manualRefreshServices;
-window.toggleStackMenu        = toggleStackMenu;
-window.stackRestart           = stackRestart;
-window.showServiceLogs        = showServiceLogs;
-window.closeLogModal          = closeLogModal;
-window.refreshServiceLogs     = refreshServiceLogs;
-window.copyServiceLogs        = copyServiceLogs;
-window.runSpeedTest           = runSpeedTest;
 
 function formatSize(b) { return window.formatSize ? window.formatSize(b) : ''; }

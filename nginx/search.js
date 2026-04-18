@@ -295,3 +295,9 @@ window.submitRequest   = submitRequest;
 window.setFilter       = setFilter;
 window.expandResults   = expandResults;
 window.showMediaDetail = showMediaDetail;
+
+// ── Event delegation for search filter buttons ────────────────────────────
+document.getElementById('search-filters').addEventListener('click', e => {
+    const btn = e.target.closest('.filter-btn');
+    if (btn) setFilter(btn);
+});

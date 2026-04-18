@@ -137,7 +137,7 @@ window.renderLogsFromSSE = function(data) {
     logsState.loaded = true;
 };
 
-window.openLogsSheet = function () {
+function openLogsSheet() {
     const sheet = document.getElementById('logs-sheet');
     const backdrop = document.getElementById('logs-sheet-backdrop');
     if (!sheet || !backdrop) return;
@@ -153,11 +153,19 @@ window.openLogsSheet = function () {
         }
     }
     loadLogs();
-};
+}
 
-window.closeLogsSheet = function () {
+function closeLogsSheet() {
     const sheet = document.getElementById('logs-sheet');
     const backdrop = document.getElementById('logs-sheet-backdrop');
     if (sheet) sheet.classList.add('hidden');
     if (backdrop) backdrop.classList.add('hidden');
-};
+}
+
+document.getElementById('logs-sheet-panel-row').addEventListener('click', openLogsSheet);
+document.getElementById('logs-sheet-open-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    openLogsSheet();
+});
+document.getElementById('logs-sheet-backdrop').addEventListener('click', closeLogsSheet);
+document.getElementById('logs-sheet-close-btn').addEventListener('click', closeLogsSheet);

@@ -131,9 +131,10 @@ component('notifications', function (el, storeProxy) {
     };
 });
 
+document.getElementById('bell-btn').addEventListener('click', toggleNotifications);
+
 // ── Window exports (for onclick handlers in index.html and dashboard.js) ───
 window.renderNotifications    = renderNotifications;
-window.toggleNotifications    = toggleNotifications;
 window.notifIcon              = notifIcon;
 window.notifClass             = notifClass;
 window.formatNotifTime        = formatNotifTime;

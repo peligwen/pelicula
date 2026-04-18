@@ -842,11 +842,13 @@ function getLibraryPathForType(type) {
     return type === 'movie' ? '/media/movies' : '/media/tv';
 }
 
-window.clearSelection = clearSelection;
-window.onImportClick = onImportClick;
-window.closeImportModal = closeImportModal;
-window.importGoToStep = importGoToStep;
-window.doApply = doApply;
+document.getElementById('import-clear-btn').addEventListener('click', clearSelection);
+document.getElementById('btn-import').addEventListener('click', onImportClick);
+document.getElementById('import-modal-close-btn').addEventListener('click', closeImportModal);
+document.getElementById('import-cancel-btn').addEventListener('click', closeImportModal);
+document.getElementById('import-back-btn').addEventListener('click', () => importGoToStep('match'));
+document.getElementById('import-apply-btn').addEventListener('click', doApply);
+document.getElementById('import-done-btn').addEventListener('click', closeImportModal);
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 

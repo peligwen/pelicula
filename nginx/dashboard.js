@@ -32,8 +32,8 @@ function _effectiveLibraryPath(name, extPath, slug) {
 async function _ensureLibraryDir() {
     if (_libraryDir) return;
     try {
-        const r = await get('/api/pelicula/settings');
-        if (r.ok) { const s = await r.json(); _libraryDir = s.library_dir || ''; }
+        const s = await get('/api/pelicula/settings');
+        if (s) _libraryDir = s.library_dir || '';
     } catch {}
 }
 
@@ -41,9 +41,8 @@ async function _ensureLibraryDir() {
 
 async function checkAuth() {
     try {
-        const res = await get('/api/pelicula/auth/check');
-        const data = await res.json();
-        if (!data.valid) {
+        const data = await get('/api/pelicula/auth/check');
+        if (!data || !data.valid) {
             document.getElementById('login-overlay').classList.remove('hidden');
         } else {
             applyRole(data.role || 'admin', data.username || '');
@@ -143,9 +142,8 @@ document.getElementById('login-form').addEventListener('submit', e => { e.preven
 // ── Status + Indexer check ────────────────
 async function checkStatus() {
     try {
-        const res = await get('/api/pelicula/status');
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await get('/api/pelicula/status');
+        if (!data) return;
         const statusBar = document.getElementById('indexer-status');
         const hint = document.getElementById('footer-hint');
         if (data.indexers != null && data.indexers === 0) {
@@ -241,9 +239,8 @@ document.addEventListener('click', (e) => {
 
 async function checkNotifications() {
     try {
-        const res = await get('/api/pelicula/notifications');
-        if (!res.ok) return;
-        const events = await res.json();
+        const events = await get('/api/pelicula/notifications');
+        if (!events) return;
         window.renderNotifications(events);
         window.renderActivity(events);
     } catch (e) { console.warn('[pelicula] error:', e); }
@@ -252,13 +249,11 @@ async function checkNotifications() {
 // ── Storage Management ────────────────────
 async function checkStorage() {
     try {
-        const [storageRes, libsRes] = await Promise.all([
+        const [data, libs] = await Promise.all([
             get('/api/pelicula/storage'),
-            get('/api/pelicula/libraries'),
+            get('/api/pelicula/libraries').catch(() => null),
         ]);
-        if (!storageRes.ok) return;
-        const data = await storageRes.json();
-        const libs = libsRes.ok ? await libsRes.json().catch(() => []) : [];
+        if (!data) return;
         const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
         if (!filesystems.length) return;
         document.getElementById('storage-section').classList.remove('hidden');
@@ -267,15 +262,15 @@ async function checkStorage() {
         renderStorageFolders(data);
         renderStorageTimestamp(data.timestamp);
         renderLibrariesLane(data, Array.isArray(libs) ? libs : []);
+
     } catch (e) { console.warn('[pelicula] storage error:', e); }
 }
 
 // Load threshold settings into the Settings lane (admin only, best-effort)
 async function loadStorageSettings() {
     try {
-        const res = await get('/api/pelicula/procula-settings');
-        if (!res.ok) return;
-        const cfg = await res.json();
+        const cfg = await get('/api/pelicula/procula-settings');
+        if (!cfg) return;
         const warnEl = document.getElementById('sm-warn-pct');
         const critEl = document.getElementById('sm-crit-pct');
         if (warnEl && cfg.storage_warning_pct) warnEl.value = cfg.storage_warning_pct;
@@ -290,17 +285,15 @@ async function saveStorageThreshold() {
     const crit = parseInt(document.getElementById('sm-crit-pct')?.value, 10);
     if (isNaN(warn) || isNaN(crit)) return;
     try {
-        const res = await post('/api/pelicula/procula-settings',
+        await post('/api/pelicula/procula-settings',
             { storage_warning_pct: warn, storage_critical_pct: crit }
         );
-        if (res.ok) {
-            ['sm-warn-pct', 'sm-crit-pct'].forEach(id => {
+        ['sm-warn-pct', 'sm-crit-pct'].forEach(id => {
                 const el = document.getElementById(id);
                 if (!el) return;
                 el.classList.add('saved');
                 setTimeout(() => el.classList.remove('saved'), 1200);
             });
-        }
     } catch (e) { console.warn('[pelicula] save storage threshold error:', e); }
 }
 
@@ -437,7 +430,7 @@ function renderStorage(data) {
             ? html`<div class="storage-folders collapsed">${raw(folderRows)}</div>`.str : '';
         const chevron = showFolders
             ? html`<span class="storage-chevron">&#9660;</span>`.str : '';
-        const headerClick = showFolders ? ' onclick="toggleStorageDisk(this.parentElement)"' : '';
+        const headerClick = showFolders ? ' data-action="toggle-disk"' : '';
         const oursTotalText = allKnown ? formatSize(oursTotal) : 'Calculating\u2026';
 
         return html`<div class="download-item storage-disk">
@@ -468,6 +461,8 @@ function toggleStorageDisk(el) {
 
 // ── Libraries lane ────────────────────────
 
+// Closure map for library row action buttons (avoids onclick= in dynamic HTML)
+const _libRowActions = new Map();
 
 function _autoSlug(s) {
     return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -522,6 +517,7 @@ function renderLibrariesLane(storageData, libraries) {
     }
 
     let rows = '';
+    _libRowActions.clear();
 
     // Group 1: registered libraries
     for (const lib of libraries) {
@@ -529,7 +525,9 @@ function renderLibrariesLane(storageData, libraries) {
         const color = folderColor(lib.slug);
         const typeBadge = lib.type ? html`<span class="sm-lib-badge">${lib.type}</span>`.str : '';
         const arrBadge  = (lib.arr && lib.arr !== 'none') ? html`<span class="sm-lib-badge">${lib.arr}</span>`.str : '';
-        const editData  = JSON.stringify(lib);
+        const actionKey = 'edit-' + lib.slug;
+        const libSnapshot = Object.assign({}, lib);
+        _libRowActions.set(actionKey, () => openLibraryModal(lib.slug, 'edit', libSnapshot));
         rows += html`<div class="sm-folder-row lib-row" id="lib-row-${lib.slug}">
             <div class="sm-folder-dot" style="background:${color}"></div>
             <div class="sm-folder-label">
@@ -537,7 +535,7 @@ function renderLibrariesLane(storageData, libraries) {
                 ${raw((typeBadge || arrBadge) ? '<div class="sm-lib-badge-row">' + typeBadge + arrBadge + '</div>' : '')}
             </div>
             <div class="sm-folder-size">${size}</div>
-            <button class="section-action admin-only lib-row-action" onclick="openLibraryModal(${JSON.stringify(lib.slug)}, 'edit', ${editData})">Edit</button>
+            <button class="section-action admin-only lib-row-action" data-action="lib-edit" data-key="${actionKey}">Edit</button>
         </div>`.str;
     }
 
@@ -545,14 +543,16 @@ function renderLibrariesLane(storageData, libraries) {
     for (const f of discovered) {
         const dirName = f.path.split('/').pop();
         const size = f.size >= 0 ? formatSize(f.size) : '';
-        const fdata = JSON.stringify({path: f.path, label: f.label, size: f.size});
+        const actionKey = 'register-' + dirName;
+        const fSnapshot = {path: f.path, label: f.label, size: f.size};
+        _libRowActions.set(actionKey, () => openLibraryModal(dirName, 'register', fSnapshot));
         rows += html`<div class="sm-folder-row lib-row" id="lib-row-disc-${dirName}">
             <div class="sm-folder-dot" style="background:var(--faint);opacity:0.4"></div>
             <div class="sm-folder-label">
                 <span class="lib-row-name lib-row-name-muted" title="${f.label}">${f.label}</span>
             </div>
             <div class="sm-folder-size">${size}</div>
-            <button class="section-action admin-only lib-row-action" onclick="openLibraryModal(${JSON.stringify(dirName)}, 'register', ${fdata})">Register</button>
+            <button class="section-action admin-only lib-row-action" data-action="lib-register" data-key="${actionKey}">Register</button>
         </div>`.str;
     }
 
@@ -659,37 +659,28 @@ async function saveLibraryForm(slug, mode) {
     if (extPath) body.path = extPath;
 
     try {
-        let res;
         if (mode === 'edit') {
-            res = await put('/api/pelicula/libraries/' + encodeURIComponent(slug), body);
+            await put('/api/pelicula/libraries/' + encodeURIComponent(slug), body);
         } else {
-            res = await post('/api/pelicula/libraries', body);
-        }
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            if (errEl) errEl.textContent = err.error || 'Failed';
-            return;
+            await post('/api/pelicula/libraries', body);
         }
         closeLibraryModal();
         await checkStorage();
     } catch (e) {
-        if (errEl) errEl.textContent = 'Error: ' + e.message;
+        const msg = (e.body && e.body.error) || e.message || 'Failed';
+        if (errEl) errEl.textContent = msg;
     }
 }
 
 async function deleteLibraryFromLane(slug) {
     const errEl = document.getElementById('lib-form-error');
     try {
-        const res = await del('/api/pelicula/libraries/' + encodeURIComponent(slug));
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            if (errEl) errEl.textContent = err.error || 'Failed to delete';
-            return;
-        }
+        await del('/api/pelicula/libraries/' + encodeURIComponent(slug));
         closeLibraryModal();
         await checkStorage();
     } catch (e) {
-        if (errEl) errEl.textContent = 'Error: ' + e.message;
+        const msg = (e.body && e.body.error) || e.message || 'Failed to delete';
+        if (errEl) errEl.textContent = msg;
     }
 }
 
@@ -697,9 +688,8 @@ async function deleteLibraryFromLane(slug) {
 // ── Update checker ────────────────────────
 async function checkUpdates() {
     try {
-        const res = await get('/api/pelicula/updates');
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await get('/api/pelicula/updates');
+        if (!data) return;
         if (!data || typeof data !== 'object') return;
         const el = document.getElementById('footer-update');
         if (data.update_available && data.latest_version) {
@@ -711,9 +701,8 @@ async function checkUpdates() {
 // ── Processing section ────────────────────
 async function checkProcessing() {
     try {
-        const res = await get('/api/pelicula/processing');
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await get('/api/pelicula/processing');
+        if (!data) return;
         renderProcessing(data);
     } catch (e) { console.warn('[pelicula] error:', e); }
 }
@@ -766,16 +755,16 @@ function renderJobCard(j) {
     const title = j.source ? j.source.title : j.id;
 
     const retryBtn = j.state === 'failed'
-        ? html`<button class="dl-btn resume" title="Retry" data-job-id="${j.id}" onclick="retryFromBtn(this)">&#8635;</button>`.str
+        ? html`<button class="dl-btn resume" title="Retry" data-action="retry" data-job-id="${j.id}">&#8635;</button>`.str
         : '';
     const cancelBtn = (j.state === 'queued' || j.state === 'processing' || j.state === 'failed')
-        ? html`<button class="dl-btn cancel" title="Cancel" data-job-id="${j.id}" onclick="cancelJobFromBtn(this)">&#x2715;</button>`.str
+        ? html`<button class="dl-btn cancel" title="Cancel" data-action="cancel-job" data-job-id="${j.id}">&#x2715;</button>`.str
         : '';
     // Show re-search subs button on completed/failed jobs that have arr_type set
     const resubBtn = (j.state === 'done' || j.state === 'failed') && j.source?.arr_type
-        ? html`<button class="dl-btn" title="Re-search subtitles" data-job-id="${j.id}" onclick="resubFromBtn(this)" style="font-size:0.7rem;padding:0.2rem 0.4rem">CC</button>`.str
+        ? html`<button class="dl-btn" title="Re-search subtitles" data-action="resub" data-job-id="${j.id}" style="font-size:0.7rem;padding:0.2rem 0.4rem">CC</button>`.str
         : '';
-    const viewLogLink = html`<button class="dl-btn" onclick="openJobDrawer('${j.id}')" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`.str;
+    const viewLogLink = html`<button class="dl-btn" data-action="open-job" data-job-id="${j.id}" title="View details" style="font-size:0.7rem;padding:0.2rem 0.4rem">&#9654;</button>`.str;
 
     let subsBadge = '';
     if (j.stage === 'await_subs') {
@@ -844,17 +833,15 @@ function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 async function resubJob(id) {
     try {
         // Resolve arr context from the job, then dispatch via the action bus.
-        const jobRes = await get(`/api/pelicula/procula/jobs/${id}`);
-        if (!jobRes.ok) { console.warn('[pelicula] resub: job fetch failed', jobRes.status); return; }
-        const job = await jobRes.json();
+        const job = await get(`/api/pelicula/procula/jobs/${id}`);
+        if (!job) { console.warn('[pelicula] resub: job fetch failed', id); return; }
         const src = job.source || {};
         if (!src.arr_type || !src.arr_id) { console.warn('[pelicula] resub: missing arr context on job', id); return; }
-        const res = await post('/api/pelicula/procula/actions', {
+        await post('/api/pelicula/procula/actions', {
             action: 'subtitle_search',
             target: {arr_type: src.arr_type, arr_id: src.arr_id, episode_id: src.episode_id || 0},
             params: {languages: ['en']},
         });
-        if (!res.ok) console.warn('[pelicula] resub failed:', res.status);
     } catch (e) { console.warn('[pelicula] resub error:', e); }
 }
 
@@ -926,7 +913,7 @@ function toggleStorageSettings() {
     if (!isHidden) {
         // close on outside click
         const onOutside = e => {
-            if (!pop.contains(e.target) && !e.target.closest('[onclick*="toggleStorageSettings"]')) {
+            if (!pop.contains(e.target) && !e.target.closest('#storage-settings-btn')) {
                 pop.classList.add('hidden');
                 document.removeEventListener('click', onOutside, true);
             }
@@ -947,9 +934,8 @@ function closeStorageExplorer() {
 async function checkVPNStatus() {
     try {
         if (document.querySelector('.vpn-banner')) return;
-        const res = await get('/api/pelicula/status');
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await get('/api/pelicula/status');
+        if (!data) return;
         if (data.vpn_configured === false) {
             const banner = document.createElement('div');
             banner.className = 'vpn-banner';
@@ -984,25 +970,9 @@ setInterval(updateStaleBanner, 5000);
 // ── Window exports ────────────────────────
 window.refresh              = refresh;
 window.checkStorage         = checkStorage;
-window.openLibraryModal      = openLibraryModal;
-window.closeLibraryModal     = closeLibraryModal;
-window.saveLibraryModal      = saveLibraryModal;
-window.deleteLibraryModal    = deleteLibraryModal;
 window.deleteLibraryFromLane = deleteLibraryFromLane;
-window.retryFromBtn          = retryFromBtn;
-window.cancelJobFromBtn      = cancelJobFromBtn;
-window.resubFromBtn          = resubFromBtn;
-window.retryJob              = retryJob;
-window.cancelJob             = cancelJob;
-window.toggleStorageDisk     = toggleStorageDisk;
 window.toggleSidePanel       = toggleSidePanel;
-window.toggleStorageSettings = toggleStorageSettings;
-window.openStorageExplorer   = openStorageExplorer;
 window.closeStorageExplorer  = closeStorageExplorer;
-window.switchStorageTab      = switchStorageTab;
-window.scanStorageNow        = scanStorageNow;
-window.toggleTheme           = toggleTheme;
-window.setThemePref          = setThemePref;
 
 // ── Job drawer ────────────────────────────
 window.openJobDrawer = async function(jobId) {
@@ -1019,17 +989,16 @@ window.openJobDrawer = async function(jobId) {
     body.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:1rem 0">Loading\u2026</div>';
     actions.innerHTML = '';
     try {
-        const res = await get('/api/procula/jobs/' + encodeURIComponent(jobId));
-        if (!res.ok) throw new Error('Not found');
-        const j = await res.json();
+        const j = await get('/api/procula/jobs/' + encodeURIComponent(jobId));
+        if (!j) throw new Error('Not found');
         title.textContent = (j.source && j.source.title) ? j.source.title : jobId;
         sub.textContent = j.state + (j.stage ? ' \u00b7 ' + j.stage : '');
         // Action buttons
         if (j.state === 'failed') {
-            actions.innerHTML = html`<button class="dl-btn resume" onclick="retryJob('${j.id}');closeJobDrawer()">&#8635; Retry</button>`.str;
+            actions.innerHTML = html`<button class="dl-btn resume" data-action="retry-close" data-job-id="${j.id}">&#8635; Retry</button>`.str;
         }
         if (j.state === 'queued' || j.state === 'processing' || j.state === 'failed') {
-            actions.innerHTML += html`<button class="dl-btn cancel" onclick="cancelJob('${j.id}');closeJobDrawer()">&#10005; Cancel</button>`.str;
+            actions.innerHTML += html`<button class="dl-btn cancel" data-action="cancel-close" data-job-id="${j.id}">&#10005; Cancel</button>`.str;
         }
         // Body
         let drawerHtml = '';
@@ -1187,3 +1156,74 @@ mount('notifications', document.getElementById('bell-wrap'));
 mount('settings', document.getElementById('settings-section'));
 mount('users', document.getElementById('users-section'));
 mount('services', document.querySelector('.pane-side'));
+
+// ── Static HTML event wiring ──────────────────────────────────────────────────
+
+// Tab bar delegation
+document.getElementById('tabbar').addEventListener('click', e => {
+    const tab = e.target.closest('[data-tab]');
+    if (tab) window.switchTab(tab.dataset.tab);
+});
+
+// Titlebar buttons
+document.getElementById('user-badge').addEventListener('click', () => window.switchTab('users'));
+document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+// Theme pref radios
+document.querySelectorAll('[name="theme-pref"]').forEach(r =>
+    r.addEventListener('change', () => setThemePref(r.value)));
+
+// Storage section buttons
+document.getElementById('storage-scan-btn').addEventListener('click', scanStorageNow);
+document.getElementById('storage-import-btn').addEventListener('click', openStorageExplorer);
+document.getElementById('storage-settings-btn').addEventListener('click', toggleStorageSettings);
+document.getElementById('lib-add-btn').addEventListener('click', () => openLibraryModal(null, 'create'));
+
+// Storage tab delegation
+document.querySelector('.storage-tabs').addEventListener('click', e => {
+    const tab = e.target.closest('[data-stab]');
+    if (tab) switchStorageTab(tab.dataset.stab);
+});
+
+// Library modal buttons
+document.getElementById('lib-modal-cancel-btn').addEventListener('click', closeLibraryModal);
+document.getElementById('lib-modal-save-btn').addEventListener('click', saveLibraryModal);
+document.getElementById('lib-modal-delete-btn').addEventListener('click', deleteLibraryModal);
+
+// Library modal overlay click-outside
+document.getElementById('lib-form-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeLibraryModal();
+});
+
+// Job drawer actions delegation
+document.getElementById('drawer-actions').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'retry-close') { retryJob(btn.dataset.jobId); window.closeJobDrawer(); }
+    else if (btn.dataset.action === 'cancel-close') { cancelJob(btn.dataset.jobId); window.closeJobDrawer(); }
+});
+
+// Job cards delegation (processing section)
+document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === 'retry') retryFromBtn(btn);
+    else if (action === 'cancel-job') cancelJobFromBtn(btn);
+    else if (action === 'resub') resubFromBtn(btn);
+    else if (action === 'open-job') window.openJobDrawer(btn.dataset.jobId);
+});
+
+// Storage disk toggle delegation
+document.getElementById('storage-list').addEventListener('click', e => {
+    const trigger = e.target.closest('[data-action="toggle-disk"]');
+    if (trigger) toggleStorageDisk(trigger.parentElement);
+});
+
+// Libraries lane delegation
+document.getElementById('libraries-lane').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action][data-key]');
+    if (!btn) return;
+    const fn = _libRowActions.get(btn.dataset.key);
+    if (fn) fn();
+});

@@ -86,7 +86,7 @@ function makeMsg(text, isError) {
     return div;
 }
 
-window.jobsRefresh = function () { jobsState.loaded = false; loadJobs(); };
+document.getElementById('jobs-refresh-btn').addEventListener('click', () => { jobsState.loaded = false; loadJobs(); });
 
 onTab('jobs', function () {
     if (!jobsState.loaded) loadJobs();

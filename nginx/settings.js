@@ -558,20 +558,55 @@ component('settings', function (el) {
     };
 });
 
+// ── Event delegation ──────────────────────────────────────────────────────
+
+// Toggle switches — covers settings main panel and all st-* drawers
+document.addEventListener('click', e => {
+    const toggle = e.target.closest('.toggle[role="switch"]');
+    if (!toggle) return;
+    const inSettingsSection = document.getElementById('settings-section')?.contains(toggle);
+    const inSettingsDrawer  = !!toggle.closest('.drawer[id^="st-"]');
+    if (inSettingsSection || inSettingsDrawer) toggleSetting(toggle);
+});
+
+// Settings summary rows — delegate by data-drawer
+document.querySelectorAll('[data-drawer]').forEach(row => {
+    row.addEventListener('click', e => {
+        if (!e.target.closest('[data-drawer-btn]')) {
+            openSettingsDrawer(row.dataset.drawer);
+        }
+    });
+});
+document.querySelectorAll('[data-drawer-btn]').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openSettingsDrawer(btn.dataset.drawerBtn);
+    });
+});
+
+// Drawer close buttons
+document.querySelectorAll('[data-close-drawer]').forEach(btn => {
+    btn.addEventListener('click', () => closeSettingsDrawer(btn.dataset.closeDrawer));
+});
+
+// Notification mode radios
+document.querySelectorAll('[name="st-notif"]').forEach(r => {
+    r.addEventListener('change', updateNotifMode);
+});
+
+// Save buttons
+document.getElementById('settings-save-btn')?.addEventListener('click', saveSettingsTab);
+document.getElementById('requests-settings-save-btn')?.addEventListener('click', saveRequestsSettings);
+document.getElementById('save-subs-drawer-btn')?.addEventListener('click', saveSubtitlesDrawer);
+document.getElementById('save-remote-drawer-btn')?.addEventListener('click', saveRemoteAccess);
+
 // ── Window exports ────────────────────────────────────────────────────────
-// Called from onclick handlers in index.html and from applyRole() in dashboard.js.
-window.openSettingsDrawer    = openSettingsDrawer;
-window.closeSettingsDrawer   = closeSettingsDrawer;
-window.saveSubtitlesDrawer   = saveSubtitlesDrawer;
-window.toggleSetting          = toggleSetting;
-window.updateNotifMode        = updateNotifMode;
-window.saveRemoteAccess            = saveRemoteAccess;
-window.updateCertMode              = updateCertMode;
-window.saveSettingsTab        = saveSettingsTab;
+// updateCertMode is called from onchange on st-cert-mode radios in the remote drawer.
+// clearProfileForm, saveProfile, installDefaultProfiles remain as onclick in profiles drawer.
+window.updateCertMode         = updateCertMode;
 window.clearProfileForm       = clearProfileForm;
 window.saveProfile            = saveProfile;
 window.installDefaultProfiles = installDefaultProfiles;
-window.saveRequestsSettings   = saveRequestsSettings;
 // loadArrMeta is called from applyRole() in dashboard.js; the flag lives here.
 window.loadArrMeta = function () {
     if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }

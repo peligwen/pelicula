@@ -650,10 +650,6 @@ window.submitResetPassword   = submitResetPassword;
 window.startDeleteUser       = startDeleteUser;
 window.toggleDisableUser     = toggleDisableUser;
 window.saveLibraryAccess     = saveLibraryAccess;
-window.openInviteModal       = openInviteModal;
-window.closeInviteModal      = closeInviteModal;
-window.submitCreateInvite    = submitCreateInvite;
-window.copyInviteLink        = copyInviteLink;
 window.copyInviteItemLink    = copyInviteItemLink;
 window.revokeInvite          = revokeInvite;
 window.deleteInvite          = deleteInvite;
@@ -663,3 +659,10 @@ window._users_setUsersLoaded    = setUsersLoaded;
 window._users_getRequestsLoaded = getRequestsLoaded;
 window._users_setRequestsLoaded = setRequestsLoaded;
 // arrMeta load-once guard lives in settings.js's window.loadArrMeta wrapper
+
+// ── Invite modal button listeners ────────────────────────────────────────────
+document.getElementById('invite-open-btn').addEventListener('click', openInviteModal);
+document.getElementById('invite-cancel-btn').addEventListener('click', closeInviteModal);
+document.getElementById('invite-create-btn').addEventListener('click', submitCreateInvite);
+document.getElementById('invite-copy-btn').addEventListener('click', copyInviteLink);
+document.getElementById('invite-done-btn').addEventListener('click', closeInviteModal);

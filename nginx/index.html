@@ -44,8 +44,8 @@
                 <option value="other">Other</option>
             </select>
             <div class="modal-buttons">
-                <button class="modal-btn-cancel" onclick="closeBlocklistModal()">Cancel</button>
-                <button class="modal-btn-confirm" onclick="confirmBlocklist()">Blocklist</button>
+                <button class="modal-btn-cancel" id="blocklist-cancel-btn">Cancel</button>
+                <button class="modal-btn-confirm" id="blocklist-confirm-btn">Blocklist</button>
             </div>
         </div>
     </div>
@@ -61,12 +61,12 @@
                 <span class="titlebar-chip titlebar-chip-ok hidden" id="chip-health-ok" data-testid="chip-health-ok"><span class="pip"></span><span id="chip-health-ok-text">all good!</span></span>
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
                 <span class="titlebar-chip titlebar-chip-err hidden" id="chip-health-err"><span class="pip"></span><span id="chip-health-err-text"></span></span>
-                <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme" onclick="toggleTheme()"></button>
+                <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
                 <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">&#9654; Watch</a>
                 <a href="/register" class="register-btn" title="Register a new user">+ Register</a>
-                <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users" onclick="switchTab('users')"></button>
+                <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users"></button>
                 <div class="bell-wrap" id="bell-wrap">
-                    <button class="bell-btn" id="bell-btn" title="Notifications" aria-label="Notifications" onclick="toggleNotifications()">
+                    <button class="bell-btn" id="bell-btn" title="Notifications" aria-label="Notifications">
                         &#9679;
                         <span class="bell-badge hidden" id="bell-badge"></span>
                     </button>
@@ -78,12 +78,12 @@
 
     <!-- Tabbar -->
     <nav class="tabbar" id="tabbar" role="tablist" aria-label="Dashboard sections">
-        <button class="tab active" data-tab="search" role="tab" aria-selected="true" tabindex="0" onclick="switchTab('search')">search</button>
-        <button class="tab" data-tab="catalog" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('catalog')">catalog</button>
-        <button class="tab" data-tab="jobs" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('jobs')">jobs</button>
-        <button class="tab" data-tab="storage" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('storage')">storage</button>
-        <button class="tab" data-tab="users" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('users')">users</button>
-        <button class="tab" data-tab="settings" role="tab" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">settings</button>
+        <button class="tab active" data-tab="search" role="tab" aria-selected="true" tabindex="0">search</button>
+        <button class="tab" data-tab="catalog" role="tab" aria-selected="false" tabindex="-1">catalog</button>
+        <button class="tab" data-tab="jobs" role="tab" aria-selected="false" tabindex="-1">jobs</button>
+        <button class="tab" data-tab="storage" role="tab" aria-selected="false" tabindex="-1">storage</button>
+        <button class="tab" data-tab="users" role="tab" aria-selected="false" tabindex="-1">users</button>
+        <button class="tab" data-tab="settings" role="tab" aria-selected="false" tabindex="-1">settings</button>
     </nav>
 
     <!-- Two-pane grid -->
@@ -103,9 +103,9 @@
                     <input type="text" id="search-input" data-testid="search-input" placeholder="Search for a title...">
                     <div class="search-warning" id="search-warning"></div>
                     <div class="search-filters" id="search-filters">
-                        <button class="filter-btn active" data-type="" onclick="setFilter(this)">Everything</button>
-                        <button class="filter-btn" data-type="movie" onclick="setFilter(this)">Movies</button>
-                        <button class="filter-btn" data-type="series" onclick="setFilter(this)">TV Shows</button>
+                        <button class="filter-btn active" data-type="">Everything</button>
+                        <button class="filter-btn" data-type="movie">Movies</button>
+                        <button class="filter-btn" data-type="series">TV Shows</button>
                     </div>
                 </div>
                 <div class="search-results" id="search-results" data-testid="search-results"></div>
@@ -121,13 +121,13 @@
                     <p class="um-hero-sub">Your library — movies and TV shows</p>
                 </div>
                 <div class="cat-controls">
-                    <input type="search" id="cat-search" class="cat-search-input" placeholder="Search…" oninput="catSearch(this.value)">
+                    <input type="search" id="cat-search" class="cat-search-input" placeholder="Search…">
                     <div class="cat-type-chips">
-                        <button class="cat-chip cat-chip-active" data-type="" onclick="catSetType(this,'')">All</button>
-                        <button class="cat-chip" data-type="movie" onclick="catSetType(this,'movie')">Movies</button>
-                        <button class="cat-chip" data-type="show" onclick="catSetType(this,'show')">TV</button>
+                        <button class="cat-chip cat-chip-active" data-type="">All</button>
+                        <button class="cat-chip" data-type="movie">Movies</button>
+                        <button class="cat-chip" data-type="show">TV</button>
                     </div>
-                    <button class="section-action admin-only" onclick="catResync(this)" title="Re-sync catalog from Radarr/Sonarr">&#8635; Resync</button>
+                    <button id="cat-resync-btn" class="section-action admin-only" title="Re-sync catalog from Radarr/Sonarr">&#8635; Resync</button>
                 </div>
                 <!-- Needs Attention (flagged items) -->
                 <details class="cat-attention" id="cat-attention" open>
@@ -148,7 +148,7 @@
                     <div class="um-hero-title-row">
                         <span class="um-hero-icon">&#128230;</span>
                         <h2 class="um-hero-title">Jobs</h2>
-                        <button class="section-action" onclick="jobsRefresh()">&#8635;</button>
+                        <button class="section-action" id="jobs-refresh-btn">&#8635;</button>
                     </div>
                     <p class="um-hero-sub">All pipeline and action jobs, every state</p>
                 </div>
@@ -161,8 +161,8 @@
                     <div class="um-hero-title-row">
                         <span class="um-hero-icon">&#128190;</span>
                         <h2 class="um-hero-title">Storage</h2>
-                        <button class="section-action admin-only" id="storage-scan-btn" onclick="scanStorageNow()">Scan now</button>
-                        <button class="section-action admin-only" onclick="openStorageExplorer()">&#8615; Import</button>
+                        <button class="section-action admin-only" id="storage-scan-btn">Scan now</button>
+                        <button class="section-action admin-only" id="storage-import-btn">&#8615; Import</button>
                     </div>
                     <p class="um-hero-sub">Capacity, folders, and health</p>
                 </div>
@@ -185,8 +185,8 @@
                     <div class="um-lane admin-only" id="libraries-lane-container">
                         <div class="um-lane-header">
                             <span>Libraries</span>
-                            <button class="section-action admin-only" onclick="toggleStorageSettings()" title="Storage settings" aria-label="Storage settings">&#9881;</button>
-                            <button class="section-action" id="lib-add-btn" onclick="openLibraryModal(null, 'create')">+ New Library</button>
+                            <button class="section-action admin-only" id="storage-settings-btn" title="Storage settings" aria-label="Storage settings">&#9881;</button>
+                            <button class="section-action" id="lib-add-btn">+ New Library</button>
                         </div>
                         <div class="storage-settings-popover hidden" id="storage-settings-popover">
                             <label class="sm-setting-row">Warn at
@@ -202,9 +202,9 @@
                     <!-- Right: tabbed detail panel -->
                     <div class="storage-right-panel">
                         <div class="storage-tabs">
-                            <button class="storage-tab active" data-stab="folder" onclick="switchStorageTab('folder')">By folder</button>
-                            <button class="storage-tab" data-stab="volumes" onclick="switchStorageTab('volumes')">Volumes</button>
-                            <button class="storage-tab" data-stab="explorer" onclick="switchStorageTab('explorer')">Explorer</button>
+                            <button class="storage-tab active" data-stab="folder">By folder</button>
+                            <button class="storage-tab" data-stab="volumes">Volumes</button>
+                            <button class="storage-tab" data-stab="explorer">Explorer</button>
                         </div>
                         <div class="storage-tab-panel" id="storage-tab-folder">
                             <div id="sm-folder-list"></div>
@@ -223,10 +223,10 @@
                             <div class="action-bar hidden" id="action-bar">
                                 <div class="action-bar-left">
                                     <span id="action-bar-count"></span>
-                                    <button class="import-btn" onclick="clearSelection()">Clear</button>
+                                    <button class="import-btn" id="import-clear-btn">Clear</button>
                                 </div>
                                 <div class="action-bar-right">
-                                    <button class="import-btn" id="btn-import" data-testid="btn-import" onclick="onImportClick()" disabled title="">&#8615; Import</button>
+                                    <button class="import-btn" id="btn-import" data-testid="btn-import" disabled title="">&#8615; Import</button>
                                 </div>
                             </div>
                         </div>
@@ -238,7 +238,7 @@
                     <div class="se-modal-inner">
                         <div class="se-modal-header">
                             <span class="se-modal-title">Import</span>
-                            <button class="section-action" onclick="closeImportModal()">&#10005;</button>
+                            <button class="section-action" id="import-modal-close-btn">&#10005;</button>
                         </div>
 
                         <div class="import-steps" id="import-steps">
@@ -257,8 +257,8 @@
                             </div>
                             <div id="match-results"></div>
                             <div class="import-nav">
-                                <button class="import-btn" onclick="closeImportModal()">Cancel</button>
-                                <button class="import-btn primary" id="btn-configure" data-testid="btn-configure" onclick="importGoToStep('configure')" disabled>Next: Configure</button>
+                                <button class="import-btn" id="import-cancel-btn">Cancel</button>
+                                <button class="import-btn primary" id="btn-configure" data-testid="btn-configure" disabled>Next: Configure</button>
                             </div>
                         </div>
 
@@ -312,8 +312,8 @@
                                 <div class="config-hint">Run FFprobe validation on imported files to catch corrupt or sample files</div>
                             </div>
                             <div class="import-nav">
-                                <button class="import-btn" onclick="importGoToStep('match')">Back</button>
-                                <button class="import-btn primary" onclick="doApply()">Apply Import</button>
+                                <button class="import-btn" id="import-back-btn">Back</button>
+                                <button class="import-btn primary" id="import-apply-btn">Apply Import</button>
                             </div>
                         </div>
 
@@ -328,7 +328,7 @@
                             </div>
                             <div class="import-nav hidden" id="apply-nav" data-testid="apply-nav">
                                 <div></div>
-                                <button class="import-btn primary" onclick="closeImportModal()">Done</button>
+                                <button class="import-btn primary" id="import-done-btn">Done</button>
                             </div>
                         </div>
                     </div>
@@ -373,7 +373,7 @@
                     <div class="um-lane">
                         <div class="um-lane-header">
                             <span>Invite links</span>
-                            <button class="section-action" onclick="openInviteModal()">+ Create</button>
+                            <button class="section-action" id="invite-open-btn">+ Create</button>
                         </div>
                         <ul id="invites-list" class="invites-list"></ul>
                     </div>
@@ -443,17 +443,17 @@
                     <div class="settings-panel-title">Appearance</div>
                     <div class="settings-appearance-row">
                         <label class="appearance-option">
-                            <input type="radio" name="theme-pref" value="system" onchange="setThemePref('system')">
+                            <input type="radio" name="theme-pref" value="system">
                             <span class="appearance-label">System</span>
                             <span class="appearance-sub">Follow OS setting</span>
                         </label>
                         <label class="appearance-option">
-                            <input type="radio" name="theme-pref" value="light" onchange="setThemePref('light')">
+                            <input type="radio" name="theme-pref" value="light">
                             <span class="appearance-label">&#9788; Light</span>
                             <span class="appearance-sub">Cotton Candy</span>
                         </label>
                         <label class="appearance-option">
-                            <input type="radio" name="theme-pref" value="dark" onchange="setThemePref('dark')">
+                            <input type="radio" name="theme-pref" value="dark">
                             <span class="appearance-label">&#9790; Dark</span>
                             <span class="appearance-sub">Starry Lavender</span>
                         </label>
@@ -475,19 +475,19 @@
                     <label class="toggle-row">
                         <span class="toggle-label">Open registration</span>
                         <span class="toggle-sub">Allow anyone on the LAN to create a viewer account at /register</span>
-                        <button class="toggle" id="st-open-registration" role="switch" onclick="toggleSetting(this)" data-key="open_registration">
+                        <button class="toggle" id="st-open-registration" role="switch" data-key="open_registration">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </label>
                 </div>
 
                 <!-- Remote Access (Peligrosa) -->
-                <div class="settings-panel settings-summary-row admin-only" onclick="openSettingsDrawer('remote')">
+                <div class="settings-panel settings-summary-row admin-only" data-drawer="remote">
                     <div class="summary-row-left">
                         <div class="settings-panel-title" style="margin-bottom:0">Remote Access</div>
                         <div class="summary-row-status" id="st-remote-summary-status"><span class="status-dot inactive"></span>Disabled</div>
                     </div>
-                    <button class="summary-row-action" onclick="event.stopPropagation();openSettingsDrawer('remote')">Configure <span class="summary-row-chevron">&#8250;</span></button>
+                    <button class="summary-row-action" data-drawer-btn="remote">Configure <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Pipeline toggles -->
@@ -496,65 +496,65 @@
                     <label class="toggle-row">
                         <span class="toggle-label">Validation</span>
                         <span class="toggle-sub">Verify file integrity before processing</span>
-                        <button class="toggle" id="st-validation" role="switch" onclick="toggleSetting(this)" data-key="validation_enabled">
+                        <button class="toggle" id="st-validation" role="switch" data-key="validation_enabled">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </label>
                     <label class="toggle-row">
                         <span class="toggle-label">Transcoding</span>
                         <span class="toggle-sub">Re-encode files matching configured profiles</span>
-                        <button class="toggle" id="st-transcoding" role="switch" onclick="toggleSetting(this)" data-key="transcoding_enabled">
+                        <button class="toggle" id="st-transcoding" role="switch" data-key="transcoding_enabled">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </label>
                     <label class="toggle-row">
                         <span class="toggle-label">Cataloging</span>
                         <span class="toggle-sub">Add imported files to Jellyfin library</span>
-                        <button class="toggle" id="st-cataloging" role="switch" onclick="toggleSetting(this)" data-key="catalog_enabled">
+                        <button class="toggle" id="st-cataloging" role="switch" data-key="catalog_enabled">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </label>
                 </div>
 
                 <!-- Service Logs -->
-                <div class="settings-panel settings-summary-row admin-only" onclick="openLogsSheet()">
+                <div class="settings-panel settings-summary-row admin-only" id="logs-sheet-panel-row">
                     <div class="summary-row-left">
                         <div class="settings-panel-title" style="margin-bottom:0">Service Logs</div>
                         <div class="summary-row-status">Live log stream from all containers</div>
                     </div>
-                    <button class="summary-row-action" onclick="event.stopPropagation();openLogsSheet()">View <span class="summary-row-chevron">&#8250;</span></button>
+                    <button class="summary-row-action" id="logs-sheet-open-btn">View <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Transcoding Profiles -->
-                <div class="settings-panel settings-summary-row" onclick="openSettingsDrawer('profiles')">
+                <div class="settings-panel settings-summary-row" data-drawer="profiles">
                     <div class="summary-row-left">
                         <div class="settings-panel-title" style="margin-bottom:0">Transcoding Profiles</div>
                         <div class="summary-row-status" id="st-profiles-summary-status">No profiles configured</div>
                     </div>
-                    <button class="summary-row-action" onclick="event.stopPropagation();openSettingsDrawer('profiles')">Configure <span class="summary-row-chevron">&#8250;</span></button>
+                    <button class="summary-row-action" data-drawer-btn="profiles">Configure <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Subtitles -->
-                <div class="settings-panel settings-summary-row" onclick="openSettingsDrawer('subs')">
+                <div class="settings-panel settings-summary-row" data-drawer="subs">
                     <div class="summary-row-left">
                         <div class="settings-panel-title" style="margin-bottom:0">Subtitles</div>
                         <div class="summary-row-status" id="st-subs-summary-status">en</div>
                     </div>
-                    <button class="summary-row-action" onclick="event.stopPropagation();openSettingsDrawer('subs')">Configure <span class="summary-row-chevron">&#8250;</span></button>
+                    <button class="summary-row-action" data-drawer-btn="subs">Configure <span class="summary-row-chevron">&#8250;</span></button>
                 </div>
 
                 <!-- Notifications -->
                 <div class="settings-panel">
                     <div class="settings-panel-title">Notifications</div>
                     <div class="settings-radio-row">
-                        <label><input type="radio" name="st-notif" value="internal" onchange="updateNotifMode()"> Internal only</label>
-                        <label><input type="radio" name="st-notif" value="apprise" onchange="updateNotifMode()"> Apprise</label>
-                        <label><input type="radio" name="st-notif" value="direct" onchange="updateNotifMode()"> Direct webhook</label>
+                        <label><input type="radio" name="st-notif" value="internal"> Internal only</label>
+                        <label><input type="radio" name="st-notif" value="apprise"> Apprise</label>
+                        <label><input type="radio" name="st-notif" value="direct"> Direct webhook</label>
                     </div>
                 </div>
 
                 <div class="settings-actions">
-                    <button class="settings-save-btn" onclick="saveSettingsTab()">Save settings</button>
+                    <button class="settings-save-btn" id="settings-save-btn">Save settings</button>
                     <span class="settings-save-status" id="st-save-status"></span>
                 </div>
 
@@ -582,7 +582,7 @@
                         </div>
                     </div>
                     <div class="settings-actions" style="margin-top:0.75rem">
-                        <button class="settings-save-btn" id="requests-settings-save-btn" onclick="saveRequestsSettings()">Save defaults</button>
+                        <button class="settings-save-btn" id="requests-settings-save-btn">Save defaults</button>
                         <span class="settings-save-status" id="requests-settings-save-status"></span>
                     </div>
                     <p class="requests-settings-note">Changes take effect after restarting the pelicula-api container.</p>
@@ -618,11 +618,11 @@
                 <span>Services</span>
                 <span class="svc-totals" id="svc-totals"></span>
                 <div class="svc-header-actions">
-                    <button class="section-action" id="svc-refresh-btn" title="Refresh now" onclick="manualRefreshServices()">&#8635;</button>
+                    <button class="section-action" id="svc-refresh-btn" title="Refresh now">&#8635;</button>
                     <div class="svc-stack-menu-wrap admin-only">
-                        <button class="section-action" id="svc-menu-btn" onclick="toggleStackMenu()" title="Stack actions">&#8943;</button>
+                        <button class="section-action" id="svc-menu-btn" title="Stack actions">&#8943;</button>
                         <div class="svc-stack-menu hidden" id="svc-stack-menu">
-                            <button onclick="stackRestart()">Restart stack</button>
+                            <button id="svc-stack-restart-btn">Restart stack</button>
                         </div>
                     </div>
                 </div>
@@ -632,43 +632,43 @@
                     <span class="svc-pip unknown" id="svc-pip-prowlarr"></span>
                     <span class="svc-name">Prowlarr</span>
                     <span class="svc-desc">Indexers</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'prowlarr')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="prowlarr" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/sonarr/" target="_blank" rel="noopener" data-check="/sonarr/ping" data-svc="sonarr">
                     <span class="svc-pip unknown" id="svc-pip-sonarr"></span>
                     <span class="svc-name">Sonarr</span>
                     <span class="svc-desc">TV shows</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'sonarr')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="sonarr" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/radarr/" target="_blank" rel="noopener" data-check="/radarr/ping" data-svc="radarr">
                     <span class="svc-pip unknown" id="svc-pip-radarr"></span>
                     <span class="svc-name">Radarr</span>
                     <span class="svc-desc">Movies</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'radarr')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="radarr" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/qbt/" target="_blank" rel="noopener" data-check="/qbt/" data-svc="qbittorrent">
                     <span class="svc-pip unknown" id="svc-pip-qbittorrent"></span>
                     <span class="svc-name">qBittorrent</span>
                     <span class="svc-desc">Downloads</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'qbittorrent')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="qbittorrent" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" data-svc="procula">
                     <span class="svc-pip unknown" id="svc-pip-procula"></span>
                     <span class="svc-name">Procula</span>
                     <span class="svc-desc">Processing</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'procula')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="procula" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/jellyfin/" target="_blank" rel="noopener" data-check="/jellyfin/health" data-svc="jellyfin">
                     <span class="svc-pip unknown" id="svc-pip-jellyfin"></span>
                     <span class="svc-name">Jellyfin</span>
                     <span class="svc-desc">Media server</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'jellyfin')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="jellyfin" title="View logs">logs</button>
                 </a>
                 <a class="svc-row" href="/bazarr/" target="_blank" rel="noopener" data-check="/bazarr/api/system/status" data-svc="bazarr">
                     <span class="svc-pip unknown" id="svc-pip-bazarr"></span>
                     <span class="svc-name">Bazarr</span>
                     <span class="svc-desc">Subtitles</span>
-                    <button class="svc-row-log admin-only" onclick="showServiceLogs(event,'bazarr')" title="View logs">logs</button>
+                    <button class="svc-row-log admin-only" data-svc="bazarr" title="View logs">logs</button>
                 </a>
             </div>
 
@@ -681,7 +681,7 @@
                 <div class="vpn-kv"><span class="vpn-k">Up</span><span class="vpn-v" id="s-ul">—</span></div>
             </div>
             <div class="vpn-speedtest-row">
-                <button class="sm-btn" id="btn-speedtest" onclick="runSpeedTest()">Test VPN Speed</button>
+                <button class="sm-btn" id="btn-speedtest">Test VPN Speed</button>
                 <span class="vpn-speedtest-result" id="s-speedtest-result"></span>
             </div>
 
@@ -722,15 +722,15 @@
             <h3 id="log-modal-title">Logs</h3>
             <pre id="log-modal-pre"></pre>
             <div class="modal-buttons">
-                <button class="modal-btn-cancel" id="log-copy-btn" onclick="copyServiceLogs()">Copy</button>
-                <button class="modal-btn-cancel" id="log-refresh-btn" onclick="refreshServiceLogs()">Refresh</button>
-                <button class="modal-btn-confirm" onclick="closeLogModal()">Close</button>
+                <button class="modal-btn-cancel" id="log-copy-btn">Copy</button>
+                <button class="modal-btn-cancel" id="log-refresh-btn">Refresh</button>
+                <button class="modal-btn-confirm" id="log-close-btn">Close</button>
             </div>
         </div>
     </div>
 
     <!-- Invite modal -->
-    <div class="modal-overlay hidden" id="lib-form-modal" onclick="if(event.target===this)closeLibraryModal()">
+    <div class="modal-overlay hidden" id="lib-form-modal">
         <div class="modal lib-modal">
             <h3 id="lib-form-title">New Library</h3>
             <div class="modal-sub" id="lib-form-path-display"></div>
@@ -769,11 +769,11 @@
             </div>
             <span id="lib-form-error" class="lib-form-error"></span>
             <div class="modal-buttons" style="margin-top:1rem">
-                <button class="modal-btn-cancel" onclick="closeLibraryModal()">Cancel</button>
-                <button class="modal-btn-confirm" onclick="saveLibraryModal()">Save</button>
+                <button class="modal-btn-cancel" id="lib-modal-cancel-btn">Cancel</button>
+                <button class="modal-btn-confirm" id="lib-modal-save-btn">Save</button>
             </div>
             <div id="lib-form-delete-row" class="modal-buttons" style="margin-top:0.4rem;display:none">
-                <button class="modal-btn-danger" onclick="deleteLibraryModal()">Delete Library</button>
+                <button class="modal-btn-danger" id="lib-modal-delete-btn">Delete Library</button>
             </div>
         </div>
     </div>
@@ -809,8 +809,8 @@
                 </div>
                 <div id="invite-create-error" class="users-error hidden"></div>
                 <div class="modal-buttons">
-                    <button class="modal-btn-cancel" onclick="closeInviteModal()">Cancel</button>
-                    <button class="modal-btn-confirm" id="invite-create-btn" onclick="submitCreateInvite()">Create link</button>
+                    <button class="modal-btn-cancel" id="invite-cancel-btn">Cancel</button>
+                    <button class="modal-btn-confirm" id="invite-create-btn">Create link</button>
                 </div>
             </div>
             <!-- Step 2: share panel (shown after creation) -->
@@ -818,14 +818,14 @@
                 <p class="invite-share-hint">Share this link — it lets someone create their own account.</p>
                 <div class="invite-link-row">
                     <input id="invite-link-val" type="text" readonly class="invite-link-input">
-                    <button id="invite-copy-btn" onclick="copyInviteLink()">Copy</button>
+                    <button id="invite-copy-btn">Copy</button>
                 </div>
                 <div id="invite-qr-wrap" class="invite-qr-wrap" style="display:none">
                     <div class="invite-qr-label">Scan to open on a phone or TV</div>
                     <div id="invite-qr-svg"></div>
                 </div>
                 <div class="modal-buttons" style="margin-top:1.25rem">
-                    <button class="modal-btn-cancel" onclick="closeInviteModal()">Done</button>
+                    <button class="modal-btn-cancel" id="invite-done-btn">Done</button>
                 </div>
             </div>
         </div>
@@ -854,13 +854,13 @@
                 <div class="drawer-title">Remote Access</div>
                 <div class="drawer-sub">Peligrosa &mdash; serve the dashboard over HTTPS from a public hostname</div>
             </div>
-            <button class="drawer-close" onclick="closeSettingsDrawer('remote')">&times;</button>
+            <button class="drawer-close" data-close-drawer="remote">&times;</button>
         </div>
         <div class="drawer-body">
             <label class="toggle-row">
                 <span class="toggle-label">Enable remote access</span>
                 <span class="toggle-sub">Requires a stack restart to activate.</span>
-                <button class="toggle" id="st-remote-enabled" role="switch" onclick="toggleSetting(this)" data-key="remote_access_enabled">
+                <button class="toggle" id="st-remote-enabled" role="switch" data-key="remote_access_enabled">
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                 </button>
             </label>
@@ -894,7 +894,7 @@
                     <label class="toggle-row">
                         <span class="toggle-label">Staging certificates</span>
                         <span class="toggle-sub">Use Let&#x2019;s Encrypt staging CA (for testing; not trusted by browsers)</span>
-                        <button class="toggle" id="st-le-staging" role="switch" onclick="toggleSetting(this)" data-key="remote_le_staging">
+                        <button class="toggle" id="st-le-staging" role="switch" data-key="remote_le_staging">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </label>
@@ -903,8 +903,8 @@
             <p class="settings-field-hint" style="margin-top:1rem;color:var(--muted)">Changes require a stack restart: <code>pelicula restart nginx</code></p>
         </div>
         <div class="drawer-footer">
-            <button class="settings-save-btn" onclick="saveRemoteAccess()">Save</button>
-            <button class="sm-btn" onclick="closeSettingsDrawer('remote')">Cancel</button>
+            <button class="settings-save-btn" id="save-remote-drawer-btn">Save</button>
+            <button class="sm-btn" data-close-drawer="remote">Cancel</button>
             <span class="settings-save-status" id="st-remote-save-status"></span>
         </div>
     </div>
@@ -916,7 +916,7 @@
                 <div class="drawer-title">Transcoding Profiles</div>
                 <div class="drawer-sub">Define re-encoding rules for imported media</div>
             </div>
-            <button class="drawer-close" onclick="closeSettingsDrawer('profiles')">&times;</button>
+            <button class="drawer-close" data-close-drawer="profiles">&times;</button>
         </div>
         <div class="drawer-actions">
             <button class="sm-btn" onclick="installDefaultProfiles()">Install defaults</button>
@@ -985,7 +985,7 @@
                     </div>
                     <div class="st-pf-row">
                         <label class="st-pf-label">Enabled</label>
-                        <button class="toggle" id="pf-enabled" role="switch" aria-checked="true" onclick="toggleSetting(this)">
+                        <button class="toggle" id="pf-enabled" role="switch" aria-checked="true">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </button>
                     </div>
@@ -1006,7 +1006,7 @@
                 <div class="drawer-title">Subtitles</div>
                 <div class="drawer-sub">Language and dual-subtitle configuration</div>
             </div>
-            <button class="drawer-close" onclick="closeSettingsDrawer('subs')">&times;</button>
+            <button class="drawer-close" data-close-drawer="subs">&times;</button>
         </div>
         <div class="drawer-body">
             <div class="settings-field-row">
@@ -1017,7 +1017,7 @@
             <label class="toggle-row">
                 <span class="toggle-label">Dual subtitles</span>
                 <span class="toggle-sub">Generate stacked dual-language subtitle sidecars</span>
-                <button class="toggle" id="st-dualsub" role="switch" onclick="toggleSetting(this)" data-key="dual_sub_enabled">
+                <button class="toggle" id="st-dualsub" role="switch" data-key="dual_sub_enabled">
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                 </button>
             </label>
@@ -1033,8 +1033,8 @@
             </div>
         </div>
         <div class="drawer-footer">
-            <button class="settings-save-btn" onclick="saveSubtitlesDrawer()">Save</button>
-            <button class="sm-btn" onclick="closeSettingsDrawer('subs')">Cancel</button>
+            <button class="settings-save-btn" id="save-subs-drawer-btn">Save</button>
+            <button class="sm-btn" data-close-drawer="subs">Cancel</button>
             <span class="settings-save-status" id="st-subs-save-status"></span>
         </div>
     </div>
@@ -1054,12 +1054,12 @@
     </div>
 
     <!-- Logs bottom sheet -->
-    <div class="modal-backdrop hidden" id="logs-sheet-backdrop" onclick="closeLogsSheet()"></div>
+    <div class="modal-backdrop hidden" id="logs-sheet-backdrop"></div>
     <div class="logs-sheet hidden" id="logs-sheet" role="dialog" aria-modal="true" aria-label="Service Logs">
         <div class="logs-sheet-handle-row"><div class="logs-sheet-handle"></div></div>
         <div class="logs-sheet-header">
             <span class="logs-sheet-title">&#128220; Service Logs</span>
-            <button class="logs-sheet-close" onclick="closeLogsSheet()" aria-label="Close">&#x2715;</button>
+            <button class="logs-sheet-close" id="logs-sheet-close-btn" aria-label="Close">&#x2715;</button>
         </div>
         <div class="logs-filters" id="logs-filters"></div>
         <div id="logs-stream" class="logs-stream"></div>
