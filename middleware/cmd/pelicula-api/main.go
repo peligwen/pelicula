@@ -28,6 +28,8 @@ import (
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/sse"
+	"pelicula-api/internal/clients/apprise"
+	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/peligrosa"
 	reporeqs "pelicula-api/internal/repo/requests"
@@ -128,6 +130,9 @@ func main() {
 	cfg := config.Load()
 	urls := cfg.URLs
 
+	dockerCli = docker.New(cfg.DockerHost, cfg.ProjectName)
+	appriseCli = apprise.New(cfg.URLs.Apprise, cfg.ConfigDir)
+
 	// Setup mode: only serve setup endpoints
 	if isSetupMode() {
 		slog.Info("starting in setup mode", "component", "main")
@@ -201,7 +206,7 @@ func main() {
 	defer stop()
 
 	hub := sse.NewHub()
-	poller := sse.NewPoller(hub, svc, urls.Procula, dockerLogs)
+	poller := sse.NewPoller(hub, svc, urls.Procula, dockerCli.Logs)
 	go poller.Run(ctx)
 	go catalog.RunQueuePoller(ctx, cdb, svc, urls.Radarr, urls.Sonarr)
 
@@ -260,7 +265,7 @@ func main() {
 	})
 
 	peliculaNotify := func(title, body string) {
-		notifyApprise(title, body) //nolint:errcheck
+		appriseCli.Notify(title, body)
 	}
 	deps := peligrosa.NewDeps(db, auth, invites, requests, jellyfinClient)
 	deps.Notify = peliculaNotify
@@ -304,7 +309,7 @@ func main() {
 			RequestStore:           requests,
 			Qbt:                    svc.Qbt,
 			TriggerJellyfinRefresh: func() error { return TriggerLibraryRefresh(svc) },
-			Notify:                 notifyAppriseErr,
+			Notify:                 func(t, b string) error { appriseCli.Notify(t, b); return nil },
 		},
 		libHandler: libHandler,
 		jfHandler:  jfHandler,
@@ -479,12 +484,6 @@ func watchdogStateAdapter(ws VPNWatchdogState) health.WatchdogState {
 		LastTransitionAt:  ws.LastTransitionAt,
 		VPNTunnelStatus:   ws.VPNTunnelStatus,
 	}
-}
-
-// notifyAppriseErr wraps notifyApprise to match the notify func signature passed to MarkAvailable.
-func notifyAppriseErr(title, body string) error {
-	notifyApprise(title, body)
-	return nil
 }
 
 func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {

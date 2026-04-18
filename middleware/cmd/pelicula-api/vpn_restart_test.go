@@ -17,7 +17,7 @@ func TestHandleVPNRestart_RejectsGET(t *testing.T) {
 }
 
 func TestHandleVPNRestart_Post_ReturnsOK(t *testing.T) {
-	// With no docker proxy available, dockerRestart errors but handler still
+	// With no docker proxy available, dockerCli.Restart errors but handler still
 	// returns 200 with ok:true and errors listed — never a 5xx.
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/admin/vpn/restart", nil)
 	req.Header.Set("Origin", "http://localhost:7354")

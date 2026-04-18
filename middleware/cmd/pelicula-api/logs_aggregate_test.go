@@ -44,8 +44,8 @@ func TestSortedLogEntries(t *testing.T) {
 }
 
 func TestHandleLogsAggregateFansOut(t *testing.T) {
-	origFetch := dockerLogsFunc
-	dockerLogsFunc = func(name string, tail int, ts bool) ([]byte, error) {
+	origFetch := dockerCli.LogsFunc
+	dockerCli.LogsFunc = func(name string, tail int, ts bool) ([]byte, error) {
 		switch name {
 		case "sonarr":
 			return []byte("sonarr line 1\nsonarr line 2\n"), nil
@@ -54,7 +54,7 @@ func TestHandleLogsAggregateFansOut(t *testing.T) {
 		}
 		return []byte(""), nil
 	}
-	t.Cleanup(func() { dockerLogsFunc = origFetch })
+	t.Cleanup(func() { dockerCli.LogsFunc = origFetch })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/logs/aggregate?tail=50&services=sonarr,radarr", nil)
 	w := httptest.NewRecorder()

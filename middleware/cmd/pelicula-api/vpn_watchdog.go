@@ -251,10 +251,10 @@ func StartVPNWatchdog(s *ServiceClients) {
 			slog.Warn("port forwarding unavailable after grace period — restarting VPN containers",
 				"component", "vpn_watchdog", "tunnel", tunnelStatus)
 			for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
-				if !isAllowedContainer(svc) {
+				if !dockerCli.IsAllowed(svc) {
 					continue
 				}
-				if err := dockerRestart(svc); err != nil {
+				if err := dockerCli.Restart(svc); err != nil {
 					slog.Error("vpn watchdog restart failed",
 						"component", "vpn_watchdog", "svc", svc, "error", err)
 				}

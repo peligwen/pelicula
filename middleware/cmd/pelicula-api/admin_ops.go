@@ -92,10 +92,10 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 		"qbittorrent", "jellyfin", "bazarr", "gluetun"}
 	var errs []string
 	for _, svc := range order {
-		if !isAllowedContainer(svc) {
+		if !dockerCli.IsAllowed(svc) {
 			continue // defense-in-depth: skip any future typo in order
 		}
-		if err := dockerRestart(svc); err != nil {
+		if err := dockerCli.Restart(svc); err != nil {
 			slog.Warn("stack restart: skipping", "component", "admin_ops", "svc", svc, "error", err)
 			errs = append(errs, svc+": "+err.Error())
 		}
@@ -110,7 +110,7 @@ func handleStackRestart(w http.ResponseWriter, r *http.Request) {
 	// after httputil.WriteJSON returns). Give it 500ms.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		dockerRestart("pelicula-api") //nolint:errcheck — we won't be here to log it
+		dockerCli.Restart("pelicula-api") //nolint:errcheck — we won't be here to log it
 	}()
 }
 
@@ -128,10 +128,10 @@ func handleVPNRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	var errs []string
 	for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
-		if !isAllowedContainer(svc) {
+		if !dockerCli.IsAllowed(svc) {
 			continue
 		}
-		if err := dockerRestart(svc); err != nil {
+		if err := dockerCli.Restart(svc); err != nil {
 			slog.Warn("vpn restart: container error",
 				"component", "admin_ops", "svc", svc, "error", err)
 			errs = append(errs, svc+": "+err.Error())
@@ -156,7 +156,7 @@ func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	svc := r.URL.Query().Get("svc")
-	if !isAllowedContainer(svc) {
+	if !dockerCli.IsAllowed(svc) {
 		httputil.WriteError(w, "unknown service", http.StatusBadRequest)
 		return
 	}
@@ -166,7 +166,7 @@ func handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 			tail = n
 		}
 	}
-	logs, err := dockerLogs(svc, tail, false)
+	logs, err := dockerCli.Logs(svc, tail, false)
 	if err != nil {
 		slog.Warn("logs failed", "component", "admin_ops", "svc", svc, "error", err)
 		httputil.WriteError(w, "logs unavailable: "+err.Error(), http.StatusBadGateway)

@@ -12,6 +12,8 @@ import (
 	"database/sql"
 
 	"pelicula-api/internal/app/library"
+	"pelicula-api/internal/clients/apprise"
+	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/peligrosa"
 )
 
@@ -37,6 +39,14 @@ var mainDB *sql.DB
 // that haven't been migrated to use App struct fields directly.
 // Set by main() once constructed; never nil after startup.
 var libHandler *library.Handler
+
+// dockerCli is the package-level Docker socket proxy client.
+// Set by main() once constructed; never nil after startup.
+var dockerCli *docker.Client
+
+// appriseCli is the package-level Apprise notification client.
+// Set by main() once constructed; never nil after startup.
+var appriseCli *apprise.Client
 
 // indexerCount is the package-level indexer count cache, used by autowire to
 // invalidate the cached count after wiring completes.

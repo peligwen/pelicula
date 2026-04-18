@@ -76,12 +76,12 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 	if sv := r.URL.Query().Get("services"); sv != "" {
 		for _, s := range strings.Split(sv, ",") {
 			s = strings.TrimSpace(s)
-			if isAllowedContainer(s) {
+			if dockerCli.IsAllowed(s) {
 				services = append(services, s)
 			}
 		}
 	} else {
-		for name := range allowedContainers {
+		for name := range dockerCli.AllowedNames() {
 			services = append(services, name)
 		}
 	}
@@ -97,7 +97,7 @@ func handleLogsAggregate(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			raw, err := dockerLogsFunc(name, tail, true)
+			raw, err := dockerCli.LogsFunc(name, tail, true)
 			resCh <- fetchResult{svc: name, raw: raw, err: err}
 		}(svc)
 	}
