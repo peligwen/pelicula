@@ -5,7 +5,8 @@ package peligrosa
 
 import (
 	"database/sql"
-	"log/slog"
+
+	"pelicula-api/internal/repo/roles"
 )
 
 // RolesEntry maps a Jellyfin user ID to a Pelicula role.
@@ -22,73 +23,48 @@ type RolesFile struct {
 	Users   []RolesEntry `json:"users"`
 }
 
-// RolesStore persists the Jellyfin user ID → Pelicula role mapping in SQLite.
+// RolesStore wraps the typed repo/roles store and adapts its string-typed API
+// to the UserRole domain type used throughout peligrosa.
 // SQLite handles concurrency; no additional mutex is needed.
 type RolesStore struct {
-	db *sql.DB
+	store *roles.Store
 }
 
 // NewRolesStore creates a RolesStore backed by db.
 func NewRolesStore(db *sql.DB) *RolesStore {
-	return &RolesStore{db: db}
+	return &RolesStore{store: roles.New(db)}
 }
 
 // IsEmpty reports whether the store has no user entries.
 func (rs *RolesStore) IsEmpty() bool {
-	var count int
-	if err := rs.db.QueryRow(`SELECT COUNT(*) FROM roles`).Scan(&count); err != nil {
-		return true
-	}
-	return count == 0
+	return rs.store.IsEmpty()
 }
 
 // Lookup returns the stored role for the given Jellyfin user ID.
 func (rs *RolesStore) Lookup(jellyfinID string) (UserRole, bool) {
-	var role UserRole
-	err := rs.db.QueryRow(
-		`SELECT role FROM roles WHERE jellyfin_id = ?`, jellyfinID,
-	).Scan(&role)
-	if err == sql.ErrNoRows {
+	role, ok := rs.store.Lookup(jellyfinID)
+	if !ok {
 		return "", false
 	}
-	if err != nil {
-		return "", false
-	}
-	return role, true
+	return UserRole(role), true
 }
 
 // Upsert sets the role for a Jellyfin user ID, creating the entry if absent.
 // Also refreshes the stored display name.
 func (rs *RolesStore) Upsert(jellyfinID, username string, role UserRole) error {
-	_, err := rs.db.Exec(
-		`INSERT INTO roles (jellyfin_id, username, role) VALUES (?, ?, ?)
-		 ON CONFLICT(jellyfin_id) DO UPDATE SET username=excluded.username, role=excluded.role`,
-		jellyfinID, username, string(role),
-	)
-	return err
+	return rs.store.Upsert(jellyfinID, username, string(role))
 }
 
 // All returns a snapshot of all role entries.
 func (rs *RolesStore) All() []RolesEntry {
-	rows, err := rs.db.Query(`SELECT jellyfin_id, username, role FROM roles ORDER BY username`)
-	if err != nil {
-		return []RolesEntry{}
-	}
-	defer rows.Close()
-
-	var result []RolesEntry
-	for rows.Next() {
-		var e RolesEntry
-		if err := rows.Scan(&e.JellyfinID, &e.Username, &e.Role); err != nil {
-			continue
+	entries := rs.store.All()
+	result := make([]RolesEntry, len(entries))
+	for i, e := range entries {
+		result[i] = RolesEntry{
+			JellyfinID: e.JellyfinID,
+			Username:   e.Username,
+			Role:       UserRole(e.Role),
 		}
-		result = append(result, e)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("roles: All rows iteration error", "component", "roles", "error", err)
-	}
-	if result == nil {
-		return []RolesEntry{}
 	}
 	return result
 }
@@ -96,6 +72,5 @@ func (rs *RolesStore) All() []RolesEntry {
 // Delete removes the role entry for jellyfinID. No-ops silently if the ID is
 // not in the table.
 func (rs *RolesStore) Delete(jellyfinID string) error {
-	_, err := rs.db.Exec(`DELETE FROM roles WHERE jellyfin_id = ?`, jellyfinID)
-	return err
+	return rs.store.Delete(jellyfinID)
 }
