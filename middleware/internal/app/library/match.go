@@ -188,6 +188,8 @@ func (h *Handler) matchFile(
 	}
 
 	encoded := url.QueryEscape(title)
+	movieRoot := h.FirstLibraryPath("radarr", "/media/movies")
+	tvRoot := h.FirstLibraryPath("sonarr", "/media/tv")
 
 	if isTV {
 		m := cachedLookup(cache, cacheMu, "series:"+title, func() *MediaMatch {
@@ -200,7 +202,7 @@ func (h *Handler) matchFile(
 			mc.Season = season
 			mc.Episode = episode
 			item.Match = &mc
-			item.SuggestedPath = suggestedTVPath(m.Title, season, filename)
+			item.SuggestedPath = suggestedTVPath(tvRoot, m.Title, season, filename)
 			item.Aliases = f.Aliases
 			if existingSeries[m.TvdbID] {
 				item.Status = "exists"
@@ -222,7 +224,7 @@ func (h *Handler) matchFile(
 			item.Aliases = f.Aliases
 			if m.Type == "movie" {
 				item.Match = m // movie matches have no Season/Episode; safe to share
-				item.SuggestedPath = suggestedMoviePath(m.Title, m.Year, filename)
+				item.SuggestedPath = suggestedMoviePath(movieRoot, m.Title, m.Year, filename)
 				if existingMovies[m.TmdbID] {
 					item.Status = "exists"
 				} else {
@@ -235,7 +237,7 @@ func (h *Handler) matchFile(
 				mc.Season = season
 				mc.Episode = episode
 				item.Match = &mc
-				item.SuggestedPath = suggestedTVPath(m.Title, season, filename)
+				item.SuggestedPath = suggestedTVPath(tvRoot, m.Title, season, filename)
 				if existingSeries[m.TvdbID] {
 					item.Status = "exists"
 				} else {
@@ -257,17 +259,15 @@ func (h *Handler) matchFile(
 
 // ── Suggested path helpers ────────────────────────────────────────────────────
 
-func suggestedMoviePath(title string, year int, filename string) string {
+func suggestedMoviePath(root, title string, year int, filename string) string {
 	folder := title
 	if year > 0 {
 		folder = fmt.Sprintf("%s (%d)", title, year)
 	}
-	root := FirstLibraryPath("radarr", "/media/movies")
 	return root + "/" + folder + "/" + filepath.Base(filename)
 }
 
-func suggestedTVPath(title string, season int, filename string) string {
-	root := FirstLibraryPath("sonarr", "/media/tv")
+func suggestedTVPath(root, title string, season int, filename string) string {
 	if season > 0 {
 		return fmt.Sprintf("%s/%s/Season %02d/%s", root, title, season, filepath.Base(filename))
 	}

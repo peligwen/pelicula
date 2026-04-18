@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"pelicula-api/httputil"
@@ -50,6 +51,9 @@ type Handler struct {
 	SonarrURL     string
 	ConfigDir     string // e.g. /config/pelicula
 	ForwardToProc ForwardToProculaFunc
+
+	registryMu sync.RWMutex
+	registry   LibraryConfig
 }
 
 // ── Browse types ──────────────────────────────────────────────────────────────

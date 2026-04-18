@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
-	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/peligrosa"
 )
 
@@ -420,7 +419,7 @@ func importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu 
 	// Tag label → id (creating missing tags)
 	tagMap, _ := ensureTags(radarrURL, apiKey, collectMovieTags(movies))
 
-	radarrRoot := library.FirstLibraryPath("radarr", "/media/movies")
+	radarrRoot := libHandler.FirstLibraryPath("radarr", "/media/movies")
 
 	for _, m := range movies {
 		if m.TmdbID == 0 {
@@ -477,7 +476,7 @@ func importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu
 	// Tag label → id (creating missing tags)
 	tagMap, _ := ensureTags(sonarrURL, apiKey, collectSeriesTags(series))
 
-	sonarrRoot := library.FirstLibraryPath("sonarr", "/media/tv")
+	sonarrRoot := libHandler.FirstLibraryPath("sonarr", "/media/tv")
 
 	for _, s := range series {
 		if s.TvdbID == 0 {

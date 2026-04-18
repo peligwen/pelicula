@@ -90,7 +90,7 @@ func (h *Handler) HandleLibraryRetranscode(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	libs := GetLibraries()
+	libs := h.GetLibraries()
 	libRoots := make([]string, 0, len(libs))
 	for _, lib := range libs {
 		libRoots = append(libRoots, lib.ContainerPath())
@@ -208,7 +208,7 @@ func (h *Handler) HandleLibraryResub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clean := filepath.Clean(req.Path)
-	resubLibs := GetLibraries()
+	resubLibs := h.GetLibraries()
 	resubRoots := make([]string, 0, len(resubLibs))
 	for _, lib := range resubLibs {
 		resubRoots = append(resubRoots, lib.ContainerPath())

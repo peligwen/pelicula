@@ -158,7 +158,7 @@ func validUsername(s string) bool {
 
 // wireJellyfin auto-configures Jellyfin: completes the startup wizard (if needed)
 // and adds Movies + TV Shows libraries pointing to the same folders used everywhere else.
-func wireJellyfin(s *ServiceClients) {
+func wireJellyfin(s *ServiceClients, lh *library.Handler) {
 	// Check if startup wizard is complete
 	data, err := jellyfinGet(s, "/System/Info/Public", "")
 	if err != nil {
@@ -267,7 +267,7 @@ func wireJellyfin(s *ServiceClients) {
 		}
 	}
 
-	for _, lib := range library.GetLibraries() {
+	for _, lib := range lh.GetLibraries() {
 		collectionType := lib.Type
 		if collectionType == "other" {
 			collectionType = "mixed"

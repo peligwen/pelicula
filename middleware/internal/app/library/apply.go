@@ -103,7 +103,7 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if warns := CheckLibraryAccess(); len(warns) > 0 {
+	if warns := h.CheckLibraryAccess(); len(warns) > 0 {
 		httputil.WriteError(w, warns[0], http.StatusServiceUnavailable)
 		return
 	}
@@ -115,7 +115,14 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	seriesProfiles, _ := h.loadProfileNameMap(h.SonarrURL, sonarrKey)
 
 	// ── Filesystem operations (import / link) ────────────────────────────────
-	fsResults := applyFSOps(req.Items, req.Strategy, nil, nil)
+	libs := h.GetLibraries()
+	dstRoots := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		dstRoots = append(dstRoots, lib.ContainerPath())
+	}
+	movieRoot := h.FirstLibraryPath("radarr", "/media/movies")
+	tvRoot := h.FirstLibraryPath("sonarr", "/media/tv")
+	fsResults := applyFSOps(req.Items, req.Strategy, nil, dstRoots, movieRoot, tvRoot)
 
 	type dedupeKey struct {
 		kind string
@@ -261,7 +268,7 @@ func (h *Handler) applyMovie(apiKey string, item ApplyItem, profMap map[string]i
 	profileID := resolveProfileID("", profMap)
 	root := item.RootFolderPath
 	if root == "" {
-		root = FirstLibraryPath("radarr", "/media/movies")
+		root = h.FirstLibraryPath("radarr", "/media/movies")
 	}
 
 	movie["tmdbId"] = item.TmdbID
@@ -296,7 +303,7 @@ func (h *Handler) applySeries(apiKey string, item ApplyItem, profMap map[string]
 	profileID := resolveProfileID("", profMap)
 	root := item.RootFolderPath
 	if root == "" {
-		root = FirstLibraryPath("sonarr", "/media/tv")
+		root = h.FirstLibraryPath("sonarr", "/media/tv")
 	}
 
 	show["tvdbId"] = item.TvdbID
@@ -385,9 +392,11 @@ func moveFile(src, dst string) error {
 }
 
 // applyFSOps iterates items and performs the filesystem operation dictated by
-// strategy for each item that has a SourcePath. allowedSrcRoots and
-// allowedDstRoots default to the production values when nil.
-func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string) []fsOpResult {
+// strategy for each item that has a SourcePath. allowedSrcRoots defaults to
+// the production browse roots when nil; allowedDstRoots defaults to empty.
+// movieRoot and tvRoot are used to compute suggested destination paths when
+// item.DestPath is empty; pass empty strings to use the hardcoded fallbacks.
+func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string, movieRoot, tvRoot string) []fsOpResult {
 	results := make([]fsOpResult, len(items))
 	for i := range results {
 		results[i] = fsOpResult{op: "kept"}
@@ -409,11 +418,7 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		allowedSrcRoots = browseRoots()
 	}
 	if allowedDstRoots == nil {
-		libs := GetLibraries()
-		allowedDstRoots = make([]string, 0, len(libs))
-		for _, lib := range libs {
-			allowedDstRoots = append(allowedDstRoots, lib.ContainerPath())
-		}
+		allowedDstRoots = []string{}
 	}
 
 	for i := range items {
@@ -430,9 +435,9 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		dst := item.DestPath
 		if dst == "" {
 			if item.Type == "movie" {
-				dst = suggestedMoviePath(item.Title, item.Year, filepath.Base(src))
+				dst = suggestedMoviePath(movieRoot, item.Title, item.Year, filepath.Base(src))
 			} else {
-				dst = suggestedTVPath(item.Title, 0, filepath.Base(src))
+				dst = suggestedTVPath(tvRoot, item.Title, 0, filepath.Base(src))
 			}
 		}
 		dst = filepath.Clean(dst)

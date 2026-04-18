@@ -11,6 +11,7 @@ package main
 import (
 	"database/sql"
 
+	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/peligrosa"
 )
 
@@ -35,6 +36,11 @@ var catalogDB *sql.DB
 // mainDB is the primary SQLite database handle (pelicula.db).
 // Set by main() once opened.
 var mainDB *sql.DB
+
+// libHandler is the package-level library Handler, used by handler functions
+// that haven't been migrated to use App struct fields directly.
+// Set by main() once constructed; never nil after startup.
+var libHandler *library.Handler
 
 // indexerCount is the package-level indexer count cache, used by autowire to
 // invalidate the cached count after wiring completes.

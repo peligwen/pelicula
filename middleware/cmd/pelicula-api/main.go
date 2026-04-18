@@ -146,9 +146,25 @@ func main() {
 	if err != nil {
 		slog.Warn("library registry", "component", "main", "error", err)
 	}
-	library.SetRegistry(libCfg)
+	libHandler = &library.Handler{
+		Svc:       svc,
+		Procula:   procClient,
+		RadarrURL: radarrURL,
+		SonarrURL: sonarrURL,
+		ConfigDir: "/config/pelicula",
+		ForwardToProc: func(source library.ProculaJobSource) error {
+			return forwardToProcula(context.Background(), ProculaJobSource{
+				Type:    source.Type,
+				Title:   source.Title,
+				Year:    source.Year,
+				Path:    source.Path,
+				ArrType: source.ArrType,
+			})
+		},
+	}
+	libHandler.SetRegistry(libCfg)
 	slog.Info("library registry loaded", "component", "main", "count", len(libCfg.Libraries))
-	for _, w := range library.CheckLibraryAccess() {
+	for _, w := range libHandler.CheckLibraryAccess() {
 		slog.Warn("library access check", "component", "main", "warning", w)
 	}
 
@@ -196,7 +212,7 @@ func main() {
 		SubLangs:      os.Getenv("PELICULA_SUB_LANGS"),
 		AudioLang:     os.Getenv("PELICULA_AUDIO_LANG"),
 		GetLibraries: func() []autowire.Library {
-			libs := library.GetLibraries()
+			libs := libHandler.GetLibraries()
 			out := make([]autowire.Library, 0, len(libs))
 			for _, l := range libs {
 				out = append(out, autowire.Library{
@@ -207,7 +223,7 @@ func main() {
 			}
 			return out
 		},
-		WireJellyfin:           func() { wireJellyfin(svc) },
+		WireJellyfin:           func() { wireJellyfin(svc, libHandler) },
 		InvalidateIndexerCache: func() { indexerCount.invalidate() },
 	})
 
@@ -277,22 +293,7 @@ func main() {
 			TriggerJellyfinRefresh: func() error { return TriggerLibraryRefresh(svc) },
 			Notify:                 notifyAppriseErr,
 		},
-		libHandler: &library.Handler{
-			Svc:       svc,
-			Procula:   procClient,
-			RadarrURL: urls.Radarr,
-			SonarrURL: urls.Sonarr,
-			ConfigDir: "/config/pelicula",
-			ForwardToProc: func(source library.ProculaJobSource) error {
-				return forwardToProcula(context.Background(), ProculaJobSource{
-					Type:    source.Type,
-					Title:   source.Title,
-					Year:    source.Year,
-					Path:    source.Path,
-					ArrType: source.ArrType,
-				})
-			},
-		},
+		libHandler: libHandler,
 	}
 	// Wire package-level globals for the handler files that still use them.
 	services = svc
@@ -438,7 +439,7 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"wired":          a.svc.IsWired(),
 		"indexers":       idxCount,
 		"vpn_configured": a.vpnConfigured,
-		"warnings":       library.CheckLibraryAccess(),
+		"warnings":       a.libHandler.CheckLibraryAccess(),
 	}
 	httputil.WriteJSON(w, status)
 }

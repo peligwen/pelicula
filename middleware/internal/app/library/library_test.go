@@ -146,7 +146,6 @@ func TestScoreMatch(t *testing.T) {
 
 func TestSuggestedMoviePath(t *testing.T) {
 	t.Parallel()
-	// Default registry (empty) falls back to /media/movies.
 	cases := []struct {
 		title    string
 		year     int
@@ -161,7 +160,7 @@ func TestSuggestedMoviePath(t *testing.T) {
 		c := c
 		t.Run(c.title, func(t *testing.T) {
 			t.Parallel()
-			got := suggestedMoviePath(c.title, c.year, c.filename)
+			got := suggestedMoviePath("/media/movies", c.title, c.year, c.filename)
 			if got != c.want {
 				t.Errorf("suggestedMoviePath(%q,%d,%q) = %q, want %q",
 					c.title, c.year, c.filename, got, c.want)
@@ -172,7 +171,6 @@ func TestSuggestedMoviePath(t *testing.T) {
 
 func TestSuggestedTVPath(t *testing.T) {
 	t.Parallel()
-	// Default registry (empty) falls back to /media/tv.
 	cases := []struct {
 		title    string
 		season   int
@@ -187,7 +185,7 @@ func TestSuggestedTVPath(t *testing.T) {
 		c := c
 		t.Run(c.title, func(t *testing.T) {
 			t.Parallel()
-			got := suggestedTVPath(c.title, c.season, c.filename)
+			got := suggestedTVPath("/media/tv", c.title, c.season, c.filename)
 			if got != c.want {
 				t.Errorf("suggestedTVPath(%q,%d,%q) = %q, want %q",
 					c.title, c.season, c.filename, got, c.want)
@@ -348,7 +346,7 @@ func TestApplyFSOps_Migrate(t *testing.T) {
 		SourcePath: src,
 		DestPath:   dst,
 	}}
-	applyFSOps(items, "migrate", []string{srcRoot}, []string{dstRoot})
+	applyFSOps(items, "migrate", []string{srcRoot}, []string{dstRoot}, "", "")
 
 	if _, err := os.Stat(dst); os.IsNotExist(err) {
 		t.Fatal("dst should exist after migrate")
@@ -377,7 +375,7 @@ func TestApplyFSOps_Symlink(t *testing.T) {
 		SourcePath: src,
 		DestPath:   dst,
 	}}
-	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}, "", "")
 
 	info, err := os.Lstat(dst)
 	if os.IsNotExist(err) {
@@ -404,8 +402,8 @@ func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
 	}
 
 	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: src, DestPath: dst}}
-	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
-	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}, "", "")
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}, "", "")
 
 	fi, err := os.Lstat(dst)
 	if err != nil {
@@ -433,7 +431,7 @@ func TestApplyFSOps_Keep(t *testing.T) {
 	}
 
 	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: src, DestPath: dst}}
-	applyFSOps(items, "keep", []string{srcRoot}, []string{dstRoot})
+	applyFSOps(items, "keep", []string{srcRoot}, []string{dstRoot}, "", "")
 
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Error("keep strategy should not create dst")
@@ -454,7 +452,7 @@ func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
 	}
 
 	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: escapeSrc, DestPath: dst}}
-	applyFSOps(items, "migrate", []string{filepath.Join(base, "downloads")}, []string{dstRoot})
+	applyFSOps(items, "migrate", []string{filepath.Join(base, "downloads")}, []string{dstRoot}, "", "")
 
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Error("path outside allowedSrcRoots should not be migrated")

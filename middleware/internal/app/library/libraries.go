@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
 
 	"pelicula-api/httputil"
 )
@@ -53,12 +52,6 @@ func DefaultLibraryConfig() LibraryConfig {
 		},
 	}
 }
-
-// libraryRegistryMu serialises reads and writes to libraries.json.
-var libraryRegistryMu sync.RWMutex
-
-// libraryRegistry is the in-memory library registry, loaded at startup.
-var libraryRegistry LibraryConfig
 
 // slugRe is the allowed pattern for library slugs: lowercase alphanumeric,
 // hyphens allowed but not as the first character.
@@ -167,8 +160,8 @@ func WriteLibraries(configPeliculaDir string, cfg LibraryConfig) error {
 // FirstLibraryPath returns the ContainerPath of the first library managed by
 // the given arr type ("radarr" or "sonarr"). Falls back to defaultPath if none
 // found.
-func FirstLibraryPath(arr, defaultPath string) string {
-	for _, lib := range GetLibraries() {
+func (h *Handler) FirstLibraryPath(arr, defaultPath string) string {
+	for _, lib := range h.GetLibraries() {
 		if lib.Arr == arr {
 			return lib.ContainerPath()
 		}
@@ -184,9 +177,9 @@ func FirstLibraryPath(arr, defaultPath string) string {
 // On Synology NAS deployments the Media shared folder often has ACLs enabled;
 // when bind-mounted into containers the POSIX mode bits can be 000, locking
 // out non-root container users even though root can still read the directory.
-func CheckLibraryAccess() []string {
+func (h *Handler) CheckLibraryAccess() []string {
 	var paths []string
-	for _, lib := range GetLibraries() {
+	for _, lib := range h.GetLibraries() {
 		paths = append(paths, lib.ContainerPath())
 	}
 	return CheckLibraryAccessPaths(paths)
@@ -212,28 +205,28 @@ func CheckLibraryAccessPaths(paths []string) []string {
 }
 
 // GetLibraries returns a snapshot of the current library registry.
-func GetLibraries() []Library {
-	libraryRegistryMu.RLock()
-	defer libraryRegistryMu.RUnlock()
-	out := make([]Library, len(libraryRegistry.Libraries))
-	copy(out, libraryRegistry.Libraries)
+func (h *Handler) GetLibraries() []Library {
+	h.registryMu.RLock()
+	defer h.registryMu.RUnlock()
+	out := make([]Library, len(h.registry.Libraries))
+	copy(out, h.registry.Libraries)
 	return out
 }
 
 // SetRegistry replaces the in-memory registry. Called by main() after loading
 // from disk at startup.
-func SetRegistry(cfg LibraryConfig) {
-	libraryRegistryMu.Lock()
-	libraryRegistry = cfg
-	libraryRegistryMu.Unlock()
+func (h *Handler) SetRegistry(cfg LibraryConfig) {
+	h.registryMu.Lock()
+	h.registry = cfg
+	h.registryMu.Unlock()
 }
 
 // GetLibraryBySlug returns the Library with the given slug, or an error if not
 // found.
-func GetLibraryBySlug(slug string) (Library, error) {
-	libraryRegistryMu.RLock()
-	defer libraryRegistryMu.RUnlock()
-	for _, lib := range libraryRegistry.Libraries {
+func (h *Handler) GetLibraryBySlug(slug string) (Library, error) {
+	h.registryMu.RLock()
+	defer h.registryMu.RUnlock()
+	for _, lib := range h.registry.Libraries {
 		if lib.Slug == slug {
 			return lib, nil
 		}
@@ -244,16 +237,16 @@ func GetLibraryBySlug(slug string) (Library, error) {
 // SaveLibrary validates, then creates or replaces a library by slug and
 // persists the registry. configPeliculaDir must be the path to the pelicula
 // config directory (e.g. /config/pelicula inside the container).
-func SaveLibrary(configPeliculaDir string, lib Library) error {
+func (h *Handler) SaveLibrary(configPeliculaDir string, lib Library) error {
 	if err := ValidateLibrary(lib); err != nil {
 		return err
 	}
 
-	libraryRegistryMu.Lock()
-	defer libraryRegistryMu.Unlock()
+	h.registryMu.Lock()
+	defer h.registryMu.Unlock()
 
-	// Build the new slice without touching the global yet.
-	existing := libraryRegistry.Libraries
+	// Build the new slice without touching the registry yet.
+	existing := h.registry.Libraries
 	newLibs := make([]Library, len(existing))
 	copy(newLibs, existing)
 
@@ -273,19 +266,19 @@ func SaveLibrary(configPeliculaDir string, lib Library) error {
 	if err := WriteLibraries(configPeliculaDir, newCfg); err != nil {
 		return err
 	}
-	// Write succeeded — update global.
-	libraryRegistry = newCfg
+	// Write succeeded — update registry.
+	h.registry = newCfg
 	return nil
 }
 
 // DeleteLibrary removes the library with the given slug and persists the
 // registry. Returns an error if the slug is not found or the library is
 // built-in.
-func DeleteLibrary(configPeliculaDir string, slug string) error {
-	libraryRegistryMu.Lock()
-	defer libraryRegistryMu.Unlock()
+func (h *Handler) DeleteLibrary(configPeliculaDir string, slug string) error {
+	h.registryMu.Lock()
+	defer h.registryMu.Unlock()
 
-	existing := libraryRegistry.Libraries
+	existing := h.registry.Libraries
 	idx := -1
 	for i, lib := range existing {
 		if lib.Slug == slug {
@@ -300,7 +293,7 @@ func DeleteLibrary(configPeliculaDir string, slug string) error {
 		return ErrLibraryBuiltIn
 	}
 
-	// Build the new slice without touching the global yet.
+	// Build the new slice without touching the registry yet.
 	newLibs := make([]Library, 0, len(existing)-1)
 	newLibs = append(newLibs, existing[:idx]...)
 	newLibs = append(newLibs, existing[idx+1:]...)
@@ -309,8 +302,8 @@ func DeleteLibrary(configPeliculaDir string, slug string) error {
 	if err := WriteLibraries(configPeliculaDir, newCfg); err != nil {
 		return err
 	}
-	// Write succeeded — update global.
-	libraryRegistry = newCfg
+	// Write succeeded — update registry.
+	h.registry = newCfg
 	return nil
 }
 
@@ -319,7 +312,7 @@ func DeleteLibrary(configPeliculaDir string, slug string) error {
 // HandleListLibraries handles GET /api/pelicula/libraries.
 // No auth required — same convention as other read-only dashboard endpoints.
 func (h *Handler) HandleListLibraries(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, GetLibraries())
+	httputil.WriteJSON(w, h.GetLibraries())
 }
 
 // HandleAddLibrary handles POST /api/pelicula/libraries.
@@ -336,7 +329,7 @@ func (h *Handler) HandleAddLibrary(w http.ResponseWriter, r *http.Request) {
 	lib.BuiltIn = false
 
 	// Reject reserved and duplicate slugs — SaveLibrary silently replaces them.
-	if existing, err := GetLibraryBySlug(lib.Slug); err == nil {
+	if existing, err := h.GetLibraryBySlug(lib.Slug); err == nil {
 		if existing.BuiltIn {
 			httputil.WriteError(w, "a built-in library already uses that name", http.StatusConflict)
 		} else {
@@ -345,7 +338,7 @@ func (h *Handler) HandleAddLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := SaveLibrary(h.ConfigDir, lib); err != nil {
+	if err := h.SaveLibrary(h.ConfigDir, lib); err != nil {
 		httputil.WriteError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -374,7 +367,7 @@ func (h *Handler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := GetLibraryBySlug(slug)
+	existing, err := h.GetLibraryBySlug(slug)
 	if err != nil {
 		httputil.WriteError(w, "library not found", http.StatusNotFound)
 		return
@@ -406,7 +399,7 @@ func (h *Handler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	// always apply it from the update.
 	merged.Path = updates.Path
 
-	if err := SaveLibrary(h.ConfigDir, merged); err != nil {
+	if err := h.SaveLibrary(h.ConfigDir, merged); err != nil {
 		httputil.WriteError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -422,7 +415,7 @@ func (h *Handler) HandleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := DeleteLibrary(h.ConfigDir, slug); err != nil {
+	if err := h.DeleteLibrary(h.ConfigDir, slug); err != nil {
 		if errors.Is(err, ErrLibraryNotFound) {
 			httputil.WriteError(w, "library not found", http.StatusNotFound)
 		} else {
