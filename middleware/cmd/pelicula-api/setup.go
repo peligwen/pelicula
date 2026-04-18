@@ -9,18 +9,20 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"pelicula-api/internal/app/library"
 )
 
 // SetupRequest is the JSON body submitted by the browser wizard.
 type SetupRequest struct {
-	ConfigDir    string    `json:"config_dir"`
-	MediaDir     string    `json:"media_dir"`
-	LibraryDir   string    `json:"library_dir"`
-	WorkDir      string    `json:"work_dir"`
-	WireguardKey string    `json:"wireguard_key"`
-	VPNSkipped   bool      `json:"vpn_skipped"`
-	LANUrl       string    `json:"lan_url"`
-	Libraries    []Library `json:"libraries,omitempty"` // optional custom libraries from wizard
+	ConfigDir    string            `json:"config_dir"`
+	MediaDir     string            `json:"media_dir"`
+	LibraryDir   string            `json:"library_dir"`
+	WorkDir      string            `json:"work_dir"`
+	WireguardKey string            `json:"wireguard_key"`
+	VPNSkipped   bool              `json:"vpn_skipped"`
+	LANUrl       string            `json:"lan_url"`
+	Libraries    []library.Library `json:"libraries,omitempty"` // optional custom libraries from wizard
 }
 
 // SetupDetect is returned by GET /api/pelicula/setup/detect.
@@ -171,14 +173,14 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Write libraries.json: always include the two built-in libraries, then
 	// append any custom libraries submitted by the setup wizard.
-	setupLibs := defaultLibraryConfig()
+	setupLibs := library.DefaultLibraryConfig()
 	for _, lib := range req.Libraries {
 		// Skip any attempt to re-add or override built-in slugs.
 		if lib.Slug == "movies" || lib.Slug == "tv" {
 			continue
 		}
 		lib.BuiltIn = false
-		if err := validateLibrary(lib); err != nil {
+		if err := library.ValidateLibrary(lib); err != nil {
 			slog.Warn("setup: skipping invalid custom library", "component", "setup", "slug", lib.Slug, "error", err)
 			continue
 		}
@@ -187,7 +189,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	peliculaCfgDir := setupContainerConfigDir(req.ConfigDir)
 	if err := os.MkdirAll(peliculaCfgDir, 0755); err != nil {
 		slog.Warn("setup: could not create pelicula config dir", "component", "setup", "error", err)
-	} else if err := writeLibraries(peliculaCfgDir, setupLibs); err != nil {
+	} else if err := library.WriteLibraries(peliculaCfgDir, setupLibs); err != nil {
 		slog.Warn("setup: could not write libraries.json", "component", "setup", "error", err)
 	}
 

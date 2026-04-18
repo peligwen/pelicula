@@ -1,4 +1,4 @@
-package main
+package library
 
 import (
 	"net/http"
@@ -11,7 +11,13 @@ import (
 	proculaclient "pelicula-api/internal/clients/procula"
 )
 
+// newProculaClientForTest constructs a procula.Client pointed at a test server URL.
+func newProculaClientForTest(baseURL string) *proculaclient.Client {
+	return proculaclient.New(baseURL, "")
+}
+
 func TestCleanFilename(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		filename string
 		title    string
@@ -30,7 +36,9 @@ func TestCleanFilename(t *testing.T) {
 		{"movie.name.mkv", "movie name", 0, false},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.filename, func(t *testing.T) {
+			t.Parallel()
 			title, year, isTV := cleanFilename(c.filename)
 			if title != c.title {
 				t.Errorf("title = %q, want %q", title, c.title)
@@ -46,6 +54,7 @@ func TestCleanFilename(t *testing.T) {
 }
 
 func TestExtractSeason(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		filename string
 		want     int
@@ -59,7 +68,9 @@ func TestExtractSeason(t *testing.T) {
 		{"", 0},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.filename, func(t *testing.T) {
+			t.Parallel()
 			got := extractSeason(c.filename)
 			if got != c.want {
 				t.Errorf("extractSeason(%q) = %d, want %d", c.filename, got, c.want)
@@ -69,23 +80,26 @@ func TestExtractSeason(t *testing.T) {
 }
 
 func TestNormalizeTitle(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		input string
 		want  string
 	}{
 		{"The Dark Knight", "dark knight"},
 		{"A Beautiful Mind", "beautiful mind"},
-		{"An Officer and a Gentleman", "officer and a gentleman"}, // only leading "an " stripped; "a" mid-string kept
+		{"An Officer and a Gentleman", "officer and a gentleman"},
 		{"Hello: World!", "hello world"},
 		{"  multiple   spaces  ", "multiple spaces"},
 		{"Schindler's List", "schindlers list"},
-		{"2001: A Space Odyssey", "2001 a space odyssey"}, // no leading article; "a" inside kept
+		{"2001: A Space Odyssey", "2001 a space odyssey"},
 		{"", ""},
 		{"THE MATRIX", "matrix"},
-		{"a", "a"}, // single letter "a" — no trailing space so prefix not matched
+		{"a", "a"},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.input, func(t *testing.T) {
+			t.Parallel()
 			got := normalizeTitle(c.input)
 			if got != c.want {
 				t.Errorf("normalizeTitle(%q) = %q, want %q", c.input, got, c.want)
@@ -95,6 +109,7 @@ func TestNormalizeTitle(t *testing.T) {
 }
 
 func TestScoreMatch(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		title      string
@@ -107,10 +122,8 @@ func TestScoreMatch(t *testing.T) {
 		{"exact match year off by 1", "The Dark Knight", 2008, "The Dark Knight", 2009, "high"},
 		{"exact match year off by 2", "The Dark Knight", 2008, "The Dark Knight", 2010, "medium"},
 		{"exact match no year info", "Alien", 0, "Alien", 1979, "high"},
-		// "Dark Knight" and "The Dark Knight" both normalize to "dark knight" → exact match
 		{"exact after normalize year ok", "Dark Knight", 2008, "The Dark Knight", 2008, "high"},
 		{"exact after normalize year bad", "Dark Knight", 2000, "The Dark Knight", 2008, "medium"},
-		// true substring: "Dark Knight" is in "The Dark Knight Rises" after normalize
 		{"substring match year ok", "Dark Knight", 2012, "The Dark Knight Rises", 2012, "medium"},
 		{"substring match year bad", "Dark Knight", 2000, "The Dark Knight Rises", 2012, "low"},
 		{"exact after normalize year ok", "Dark Knight Rises", 2012, "The Dark Knight Rises", 2012, "high"},
@@ -119,7 +132,9 @@ func TestScoreMatch(t *testing.T) {
 		{"empty match title", "The Dark Knight", 2008, "", 2008, "unmatched"},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := scoreMatch(c.title, c.year, c.matchTitle, c.matchYear)
 			if got != c.want {
 				t.Errorf("scoreMatch(%q,%d,%q,%d) = %q, want %q",
@@ -130,6 +145,7 @@ func TestScoreMatch(t *testing.T) {
 }
 
 func TestSuggestedMoviePath(t *testing.T) {
+	t.Parallel()
 	// Default registry (empty) falls back to /media/movies.
 	cases := []struct {
 		title    string
@@ -142,7 +158,9 @@ func TestSuggestedMoviePath(t *testing.T) {
 		{"The Dark Knight", 2008, "the.dark.knight.mkv", "/media/movies/The Dark Knight (2008)/the.dark.knight.mkv"},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.title, func(t *testing.T) {
+			t.Parallel()
 			got := suggestedMoviePath(c.title, c.year, c.filename)
 			if got != c.want {
 				t.Errorf("suggestedMoviePath(%q,%d,%q) = %q, want %q",
@@ -153,6 +171,7 @@ func TestSuggestedMoviePath(t *testing.T) {
 }
 
 func TestSuggestedTVPath(t *testing.T) {
+	t.Parallel()
 	// Default registry (empty) falls back to /media/tv.
 	cases := []struct {
 		title    string
@@ -165,7 +184,9 @@ func TestSuggestedTVPath(t *testing.T) {
 		{"Show", 0, "episode.mkv", "/media/tv/Show/episode.mkv"},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.title, func(t *testing.T) {
+			t.Parallel()
 			got := suggestedTVPath(c.title, c.season, c.filename)
 			if got != c.want {
 				t.Errorf("suggestedTVPath(%q,%d,%q) = %q, want %q",
@@ -178,6 +199,7 @@ func TestSuggestedTVPath(t *testing.T) {
 // ── FS helpers ────────────────────────────────────────────────────────────────
 
 func TestCopyFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.mkv")
 	dst := filepath.Join(dir, "dst.mkv")
@@ -196,13 +218,13 @@ func TestCopyFile(t *testing.T) {
 	if string(got) != string(content) {
 		t.Errorf("dst content = %q, want %q", got, content)
 	}
-	// src should still exist after copy (copyFile does not remove src)
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		t.Error("copyFile should not remove src")
 	}
 }
 
 func TestMoveFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.mkv")
 	dst := filepath.Join(dir, "subdir", "dst.mkv")
@@ -224,24 +246,13 @@ func TestMoveFile(t *testing.T) {
 	if string(got) != string(content) {
 		t.Errorf("dst content = %q, want %q", got, content)
 	}
-	// src should be gone after a move
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Error("moveFile should remove src")
 	}
 }
 
 func TestWalkVideoFiles(t *testing.T) {
-	// Build a directory tree:
-	//   root/
-	//     movie.mkv              ← included
-	//     readme.txt             ← skipped (not a video ext)
-	//     .hidden/               ← skipped (hidden dir)
-	//       hidden.mkv           ← never reached
-	//     Extras/                ← skipped (skipDirs)
-	//       extra.mkv            ← never reached
-	//     Season 01/
-	//       ep01.mkv             ← included
-	//       sample.mkv           ← skipped (name contains "sample" AND < 100 MB)
+	t.Parallel()
 	root := t.TempDir()
 	write := func(path string, size int) {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -289,6 +300,7 @@ func TestWalkVideoFiles(t *testing.T) {
 }
 
 func TestWalkVideoFilesCap(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for i := 0; i < 5; i++ {
 		name := filepath.Join(root, filepath.Base(t.TempDir())+".mkv")
@@ -307,8 +319,6 @@ func TestWalkVideoFilesCap(t *testing.T) {
 
 // ── applyFSOps ────────────────────────────────────────────────────────────────
 
-// newApplyFSOpsRoots builds a tmp tree with src and dst roots so applyFSOps can
-// be exercised without touching the production /downloads or /movies paths.
 func newApplyFSOpsRoots(t *testing.T) (srcRoot, dstRoot string) {
 	t.Helper()
 	base := t.TempDir()
@@ -323,6 +333,7 @@ func newApplyFSOpsRoots(t *testing.T) (srcRoot, dstRoot string) {
 }
 
 func TestApplyFSOps_Migrate(t *testing.T) {
+	t.Parallel()
 	srcRoot, dstRoot := newApplyFSOpsRoots(t)
 	src := filepath.Join(srcRoot, "Alien.1979.mkv")
 	dst := filepath.Join(dstRoot, "Alien (1979)", "Alien.1979.mkv")
@@ -351,6 +362,7 @@ func TestApplyFSOps_Migrate(t *testing.T) {
 }
 
 func TestApplyFSOps_Symlink(t *testing.T) {
+	t.Parallel()
 	srcRoot, dstRoot := newApplyFSOpsRoots(t)
 	src := filepath.Join(srcRoot, "Inception.2010.mkv")
 	dst := filepath.Join(dstRoot, "Inception (2010)", "Inception.2010.mkv")
@@ -374,7 +386,6 @@ func TestApplyFSOps_Symlink(t *testing.T) {
 	if info.Mode()&os.ModeSymlink == 0 {
 		t.Error("dst should be a symlink")
 	}
-	// src should still exist
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		t.Error("src should still exist after symlink")
 	}
@@ -384,8 +395,7 @@ func TestApplyFSOps_Symlink(t *testing.T) {
 }
 
 func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
-	// Calling applyFSOps twice with symlink strategy should not error on the
-	// second call — it silently skips if the dst already exists.
+	t.Parallel()
 	srcRoot, dstRoot := newApplyFSOpsRoots(t)
 	src := filepath.Join(srcRoot, "movie.mkv")
 	dst := filepath.Join(dstRoot, "Movie (2020)", "movie.mkv")
@@ -395,7 +405,7 @@ func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
 
 	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: src, DestPath: dst}}
 	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
-	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}) // should not panic / error
+	applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot})
 
 	fi, err := os.Lstat(dst)
 	if err != nil {
@@ -414,7 +424,7 @@ func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
 }
 
 func TestApplyFSOps_Keep(t *testing.T) {
-	// "keep" must not touch any files.
+	t.Parallel()
 	srcRoot, dstRoot := newApplyFSOpsRoots(t)
 	src := filepath.Join(srcRoot, "movie.mkv")
 	dst := filepath.Join(dstRoot, "Movie (2020)", "movie.mkv")
@@ -434,7 +444,7 @@ func TestApplyFSOps_Keep(t *testing.T) {
 }
 
 func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
-	// SourcePath outside allowedSrcRoots must be silently ignored.
+	t.Parallel()
 	_, dstRoot := newApplyFSOpsRoots(t)
 	base := filepath.Dir(dstRoot)
 	escapeSrc := filepath.Join(base, "outside.mkv")
@@ -449,7 +459,6 @@ func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Error("path outside allowedSrcRoots should not be migrated")
 	}
-	// original must remain untouched
 	if _, err := os.Stat(escapeSrc); os.IsNotExist(err) {
 		t.Error("escapeSrc should be untouched")
 	}
@@ -458,6 +467,7 @@ func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
 // ── extractEpisode ────────────────────────────────────────────────────────────
 
 func TestExtractEpisode(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		filename string
 		want     int
@@ -472,7 +482,9 @@ func TestExtractEpisode(t *testing.T) {
 		{"", 0},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.filename, func(t *testing.T) {
+			t.Parallel()
 			got := extractEpisode(c.filename)
 			if got != c.want {
 				t.Errorf("extractEpisode(%q) = %d, want %d", c.filename, got, c.want)
@@ -484,6 +496,7 @@ func TestExtractEpisode(t *testing.T) {
 // ── collapseHardlinks ─────────────────────────────────────────────────────────
 
 func TestCollapseHardlinks_NoLinks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.mkv")
 	b := filepath.Join(dir, "b.mkv")
@@ -506,6 +519,7 @@ func TestCollapseHardlinks_NoLinks(t *testing.T) {
 }
 
 func TestCollapseHardlinks_WithLink(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	orig := filepath.Join(dir, "original.mkv")
 	link := filepath.Join(dir, "hardlink.mkv")
@@ -531,7 +545,7 @@ func TestCollapseHardlinks_WithLink(t *testing.T) {
 }
 
 func TestCollapseHardlinks_NonExistentFile(t *testing.T) {
-	// Files that cannot be stat'd should be passed through as-is.
+	t.Parallel()
 	files := []ScanFile{{Path: "/nonexistent/ghost.mkv", Size: 100}}
 	got := collapseHardlinks(files)
 	if len(got) != 1 {
@@ -542,6 +556,7 @@ func TestCollapseHardlinks_NonExistentFile(t *testing.T) {
 // ── matchItemGroupKey / assignGroupKeys ───────────────────────────────────────
 
 func TestMatchItemGroupKey(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		item MatchItem
@@ -574,7 +589,9 @@ func TestMatchItemGroupKey(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := matchItemGroupKey(c.item)
 			if got != c.want {
 				t.Errorf("matchItemGroupKey = %q, want %q", got, c.want)
@@ -584,6 +601,7 @@ func TestMatchItemGroupKey(t *testing.T) {
 }
 
 func TestAssignGroupKeys(t *testing.T) {
+	t.Parallel()
 	items := []MatchItem{
 		{File: "/a.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 1}},
 		{File: "/b.mkv", Match: &MediaMatch{Type: "movie", TmdbID: 1}}, // dup
@@ -611,8 +629,28 @@ func TestAssignGroupKeys(t *testing.T) {
 
 // ── handleLibraryApply duplicate guard ───────────────────────────────────────
 
+func newTestHandler() *Handler {
+	return &Handler{
+		Svc:       &stubArrClient{},
+		RadarrURL: "http://radarr:7878/radarr",
+		SonarrURL: "http://sonarr:8989/sonarr",
+		ConfigDir: "/config/pelicula",
+	}
+}
+
+// stubArrClient satisfies ArrClient returning empty/zeroed responses.
+type stubArrClient struct{}
+
+func (s *stubArrClient) Keys() (string, string, string) { return "", "", "" }
+func (s *stubArrClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+	return []byte("[]"), nil
+}
+func (s *stubArrClient) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return []byte("{}"), nil
+}
+
 func TestHandleLibraryApply_DuplicateGuard(t *testing.T) {
-	// Two items with the same movie group key must be rejected with 400.
+	t.Parallel()
 	body := `{
 		"items": [
 			{"type":"movie","tmdbId":999,"title":"Alien","year":1979,"rootFolderPath":"/movies","sourcePath":"/a/alien_1.mkv"},
@@ -625,7 +663,10 @@ func TestHandleLibraryApply_DuplicateGuard(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handleLibraryApply(w, req)
+	h := newTestHandler()
+	// Inject stub keys so it gets past the key check.
+	h.Svc = &stubArrClientWithKeys{sonarr: "sk", radarr: "rk"}
+	h.HandleLibraryApply(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for duplicate group keys, got %d: %s", w.Code, w.Body.String())
@@ -636,7 +677,7 @@ func TestHandleLibraryApply_DuplicateGuard(t *testing.T) {
 }
 
 func TestHandleLibraryApply_DupEpisodeGuard(t *testing.T) {
-	// Two items for the same episode must be rejected with 400.
+	t.Parallel()
 	body := `{
 		"items": [
 			{"type":"series","tvdbId":888,"title":"Breaking Bad","season":1,"episode":1,"rootFolderPath":"/tv","sourcePath":"/a/bb_s01e01_720p.mkv"},
@@ -649,18 +690,30 @@ func TestHandleLibraryApply_DupEpisodeGuard(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handleLibraryApply(w, req)
+	h := newTestHandler()
+	h.Svc = &stubArrClientWithKeys{sonarr: "sk", radarr: "rk"}
+	h.HandleLibraryApply(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for duplicate episode group keys, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-// TestInPlaceDetection verifies that the in-place status is correctly assigned
-// when the scan result's file path matches its suggested destination path.
-// We can't call matchFile directly (it hits external APIs), so we validate the
-// post-processing logic that applyInPlaceStatus performs on MatchItem slices.
+// stubArrClientWithKeys returns non-empty API keys.
+type stubArrClientWithKeys struct {
+	sonarr, radarr string
+}
+
+func (s *stubArrClientWithKeys) Keys() (string, string, string) { return s.sonarr, s.radarr, "" }
+func (s *stubArrClientWithKeys) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+	return []byte("[]"), nil
+}
+func (s *stubArrClientWithKeys) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return []byte("{}"), nil
+}
+
 func TestInPlaceDetection(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		file       string
@@ -705,13 +758,14 @@ func TestInPlaceDetection(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
+		c := c
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			item := MatchItem{
 				File:          c.file,
 				Status:        c.origStatus,
 				SuggestedPath: c.suggested,
 			}
-			// Apply the same logic used in matchFile post-processing
 			if item.Status == "new" && item.SuggestedPath != "" &&
 				filepath.Clean(item.File) == filepath.Clean(item.SuggestedPath) {
 				item.Status = "in_place"
@@ -724,8 +778,7 @@ func TestInPlaceDetection(t *testing.T) {
 }
 
 func TestApplyGroupKey_DifferentEpisodes_NotDups(t *testing.T) {
-	// Two different episodes of the same series must produce different group keys
-	// so the duplicate guard does NOT reject them.
+	t.Parallel()
 	ep1 := ApplyItem{Type: "series", TvdbID: 888, Season: 1, Episode: 1}
 	ep2 := ApplyItem{Type: "series", TvdbID: 888, Season: 1, Episode: 2}
 
@@ -744,6 +797,7 @@ func TestApplyGroupKey_DifferentEpisodes_NotDups(t *testing.T) {
 }
 
 func TestHandleJobRetry_ProxiesToProcula(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -752,19 +806,16 @@ func TestHandleJobRetry_ProxiesToProcula(t *testing.T) {
 	}))
 	defer fake.Close()
 
-	old := proculaURL
-	origSvc := services
-	proculaURL = fake.URL
-	services = NewServiceClients("/config")
-	t.Cleanup(func() { proculaURL = old; services = origSvc })
-	oldProcClient := procClient
-	procClient = proculaclient.New(fake.URL, "")
-	t.Cleanup(func() { procClient = oldProcClient })
+	proculaclient := newProculaClientForTest(fake.URL)
+	h := &Handler{
+		Svc:     &stubArrClient{},
+		Procula: proculaclient,
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/procula/jobs/abc123/retry", nil)
 	req.SetPathValue("id", "abc123")
 	w := httptest.NewRecorder()
-	handleJobRetry(w, req)
+	h.HandleJobRetry(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -775,10 +826,12 @@ func TestHandleJobRetry_ProxiesToProcula(t *testing.T) {
 }
 
 func TestHandleJobRetry_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/procula/jobs/abc123/retry", nil)
 	req.SetPathValue("id", "abc123")
 	w := httptest.NewRecorder()
-	handleJobRetry(w, req)
+	h.HandleJobRetry(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", w.Code)
 	}
@@ -787,19 +840,11 @@ func TestHandleJobRetry_MethodNotAllowed(t *testing.T) {
 // ── handleBrowse symlink escape ───────────────────────────────────────────────
 
 func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {
-	// Create a symlink inside /tmp pointing to /etc, then try to browse via
-	// a path that resolves outside the allowed roots. We use a temp dir to
-	// simulate the layout since /downloads doesn't exist in tests.
-	//
-	// The handler checks isAllowedBrowsePath before EvalSymlinks, so a path
-	// that is under /downloads but resolves elsewhere would be caught by the
-	// second check after EvalSymlinks. We verify the forbidden response.
-	//
-	// Since we can't create a path under /downloads in tests, we exercise
-	// the simpler case: a path not under any root is immediately rejected.
+	t.Parallel()
+	h := newTestHandler()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/browse?path=/etc/passwd", nil)
 	w := httptest.NewRecorder()
-	handleBrowse(w, req)
+	h.HandleBrowse(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for path outside allowed roots", w.Code)

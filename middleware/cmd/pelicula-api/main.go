@@ -24,6 +24,7 @@ import (
 	"pelicula-api/internal/app/downloads"
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/hooks"
+	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/peligrosa"
@@ -47,6 +48,7 @@ type App struct {
 	dlHandler     *downloads.Handler
 	healthHandler *health.Handler
 	hooksHandler  *hooks.Handler
+	libHandler    *library.Handler
 	vpnConfigured bool
 	autowireState *autowire.AutowireState
 }
@@ -140,15 +142,13 @@ func main() {
 	svc := NewServiceClients("/config")
 	initSearchMode()
 
-	libCfg, err := loadLibraries("/config/pelicula")
+	libCfg, err := library.LoadLibraries("/config/pelicula")
 	if err != nil {
 		slog.Warn("library registry", "component", "main", "error", err)
 	}
-	libraryRegistryMu.Lock()
-	libraryRegistry = libCfg
-	libraryRegistryMu.Unlock()
+	library.SetRegistry(libCfg)
 	slog.Info("library registry loaded", "component", "main", "count", len(libCfg.Libraries))
-	for _, w := range CheckLibraryAccess() {
+	for _, w := range library.CheckLibraryAccess() {
 		slog.Warn("library access check", "component", "main", "warning", w)
 	}
 
@@ -196,7 +196,7 @@ func main() {
 		SubLangs:      os.Getenv("PELICULA_SUB_LANGS"),
 		AudioLang:     os.Getenv("PELICULA_AUDIO_LANG"),
 		GetLibraries: func() []autowire.Library {
-			libs := GetLibraries()
+			libs := library.GetLibraries()
 			out := make([]autowire.Library, 0, len(libs))
 			for _, l := range libs {
 				out = append(out, autowire.Library{
@@ -277,6 +277,22 @@ func main() {
 			TriggerJellyfinRefresh: func() error { return TriggerLibraryRefresh(svc) },
 			Notify:                 notifyAppriseErr,
 		},
+		libHandler: &library.Handler{
+			Svc:       svc,
+			Procula:   procClient,
+			RadarrURL: urls.Radarr,
+			SonarrURL: urls.Sonarr,
+			ConfigDir: "/config/pelicula",
+			ForwardToProc: func(source library.ProculaJobSource) error {
+				return forwardToProcula(context.Background(), ProculaJobSource{
+					Type:    source.Type,
+					Title:   source.Title,
+					Year:    source.Year,
+					Path:    source.Path,
+					ArrType: source.ArrType,
+				})
+			},
+		},
 	}
 	// Wire package-level globals for the handler files that still use them.
 	services = svc
@@ -345,26 +361,26 @@ func main() {
 	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(handleSessions)))
 
 	// viewer+: library metadata
-	mux.Handle("GET /api/pelicula/libraries", auth.Guard(http.HandlerFunc(handleListLibraries)))
+	mux.Handle("GET /api/pelicula/libraries", auth.Guard(http.HandlerFunc(app.libHandler.HandleListLibraries)))
 	// admin only: library CRUD
-	mux.Handle("POST /api/pelicula/libraries", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleAddLibrary))))
-	mux.Handle("PUT /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleUpdateLibrary))))
-	mux.Handle("DELETE /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleDeleteLibrary))))
+	mux.Handle("POST /api/pelicula/libraries", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(app.libHandler.HandleAddLibrary))))
+	mux.Handle("PUT /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(app.libHandler.HandleUpdateLibrary))))
+	mux.Handle("DELETE /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(app.libHandler.HandleDeleteLibrary))))
 
 	// admin only: library import scan + apply + browse
-	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(handleBrowse)))
-	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(handleLibraryScan)))
-	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(handleLibraryApply)))
+	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleBrowse)))
+	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleLibraryScan)))
+	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleLibraryApply)))
 
 	// admin only: transcoding
-	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(handleTranscodeProfiles)))
-	mux.Handle("/api/pelicula/transcode/profiles/{name}", auth.GuardAdmin(http.HandlerFunc(handleDeleteTranscodeProfile)))
-	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(handleLibraryRetranscode)))
+	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleTranscodeProfiles)))
+	mux.Handle("/api/pelicula/transcode/profiles/{name}", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleDeleteTranscodeProfile)))
+	mux.Handle("/api/pelicula/library/retranscode", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleLibraryRetranscode)))
 
 	// admin only: subtitle re-acquisition
-	mux.Handle("/api/pelicula/library/resub", auth.GuardAdmin(http.HandlerFunc(handleLibraryResub)))
-	mux.Handle("/api/pelicula/procula/jobs/{id}/resub", auth.GuardAdmin(http.HandlerFunc(handleJobResub)))
-	mux.Handle("/api/pelicula/procula/jobs/{id}/retry", auth.GuardAdmin(http.HandlerFunc(handleJobRetry)))
+	mux.Handle("/api/pelicula/library/resub", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleLibraryResub)))
+	mux.Handle("/api/pelicula/procula/jobs/{id}/resub", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleJobResub)))
+	mux.Handle("/api/pelicula/procula/jobs/{id}/retry", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleJobRetry)))
 
 	// viewer+: catalog
 	mux.Handle("/api/pelicula/catalog", auth.Guard(http.HandlerFunc(handleCatalogList)))
@@ -422,7 +438,7 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"wired":          a.svc.IsWired(),
 		"indexers":       idxCount,
 		"vpn_configured": a.vpnConfigured,
-		"warnings":       CheckLibraryAccess(),
+		"warnings":       library.CheckLibraryAccess(),
 	}
 	httputil.WriteJSON(w, status)
 }

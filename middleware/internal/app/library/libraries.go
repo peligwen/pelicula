@@ -1,4 +1,4 @@
-package main
+package library
 
 import (
 	"encoding/json"
@@ -16,8 +16,8 @@ import (
 
 // Sentinel errors returned by DeleteLibrary so callers can distinguish failure
 // modes without a second registry lookup.
-var errLibraryNotFound = errors.New("library not found")
-var errLibraryBuiltIn = errors.New("cannot delete built-in library")
+var ErrLibraryNotFound = errors.New("library not found")
+var ErrLibraryBuiltIn = errors.New("cannot delete built-in library")
 
 // ── Library registry ──────────────────────────────────────────────────────────
 
@@ -43,9 +43,9 @@ type LibraryConfig struct {
 	Libraries []Library `json:"libraries"`
 }
 
-// defaultLibraryConfig returns the built-in two-library config used when
+// DefaultLibraryConfig returns the built-in two-library config used when
 // libraries.json is absent.
-func defaultLibraryConfig() LibraryConfig {
+func DefaultLibraryConfig() LibraryConfig {
 	return LibraryConfig{
 		Libraries: []Library{
 			{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full", BuiltIn: true},
@@ -86,8 +86,8 @@ var validLibraryProcessing = map[string]bool{
 	"off":   true,
 }
 
-// validateLibrary returns an error if lib contains invalid field values.
-func validateLibrary(lib Library) error {
+// ValidateLibrary returns an error if lib contains invalid field values.
+func ValidateLibrary(lib Library) error {
 	if lib.Slug == "" {
 		return fmt.Errorf("folder name must not be empty")
 	}
@@ -106,16 +106,16 @@ func validateLibrary(lib Library) error {
 	return nil
 }
 
-// loadLibraries reads libraries.json from configPeliculaDir. If the file does
+// LoadLibraries reads libraries.json from configPeliculaDir. If the file does
 // not exist it writes the default config and returns it. Any other I/O error is
 // returned to the caller.
-func loadLibraries(configPeliculaDir string) (LibraryConfig, error) {
+func LoadLibraries(configPeliculaDir string) (LibraryConfig, error) {
 	path := filepath.Join(configPeliculaDir, "libraries.json")
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		cfg := defaultLibraryConfig()
-		if writeErr := writeLibraries(configPeliculaDir, cfg); writeErr != nil {
+		cfg := DefaultLibraryConfig()
+		if writeErr := WriteLibraries(configPeliculaDir, cfg); writeErr != nil {
 			// Log but don't fail — in-memory default is still usable.
 			return cfg, fmt.Errorf("libraries: create default config: %w", writeErr)
 		}
@@ -132,9 +132,9 @@ func loadLibraries(configPeliculaDir string) (LibraryConfig, error) {
 	return cfg, nil
 }
 
-// writeLibraries atomically writes cfg to configPeliculaDir/libraries.json by
+// WriteLibraries atomically writes cfg to configPeliculaDir/libraries.json by
 // writing to a temp file in the same directory then renaming it into place.
-func writeLibraries(configPeliculaDir string, cfg LibraryConfig) error {
+func WriteLibraries(configPeliculaDir string, cfg LibraryConfig) error {
 	dest := filepath.Join(configPeliculaDir, "libraries.json")
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -164,10 +164,10 @@ func writeLibraries(configPeliculaDir string, cfg LibraryConfig) error {
 	return nil
 }
 
-// firstLibraryPath returns the ContainerPath of the first library managed by
+// FirstLibraryPath returns the ContainerPath of the first library managed by
 // the given arr type ("radarr" or "sonarr"). Falls back to defaultPath if none
 // found.
-func firstLibraryPath(arr, defaultPath string) string {
+func FirstLibraryPath(arr, defaultPath string) string {
 	for _, lib := range GetLibraries() {
 		if lib.Arr == arr {
 			return lib.ContainerPath()
@@ -189,11 +189,11 @@ func CheckLibraryAccess() []string {
 	for _, lib := range GetLibraries() {
 		paths = append(paths, lib.ContainerPath())
 	}
-	return checkLibraryAccessPaths(paths)
+	return CheckLibraryAccessPaths(paths)
 }
 
-// checkLibraryAccessPaths is the testable core of CheckLibraryAccess.
-func checkLibraryAccessPaths(paths []string) []string {
+// CheckLibraryAccessPaths is the testable core of CheckLibraryAccess.
+func CheckLibraryAccessPaths(paths []string) []string {
 	var warnings []string
 	for _, p := range paths {
 		fi, err := os.Stat(p)
@@ -220,6 +220,14 @@ func GetLibraries() []Library {
 	return out
 }
 
+// SetRegistry replaces the in-memory registry. Called by main() after loading
+// from disk at startup.
+func SetRegistry(cfg LibraryConfig) {
+	libraryRegistryMu.Lock()
+	libraryRegistry = cfg
+	libraryRegistryMu.Unlock()
+}
+
 // GetLibraryBySlug returns the Library with the given slug, or an error if not
 // found.
 func GetLibraryBySlug(slug string) (Library, error) {
@@ -237,7 +245,7 @@ func GetLibraryBySlug(slug string) (Library, error) {
 // persists the registry. configPeliculaDir must be the path to the pelicula
 // config directory (e.g. /config/pelicula inside the container).
 func SaveLibrary(configPeliculaDir string, lib Library) error {
-	if err := validateLibrary(lib); err != nil {
+	if err := ValidateLibrary(lib); err != nil {
 		return err
 	}
 
@@ -262,7 +270,43 @@ func SaveLibrary(configPeliculaDir string, lib Library) error {
 	}
 
 	newCfg := LibraryConfig{Libraries: newLibs}
-	if err := writeLibraries(configPeliculaDir, newCfg); err != nil {
+	if err := WriteLibraries(configPeliculaDir, newCfg); err != nil {
+		return err
+	}
+	// Write succeeded — update global.
+	libraryRegistry = newCfg
+	return nil
+}
+
+// DeleteLibrary removes the library with the given slug and persists the
+// registry. Returns an error if the slug is not found or the library is
+// built-in.
+func DeleteLibrary(configPeliculaDir string, slug string) error {
+	libraryRegistryMu.Lock()
+	defer libraryRegistryMu.Unlock()
+
+	existing := libraryRegistry.Libraries
+	idx := -1
+	for i, lib := range existing {
+		if lib.Slug == slug {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return ErrLibraryNotFound
+	}
+	if existing[idx].BuiltIn {
+		return ErrLibraryBuiltIn
+	}
+
+	// Build the new slice without touching the global yet.
+	newLibs := make([]Library, 0, len(existing)-1)
+	newLibs = append(newLibs, existing[:idx]...)
+	newLibs = append(newLibs, existing[idx+1:]...)
+
+	newCfg := LibraryConfig{Libraries: newLibs}
+	if err := WriteLibraries(configPeliculaDir, newCfg); err != nil {
 		return err
 	}
 	// Write succeeded — update global.
@@ -272,20 +316,16 @@ func SaveLibrary(configPeliculaDir string, lib Library) error {
 
 // ── HTTP handlers ─────────────────────────────────────────────────────────────
 
-// peliculaConfigDir is the runtime path to the pelicula config directory
-// inside the container, used by the library HTTP handlers.
-const peliculaConfigDir = "/config/pelicula"
-
-// handleListLibraries handles GET /api/pelicula/libraries.
+// HandleListLibraries handles GET /api/pelicula/libraries.
 // No auth required — same convention as other read-only dashboard endpoints.
-func handleListLibraries(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleListLibraries(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, GetLibraries())
 }
 
-// handleAddLibrary handles POST /api/pelicula/libraries.
+// HandleAddLibrary handles POST /api/pelicula/libraries.
 // Admin auth required. Decodes the request body, validates, saves, and (when
 // no external Path is provided) creates the media directory on disk.
-func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleAddLibrary(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var lib Library
 	if err := json.NewDecoder(r.Body).Decode(&lib); err != nil {
@@ -305,7 +345,7 @@ func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := SaveLibrary(peliculaConfigDir, lib); err != nil {
+	if err := SaveLibrary(h.ConfigDir, lib); err != nil {
 		httputil.WriteError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -324,10 +364,10 @@ func handleAddLibrary(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, lib)
 }
 
-// handleUpdateLibrary handles PUT /api/pelicula/libraries/{slug}.
+// HandleUpdateLibrary handles PUT /api/pelicula/libraries/{slug}.
 // Admin auth required. Merges the request body fields onto the existing
 // library (preserving BuiltIn), then saves.
-func handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	if slug == "" {
 		httputil.WriteError(w, "slug required", http.StatusBadRequest)
@@ -366,24 +406,24 @@ func handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	// always apply it from the update.
 	merged.Path = updates.Path
 
-	if err := SaveLibrary(peliculaConfigDir, merged); err != nil {
+	if err := SaveLibrary(h.ConfigDir, merged); err != nil {
 		httputil.WriteError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	httputil.WriteJSON(w, merged)
 }
 
-// handleDeleteLibrary handles DELETE /api/pelicula/libraries/{slug}.
+// HandleDeleteLibrary handles DELETE /api/pelicula/libraries/{slug}.
 // Admin auth required. Rejects built-in libraries.
-func handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	if slug == "" {
 		httputil.WriteError(w, "slug required", http.StatusBadRequest)
 		return
 	}
 
-	if err := DeleteLibrary(peliculaConfigDir, slug); err != nil {
-		if errors.Is(err, errLibraryNotFound) {
+	if err := DeleteLibrary(h.ConfigDir, slug); err != nil {
+		if errors.Is(err, ErrLibraryNotFound) {
 			httputil.WriteError(w, "library not found", http.StatusNotFound)
 		} else {
 			httputil.WriteError(w, err.Error(), http.StatusConflict)
@@ -391,40 +431,4 @@ func handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// DeleteLibrary removes the library with the given slug and persists the
-// registry. Returns an error if the slug is not found or the library is
-// built-in.
-func DeleteLibrary(configPeliculaDir string, slug string) error {
-	libraryRegistryMu.Lock()
-	defer libraryRegistryMu.Unlock()
-
-	existing := libraryRegistry.Libraries
-	idx := -1
-	for i, lib := range existing {
-		if lib.Slug == slug {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return errLibraryNotFound
-	}
-	if existing[idx].BuiltIn {
-		return errLibraryBuiltIn
-	}
-
-	// Build the new slice without touching the global yet.
-	newLibs := make([]Library, 0, len(existing)-1)
-	newLibs = append(newLibs, existing[:idx]...)
-	newLibs = append(newLibs, existing[idx+1:]...)
-
-	newCfg := LibraryConfig{Libraries: newLibs}
-	if err := writeLibraries(configPeliculaDir, newCfg); err != nil {
-		return err
-	}
-	// Write succeeded — update global.
-	libraryRegistry = newCfg
-	return nil
 }

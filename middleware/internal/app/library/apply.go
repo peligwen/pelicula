@@ -1,26 +1,31 @@
-package main
+package library
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
-	"pelicula-api/httputil"
 	"sort"
 	"strings"
 	"sync"
+
+	"pelicula-api/httputil"
 )
 
 // ── Apply types ───────────────────────────────────────────────────────────────
 
+// ApplyRequest is the body accepted by HandleLibraryApply.
 type ApplyRequest struct {
 	Items    []ApplyItem `json:"items"`
 	Strategy string      `json:"strategy"` // import / link / register (also accepts legacy: migrate / symlink / hardlink / keep)
 	Validate bool        `json:"validate"` // forward to Procula for validation after apply
 }
 
+// ApplyItem describes one media item to apply.
 type ApplyItem struct {
 	Type           string `json:"type"` // movie / series
 	TmdbID         int    `json:"tmdbId,omitempty"`
@@ -35,6 +40,7 @@ type ApplyItem struct {
 	DestPath       string `json:"destPath,omitempty"`   // pre-computed destination (client-supplied for confirmation)
 }
 
+// LibraryApplyResult is the response shape for HandleLibraryApply.
 type LibraryApplyResult struct {
 	Added   int               `json:"added"`
 	Skipped int               `json:"skipped"`
@@ -43,6 +49,7 @@ type LibraryApplyResult struct {
 	Items   []ApplyItemResult `json:"items,omitempty"` // per-item detail for display
 }
 
+// ApplyItemResult is the per-item result within LibraryApplyResult.
 type ApplyItemResult struct {
 	Title string `json:"title"`
 	Src   string `json:"src,omitempty"`
@@ -51,10 +58,12 @@ type ApplyItemResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-// handleLibraryApply receives a list of matched items and registers them in
+// ── HandleLibraryApply ───────────────────────────────────────────────────────
+
+// HandleLibraryApply receives a list of matched items and registers them in
 // Radarr/Sonarr with search disabled. The CLI has already performed any
 // necessary filesystem operations (move / symlink) before calling this.
-func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -68,10 +77,6 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Duplicate guard ──────────────────────────────────────────────────────
-	// Reject the request if any group key (movie:tmdbId or
-	// series:tvdbId:s_e_) appears more than once.  The UI should have
-	// resolved all duplicate groups before calling apply; this check
-	// prevents stale UIs or direct API callers from clobbering files.
 	{
 		gkCount := make(map[string]int, len(req.Items))
 		for _, item := range req.Items {
@@ -92,7 +97,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Svc.Keys()
 	if radarrKey == "" || sonarrKey == "" {
 		httputil.WriteError(w, "API keys not loaded — is the stack wired?", http.StatusServiceUnavailable)
 		return
@@ -103,20 +108,15 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingMovies := loadExistingMovieIDs(radarrKey)
-	existingSeries := loadExistingSeriesIDs(sonarrKey)
+	existingMovies := h.loadExistingMovieIDs(radarrKey)
+	existingSeries := h.loadExistingSeriesIDs(sonarrKey)
 
-	movieProfiles, _ := loadProfileNameMap(radarrURL, radarrKey)
-	seriesProfiles, _ := loadProfileNameMap(sonarrURL, sonarrKey)
+	movieProfiles, _ := h.loadProfileNameMap(h.RadarrURL, radarrKey)
+	seriesProfiles, _ := h.loadProfileNameMap(h.SonarrURL, sonarrKey)
 
-	// ── Filesystem operations (import / link) ───────────────────────────────
-	// Perform FS ops before *arr registration so that if a move fails we don't
-	// register a path that doesn't exist yet.  "register" skips this section.
-	// fsResults is parallel to req.Items and records the actual per-item outcome.
+	// ── Filesystem operations (import / link) ────────────────────────────────
 	fsResults := applyFSOps(req.Items, req.Strategy, nil, nil)
 
-	// Deduplicate *arr registration by (type, id) — when multiple episodes of
-	// the same series are imported, applySeries only needs to be called once.
 	type dedupeKey struct {
 		kind string
 		id   int
@@ -124,17 +124,14 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	seen := make(map[dedupeKey]bool)
 
 	result := &LibraryApplyResult{}
-	var addedItems []ApplyItem // tracks successfully added items for Procula forwarding
+	var addedItems []ApplyItem
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	// Semaphore: max 5 concurrent Radarr/Sonarr add calls.
 	sem := make(chan struct{}, 5)
 
 	for idx, item := range req.Items {
 		fsResult := fsResults[idx]
 
-		// Items skipped by applyFSOps (path not under allowed prefix) are
-		// propagated directly to the response without *arr registration.
 		if fsResult.op == "skipped" {
 			mu.Lock()
 			result.Skipped++
@@ -156,7 +153,6 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if seen[k] {
-			// FS op already ran; skip *arr registration for this duplicate series episode.
 			mu.Lock()
 			result.Skipped++
 			mu.Unlock()
@@ -179,9 +175,9 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			defer func() { <-sem }()
 			var err error
 			if it.Type == "movie" {
-				err = applyMovie(radarrKey, it, movieProfiles)
+				err = h.applyMovie(radarrKey, it, movieProfiles)
 			} else {
-				err = applySeries(sonarrKey, it, seriesProfiles)
+				err = h.applySeries(sonarrKey, it, seriesProfiles)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -195,8 +191,6 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			} else {
 				result.Added++
 				addedItems = append(addedItems, it)
-				// Use the actual FS op result so callers see "failed"/"skipped"
-				// rather than a pre-computed guess when the FS step did not succeed.
 				reportedOp := fsRes.op
 				if reportedOp == "" {
 					reportedOp = "kept"
@@ -213,7 +207,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		"added", result.Added, "skipped", result.Skipped, "failed", result.Failed)
 
 	// Optionally forward successfully added items to Procula for validation.
-	if req.Validate && len(addedItems) > 0 {
+	if req.Validate && len(addedItems) > 0 && h.ForwardToProc != nil {
 		for _, item := range addedItems {
 			if item.SourcePath == "" {
 				continue
@@ -229,7 +223,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 				Path:    item.SourcePath,
 				ArrType: arrType,
 			}
-			if err := forwardToProcula(r.Context(), source); err != nil {
+			if err := h.ForwardToProc(source); err != nil {
 				slog.Warn("failed to forward import to Procula",
 					"component", "library", "title", item.Title, "error", err)
 			}
@@ -239,8 +233,7 @@ func handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, result)
 }
 
-// applyGroupKey computes the group key from an ApplyItem. Used in the
-// duplicate guard inside handleLibraryApply.
+// applyGroupKey computes the group key from an ApplyItem.
 func applyGroupKey(item ApplyItem) string {
 	switch item.Type {
 	case "movie":
@@ -252,28 +245,10 @@ func applyGroupKey(item ApplyItem) string {
 	}
 }
 
-func suggestedMoviePath(title string, year int, filename string) string {
-	folder := title
-	if year > 0 {
-		folder = fmt.Sprintf("%s (%d)", title, year)
-	}
-	root := firstLibraryPath("radarr", "/media/movies")
-	return root + "/" + folder + "/" + filepath.Base(filename)
-}
+// ── *arr apply helpers ────────────────────────────────────────────────────────
 
-func suggestedTVPath(title string, season int, filename string) string {
-	root := firstLibraryPath("sonarr", "/media/tv")
-	if season > 0 {
-		return fmt.Sprintf("%s/%s/Season %02d/%s", root, title, season, filepath.Base(filename))
-	}
-	return fmt.Sprintf("%s/%s/%s", root, title, filepath.Base(filename))
-}
-
-// ── Apply helpers ─────────────────────────────────────────────────────────────
-
-func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
-	// Look up full movie details for the add payload.
-	data, err := services.ArrGet(radarrURL, apiKey,
+func (h *Handler) applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
+	data, err := h.Svc.ArrGet(h.RadarrURL, apiKey,
 		"/api/v3/movie/lookup/tmdb?tmdbId="+itoa(item.TmdbID))
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
@@ -283,15 +258,12 @@ func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
 		return fmt.Errorf("parse: %w", err)
 	}
 
-	profileID := resolveProfileID("", profMap) // use first available
-	// rootFolderPath from the item (set by the CLI based on strategy)
+	profileID := resolveProfileID("", profMap)
 	root := item.RootFolderPath
 	if root == "" {
-		root = firstLibraryPath("radarr", "/media/movies")
+		root = FirstLibraryPath("radarr", "/media/movies")
 	}
 
-	// Start from the full lookup object so Radarr gets all required fields
-	// (images, ratings, etc.), then overlay our config values.
 	movie["tmdbId"] = item.TmdbID
 	movie["qualityProfileId"] = profileID
 	movie["rootFolderPath"] = root
@@ -299,7 +271,7 @@ func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
 	movie["addOptions"] = map[string]any{
 		"searchForMovie": false,
 	}
-	body, err := services.ArrPost(radarrURL, apiKey, "/api/v3/movie", movie)
+	body, err := h.Svc.ArrPost(h.RadarrURL, apiKey, "/api/v3/movie", movie)
 	if err != nil {
 		if len(body) > 0 {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
@@ -309,9 +281,8 @@ func applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
 	return nil
 }
 
-func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
-	// Look up full series details.
-	data, err := services.ArrGet(sonarrURL, apiKey,
+func (h *Handler) applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
+	data, err := h.Svc.ArrGet(h.SonarrURL, apiKey,
 		"/api/v3/series/lookup?term=tvdb:"+itoa(item.TvdbID))
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
@@ -325,11 +296,9 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 	profileID := resolveProfileID("", profMap)
 	root := item.RootFolderPath
 	if root == "" {
-		root = firstLibraryPath("sonarr", "/media/tv")
+		root = FirstLibraryPath("sonarr", "/media/tv")
 	}
 
-	// Start from the full lookup object so Sonarr gets all required fields,
-	// then overlay our config values.
 	show["tvdbId"] = item.TvdbID
 	show["qualityProfileId"] = profileID
 	show["rootFolderPath"] = root
@@ -338,7 +307,7 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 	show["addOptions"] = map[string]any{
 		"searchForMissingEpisodes": false,
 	}
-	body, err := services.ArrPost(sonarrURL, apiKey, "/api/v3/series", show)
+	body, err := h.Svc.ArrPost(h.SonarrURL, apiKey, "/api/v3/series", show)
 	if err != nil {
 		if len(body) > 0 {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
@@ -346,4 +315,178 @@ func applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
 		return err
 	}
 	return nil
+}
+
+// resolveProfileID looks up profile ID by name, falling back to first available.
+func resolveProfileID(name string, nameMap map[string]int) int {
+	if id, ok := nameMap[name]; ok {
+		return id
+	}
+	for _, id := range nameMap {
+		slog.Warn("quality profile not found, using fallback",
+			"component", "library", "requested", name, "fallback_id", id)
+		return id
+	}
+	slog.Warn("quality profile not found and no profiles available, using id=1",
+		"component", "library", "requested", name)
+	return 1
+}
+
+func itoa(i int) string {
+	return fmt.Sprintf("%d", i)
+}
+
+// ── Filesystem helpers ────────────────────────────────────────────────────────
+
+// fsOpResult records the outcome of a single filesystem operation.
+type fsOpResult struct {
+	op  string // "moved", "hardlinked", "symlinked", "kept", "skipped", "failed"
+	err string // non-empty only when op == "failed" or "skipped"
+}
+
+// copyFile copies src to dst using a buffered io.Copy, removing dst on error.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		in.Close()
+		return err
+	}
+
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		in.Close()
+		os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		in.Close()
+		os.Remove(dst)
+		return err
+	}
+	in.Close()
+	return nil
+}
+
+// moveFile moves src to dst, falling back to copy+remove when os.Rename fails
+// across different filesystems (common on Synology bind mounts).
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
+// applyFSOps iterates items and performs the filesystem operation dictated by
+// strategy for each item that has a SourcePath. allowedSrcRoots and
+// allowedDstRoots default to the production values when nil.
+func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string) []fsOpResult {
+	results := make([]fsOpResult, len(items))
+	for i := range results {
+		results[i] = fsOpResult{op: "kept"}
+	}
+
+	// Normalise legacy strategy names to canonical ones.
+	switch strategy {
+	case "migrate":
+		strategy = "import"
+	case "symlink":
+		strategy = "link"
+	case "keep":
+		strategy = "register"
+	}
+	if strategy == "register" {
+		return results
+	}
+	if allowedSrcRoots == nil {
+		allowedSrcRoots = browseRoots()
+	}
+	if allowedDstRoots == nil {
+		libs := GetLibraries()
+		allowedDstRoots = make([]string, 0, len(libs))
+		for _, lib := range libs {
+			allowedDstRoots = append(allowedDstRoots, lib.ContainerPath())
+		}
+	}
+
+	for i := range items {
+		item := &items[i]
+		if item.SourcePath == "" {
+			continue
+		}
+		src := filepath.Clean(item.SourcePath)
+		if !IsUnderPrefixes(src, allowedSrcRoots) {
+			results[i] = fsOpResult{op: "skipped", err: "path not allowed"}
+			continue
+		}
+
+		dst := item.DestPath
+		if dst == "" {
+			if item.Type == "movie" {
+				dst = suggestedMoviePath(item.Title, item.Year, filepath.Base(src))
+			} else {
+				dst = suggestedTVPath(item.Title, 0, filepath.Base(src))
+			}
+		}
+		dst = filepath.Clean(dst)
+		if !IsUnderPrefixes(dst, allowedDstRoots) {
+			results[i] = fsOpResult{op: "skipped", err: "destination path not allowed"}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			slog.Warn("import: mkdir failed", "component", "library", "dst", dst, "error", err)
+			results[i] = fsOpResult{op: "failed", err: err.Error()}
+			continue
+		}
+
+		switch strategy {
+		case "import":
+			if err := moveFile(src, dst); err != nil {
+				slog.Warn("import: move failed", "component", "library",
+					"src", src, "dst", dst, "error", err)
+				results[i] = fsOpResult{op: "failed", err: err.Error()}
+			} else {
+				item.SourcePath = dst
+				item.DestPath = dst
+				results[i] = fsOpResult{op: "moved"}
+			}
+		case "hardlink":
+			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+				if err := os.Link(src, dst); err != nil {
+					slog.Warn("import: hardlink failed", "component", "library",
+						"src", src, "dst", dst, "error", err)
+					results[i] = fsOpResult{op: "failed", err: err.Error()}
+				} else {
+					item.DestPath = dst
+					results[i] = fsOpResult{op: "hardlinked"}
+				}
+			} else {
+				item.DestPath = dst
+				results[i] = fsOpResult{op: "hardlinked"}
+			}
+		case "link":
+			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+				if err := os.Symlink(src, dst); err != nil {
+					slog.Warn("import: symlink failed", "component", "library",
+						"src", src, "dst", dst, "error", err)
+					results[i] = fsOpResult{op: "failed", err: err.Error()}
+				} else {
+					item.DestPath = dst
+					results[i] = fsOpResult{op: "symlinked"}
+				}
+			} else {
+				item.DestPath = dst
+				results[i] = fsOpResult{op: "symlinked"}
+			}
+		}
+	}
+	return results
 }

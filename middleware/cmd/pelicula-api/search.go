@@ -13,6 +13,7 @@ import (
 
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/config"
 )
 
@@ -359,7 +360,7 @@ func addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = firstLibraryPath("radarr", "/media/movies")
+		rootPath = library.FirstLibraryPath("radarr", "/media/movies")
 	}
 
 	payload := map[string]any{
@@ -411,7 +412,7 @@ func addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
 		}
 	}
 	if rootPath == "" {
-		rootPath = firstLibraryPath("sonarr", "/media/tv")
+		rootPath = library.FirstLibraryPath("sonarr", "/media/tv")
 	}
 
 	payload := map[string]any{

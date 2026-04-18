@@ -1,4 +1,4 @@
-package main
+package library
 
 import (
 	"os"
@@ -15,17 +15,18 @@ func resetRegistry() {
 }
 
 // TestLoadLibraries_FileAbsent checks that when libraries.json does not exist
-// loadLibraries returns the default config and writes it to disk.
+// LoadLibraries returns the default config and writes it to disk.
 func TestLoadLibraries_FileAbsent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	resetRegistry()
 
-	cfg, err := loadLibraries(dir)
+	cfg, err := LoadLibraries(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	def := defaultLibraryConfig()
+	def := DefaultLibraryConfig()
 	if len(cfg.Libraries) != len(def.Libraries) {
 		t.Fatalf("got %d libraries, want %d", len(cfg.Libraries), len(def.Libraries))
 	}
@@ -36,7 +37,6 @@ func TestLoadLibraries_FileAbsent(t *testing.T) {
 		}
 	}
 
-	// File should have been written.
 	if _, err := os.Stat(filepath.Join(dir, "libraries.json")); err != nil {
 		t.Errorf("expected libraries.json to be written, stat error: %v", err)
 	}
@@ -45,16 +45,16 @@ func TestLoadLibraries_FileAbsent(t *testing.T) {
 // TestLoadLibraries_FilePresent checks that an existing libraries.json is
 // parsed correctly.
 func TestLoadLibraries_FilePresent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	resetRegistry()
 
-	// Write a custom config.
 	raw := `{"libraries":[{"name":"Docs","slug":"docs","type":"other","arr":"none","processing":"off"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "libraries.json"), []byte(raw), 0644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
-	cfg, err := loadLibraries(dir)
+	cfg, err := LoadLibraries(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,6 +68,7 @@ func TestLoadLibraries_FilePresent(t *testing.T) {
 
 // TestContainerPath checks the ContainerPath helper.
 func TestContainerPath(t *testing.T) {
+	t.Parallel()
 	lib := Library{Slug: "movies"}
 	want := "/media/movies"
 	if got := lib.ContainerPath(); got != want {
@@ -81,10 +82,9 @@ func TestSaveLibrary_Upsert(t *testing.T) {
 	dir := t.TempDir()
 	resetRegistry()
 
-	// Seed with defaults so the registry is in a known state.
-	cfg, err := loadLibraries(dir)
+	cfg, err := LoadLibraries(dir)
 	if err != nil {
-		t.Fatalf("loadLibraries: %v", err)
+		t.Fatalf("LoadLibraries: %v", err)
 	}
 	libraryRegistryMu.Lock()
 	libraryRegistry = cfg
@@ -92,7 +92,6 @@ func TestSaveLibrary_Upsert(t *testing.T) {
 
 	custom := Library{Name: "Anime", Slug: "anime", Type: "tvshows", Arr: "sonarr", Processing: "full"}
 
-	// Add.
 	if err := SaveLibrary(dir, custom); err != nil {
 		t.Fatalf("SaveLibrary add: %v", err)
 	}
@@ -107,7 +106,6 @@ func TestSaveLibrary_Upsert(t *testing.T) {
 		t.Fatal("anime library not found after add")
 	}
 
-	// Update.
 	custom.Name = "Anime (Updated)"
 	if err := SaveLibrary(dir, custom); err != nil {
 		t.Fatalf("SaveLibrary update: %v", err)
@@ -120,7 +118,6 @@ func TestSaveLibrary_Upsert(t *testing.T) {
 		t.Errorf("got name %q, want %q", updated.Name, "Anime (Updated)")
 	}
 
-	// Only one "anime" entry should exist.
 	count := 0
 	for _, l := range GetLibraries() {
 		if l.Slug == "anime" {
@@ -134,6 +131,7 @@ func TestSaveLibrary_Upsert(t *testing.T) {
 
 // TestSaveLibrary_Validation checks that invalid Library values are rejected.
 func TestSaveLibrary_Validation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	resetRegistry()
 
@@ -168,7 +166,9 @@ func TestSaveLibrary_Validation(t *testing.T) {
 	}
 
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if err := SaveLibrary(dir, tc.lib); err == nil {
 				t.Errorf("expected error for %q, got nil", tc.name)
 			}
@@ -181,9 +181,9 @@ func TestDeleteLibrary_BuiltIn(t *testing.T) {
 	dir := t.TempDir()
 	resetRegistry()
 
-	cfg, err := loadLibraries(dir)
+	cfg, err := LoadLibraries(dir)
 	if err != nil {
-		t.Fatalf("loadLibraries: %v", err)
+		t.Fatalf("LoadLibraries: %v", err)
 	}
 	libraryRegistryMu.Lock()
 	libraryRegistry = cfg
@@ -194,7 +194,7 @@ func TestDeleteLibrary_BuiltIn(t *testing.T) {
 	}
 }
 
-// TestFirstLibraryPath checks the firstLibraryPath helper.
+// TestFirstLibraryPath checks the FirstLibraryPath helper.
 func TestFirstLibraryPath(t *testing.T) {
 	resetRegistry()
 	libraryRegistryMu.Lock()
@@ -207,21 +207,21 @@ func TestFirstLibraryPath(t *testing.T) {
 	libraryRegistryMu.Unlock()
 
 	t.Run("match radarr", func(t *testing.T) {
-		got := firstLibraryPath("radarr", "/media/movies")
+		got := FirstLibraryPath("radarr", "/media/movies")
 		if got != "/media/movies" {
 			t.Errorf("got %q, want %q", got, "/media/movies")
 		}
 	})
 
 	t.Run("match sonarr", func(t *testing.T) {
-		got := firstLibraryPath("sonarr", "/media/tv")
+		got := FirstLibraryPath("sonarr", "/media/tv")
 		if got != "/media/tv" {
 			t.Errorf("got %q, want %q", got, "/media/tv")
 		}
 	})
 
 	t.Run("no match returns default", func(t *testing.T) {
-		got := firstLibraryPath("lidarr", "/media/music")
+		got := FirstLibraryPath("lidarr", "/media/music")
 		if got != "/media/music" {
 			t.Errorf("got %q, want %q", got, "/media/music")
 		}
@@ -236,16 +236,17 @@ func TestFirstLibraryPath(t *testing.T) {
 			},
 		}
 		libraryRegistryMu.Unlock()
-		got := firstLibraryPath("radarr", "/media/movies")
+		got := FirstLibraryPath("radarr", "/media/movies")
 		if got != "/media/films" {
 			t.Errorf("got %q, want %q", got, "/media/films")
 		}
 	})
 }
 
-// TestCheckLibraryAccessPaths verifies that checkLibraryAccessPaths warns on
+// TestCheckLibraryAccessPaths verifies that CheckLibraryAccessPaths warns on
 // directories with no world-execute bit and passes on accessible directories.
 func TestCheckLibraryAccessPaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	accessible := filepath.Join(dir, "accessible")
 	inaccessible := filepath.Join(dir, "inaccessible")
@@ -257,7 +258,7 @@ func TestCheckLibraryAccessPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	warns := checkLibraryAccessPaths([]string{accessible, inaccessible})
+	warns := CheckLibraryAccessPaths([]string{accessible, inaccessible})
 	if len(warns) != 1 {
 		t.Fatalf("expected 1 warning, got %d: %v", len(warns), warns)
 	}
@@ -269,7 +270,8 @@ func TestCheckLibraryAccessPaths(t *testing.T) {
 // TestCheckLibraryAccessPaths_Missing verifies a warning is returned for a
 // path that does not exist.
 func TestCheckLibraryAccessPaths_Missing(t *testing.T) {
-	warns := checkLibraryAccessPaths([]string{"/nonexistent/path/xyz123"})
+	t.Parallel()
+	warns := CheckLibraryAccessPaths([]string{"/nonexistent/path/xyz123"})
 	if len(warns) != 1 {
 		t.Fatalf("expected 1 warning for missing path, got %d: %v", len(warns), warns)
 	}
@@ -280,35 +282,31 @@ func TestDeleteLibrary_Custom(t *testing.T) {
 	dir := t.TempDir()
 	resetRegistry()
 
-	cfg, err := loadLibraries(dir)
+	cfg, err := LoadLibraries(dir)
 	if err != nil {
-		t.Fatalf("loadLibraries: %v", err)
+		t.Fatalf("LoadLibraries: %v", err)
 	}
 	libraryRegistryMu.Lock()
 	libraryRegistry = cfg
 	libraryRegistryMu.Unlock()
 
-	// Add a custom library.
 	custom := Library{Name: "Extras", Slug: "extras", Type: "other", Arr: "none", Processing: "off"}
 	if err := SaveLibrary(dir, custom); err != nil {
 		t.Fatalf("SaveLibrary: %v", err)
 	}
 
-	// Delete it.
 	if err := DeleteLibrary(dir, "extras"); err != nil {
 		t.Fatalf("DeleteLibrary: %v", err)
 	}
 
-	// Should be gone from in-memory registry.
 	if _, err := GetLibraryBySlug("extras"); err == nil {
 		t.Error("expected extras library to be gone, but found it")
 	}
 
-	// Should also be gone from the file after a fresh load.
 	resetRegistry()
-	fileCfg, err := loadLibraries(dir)
+	fileCfg, err := LoadLibraries(dir)
 	if err != nil {
-		t.Fatalf("loadLibraries after delete: %v", err)
+		t.Fatalf("LoadLibraries after delete: %v", err)
 	}
 	for _, l := range fileCfg.Libraries {
 		if l.Slug == "extras" {

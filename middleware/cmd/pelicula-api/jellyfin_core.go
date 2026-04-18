@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"pelicula-api/clients"
 	"strings"
 	"time"
 	"unicode"
+
+	"pelicula-api/clients"
+	"pelicula-api/internal/app/library"
 )
 
 // jellyfinURL is a var (not const) so tests can point it at an httptest.Server
@@ -265,7 +267,7 @@ func wireJellyfin(s *ServiceClients) {
 		}
 	}
 
-	for _, lib := range GetLibraries() {
+	for _, lib := range library.GetLibraries() {
 		collectionType := lib.Type
 		if collectionType == "other" {
 			collectionType = "mixed"
