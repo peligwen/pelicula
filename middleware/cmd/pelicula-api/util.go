@@ -1,5 +1,14 @@
 package main
 
+import "os"
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func shortHash(hash string) string {
 	if len(hash) > 8 {
 		return hash[:8]

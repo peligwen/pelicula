@@ -89,7 +89,7 @@ func parseEnvFile(path string) (map[string]string, error) {
 // Known keys are written in canonical order; any extra keys follow.
 // Caller must hold envMu.
 func writeEnvFile(path string, vars map[string]string) error {
-	// Canonical order matching handleSetupSubmit
+	// Canonical order matching the setup wizard (.env produced by internal/app/setup)
 	order := []string{
 		"CONFIG_DIR", "LIBRARY_DIR", "WORK_DIR",
 		"PUID", "PGID", "TZ",

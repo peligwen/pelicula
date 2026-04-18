@@ -1,4 +1,4 @@
-package main
+package setup
 
 import (
 	"bytes"
@@ -7,51 +7,64 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"pelicula-api/httputil"
 	"strings"
 	"testing"
+
+	"pelicula-api/httputil"
 )
 
-func TestHandleSetupSubmit_AlreadyConfigured(t *testing.T) {
-	// Verify the handler returns 405 for GET (method guard fires before file check).
+// stubGenerateAPIKey returns a fixed string for deterministic tests.
+func stubGenerateAPIKey() string { return "testapikey1234567890abcdef123456" }
+
+// stubGenPassword returns a fixed password for deterministic tests.
+func stubGenPassword() string { return "calm-tiger-sobre-leaps" }
+
+func newTestHandler(t *testing.T) (*Handler, string) {
+	t.Helper()
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	return New(envPath, stubGenerateAPIKey, stubGenPassword), envPath
+}
+
+func TestHandleSubmit_RejectsGET(t *testing.T) {
+	h, _ := newTestHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup", nil)
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	h.HandleSubmit(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405 for GET", w.Code)
 	}
 }
 
-func TestHandleSetupSubmit_RejectsForeignOrigin(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{
-		VPNSkipped: true,
-	})
+func TestHandleSubmit_RejectsForeignOrigin(t *testing.T) {
+	h, _ := newTestHandler(t)
+	body, _ := json.Marshal(SetupRequest{VPNSkipped: true})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
-	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(h.HandleSubmit)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
 	}
 }
 
-func TestHandleSetupSubmit_RejectsEmptyOrigin(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{
-		VPNSkipped: true,
-	})
+func TestHandleSubmit_RejectsEmptyOrigin(t *testing.T) {
+	h, _ := newTestHandler(t)
+	body, _ := json.Marshal(SetupRequest{VPNSkipped: true})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	// No Origin header — should be rejected by the strict CSRF guard.
 	w := httptest.NewRecorder()
-	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(h.HandleSubmit)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin", w.Code)
 	}
 }
 
-func TestHandleSetupSubmit_RejectsMissingVPNKey(t *testing.T) {
+func TestHandleSubmit_RejectsMissingVPNKey(t *testing.T) {
+	h, _ := newTestHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"config_dir": "./config",
 		"media_dir":  "~/media",
@@ -60,14 +73,15 @@ func TestHandleSetupSubmit_RejectsMissingVPNKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	h.HandleSubmit(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for missing wireguard_key when not skipped", w.Code)
 	}
 }
 
-func TestHandleSetupSubmit_RejectsShortKey(t *testing.T) {
+func TestHandleSubmit_RejectsShortKey(t *testing.T) {
+	h, _ := newTestHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"wireguard_key": "tooshort",
 		"config_dir":    "./config",
@@ -76,14 +90,15 @@ func TestHandleSetupSubmit_RejectsShortKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	h.HandleSubmit(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for invalid key length", w.Code)
 	}
 }
 
-func TestHandleSetupSubmit_RejectsInjectionInFields(t *testing.T) {
+func TestHandleSubmit_RejectsInjectionInFields(t *testing.T) {
+	h, _ := newTestHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"config_dir":  "/config\nnewline",
 		"vpn_skipped": true,
@@ -91,14 +106,15 @@ func TestHandleSetupSubmit_RejectsInjectionInFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	h.HandleSubmit(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for newline in config_dir", w.Code)
 	}
 }
 
-func TestHandleSetupSubmit_AcceptsVPNSkipped(t *testing.T) {
+func TestHandleSubmit_AcceptsVPNSkipped(t *testing.T) {
+	h, _ := newTestHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"config_dir":  "./config",
 		"media_dir":   "~/media",
@@ -107,49 +123,57 @@ func TestHandleSetupSubmit_AcceptsVPNSkipped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
+	h.HandleSubmit(w, req)
 
-	// Will fail with 409 (already configured) or 500 (can't write /project/.env)
-	// in test environment — but NOT 400, which would mean validation rejected it.
+	// Will succeed (200) since the temp dir .env doesn't exist yet and can be written.
+	// Must NOT be 400 (validation rejection).
 	if w.Code == http.StatusBadRequest {
 		t.Errorf("status = 400, but VPN skip with valid fields should pass validation")
 	}
 }
 
-func TestGenerateReadablePassword_Format(t *testing.T) {
-	p := generateReadablePassword()
-	parts := strings.Split(p, "-")
-	if len(parts) != 4 {
-		t.Fatalf("expected 4 hyphen-separated words, got %d in %q", len(parts), p)
-	}
-	wordSet := make(map[string]bool, len(passphraseWords))
-	for _, w := range passphraseWords {
-		wordSet[w] = true
-	}
-	for i, part := range parts {
-		if l := len(part); l < 3 || l > 7 {
-			t.Errorf("word %d: length = %d, want 3–7 in %q", i, l, p)
-		}
-		if !wordSet[part] {
-			t.Errorf("word %d: %q not in passphraseWords", i, part)
-		}
+func TestHandleSubmit_RejectsInjectionInLANURL(t *testing.T) {
+	h, _ := newTestHandler(t)
+	body, _ := json.Marshal(map[string]any{
+		"config_dir":  "./config",
+		"media_dir":   "~/media",
+		"lan_url":     "http://1.2.3.4:7354/jellyfin\nX-Evil: yes",
+		"vpn_skipped": true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	h.HandleSubmit(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for newline in lan_url", w.Code)
 	}
 }
 
-func TestGenerateReadablePassword_Unique(t *testing.T) {
-	a := generateReadablePassword()
-	b := generateReadablePassword()
-	if a == b {
-		t.Error("expected two different passwords, got same")
+func TestHandleSubmit_AlreadyConfigured(t *testing.T) {
+	h, envPath := newTestHandler(t)
+	// Pre-create the .env so the handler sees it as already configured.
+	if err := os.WriteFile(envPath, []byte("# existing\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(SetupRequest{VPNSkipped: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	h.HandleSubmit(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 when .env already exists", w.Code)
 	}
 }
 
-func TestHandleSetupDetect_ReturnsLANURL(t *testing.T) {
+func TestHandleDetect_ReturnsLANURL(t *testing.T) {
+	h, _ := newTestHandler(t)
 	t.Setenv("HOST_LAN_URL", "http://192.168.1.42:7354/jellyfin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup/detect", nil)
 	w := httptest.NewRecorder()
-	handleSetupDetect(w, req)
+	h.HandleDetect(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -164,12 +188,13 @@ func TestHandleSetupDetect_ReturnsLANURL(t *testing.T) {
 	}
 }
 
-func TestHandleSetupDetect_EmptyLANURLWhenUnset(t *testing.T) {
+func TestHandleDetect_EmptyLANURLWhenUnset(t *testing.T) {
+	h, _ := newTestHandler(t)
 	t.Setenv("HOST_LAN_URL", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/setup/detect", nil)
 	w := httptest.NewRecorder()
-	handleSetupDetect(w, req)
+	h.HandleDetect(w, req)
 
 	var resp SetupDetect
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
@@ -180,11 +205,7 @@ func TestHandleSetupDetect_EmptyLANURLWhenUnset(t *testing.T) {
 	}
 }
 
-// ── writeEnvFile uses writeEnvFile (not fmt.Sprintf) ────────────────────────
-
-func TestSetupUsesWriteEnvFile(t *testing.T) {
-	// Verify that the setup wizard writes booleans unquoted and strings quoted —
-	// the canonical format produced by writeEnvFile.
+func TestWriteEnvFile_BooleanAndStringFormatting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
 
@@ -223,23 +244,6 @@ func TestSetupRequest_DecodesLANURL(t *testing.T) {
 	}
 }
 
-func TestHandleSetupSubmit_RejectsInjectionInLANURL(t *testing.T) {
-	body, _ := json.Marshal(map[string]any{
-		"config_dir":  "./config",
-		"media_dir":   "~/media",
-		"lan_url":     "http://1.2.3.4:7354/jellyfin\nX-Evil: yes",
-		"vpn_skipped": true,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/setup", bytes.NewReader(body))
-	req.Header.Set("Origin", "http://localhost:7354")
-	w := httptest.NewRecorder()
-	handleSetupSubmit(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for newline in lan_url", w.Code)
-	}
-}
-
 func TestWriteEnvFile_IncludesJellyfinPublishedURL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
@@ -271,5 +275,19 @@ func TestWriteEnvFile_OmitsEmptyJellyfinPublishedURL(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "JELLYFIN_PUBLISHED_URL") {
 		t.Errorf("env file should not mention JELLYFIN_PUBLISHED_URL when absent\n got: %s", string(data))
+	}
+}
+
+func TestNeedsSetup_True(t *testing.T) {
+	t.Setenv("SETUP_MODE", "true")
+	if !NeedsSetup() {
+		t.Error("NeedsSetup() = false, want true when SETUP_MODE=true")
+	}
+}
+
+func TestNeedsSetup_False(t *testing.T) {
+	t.Setenv("SETUP_MODE", "")
+	if NeedsSetup() {
+		t.Error("NeedsSetup() = true, want false when SETUP_MODE unset")
 	}
 }

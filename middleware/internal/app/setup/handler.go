@@ -1,17 +1,43 @@
-package main
+// Package setup implements the setup wizard HTTP handlers for pelicula-api.
+// It is only mounted when SETUP_MODE=true; once the wizard completes and
+// .env is written the container is restarted in normal mode.
+package setup
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"pelicula-api/internal/app/library"
 )
+
+// Handler holds the setup wizard state. Instantiate with New.
+type Handler struct {
+	EnvPath        string
+	GenerateAPIKey func() string // injected from cmd/
+	GenPassword    func() string // injected from cmd/
+
+	mu sync.Mutex // serialises writes to EnvPath
+}
+
+// New creates a Handler wired to the given .env path and key generators.
+func New(envPath string, generateAPIKey, genPassword func() string) *Handler {
+	return &Handler{
+		EnvPath:        envPath,
+		GenerateAPIKey: generateAPIKey,
+		GenPassword:    genPassword,
+	}
+}
+
+// NeedsSetup reports whether the process was started in setup mode.
+func NeedsSetup() bool {
+	return os.Getenv("SETUP_MODE") == "true"
+}
 
 // SetupRequest is the JSON body submitted by the browser wizard.
 type SetupRequest struct {
@@ -38,11 +64,8 @@ type SetupDetect struct {
 	LANUrl     string `json:"lan_url"`
 }
 
-func isSetupMode() bool {
-	return os.Getenv("SETUP_MODE") == "true"
-}
-
-func handleSetupDetect(w http.ResponseWriter, r *http.Request) {
+// HandleDetect serves GET /api/pelicula/setup/detect.
+func (h *Handler) HandleDetect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -62,16 +85,17 @@ func handleSetupDetect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
-func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
+// HandleSubmit serves POST /api/pelicula/setup.
+func (h *Handler) HandleSubmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if _, err := os.Stat(envPath); err == nil {
+	if _, err := os.Stat(h.EnvPath); err == nil {
 		http.Error(w, "already configured", http.StatusConflict)
 		return
 	}
@@ -136,11 +160,11 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	puid := envOr("HOST_PUID", "1000")
 	pgid := envOr("HOST_PGID", "1000")
 	tz := envOr("HOST_TZ", "America/New_York")
-	proculaKey := generateAPIKey()
-	webhookSecret := generateAPIKey()
+	proculaKey := h.GenerateAPIKey()
+	webhookSecret := h.GenerateAPIKey()
 
-	envMu.Lock()
-	defer envMu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	vars := map[string]string{
 		"CONFIG_DIR":            req.ConfigDir,
@@ -165,7 +189,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		vars["JELLYFIN_PUBLISHED_URL"] = lan
 	}
 
-	if err := writeEnvFile(envPath, vars); err != nil {
+	if err := writeEnvFile(h.EnvPath, vars); err != nil {
 		slog.Error("failed to write .env", "error", err)
 		http.Error(w, "failed to write config", http.StatusInternalServerError)
 		return
@@ -196,7 +220,7 @@ func handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	slog.Info("setup wizard completed", "component", "setup", "vpn", !req.VPNSkipped)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
 }
 
 // setupContainerConfigDir maps the host config dir to a path writable from
@@ -231,6 +255,7 @@ func setupContainerConfigDir(hostConfigDir string) string {
 	return "/project/" + base + "/pelicula"
 }
 
+// envOr reads an environment variable, returning fallback if it is unset or empty.
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -238,33 +263,100 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// generateReadablePassword returns a 4-word passphrase like "calm-tiger-sobre-leaps",
-// drawn from weightedPassphraseWords (wordlist.go). All lowercase, hyphen-separated.
-// 5-letter words are most likely; 3- and 7-letter words are rare (bell curve).
-func generateReadablePassword() string {
-	n := len(weightedPassphraseWords)
-	return weightedPassphraseWords[cryptoRandN(n)] + "-" +
-		weightedPassphraseWords[cryptoRandN(n)] + "-" +
-		weightedPassphraseWords[cryptoRandN(n)] + "-" +
-		weightedPassphraseWords[cryptoRandN(n)]
-}
-
-// cryptoRandN returns a cryptographically random integer in [0, n).
-func cryptoRandN(n int) int {
-	max := big.NewInt(int64(n))
-	v, err := rand.Int(rand.Reader, max)
+// parseEnvFile reads a .env file and returns a key→value map.
+// Handles quoted values, comments (#), and blank lines.
+func parseEnvFile(path string) (map[string]string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return 0
+		return nil, err
 	}
-	return int(v.Int64())
+	defer f.Close()
+
+	result := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		// Strip surrounding double quotes
+		if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+			val = val[1 : len(val)-1]
+		}
+		result[key] = val
+	}
+	return result, scanner.Err()
 }
 
-func generateAPIKey() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// crypto/rand.Read should never fail; log and proceed with whatever
-		// partial bytes were written (consistent with generateReadablePassword).
-		slog.Error("crypto/rand.Read failed generating API key", "error", err)
+// writeEnvFile atomically writes a .env file from the provided key-value map.
+// Known keys are written in canonical order; any extra keys follow.
+// Caller must hold h.mu.
+func writeEnvFile(path string, vars map[string]string) error {
+	// Canonical order matching handleSetupSubmit
+	order := []string{
+		"CONFIG_DIR", "LIBRARY_DIR", "WORK_DIR",
+		"PUID", "PGID", "TZ",
+		"WIREGUARD_PRIVATE_KEY", "SERVER_COUNTRIES",
+		"PELICULA_PORT",
+		"PELICULA_OPEN_REGISTRATION",
+		"JELLYFIN_ADMIN_USER", // legacy: kept for upgrade-path ordering
+		"JELLYFIN_PASSWORD",   // legacy: kept for upgrade-path ordering
+		"JELLYFIN_API_KEY",
+		"JELLYFIN_PUBLISHED_URL",
+		"PROCULA_API_KEY", "WEBHOOK_SECRET",
+		"TRANSCODING_ENABLED",
+		"NOTIFICATIONS_ENABLED", "NOTIFICATIONS_MODE",
+		"PELICULA_SUB_LANGS",
+		"REQUESTS_RADARR_PROFILE_ID", "REQUESTS_RADARR_ROOT",
+		"REQUESTS_SONARR_PROFILE_ID", "REQUESTS_SONARR_ROOT",
+		"REMOTE_ACCESS_ENABLED", "REMOTE_HOSTNAME",
+		"REMOTE_HTTP_PORT", "REMOTE_HTTPS_PORT",
+		"REMOTE_CERT_MODE", "REMOTE_LE_EMAIL", "REMOTE_LE_STAGING",
+		"SEEDING_REMOVE_ON_COMPLETE",
+		"SEARCH_MODE",
 	}
-	return hex.EncodeToString(b)
+	inOrder := make(map[string]bool, len(order))
+	for _, k := range order {
+		inOrder[k] = true
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Generated by Pelicula setup wizard\n")
+	for _, k := range order {
+		v, ok := vars[k]
+		if !ok {
+			continue
+		}
+		writeEnvLine(&sb, k, v)
+	}
+	// Preserve any extra keys not in the canonical list
+	for k, v := range vars {
+		if !inOrder[k] {
+			writeEnvLine(&sb, k, v)
+		}
+	}
+
+	// Direct write (not tmp+rename): .env is bind-mounted as a single file
+	// into the container, so a rename from an overlay-fs tmp would fail with
+	// EXDEV and, even if it didn't, would replace the in-container mount
+	// point rather than the host file.
+	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeEnvLine(sb *strings.Builder, k, v string) {
+	// Booleans written unquoted; everything else double-quoted
+	if v == "true" || v == "false" {
+		fmt.Fprintf(sb, "%s=%s\n", k, v)
+	} else {
+		fmt.Fprintf(sb, "%s=\"%s\"\n", k, v)
+	}
 }

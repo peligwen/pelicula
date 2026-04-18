@@ -31,6 +31,7 @@ import (
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/missingwatcher"
 	appservices "pelicula-api/internal/app/services"
+	appsetup "pelicula-api/internal/app/setup"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
 	"pelicula-api/internal/app/vpnwatchdog"
@@ -142,15 +143,16 @@ func main() {
 	appriseCli = apprise.New(cfg.URLs.Apprise, cfg.ConfigDir)
 
 	// Setup mode: only serve setup endpoints
-	if isSetupMode() {
+	if appsetup.NeedsSetup() {
 		slog.Info("starting in setup mode", "component", "main")
+		setupHandler := appsetup.New(envPath, generateAPIKey, generateReadablePassword)
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/pelicula/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"status":"setup"}`)) //nolint:errcheck
 		})
-		mux.HandleFunc("/api/pelicula/setup/detect", handleSetupDetect)
-		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSetupSubmit)))
+		mux.HandleFunc("/api/pelicula/setup/detect", setupHandler.HandleDetect)
+		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(setupHandler.HandleSubmit)))
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
 		setupCtx, setupStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer setupStop()
