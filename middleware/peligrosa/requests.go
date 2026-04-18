@@ -16,6 +16,7 @@ import (
 
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/config"
 	"pelicula-api/internal/repo/dbutil"
 )
 
@@ -551,9 +552,9 @@ func (p *Deps) HandleRequestOp(w http.ResponseWriter, r *http.Request) {
 
 func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id, actorUsername string, notify func(string, string)) {
 	// Read profile/root from settings env vars (set at container start from .env)
-	radarrProfileID := envIntOr("REQUESTS_RADARR_PROFILE_ID", 0)
+	radarrProfileID := config.IntOr("REQUESTS_RADARR_PROFILE_ID", 0)
 	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
-	sonarrProfileID := envIntOr("REQUESTS_SONARR_PROFILE_ID", 0)
+	sonarrProfileID := config.IntOr("REQUESTS_SONARR_PROFILE_ID", 0)
 	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
 
 	req := rs.get(id)
@@ -692,17 +693,4 @@ func (rs *RequestStore) HandleRequestDelete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	httputil.WriteJSON(w, map[string]string{"status": "deleted"})
-}
-
-// envIntOr reads an env var as an integer, returning fallback on parse error or if unset.
-func envIntOr(key string, fallback int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	var n int
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-		return fallback
-	}
-	return n
 }

@@ -13,6 +13,7 @@ import (
 
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
+	"pelicula-api/internal/config"
 )
 
 // searchMode is read once at startup from the .env file and used by handleSearch
@@ -301,9 +302,9 @@ func handleSearchAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Read the same request profile env vars that handleRequestApprove uses,
 	// so both add paths honour REQUESTS_RADARR_PROFILE_ID / REQUESTS_RADARR_ROOT.
-	radarrProfileID := envIntOr("REQUESTS_RADARR_PROFILE_ID", 0)
+	radarrProfileID := config.IntOr("REQUESTS_RADARR_PROFILE_ID", 0)
 	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
-	sonarrProfileID := envIntOr("REQUESTS_SONARR_PROFILE_ID", 0)
+	sonarrProfileID := config.IntOr("REQUESTS_SONARR_PROFILE_ID", 0)
 	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
 
 	var arrID int

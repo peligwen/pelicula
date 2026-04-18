@@ -7,8 +7,8 @@ import (
 	"strconv"
 )
 
-// EnvOr returns the value of the environment variable key, or fallback if unset/empty.
-func EnvOr(key, fallback string) string {
+// envOr returns the value of the environment variable key, or fallback if unset/empty.
+func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
@@ -31,19 +31,19 @@ type URLs struct {
 	PeliculaAPI string
 }
 
-// LoadURLs reads all service base URLs from the environment.
-func LoadURLs() URLs {
+// loadURLs reads all service base URLs from the environment.
+func loadURLs() URLs {
 	return URLs{
-		Sonarr:      EnvOr("SONARR_URL", "http://sonarr:8989/sonarr"),
-		Radarr:      EnvOr("RADARR_URL", "http://radarr:7878/radarr"),
-		Prowlarr:    EnvOr("PROWLARR_URL", "http://gluetun:9696/prowlarr"),
-		Bazarr:      EnvOr("BAZARR_URL", "http://bazarr:6767/bazarr"),
-		Jellyfin:    EnvOr("JELLYFIN_URL", "http://jellyfin:8096/jellyfin"),
-		Procula:     EnvOr("PROCULA_URL", "http://procula:8282"),
-		Gluetun:     EnvOr("GLUETUN_CONTROL_URL", "http://gluetun:8000"),
-		QBT:         EnvOr("QBITTORRENT_URL", "http://gluetun:8080"),
-		Apprise:     EnvOr("APPRISE_URL", "http://apprise:8000/notify"),
-		PeliculaAPI: EnvOr("PELICULA_API_URL", "http://pelicula-api:8181"),
+		Sonarr:      envOr("SONARR_URL", "http://sonarr:8989/sonarr"),
+		Radarr:      envOr("RADARR_URL", "http://radarr:7878/radarr"),
+		Prowlarr:    envOr("PROWLARR_URL", "http://gluetun:9696/prowlarr"),
+		Bazarr:      envOr("BAZARR_URL", "http://bazarr:6767/bazarr"),
+		Jellyfin:    envOr("JELLYFIN_URL", "http://jellyfin:8096/jellyfin"),
+		Procula:     envOr("PROCULA_URL", "http://procula:8282"),
+		Gluetun:     envOr("GLUETUN_CONTROL_URL", "http://gluetun:8000"),
+		QBT:         envOr("QBITTORRENT_URL", "http://gluetun:8080"),
+		Apprise:     envOr("APPRISE_URL", "http://apprise:8000/notify"),
+		PeliculaAPI: envOr("PELICULA_API_URL", "http://pelicula-api:8181"),
 	}
 }
 
@@ -112,12 +112,12 @@ type Config struct {
 // defaults that were previously scattered across the cmd/pelicula-api package.
 func Load() *Config {
 	return &Config{
-		URLs: LoadURLs(),
+		URLs: loadURLs(),
 
 		WireguardPrivateKey: os.Getenv("WIREGUARD_PRIVATE_KEY"),
-		GluetunProxyURL:     EnvOr("GLUETUN_PROXY_URL", "http://gluetun:8888"),
-		GluetunHTTPUser:     EnvOr("GLUETUN_HTTP_USER", "pelicula"),
-		GluetunHTTPPass:     EnvOr("GLUETUN_HTTP_PASS", ""),
+		GluetunProxyURL:     envOr("GLUETUN_PROXY_URL", "http://gluetun:8888"),
+		GluetunHTTPUser:     envOr("GLUETUN_HTTP_USER", "pelicula"),
+		GluetunHTTPPass:     envOr("GLUETUN_HTTP_PASS", ""),
 
 		WebhookSecret:  os.Getenv("WEBHOOK_SECRET"),
 		ProculaAPIKey:  os.Getenv("PROCULA_API_KEY"),
@@ -127,36 +127,37 @@ func Load() *Config {
 		OpenRegistration:        os.Getenv("PELICULA_OPEN_REGISTRATION") == "true",
 		SeedingRemoveOnComplete: os.Getenv("SEEDING_REMOVE_ON_COMPLETE") == "true",
 
-		ConfigDir:       EnvOr("CONFIG_DIR", "/config"),
-		LibraryDir:      EnvOr("LIBRARY_DIR", "/media"),
+		ConfigDir:       envOr("CONFIG_DIR", "/config"),
+		LibraryDir:      envOr("LIBRARY_DIR", "/media"),
 		ImportSourceDir: os.Getenv("IMPORT_SOURCE_DIR"),
-		ProjectName:     EnvOr("PELICULA_PROJECT_NAME", "pelicula"),
+		ProjectName:     envOr("PELICULA_PROJECT_NAME", "pelicula"),
 
 		SubLangs:  os.Getenv("PELICULA_SUB_LANGS"),
-		AudioLang: EnvOr("PELICULA_AUDIO_LANG", "eng"),
+		AudioLang: envOr("PELICULA_AUDIO_LANG", "eng"),
 
-		JellyfinLibraryLimit:    envIntOr("JELLYFIN_LIBRARY_LIMIT", 5000),
-		RequestsRadarrProfileID: envIntOr("REQUESTS_RADARR_PROFILE_ID", 0),
+		JellyfinLibraryLimit:    IntOr("JELLYFIN_LIBRARY_LIMIT", 5000),
+		RequestsRadarrProfileID: IntOr("REQUESTS_RADARR_PROFILE_ID", 0),
 		RequestsRadarrRoot:      os.Getenv("REQUESTS_RADARR_ROOT"),
-		RequestsSonarrProfileID: envIntOr("REQUESTS_SONARR_PROFILE_ID", 0),
+		RequestsSonarrProfileID: IntOr("REQUESTS_SONARR_PROFILE_ID", 0),
 		RequestsSonarrRoot:      os.Getenv("REQUESTS_SONARR_ROOT"),
 
-		DockerHost: EnvOr("DOCKER_HOST", "http://docker-proxy:2375"),
+		DockerHost: envOr("DOCKER_HOST", "http://docker-proxy:2375"),
 
-		HostPlatform:   EnvOr("HOST_PLATFORM", "linux"),
-		HostTZ:         EnvOr("HOST_TZ", "America/New_York"),
-		HostPUID:       EnvOr("HOST_PUID", "1000"),
-		HostPGID:       EnvOr("HOST_PGID", "1000"),
-		HostConfigDir:  EnvOr("HOST_CONFIG_DIR", "./config"),
-		HostLibraryDir: EnvOr("HOST_LIBRARY_DIR", "~/media"),
-		HostWorkDir:    EnvOr("HOST_WORK_DIR", "~/media"),
+		HostPlatform:   envOr("HOST_PLATFORM", "linux"),
+		HostTZ:         envOr("HOST_TZ", "America/New_York"),
+		HostPUID:       envOr("HOST_PUID", "1000"),
+		HostPGID:       envOr("HOST_PGID", "1000"),
+		HostConfigDir:  envOr("HOST_CONFIG_DIR", "./config"),
+		HostLibraryDir: envOr("HOST_LIBRARY_DIR", "~/media"),
+		HostWorkDir:    envOr("HOST_WORK_DIR", "~/media"),
 		HostLANURL:     os.Getenv("HOST_LAN_URL"),
 	}
 }
 
-// envIntOr reads an environment variable as an integer.
+// IntOr reads an environment variable as an integer.
 // Returns fallback if the variable is unset, empty, or not a valid integer.
-func envIntOr(key string, fallback int) int {
+// Uses strconv.Atoi — rejects partial matches like "5000abc".
+func IntOr(key string, fallback int) int {
 	v := os.Getenv(key)
 	if v == "" {
 		return fallback
