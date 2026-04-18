@@ -1,4 +1,4 @@
-package main
+package catalog_test
 
 import (
 	"encoding/json"
@@ -6,32 +6,153 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"pelicula-api/internal/app/catalog"
 )
 
+// stubArrClient implements catalog.ArrClient for tests.
+type stubArrClient struct {
+	radarrKey string
+	sonarrKey string
+	doGet     func(baseURL, apiKey, path string) ([]byte, error)
+	doPost    func(baseURL, apiKey, path string, payload any) ([]byte, error)
+	doPut     func(baseURL, apiKey, path string, payload any) ([]byte, error)
+	doDelete  func(baseURL, apiKey, path string) ([]byte, error)
+}
+
+func (s *stubArrClient) Keys() (sonarr, radarr, prowlarr string) {
+	return s.sonarrKey, s.radarrKey, ""
+}
+func (s *stubArrClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+	if s.doGet != nil {
+		return s.doGet(baseURL, apiKey, path)
+	}
+	return nil, nil
+}
+func (s *stubArrClient) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	if s.doPost != nil {
+		return s.doPost(baseURL, apiKey, path, payload)
+	}
+	return nil, nil
+}
+func (s *stubArrClient) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	if s.doPut != nil {
+		return s.doPut(baseURL, apiKey, path, payload)
+	}
+	return nil, nil
+}
+func (s *stubArrClient) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
+	if s.doDelete != nil {
+		return s.doDelete(baseURL, apiKey, path)
+	}
+	return nil, nil
+}
+func (s *stubArrClient) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+	return nil, nil
+}
+
+// newTestHandler builds a catalog.Handler backed by real httptest servers.
+func newTestHandler(radarrSrv, sonarrSrv, proculaSrv *httptest.Server, radarrKey, sonarrKey string) *catalog.Handler {
+	arr := &stubArrClient{radarrKey: radarrKey, sonarrKey: sonarrKey}
+	arr.doGet = func(baseURL, apiKey, path string) ([]byte, error) {
+		resp, err := http.Get(baseURL + path)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		buf := make([]byte, 0, 256)
+		tmp := make([]byte, 256)
+		for {
+			n, rerr := resp.Body.Read(tmp)
+			buf = append(buf, tmp[:n]...)
+			if rerr != nil {
+				break
+			}
+		}
+		return buf, nil
+	}
+	arr.doPost = func(baseURL, apiKey, path string, payload any) ([]byte, error) {
+		data, _ := json.Marshal(payload)
+		resp, err := http.Post(baseURL+path, "application/json", strings.NewReader(string(data)))
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		buf := make([]byte, 0, 256)
+		tmp := make([]byte, 256)
+		for {
+			n, rerr := resp.Body.Read(tmp)
+			buf = append(buf, tmp[:n]...)
+			if rerr != nil {
+				break
+			}
+		}
+		return buf, nil
+	}
+	arr.doPut = func(baseURL, apiKey, path string, payload any) ([]byte, error) {
+		data, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPut, baseURL+path, strings.NewReader(string(data)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		buf := make([]byte, 0, 256)
+		tmp := make([]byte, 256)
+		for {
+			n, rerr := resp.Body.Read(tmp)
+			buf = append(buf, tmp[:n]...)
+			if rerr != nil {
+				break
+			}
+		}
+		return buf, nil
+	}
+
+	radarrURL := ""
+	if radarrSrv != nil {
+		radarrURL = radarrSrv.URL
+	}
+	sonarrURL := ""
+	if sonarrSrv != nil {
+		sonarrURL = sonarrSrv.URL
+	}
+	proculaURL := ""
+	if proculaSrv != nil {
+		proculaURL = proculaSrv.URL
+	}
+
+	return &catalog.Handler{
+		Arr:        arr,
+		Client:     http.DefaultClient,
+		RadarrURL:  radarrURL,
+		SonarrURL:  sonarrURL,
+		ProculaURL: proculaURL,
+	}
+}
+
 func TestHandleCatalogListFansOut(t *testing.T) {
+	t.Parallel()
+
 	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v3/movie" {
 			t.Errorf("radarr path = %q", r.URL.Path)
 		}
-		w.Write([]byte(`[{"id":1,"title":"Foo","year":2024},{"id":2,"title":"Bar","year":2023}]`))
+		w.Write([]byte(`[{"id":1,"title":"Foo","year":2024},{"id":2,"title":"Bar","year":2023}]`)) //nolint:errcheck
 	}))
 	defer radarr.Close()
 
 	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`[{"id":10,"title":"Show","year":2020}]`))
+		w.Write([]byte(`[{"id":10,"title":"Show","year":2020}]`)) //nolint:errcheck
 	}))
 	defer sonarr.Close()
 
-	origR, origS := radarrURL, sonarrURL
-	origSvc := services
-	radarrURL, sonarrURL = radarr.URL, sonarr.URL
-	services = &ServiceClients{RadarrKey: "k", SonarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS; services = origSvc })
+	h := newTestHandler(radarr, sonarr, nil, "rk", "sk")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog", nil)
 	w := httptest.NewRecorder()
-	handleCatalogList(w, req)
+	h.HandleCatalogList(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
@@ -52,28 +173,25 @@ func TestHandleCatalogListFansOut(t *testing.T) {
 }
 
 func TestHandleCatalogSeasonMergesFiles(t *testing.T) {
+	t.Parallel()
+
 	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v3/episode":
-			w.Write([]byte(`[{"id":1,"episodeFileId":100,"title":"Ep 1"},{"id":2,"episodeFileId":0,"title":"Ep 2"}]`))
+			w.Write([]byte(`[{"id":1,"episodeFileId":100,"title":"Ep 1"},{"id":2,"episodeFileId":0,"title":"Ep 2"}]`)) //nolint:errcheck
 		case r.URL.Path == "/api/v3/episodefile":
-			w.Write([]byte(`[{"id":100,"path":"/tv/Show/S01/ep1.mkv"}]`))
+			w.Write([]byte(`[{"id":100,"path":"/tv/Show/S01/ep1.mkv"}]`)) //nolint:errcheck
 		}
 	}))
 	defer sonarr.Close()
 
-	origS := sonarrURL
-	origSvc := services
-	sonarrURL = sonarr.URL
-	services = &ServiceClients{SonarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { sonarrURL = origS; services = origSvc })
+	h := newTestHandler(nil, sonarr, nil, "", "sk")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/series/5/season/1", nil)
 	req.SetPathValue("id", "5")
 	req.SetPathValue("n", "1")
 	w := httptest.NewRecorder()
-	handleCatalogSeason(w, req)
+	h.HandleCatalogSeason(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
@@ -94,25 +212,22 @@ func TestHandleCatalogSeasonMergesFiles(t *testing.T) {
 }
 
 func TestHandleCatalogFlagsProxies(t *testing.T) {
+	t.Parallel()
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/procula/catalog/flags" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"rows":[{"path":"/movies/A/A.mkv","severity":"error","flags":[{"code":"validation_failed","severity":"error"}],"job_id":"job_a","updated_at":"2026-04-11T00:00:00Z"}]}`))
+		w.Write([]byte(`{"rows":[{"path":"/movies/A/A.mkv","severity":"error","flags":[{"code":"validation_failed","severity":"error"}],"job_id":"job_a","updated_at":"2026-04-11T00:00:00Z"}]}`)) //nolint:errcheck
 	}))
 	defer upstream.Close()
 
-	orig := proculaURL
-	origSvc := services
-	proculaURL = upstream.URL
-	services = &ServiceClients{}
-	services.client = &http.Client{}
-	t.Cleanup(func() { proculaURL = orig; services = origSvc })
+	h := newTestHandler(nil, nil, upstream, "", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/flags", nil)
 	w := httptest.NewRecorder()
-	handleCatalogFlags(w, req)
+	h.HandleCatalogFlags(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("code = %d", w.Code)
@@ -123,26 +238,23 @@ func TestHandleCatalogFlagsProxies(t *testing.T) {
 }
 
 func TestHandleCatalogDetailMergesFlagsAndJob(t *testing.T) {
+	t.Parallel()
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/procula/catalog/flags":
-			w.Write([]byte(`{"rows":[{"path":"/movies/A/A.mkv","severity":"warn","flags":[{"code":"missing_subtitles","severity":"warn","fields":{"langs":["es"]}}],"job_id":"job_a","updated_at":"2026-04-11T00:00:00Z"}]}`))
+			w.Write([]byte(`{"rows":[{"path":"/movies/A/A.mkv","severity":"warn","flags":[{"code":"missing_subtitles","severity":"warn","fields":{"langs":["es"]}}],"job_id":"job_a","updated_at":"2026-04-11T00:00:00Z"}]}`)) //nolint:errcheck
 		case "/api/procula/jobs":
-			w.Write([]byte(`[{"id":"job_a","state":"completed","stage":"done","source":{"path":"/movies/A/A.mkv","title":"A"},"validation":{"passed":true,"checks":{"integrity":"pass","duration":"pass","sample":"pass","codecs":{"video":"h264","audio":"aac","subtitles":["eng"],"width":1920,"height":1080}}}}]`))
+			w.Write([]byte(`[{"id":"job_a","state":"completed","stage":"done","source":{"path":"/movies/A/A.mkv","title":"A"},"validation":{"passed":true,"checks":{"integrity":"pass","duration":"pass","sample":"pass","codecs":{"video":"h264","audio":"aac","subtitles":["eng"],"width":1920,"height":1080}}}}]`)) //nolint:errcheck
 		}
 	}))
 	defer upstream.Close()
 
-	orig := proculaURL
-	origSvc := services
-	proculaURL = upstream.URL
-	services = &ServiceClients{}
-	services.client = &http.Client{}
-	t.Cleanup(func() { proculaURL = orig; services = origSvc })
+	h := newTestHandler(nil, nil, upstream, "", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/detail?path=%2Fmovies%2FA%2FA.mkv", nil)
 	w := httptest.NewRecorder()
-	handleCatalogDetail(w, req)
+	h.HandleCatalogDetail(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("code = %d: %s", w.Code, w.Body.String())
@@ -164,29 +276,26 @@ func TestHandleCatalogDetailMergesFlagsAndJob(t *testing.T) {
 }
 
 func TestHandleCatalogCommandSearch_Radarr(t *testing.T) {
+	t.Parallel()
+
 	var gotBody map[string]any
 	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
 			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 				t.Errorf("decode request body: %v", err)
 			}
-			w.Write([]byte(`{"id":1}`))
+			w.Write([]byte(`{"id":1}`)) //nolint:errcheck
 		}
 	}))
 	defer radarr.Close()
 
-	origR := radarrURL
-	origSvc := services
-	radarrURL = radarr.URL
-	services = &ServiceClients{RadarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL = origR; services = origSvc })
+	h := newTestHandler(radarr, nil, nil, "rk", "")
 
 	body := `{"arr_type":"radarr","arr_id":42,"command":"search"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleCatalogCommand(w, req)
+	h.HandleCatalogCommand(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
@@ -201,29 +310,26 @@ func TestHandleCatalogCommandSearch_Radarr(t *testing.T) {
 }
 
 func TestHandleCatalogCommandSearch_Sonarr(t *testing.T) {
+	t.Parallel()
+
 	var gotBody map[string]any
 	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
 			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 				t.Errorf("decode request body: %v", err)
 			}
-			w.Write([]byte(`{"id":1}`))
+			w.Write([]byte(`{"id":1}`)) //nolint:errcheck
 		}
 	}))
 	defer sonarr.Close()
 
-	origS := sonarrURL
-	origSvc := services
-	sonarrURL = sonarr.URL
-	services = &ServiceClients{SonarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { sonarrURL = origS; services = origSvc })
+	h := newTestHandler(nil, sonarr, nil, "", "sk")
 
 	body := `{"arr_type":"sonarr","arr_id":7,"command":"search"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleCatalogCommand(w, req)
+	h.HandleCatalogCommand(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
@@ -237,32 +343,29 @@ func TestHandleCatalogCommandSearch_Sonarr(t *testing.T) {
 }
 
 func TestHandleCatalogCommandUnmonitor_Radarr(t *testing.T) {
+	t.Parallel()
+
 	var putBody map[string]any
 	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v3/movie/42" && r.Method == http.MethodGet:
-			w.Write([]byte(`{"id":42,"title":"Foo","monitored":true}`))
+			w.Write([]byte(`{"id":42,"title":"Foo","monitored":true}`)) //nolint:errcheck
 		case r.URL.Path == "/api/v3/movie/42" && r.Method == http.MethodPut:
 			if err := json.NewDecoder(r.Body).Decode(&putBody); err != nil {
 				t.Errorf("decode request body: %v", err)
 			}
-			w.Write([]byte(`{"id":42}`))
+			w.Write([]byte(`{"id":42}`)) //nolint:errcheck
 		}
 	}))
 	defer radarr.Close()
 
-	origR := radarrURL
-	origSvc := services
-	radarrURL = radarr.URL
-	services = &ServiceClients{RadarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL = origR; services = origSvc })
+	h := newTestHandler(radarr, nil, nil, "rk", "")
 
 	body := `{"arr_type":"radarr","arr_id":42,"command":"unmonitor"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/catalog/command", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleCatalogCommand(w, req)
+	h.HandleCatalogCommand(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
@@ -272,49 +375,20 @@ func TestHandleCatalogCommandUnmonitor_Radarr(t *testing.T) {
 	}
 }
 
-func TestHandleActionsRegistryCached(t *testing.T) {
-	hits := 0
-	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/procula/actions/registry" {
-			hits++
-			w.Write([]byte(`[{"name":"validate","label":"Re-verify file"}]`))
-		}
-	}))
-	defer procula.Close()
-
-	origP := proculaURL
-	origSvc := services
-	proculaURL = procula.URL
-	services = &ServiceClients{}
-	services.client = &http.Client{}
-	registryCache = actionRegistryCache{}
-	t.Cleanup(func() { proculaURL = origP; services = origSvc })
-
-	for i := 0; i < 3; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/pelicula/actions/registry", nil)
-		w := httptest.NewRecorder()
-		handleActionsRegistry(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d", w.Code)
-		}
-	}
-	if hits != 1 {
-		t.Errorf("procula hits = %d, want 1 (cache should serve the rest)", hits)
-	}
-}
-
 func TestHandleCatalogReplaceValidation(t *testing.T) {
-	origSvc := services
-	services = &ServiceClients{}
-	services.client = &http.Client{}
-	t.Cleanup(func() { services = origSvc })
+	t.Parallel()
+
+	h := &catalog.Handler{
+		Arr:    &stubArrClient{},
+		Client: http.DefaultClient,
+	}
 
 	// Missing arr_type → 400
 	body := `{"arr_id":1,"episode_id":2,"path":"/tv/Silo/S01E01.mkv"}`
 	req := httptest.NewRequest("POST", "/api/pelicula/catalog/replace", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleCatalogReplace(w, req)
+	h.HandleCatalogReplace(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing arr_type: want 400, got %d", w.Code)
 	}
@@ -324,36 +398,33 @@ func TestHandleCatalogReplaceValidation(t *testing.T) {
 	req = httptest.NewRequest("POST", "/api/pelicula/catalog/replace", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
-	handleCatalogReplace(w, req)
+	h.HandleCatalogReplace(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing arr_id: want 400, got %d", w.Code)
 	}
 }
 
 func TestHandleCatalogCommandRescan(t *testing.T) {
+	t.Parallel()
+
 	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost {
-			w.Write([]byte(`{"id":1}`))
+			w.Write([]byte(`{"id":1}`)) //nolint:errcheck
 		}
 	}))
 	defer sonarr.Close()
 
-	origS := sonarrURL
-	origSvc := services
-	sonarrURL = sonarr.URL
-	services = &ServiceClients{SonarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { sonarrURL = origS; services = origSvc })
+	h := newTestHandler(nil, sonarr, nil, "", "sk")
 
 	req := httptest.NewRequest("POST", "/api/pelicula/catalog/command",
 		strings.NewReader(`{"arr_type":"sonarr","arr_id":1,"command":"rescan"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handleCatalogCommand(w, req)
+	h.HandleCatalogCommand(w, req)
 	// Should NOT return 400 "unknown command"
 	if w.Code == http.StatusBadRequest {
 		var errResp map[string]string
-		json.NewDecoder(w.Body).Decode(&errResp)
+		json.NewDecoder(w.Body).Decode(&errResp) //nolint:errcheck
 		if errResp["error"] == "unknown command" {
 			t.Error("rescan command not recognised")
 		}
@@ -361,30 +432,27 @@ func TestHandleCatalogCommandRescan(t *testing.T) {
 }
 
 func TestHandleCatalogQualityProfiles(t *testing.T) {
+	t.Parallel()
+
 	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/qualityprofile" {
-			w.Write([]byte(`[{"id":1,"name":"HD-1080p"},{"id":2,"name":"Any"}]`))
+			w.Write([]byte(`[{"id":1,"name":"HD-1080p"},{"id":2,"name":"Any"}]`)) //nolint:errcheck
 		}
 	}))
 	defer radarr.Close()
 
 	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/qualityprofile" {
-			w.Write([]byte(`[{"id":4,"name":"HD TV"}]`))
+			w.Write([]byte(`[{"id":4,"name":"HD TV"}]`)) //nolint:errcheck
 		}
 	}))
 	defer sonarr.Close()
 
-	origR, origS := radarrURL, sonarrURL
-	origSvc := services
-	radarrURL, sonarrURL = radarr.URL, sonarr.URL
-	services = &ServiceClients{RadarrKey: "k", SonarrKey: "k"}
-	services.client = &http.Client{}
-	t.Cleanup(func() { radarrURL, sonarrURL = origR, origS; services = origSvc })
+	h := newTestHandler(radarr, sonarr, nil, "rk", "sk")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/qualityprofiles", nil)
 	w := httptest.NewRecorder()
-	handleCatalogQualityProfiles(w, req)
+	h.HandleCatalogQualityProfiles(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())

@@ -35,24 +35,25 @@ import (
 
 // App holds all wired-up application state. No package-level globals.
 type App struct {
-	svc           *ServiceClients
-	urls          config.URLs
-	sseHub        *sse.Hub
-	ssePoller     *sse.Poller
-	catalogDB     *sql.DB
-	mainDB        *sql.DB
-	auth          *peligrosa.Auth
-	invites       *peligrosa.InviteStore
-	requests      *peligrosa.RequestStore
-	idxCache      indexerCountCacheApp
-	statusTTL     statusTTLCache
-	backupHandler *backup.Handler
-	dlHandler     *downloads.Handler
-	healthHandler *health.Handler
-	hooksHandler  *hooks.Handler
-	libHandler    *library.Handler
-	vpnConfigured bool
-	autowireState *autowire.AutowireState
+	svc            *ServiceClients
+	urls           config.URLs
+	sseHub         *sse.Hub
+	ssePoller      *sse.Poller
+	catalogDB      *sql.DB
+	mainDB         *sql.DB
+	auth           *peligrosa.Auth
+	invites        *peligrosa.InviteStore
+	requests       *peligrosa.RequestStore
+	idxCache       indexerCountCacheApp
+	statusTTL      statusTTLCache
+	backupHandler  *backup.Handler
+	dlHandler      *downloads.Handler
+	healthHandler  *health.Handler
+	hooksHandler   *hooks.Handler
+	libHandler     *library.Handler
+	catalogHandler *catalog.Handler
+	vpnConfigured  bool
+	autowireState  *autowire.AutowireState
 }
 
 // indexerCountCacheApp caches the Prowlarr indexer count.
@@ -297,13 +298,21 @@ func main() {
 			Notify:                 notifyAppriseErr,
 		},
 		libHandler: libHandler,
+		catalogHandler: &catalog.Handler{
+			DB:         cdb,
+			Arr:        svc,
+			Jf:         svc,
+			Client:     &http.Client{Timeout: 10 * time.Second},
+			ProculaURL: proculaURL,
+			RadarrURL:  urls.Radarr,
+			SonarrURL:  urls.Sonarr,
+		},
 	}
 	// Wire package-level globals for the handler files that still use them.
 	services = svc
 	authMiddleware = auth
 	inviteStore = invites
 	requestStore = requests
-	catalogDB = cdb
 	mainDB = db
 
 	mux := http.NewServeMux()
@@ -387,19 +396,19 @@ func main() {
 	mux.Handle("/api/pelicula/procula/jobs/{id}/retry", auth.GuardAdmin(http.HandlerFunc(app.libHandler.HandleJobRetry)))
 
 	// viewer+: catalog
-	mux.Handle("/api/pelicula/catalog", auth.Guard(http.HandlerFunc(handleCatalogList)))
-	mux.Handle("/api/pelicula/catalog/series/{id}", auth.Guard(http.HandlerFunc(handleCatalogSeriesDetail)))
-	mux.Handle("/api/pelicula/catalog/series/{id}/season/{n}", auth.Guard(http.HandlerFunc(handleCatalogSeason)))
-	mux.Handle("/api/pelicula/catalog/item/history", auth.Guard(http.HandlerFunc(handleCatalogItemHistory)))
-	mux.Handle("/api/pelicula/catalog/flags", auth.Guard(http.HandlerFunc(handleCatalogFlags)))
-	mux.Handle("/api/pelicula/catalog/detail", auth.Guard(http.HandlerFunc(handleCatalogDetail)))
-	mux.Handle("/api/pelicula/catalog/items", auth.Guard(http.HandlerFunc(handleCatalogItems)))
-	mux.Handle("/api/pelicula/catalog/items/{id}", auth.Guard(http.HandlerFunc(handleCatalogItemDetail)))
-	mux.Handle("/api/pelicula/catalog/backfill", auth.GuardAdmin(http.HandlerFunc(handleCatalogBackfill)))
-	mux.Handle("/api/pelicula/catalog/command", auth.GuardAdmin(http.HandlerFunc(handleCatalogCommand)))
-	mux.Handle("/api/pelicula/catalog/replace", auth.GuardAdmin(http.HandlerFunc(handleCatalogReplace)))
-	mux.Handle("/api/pelicula/catalog/blocklist/{id}", auth.GuardAdmin(http.HandlerFunc(handleCatalogUnblocklist)))
-	mux.Handle("/api/pelicula/catalog/qualityprofiles", auth.Guard(http.HandlerFunc(handleCatalogQualityProfiles)))
+	mux.Handle("/api/pelicula/catalog", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogList)))
+	mux.Handle("/api/pelicula/catalog/series/{id}", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogSeriesDetail)))
+	mux.Handle("/api/pelicula/catalog/series/{id}/season/{n}", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogSeason)))
+	mux.Handle("/api/pelicula/catalog/item/history", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogItemHistory)))
+	mux.Handle("/api/pelicula/catalog/flags", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogFlags)))
+	mux.Handle("/api/pelicula/catalog/detail", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogDetail)))
+	mux.Handle("/api/pelicula/catalog/items", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogItems)))
+	mux.Handle("/api/pelicula/catalog/items/{id}", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogItemDetail)))
+	mux.Handle("/api/pelicula/catalog/backfill", auth.GuardAdmin(http.HandlerFunc(app.catalogHandler.HandleCatalogBackfill)))
+	mux.Handle("/api/pelicula/catalog/command", auth.GuardAdmin(http.HandlerFunc(app.catalogHandler.HandleCatalogCommand)))
+	mux.Handle("/api/pelicula/catalog/replace", auth.GuardAdmin(http.HandlerFunc(app.catalogHandler.HandleCatalogReplace)))
+	mux.Handle("/api/pelicula/catalog/blocklist/{id}", auth.GuardAdmin(http.HandlerFunc(app.catalogHandler.HandleCatalogUnblocklist)))
+	mux.Handle("/api/pelicula/catalog/qualityprofiles", auth.Guard(http.HandlerFunc(app.catalogHandler.HandleCatalogQualityProfiles)))
 	mux.Handle("/api/pelicula/jobs", auth.Guard(http.HandlerFunc(handleJobsList)))
 
 	// admin only: action bus

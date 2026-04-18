@@ -1,25 +1,44 @@
-// catalog.go — thin Radarr/Sonarr proxies powering the dashboard Catalog tab.
-package main
+// handler.go — HTTP handlers for the catalog tab, moved from cmd/pelicula-api/catalog.go.
+package catalog
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"pelicula-api/httputil"
-	"pelicula-api/internal/app/catalog"
 	"strings"
+
+	"pelicula-api/httputil"
 )
+
+// ProxyClient is the subset of an HTTP client needed by the catalog handler
+// to make outbound requests to Procula.
+type ProxyClient interface {
+	Get(url string) (*http.Response, error)
+}
+
+// Handler holds the dependencies for catalog HTTP handlers.
+// No package-level globals — wire this from main() and call the Handle* methods.
+type Handler struct {
+	DB         *sql.DB
+	Arr        ArrClient
+	Jf         JellyfinMetaClient
+	Client     ProxyClient // outbound HTTP client (for Procula calls)
+	ProculaURL string
+	RadarrURL  string
+	SonarrURL  string
+}
 
 type catalogResponse struct {
 	Movies []json.RawMessage `json:"movies"`
 	Series []json.RawMessage `json:"series"`
 }
 
-// handleCatalogList returns movies and series from Radarr+Sonarr in parallel.
-func handleCatalogList(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogList returns movies and series from Radarr+Sonarr in parallel.
+func (h *Handler) HandleCatalogList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -27,7 +46,7 @@ func handleCatalogList(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	typ := r.URL.Query().Get("type")
 
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Arr.Keys()
 
 	type arrFetch struct {
 		data []byte
@@ -41,7 +60,7 @@ func handleCatalogList(w http.ResponseWriter, r *http.Request) {
 			radarrCh <- arrFetch{}
 			return
 		}
-		body, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/movie")
+		body, err := h.Arr.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie")
 		radarrCh <- arrFetch{data: body, err: err}
 	}()
 	go func() {
@@ -49,7 +68,7 @@ func handleCatalogList(w http.ResponseWriter, r *http.Request) {
 			sonarrCh <- arrFetch{}
 			return
 		}
-		body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series")
+		body, err := h.Arr.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series")
 		sonarrCh <- arrFetch{data: body, err: err}
 	}()
 
@@ -87,8 +106,8 @@ func filterByTitle(data []byte, q string) []json.RawMessage {
 	return out
 }
 
-// handleCatalogSeriesDetail proxies Sonarr /api/v3/series/{id}.
-func handleCatalogSeriesDetail(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogSeriesDetail proxies Sonarr /api/v3/series/{id}.
+func (h *Handler) HandleCatalogSeriesDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -98,8 +117,8 @@ func handleCatalogSeriesDetail(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "series id required", http.StatusBadRequest)
 		return
 	}
-	sonarrKey, _, _ := services.Keys()
-	body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/series/"+url.PathEscape(id))
+	sonarrKey, _, _ := h.Arr.Keys()
+	body, err := h.Arr.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series/"+url.PathEscape(id))
 	if err != nil {
 		httputil.WriteError(w, "sonarr unavailable", http.StatusBadGateway)
 		return
@@ -108,8 +127,8 @@ func handleCatalogSeriesDetail(w http.ResponseWriter, r *http.Request) {
 	w.Write(body) //nolint:errcheck
 }
 
-// handleCatalogSeason merges Sonarr episode and episodefile lists.
-func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogSeason merges Sonarr episode and episodefile lists.
+func (h *Handler) HandleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -120,15 +139,15 @@ func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "series id and season required", http.StatusBadRequest)
 		return
 	}
-	sonarrKey, _, _ := services.Keys()
+	sonarrKey, _, _ := h.Arr.Keys()
 
-	epData, err := services.ArrGet(sonarrURL, sonarrKey,
+	epData, err := h.Arr.ArrGet(h.SonarrURL, sonarrKey,
 		"/api/v3/episode?seriesId="+url.QueryEscape(seriesID)+"&seasonNumber="+url.QueryEscape(seasonNum))
 	if err != nil {
 		httputil.WriteError(w, "sonarr episode fetch failed", http.StatusBadGateway)
 		return
 	}
-	fileData, err := services.ArrGet(sonarrURL, sonarrKey,
+	fileData, err := h.Arr.ArrGet(h.SonarrURL, sonarrKey,
 		"/api/v3/episodefile?seriesId="+url.QueryEscape(seriesID))
 	if err != nil {
 		httputil.WriteError(w, "sonarr episodefile fetch failed", http.StatusBadGateway)
@@ -155,13 +174,13 @@ func handleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, eps)
 }
 
-// handleCatalogFlags proxies GET /api/procula/catalog/flags unchanged.
-func handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogFlags proxies GET /api/procula/catalog/flags unchanged.
+func (h *Handler) HandleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	resp, err := services.client.Get(proculaURL + "/api/procula/catalog/flags")
+	resp, err := h.Client.Get(h.ProculaURL + "/api/procula/catalog/flags")
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -173,9 +192,8 @@ func handleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 	w.Write(body) //nolint:errcheck
 }
 
-// handleCatalogDetail returns {path, flags, job, synopsis, artwork_url} for a specific media path.
-// It fetches the flag row and the newest matching job from procula, plus catalog metadata.
-func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogDetail returns {path, flags, job, synopsis, artwork_url} for a specific media path.
+func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -190,7 +208,7 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		Rows []map[string]any `json:"rows"`
 	}
 	var fw flagsWrap
-	if resp, err := services.client.Get(proculaURL + "/api/procula/catalog/flags"); err == nil {
+	if resp, err := h.Client.Get(h.ProculaURL + "/api/procula/catalog/flags"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		_ = json.Unmarshal(body, &fw)
@@ -211,7 +229,7 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var matched map[string]any
-	if resp, err := services.client.Get(proculaURL + "/api/procula/jobs"); err == nil {
+	if resp, err := h.Client.Get(h.ProculaURL + "/api/procula/jobs"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		var all []map[string]any
@@ -227,23 +245,20 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve synopsis, artwork, and title from the catalog DB.
-	// For episodes: walk up episode → season → series to find the item that carries them.
-	// Also trigger a background Jellyfin metadata sync so subsequent requests see fresh data.
 	synopsis, artworkURL, title, metadataSyncedAt := "", "", "", ""
 	inCatalog := false
-	if catalogDB != nil {
-		if item, err := catalog.GetCatalogItemByFilePath(catalogDB, path); err == nil && item != nil {
+	if h.DB != nil {
+		if item, err := GetCatalogItemByFilePath(h.DB, path); err == nil && item != nil {
 			inCatalog = true
 			synopsis = item.Synopsis
 			artworkURL = item.ArtworkURL
 			title = item.Title
 			metadataSyncedAt = item.MetadataSyncedAt
 			if item.Type == "movie" {
-				go maybeSyncJellyfinMetadata(item)
+				go MaybeSyncJellyfinMetadata(h.DB, h.Jf, item)
 			} else if item.Type == "episode" {
-				if season, err := catalog.GetCatalogItemByID(catalogDB, item.ParentID); err == nil && season != nil {
-					if series, err := catalog.GetCatalogItemByID(catalogDB, season.ParentID); err == nil && series != nil {
+				if season, err := GetCatalogItemByID(h.DB, item.ParentID); err == nil && season != nil {
+					if series, err := GetCatalogItemByID(h.DB, season.ParentID); err == nil && series != nil {
 						if synopsis == "" {
 							synopsis = series.Synopsis
 						}
@@ -253,7 +268,7 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 						if metadataSyncedAt == "" {
 							metadataSyncedAt = series.MetadataSyncedAt
 						}
-						go maybeSyncJellyfinMetadata(series)
+						go MaybeSyncJellyfinMetadata(h.DB, h.Jf, series)
 					}
 				}
 			}
@@ -272,8 +287,8 @@ func handleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCatalogItemHistory returns recent job history for a file path.
-func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogItemHistory returns recent job history for a file path.
+func (h *Handler) HandleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -283,7 +298,7 @@ func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "path required", http.StatusBadRequest)
 		return
 	}
-	resp, err := services.client.Get(proculaURL + "/api/procula/jobs")
+	resp, err := h.Client.Get(h.ProculaURL + "/api/procula/jobs")
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -306,17 +321,18 @@ func handleCatalogItemHistory(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, matching)
 }
 
-func handleCatalogItems(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogItems lists catalog items with optional type/tier/query filters.
+func (h *Handler) HandleCatalogItems(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	f := catalog.CatalogFilter{
+	f := CatalogFilter{
 		Type:  r.URL.Query().Get("type"),
 		Tier:  r.URL.Query().Get("tier"),
 		Query: r.URL.Query().Get("q"),
 	}
-	items, err := catalog.ListCatalogItems(catalogDB, f)
+	items, err := ListCatalogItems(h.DB, f)
 	if err != nil {
 		slog.Error("list catalog items", "component", "catalog", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
@@ -325,7 +341,8 @@ func handleCatalogItems(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, items)
 }
 
-func handleCatalogItemDetail(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogItemDetail returns a single catalog item by ID.
+func (h *Handler) HandleCatalogItemDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -335,7 +352,7 @@ func handleCatalogItemDetail(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	item, err := catalog.GetCatalogItemByID(catalogDB, id)
+	item, err := GetCatalogItemByID(h.DB, id)
 	if err != nil {
 		slog.Error("get catalog item", "component", "catalog", "id", id, "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
@@ -345,35 +362,36 @@ func handleCatalogItemDetail(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "not found", http.StatusNotFound)
 		return
 	}
-	go maybeSyncJellyfinMetadata(item)
+	go MaybeSyncJellyfinMetadata(h.DB, h.Jf, item)
 	httputil.WriteJSON(w, item)
 }
 
-func handleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
+// HandleCatalogBackfill triggers a background backfill from Radarr+Sonarr.
+func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go BackfillFromArr(catalogDB, services)
+	go BackfillFromArr(h.DB, h.Arr, h.RadarrURL, h.SonarrURL) //nolint:errcheck
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 
-// arrTarget captures the per-arr-type parameters used by handleCatalogCommand.
+// arrTarget captures the per-arr-type parameters used by HandleCatalogCommand.
 type arrTarget struct {
 	baseURL      string
 	apiKey       string
-	itemPath     string // e.g. "/api/v3/movie" or "/api/v3/series"
-	searchCmd    string // e.g. "MoviesSearch" or "SeriesSearch"
-	searchIDKey  string // e.g. "movieIds" (slice) or "seriesId" (scalar)
-	searchIDList bool   // true when the ID value is []int rather than int
-	rescanCmd    string // e.g. "RescanMovie" or "RescanSeries"
-	rescanIDKey  string // e.g. "movieId" or "seriesId"
+	itemPath     string
+	searchCmd    string
+	searchIDKey  string
+	searchIDList bool
+	rescanCmd    string
+	rescanIDKey  string
 }
 
-// handleCatalogCommand proxies force-search and unmonitor commands to Radarr/Sonarr.
+// HandleCatalogCommand proxies force-search and unmonitor commands to Radarr/Sonarr.
 // POST /api/pelicula/catalog/command
-// Body: {"arr_type":"radarr"|"sonarr","arr_id":N,"command":"search"|"unmonitor"}
-func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
+// Body: {"arr_type":"radarr"|"sonarr","arr_id":N,"command":"search"|"unmonitor"|"rescan"}
+func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -391,12 +409,11 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "invalid arr_type", http.StatusBadRequest)
 		return
 	}
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Arr.Keys()
 
-	// Dispatch table keyed by arr_type — only the names and paths differ.
 	targets := map[string]arrTarget{
 		"radarr": {
-			baseURL:      radarrURL,
+			baseURL:      h.RadarrURL,
 			apiKey:       radarrKey,
 			itemPath:     "/api/v3/movie",
 			searchCmd:    "MoviesSearch",
@@ -406,7 +423,7 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 			rescanIDKey:  "movieId",
 		},
 		"sonarr": {
-			baseURL:      sonarrURL,
+			baseURL:      h.SonarrURL,
 			apiKey:       sonarrKey,
 			itemPath:     "/api/v3/series",
 			searchCmd:    "SeriesSearch",
@@ -426,7 +443,7 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		} else {
 			searchID = req.ArrID
 		}
-		if _, err := services.ArrPost(t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
+		if _, err := h.Arr.ArrPost(t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
 			"name":        t.searchCmd,
 			t.searchIDKey: searchID,
 		}); err != nil {
@@ -434,7 +451,7 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "rescan":
-		if _, err := services.ArrPost(t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
+		if _, err := h.Arr.ArrPost(t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
 			"name":        t.rescanCmd,
 			t.rescanIDKey: req.ArrID,
 		}); err != nil {
@@ -443,7 +460,7 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		}
 	case "unmonitor":
 		itemURL := fmt.Sprintf("%s/%d", t.itemPath, req.ArrID)
-		body, err := services.ArrGet(t.baseURL, t.apiKey, itemURL)
+		body, err := h.Arr.ArrGet(t.baseURL, t.apiKey, itemURL)
 		if err != nil {
 			httputil.WriteError(w, req.ArrType+" fetch failed", http.StatusBadGateway)
 			return
@@ -454,7 +471,7 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		item["monitored"] = false
-		if _, err := services.ArrPut(t.baseURL, t.apiKey, itemURL, item); err != nil {
+		if _, err := h.Arr.ArrPut(t.baseURL, t.apiKey, itemURL, item); err != nil {
 			httputil.WriteError(w, req.ArrType+" update failed", http.StatusBadGateway)
 			return
 		}
@@ -465,14 +482,11 @@ func handleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
-// handleCatalogReplace finds the *arr history record for the given episode/movie,
-// marks it failed (blocklisting the release), queries the blocklist for the new
-// entry ID, then triggers a rescan and fresh search.
-//
+// HandleCatalogReplace marks a release as failed (blocklisting it), then triggers
+// a rescan and fresh search.
 // POST /api/pelicula/catalog/replace
 // Body: {"arr_type":"sonarr"|"radarr","arr_id":N,"episode_id":N,"path":"/tv/..."}
-// Returns: {"arr_blocklist_id":N,"display_title":"...","arr_item_id":N,"arr_app":"..."}
-func handleCatalogReplace(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -497,46 +511,40 @@ func handleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Arr.Keys()
 	var baseURL, apiKey string
 	if req.ArrType == "radarr" {
-		baseURL, apiKey = radarrURL, radarrKey
+		baseURL, apiKey = h.RadarrURL, radarrKey
 	} else {
-		baseURL, apiKey = sonarrURL, sonarrKey
+		baseURL, apiKey = h.SonarrURL, sonarrKey
 	}
 
-	// 1. Look up history for this episode/movie to find the import event.
-	historyID, displayTitle, err := findImportHistoryID(baseURL, apiKey, req.ArrType, req.ArrID, req.EpisodeID)
+	historyID, displayTitle, err := h.findImportHistoryID(baseURL, apiKey, req.ArrType, req.ArrID, req.EpisodeID)
 	if err != nil {
-		slog.Warn("replace: history lookup failed", "arr_type", req.ArrType,
-			"arr_id", req.ArrID, "error", err)
+		slog.Warn("replace: history lookup failed", "arr_type", req.ArrType, "arr_id", req.ArrID, "error", err)
 		historyID = 0
 	}
 
-	// 2. Mark the history event as failed (blocklists the release).
 	blocklistID := 0
 	if historyID > 0 {
-		if _, err := services.ArrPost(baseURL, apiKey,
+		if _, err := h.Arr.ArrPost(baseURL, apiKey,
 			fmt.Sprintf("/api/v3/history/failed/%d", historyID), nil); err != nil {
 			slog.Warn("replace: history/failed call failed", "history_id", historyID, "error", err)
 		} else {
-			// 3. Query blocklist to get the new entry ID.
-			blocklistID, _ = findBlocklistID(baseURL, apiKey, req.ArrType, req.ArrID)
+			blocklistID, _ = h.findBlocklistID(baseURL, apiKey, req.ArrType, req.ArrID)
 		}
 	}
 
-	// 4. Trigger rescan (so *arr notices the deleted file after procula removes it).
 	var rescanCmd map[string]any
 	if req.ArrType == "radarr" {
 		rescanCmd = map[string]any{"name": "RescanMovie", "movieId": req.ArrID}
 	} else {
 		rescanCmd = map[string]any{"name": "RescanSeries", "seriesId": req.ArrID}
 	}
-	if _, err := services.ArrPost(baseURL, apiKey, "/api/v3/command", rescanCmd); err != nil {
+	if _, err := h.Arr.ArrPost(baseURL, apiKey, "/api/v3/command", rescanCmd); err != nil {
 		slog.Warn("replace: rescan command failed", "arr_type", req.ArrType, "error", err)
 	}
 
-	// 5. Trigger a fresh search.
 	var searchCmd map[string]any
 	if req.ArrType == "radarr" {
 		searchCmd = map[string]any{"name": "MoviesSearch", "movieIds": []int{req.ArrID}}
@@ -545,7 +553,7 @@ func handleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 	} else {
 		searchCmd = map[string]any{"name": "SeriesSearch", "seriesId": req.ArrID}
 	}
-	if _, err := services.ArrPost(baseURL, apiKey, "/api/v3/command", searchCmd); err != nil {
+	if _, err := h.Arr.ArrPost(baseURL, apiKey, "/api/v3/command", searchCmd); err != nil {
 		slog.Warn("replace: search command failed", "arr_type", req.ArrType, "error", err)
 	}
 
@@ -561,9 +569,9 @@ func handleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCatalogUnblocklist removes an entry from the *arr blocklist.
+// HandleCatalogUnblocklist removes an entry from the *arr blocklist.
 // DELETE /api/pelicula/catalog/blocklist/{id}
-func handleCatalogUnblocklist(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleCatalogUnblocklist(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -575,97 +583,27 @@ func handleCatalogUnblocklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	arrType := r.URL.Query().Get("arr_type")
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Arr.Keys()
 	if arrType == "radarr" {
-		services.ArrDelete(radarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.ArrDelete(h.RadarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
 	} else if arrType == "sonarr" {
-		services.ArrDelete(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.ArrDelete(h.SonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
 	} else {
-		// No arr_type provided: try both, ignore errors.
-		services.ArrDelete(sonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
-		services.ArrDelete(radarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.ArrDelete(h.SonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.ArrDelete(h.RadarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// findImportHistoryID queries *arr history for an episode/movie and returns the
-// historyId of the most recent downloadFolderImported event, plus the source title.
-func findImportHistoryID(baseURL, apiKey, arrType string, arrID, episodeID int) (int, string, error) {
-	var path string
-	if arrType == "sonarr" {
-		if episodeID == 0 {
-			return 0, "", fmt.Errorf("episode_id required for sonarr history lookup")
-		}
-		path = fmt.Sprintf("/api/v3/history/episode?episodeId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", episodeID)
-	} else {
-		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", arrID)
-	}
-	data, err := services.ArrGet(baseURL, apiKey, path)
-	if err != nil {
-		return 0, "", err
-	}
-
-	// Sonarr history/episode returns an array directly.
-	// Radarr history/movie returns {records:[...]} or an array depending on version.
-	var records []map[string]any
-	if err := json.Unmarshal(data, &records); err != nil {
-		var wrapped struct {
-			Records []map[string]any `json:"records"`
-		}
-		if err2 := json.Unmarshal(data, &wrapped); err2 != nil {
-			return 0, "", fmt.Errorf("parse history: %w", err)
-		}
-		records = wrapped.Records
-	}
-
-	for _, rec := range records {
-		id := int(floatVal(rec, "id"))
-		if id == 0 {
-			continue
-		}
-		title := strVal(rec, "sourceTitle")
-		return id, title, nil
-	}
-	return 0, "", fmt.Errorf("no import history found")
-}
-
-// findBlocklistID queries the *arr blocklist to find the most recently added
-// entry for the given item. Returns 0 if not found (non-fatal).
-func findBlocklistID(baseURL, apiKey, arrType string, arrID int) (int, error) {
-	data, err := services.ArrGet(baseURL, apiKey,
-		"/api/v3/blocklist?pageSize=10&sortKey=date&sortDirection=descending")
-	if err != nil {
-		return 0, err
-	}
-	var resp struct {
-		Records []map[string]any `json:"records"`
-	}
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return 0, err
-	}
-	for _, rec := range resp.Records {
-		var matchID float64
-		if arrType == "radarr" {
-			matchID = floatVal(rec, "movieId")
-		} else {
-			matchID = floatVal(rec, "seriesId")
-		}
-		if int(matchID) == arrID {
-			return int(floatVal(rec, "id")), nil
-		}
-	}
-	return 0, nil
-}
-
-// handleCatalogQualityProfiles returns quality profile id→name maps for Radarr and Sonarr.
+// HandleCatalogQualityProfiles returns quality profile id→name maps for Radarr and Sonarr.
 // GET /api/pelicula/catalog/qualityprofiles
 // Response: {"radarr":{"1":"HD-1080p",...},"sonarr":{"4":"HD TV",...}}
-func handleCatalogQualityProfiles(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleCatalogQualityProfiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	sonarrKey, radarrKey, _ := services.Keys()
+	sonarrKey, radarrKey, _ := h.Arr.Keys()
 
 	type fetch struct {
 		data []byte
@@ -674,11 +612,11 @@ func handleCatalogQualityProfiles(w http.ResponseWriter, r *http.Request) {
 	rCh := make(chan fetch, 1)
 	sCh := make(chan fetch, 1)
 	go func() {
-		body, err := services.ArrGet(radarrURL, radarrKey, "/api/v3/qualityprofile")
+		body, err := h.Arr.ArrGet(h.RadarrURL, radarrKey, "/api/v3/qualityprofile")
 		rCh <- fetch{body, err}
 	}()
 	go func() {
-		body, err := services.ArrGet(sonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		body, err := h.Arr.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/qualityprofile")
 		sCh <- fetch{body, err}
 	}()
 
@@ -711,4 +649,71 @@ func handleCatalogQualityProfiles(w http.ResponseWriter, r *http.Request) {
 		"radarr": radarrMap,
 		"sonarr": sonarrMap,
 	})
+}
+
+// findImportHistoryID queries *arr history for an episode/movie and returns the
+// historyId of the most recent downloadFolderImported event, plus the source title.
+func (h *Handler) findImportHistoryID(baseURL, apiKey, arrType string, arrID, episodeID int) (int, string, error) {
+	var path string
+	if arrType == "sonarr" {
+		if episodeID == 0 {
+			return 0, "", fmt.Errorf("episode_id required for sonarr history lookup")
+		}
+		path = fmt.Sprintf("/api/v3/history/episode?episodeId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", episodeID)
+	} else {
+		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", arrID)
+	}
+	data, err := h.Arr.ArrGet(baseURL, apiKey, path)
+	if err != nil {
+		return 0, "", err
+	}
+
+	var records []map[string]any
+	if err := json.Unmarshal(data, &records); err != nil {
+		var wrapped struct {
+			Records []map[string]any `json:"records"`
+		}
+		if err2 := json.Unmarshal(data, &wrapped); err2 != nil {
+			return 0, "", fmt.Errorf("parse history: %w", err)
+		}
+		records = wrapped.Records
+	}
+
+	for _, rec := range records {
+		id := int(floatVal(rec, "id"))
+		if id == 0 {
+			continue
+		}
+		title, _ := rec["sourceTitle"].(string)
+		return id, title, nil
+	}
+	return 0, "", fmt.Errorf("no import history found")
+}
+
+// findBlocklistID queries the *arr blocklist to find the most recently added
+// entry for the given item. Returns 0 if not found (non-fatal).
+func (h *Handler) findBlocklistID(baseURL, apiKey, arrType string, arrID int) (int, error) {
+	data, err := h.Arr.ArrGet(baseURL, apiKey,
+		"/api/v3/blocklist?pageSize=10&sortKey=date&sortDirection=descending")
+	if err != nil {
+		return 0, err
+	}
+	var resp struct {
+		Records []map[string]any `json:"records"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return 0, err
+	}
+	for _, rec := range resp.Records {
+		var matchID float64
+		if arrType == "radarr" {
+			matchID = floatVal(rec, "movieId")
+		} else {
+			matchID = floatVal(rec, "seriesId")
+		}
+		if int(matchID) == arrID {
+			return int(floatVal(rec, "id")), nil
+		}
+	}
+	return 0, nil
 }

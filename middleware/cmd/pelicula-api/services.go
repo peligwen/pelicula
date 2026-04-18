@@ -285,6 +285,36 @@ func redactedURL(u *url.URL) string {
 	return u.String()
 }
 
+// GetJellyfinAPIKey returns the cached Jellyfin API key.
+// Implements catalog.JellyfinMetaClient.
+func (s *ServiceClients) GetJellyfinAPIKey() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.JellyfinAPIKey
+}
+
+// GetJellyfinUserID returns the cached Jellyfin user ID for pelicula-internal.
+// Implements catalog.JellyfinMetaClient.
+func (s *ServiceClients) GetJellyfinUserID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.JellyfinUserID
+}
+
+// SetJellyfinUserID stores the resolved Jellyfin user ID.
+// Implements catalog.JellyfinMetaClient.
+func (s *ServiceClients) SetJellyfinUserID(id string) {
+	s.mu.Lock()
+	s.JellyfinUserID = id
+	s.mu.Unlock()
+}
+
+// JellyfinGet makes an authenticated GET request to Jellyfin.
+// Implements catalog.JellyfinMetaClient.
+func (s *ServiceClients) JellyfinGet(path, apiKey string) ([]byte, error) {
+	return jellyfinGet(s, path, apiKey)
+}
+
 // ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.
 func (s *ServiceClients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	const pageSize = 100

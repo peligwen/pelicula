@@ -29,10 +29,6 @@ var authMiddleware *peligrosa.Auth
 var inviteStore *peligrosa.InviteStore
 var requestStore *peligrosa.RequestStore
 
-// catalogDB is the catalog SQLite database handle.
-// Set by main() once opened.
-var catalogDB *sql.DB
-
 // mainDB is the primary SQLite database handle (pelicula.db).
 // Set by main() once opened.
 var mainDB *sql.DB
