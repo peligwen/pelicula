@@ -1,29 +1,20 @@
 package main
 
-// setup_helpers.go — crypto generators and type alias that remain in cmd/
+// setup_helpers.go — crypto generators that remain in cmd/
 // because they are used by multiple cmd/ files that have not yet been migrated.
 //
-//   - generateAPIKey: used by jellyfin_wiring.go, settings.go, and injected
-//     into internal/app/setup.Handler
+//   - generateAPIKey: used by jellyfin_wiring.go and injected into
+//     internal/app/setup.Handler and internal/app/settings.Handler
 //   - generateReadablePassword: used by main.go (deps.GenPassword) and
 //     injected into internal/app/setup.Handler
 //   - cryptoRandN: helper only for generateReadablePassword
-//   - SetupRequest: type alias so settings.go (handleSettingsReset) continues
-//     to compile without importing the setup package directly
 
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
 	"math/big"
-
-	appsetup "pelicula-api/internal/app/setup"
 )
-
-// SetupRequest is a local alias for the canonical type in internal/app/setup.
-// settings.go uses this type in handleSettingsReset to decode the same wizard
-// body shape; keeping the alias avoids a new import in that file.
-type SetupRequest = appsetup.SetupRequest
 
 // generateReadablePassword returns a 4-word passphrase like "calm-tiger-sobre-leaps",
 // drawn from weightedPassphraseWords (wordlist.go). All lowercase, hyphen-separated.

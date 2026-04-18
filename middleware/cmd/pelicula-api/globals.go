@@ -10,6 +10,7 @@ package main
 
 import (
 	"database/sql"
+	"sync"
 
 	"pelicula-api/internal/app/library"
 	appservices "pelicula-api/internal/app/services"
@@ -17,6 +18,15 @@ import (
 	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/peligrosa"
 )
+
+// envPath is the well-known path to the .env file inside the container.
+// Used by jfWirer (jellyfin wiring) and settings handler construction in main().
+const envPath = "/project/.env"
+
+// envMu serialises reads and writes to the .env file so concurrent operations
+// cannot interleave their read-modify-write cycles.
+// Used by jfWirer (passed as &envMu). The settings Handler has its own mutex.
+var envMu sync.Mutex
 
 // services is the package-level Clients instance, used by all handler
 // and helper functions that haven't been migrated to accept it as a parameter.

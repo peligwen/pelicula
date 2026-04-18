@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"pelicula-api/httputil"
 	"strings"
 	"testing"
+
+	appsetup "pelicula-api/internal/app/setup"
 )
 
 // ── parseEnvFile / writeEnvFile round-trip ────────────────────────────────────
@@ -25,11 +27,11 @@ func TestParseEnvFile_RoundTrip(t *testing.T) {
 		"NOTIFICATIONS_ENABLED": "false",
 	}
 
-	if err := writeEnvFile(path, in); err != nil {
+	if err := WriteEnvFile(path, in); err != nil {
 		t.Fatalf("writeEnvFile: %v", err)
 	}
 
-	got, err := parseEnvFile(path)
+	got, err := ParseEnvFile(path)
 	if err != nil {
 		t.Fatalf("parseEnvFile: %v", err)
 	}
@@ -47,7 +49,7 @@ func TestParseEnvFile_StripQuotes(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`KEY="value with spaces"`+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := parseEnvFile(path)
+	got, err := ParseEnvFile(path)
 	if err != nil {
 		t.Fatalf("parseEnvFile: %v", err)
 	}
@@ -66,7 +68,7 @@ KEY=value
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := parseEnvFile(path)
+	got, err := ParseEnvFile(path)
 	if err != nil {
 		t.Fatalf("parseEnvFile: %v", err)
 	}
@@ -79,15 +81,15 @@ KEY=value
 }
 
 func TestParseEnvFile_NotExist(t *testing.T) {
-	_, err := parseEnvFile("/nonexistent/.env")
+	_, err := ParseEnvFile("/nonexistent/.env")
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
 }
 
-// ── handleSettingsUpdate input validation ─────────────────────────────────────
+// ── HandleSettings input validation ──────────────────────────────────────────
 
-func newSettingsEnv(t *testing.T) string {
+func newSettingsEnv(t *testing.T) (string, *Handler) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
@@ -107,32 +109,23 @@ func newSettingsEnv(t *testing.T) string {
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
 	}
-	if err := writeEnvFile(path, vars); err != nil {
+	if err := WriteEnvFile(path, vars); err != nil {
 		t.Fatalf("write test .env: %v", err)
 	}
-	return path
+	h := New(path, func() string { return "testkey" })
+	return path, h
 }
 
 func TestHandleSettingsUpdate_RejectsInvalidCharacters(t *testing.T) {
-	path := newSettingsEnv(t)
-	t.Setenv("HOME", filepath.Dir(path)) // unused but harmless
-	// Patch envPath to use the temp file by hijacking it via env
-	origEnvPath := envPath
-	// We can't reassign the const directly; test via the handler with
-	// a direct call won't work cleanly — use the HTTP layer instead
-	_ = origEnvPath
-	_ = path
+	_, h := newSettingsEnv(t)
 
-	body, _ := json.Marshal(SettingsResponse{Country: "bad\ncountry"})
+	body, _ := json.Marshal(settingsResponse{Country: "bad\ncountry"})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
-	handleSettingsUpdate(w, req)
+	h.handleSettingsUpdate(w, req)
 
-	// envPath is a compile-time const pointing at /project/.env which
-	// won't exist in test; the handler will fail when trying to read it
-	// after validation passes. The important thing is it does NOT fail
-	// before validation — it should fail with 400 for the bad character.
+	// The handler should reject the invalid character with 400.
 	if w.Code == http.StatusOK {
 		t.Error("expected non-200 for country containing newline")
 	}
@@ -142,11 +135,13 @@ func TestHandleSettingsUpdate_RejectsInvalidCharacters(t *testing.T) {
 }
 
 func TestHandleSettingsUpdate_RejectsForeignOrigin(t *testing.T) {
-	body, _ := json.Marshal(SettingsResponse{Country: "Netherlands"})
+	_, h := newSettingsEnv(t)
+
+	body, _ := json.Marshal(settingsResponse{Country: "Netherlands"})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	req.Header.Set("Origin", "https://evil.example.com")
 	w := httptest.NewRecorder()
-	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(h.handleSettingsUpdate)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for foreign origin", w.Code)
@@ -155,11 +150,13 @@ func TestHandleSettingsUpdate_RejectsForeignOrigin(t *testing.T) {
 
 func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
 	// Empty Origin must be rejected by the strict CSRF guard.
-	body, _ := json.Marshal(SettingsResponse{Country: "Netherlands"})
+	_, h := newSettingsEnv(t)
+
+	body, _ := json.Marshal(settingsResponse{Country: "Netherlands"})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	// No Origin header set
 	w := httptest.NewRecorder()
-	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsUpdate)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(h.handleSettingsUpdate)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for missing Origin (CSRF guard)", w.Code)
@@ -167,25 +164,29 @@ func TestHandleSettingsUpdate_RejectsEmptyOrigin(t *testing.T) {
 }
 
 func TestHandleSettingsUpdate_RejectsInvalidWireGuardKey(t *testing.T) {
-	body, _ := json.Marshal(SettingsResponse{WireguardKey: "tooshort"})
+	_, h := newSettingsEnv(t)
+
+	body, _ := json.Marshal(settingsResponse{WireguardKey: "tooshort"})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
 	req.Header.Set("Origin", "http://localhost:7354")
 	w := httptest.NewRecorder()
-	handleSettingsUpdate(w, req)
+	h.handleSettingsUpdate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for invalid WireGuard key", w.Code)
 	}
 }
 
-func TestHandleSettingsReset_RejectsEmptyOrigin(t *testing.T) {
-	body, _ := json.Marshal(SetupRequest{
+func TestHandleReset_RejectsEmptyOrigin(t *testing.T) {
+	_, h := newSettingsEnv(t)
+
+	body, _ := json.Marshal(appsetup.SetupRequest{
 		WireguardKey: strings.Repeat("A", 43) + "=",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings/reset", bytes.NewReader(body))
 	// No Origin header
 	w := httptest.NewRecorder()
-	httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset)).ServeHTTP(w, req)
+	httputil.RequireLocalOriginStrict(http.HandlerFunc(h.HandleReset)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin on reset", w.Code)

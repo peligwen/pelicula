@@ -31,6 +31,7 @@ import (
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/missingwatcher"
 	appservices "pelicula-api/internal/app/services"
+	"pelicula-api/internal/app/settings"
 	appsetup "pelicula-api/internal/app/setup"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
@@ -367,6 +368,8 @@ func main() {
 	requestStore = requests
 	mainDB = db
 
+	settingsHandler := settings.New(envPath, generateAPIKey)
+
 	actionsHandler := actions.New(services.HTTPClient(), proculaURL, strings.TrimSpace(os.Getenv("PROCULA_API_KEY")))
 
 	mux := http.NewServeMux()
@@ -409,8 +412,8 @@ func main() {
 	mux.Handle("/api/pelicula/downloads/cancel", auth.GuardAdmin(http.HandlerFunc(app.dlHandler.HandleDownloadCancel)))
 
 	// admin only: settings
-	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettings))))
-	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(handleSettingsReset))))
+	mux.Handle("/api/pelicula/settings", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(settingsHandler.HandleSettings))))
+	mux.Handle("/api/pelicula/settings/reset", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(settingsHandler.HandleReset))))
 
 	// admin only: backup export / import
 	mux.Handle("/api/pelicula/export", auth.GuardAdmin(http.HandlerFunc(app.backupHandler.HandleExport)))
