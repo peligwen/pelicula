@@ -7,113 +7,7 @@
     <title>Join Pelicula</title>
     <link rel="stylesheet" href="/theme.css">
     <link rel="stylesheet" href="/components.css">
-    <style>
-        *, *::before, *::after { box-sizing: border-box; }
-        html { font-size: 18px; }
-        body { font-family: var(--font-body, 'Nunito Sans', sans-serif); color: var(--ink, #2a1f35); min-height: 100vh; }
-
-        .reg-wrap {
-            min-height: 100vh; display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            padding: 2rem 1.5rem; position: relative; z-index: 1;
-        }
-        .reg-card {
-            width: 100%; max-width: 420px;
-            background: var(--panel, #fff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4));
-            border-radius: 24px; padding: 2rem 2rem 1.75rem;
-            box-shadow: 0 16px 48px rgba(180,140,220,0.2);
-        }
-        .reg-logo {
-            font-family: var(--font-display, 'Nunito', sans-serif);
-            font-weight: 900; font-size: 1.8rem; letter-spacing: 0.12em;
-            color: var(--ink, #2a1f35); margin-bottom: 0.2rem;
-        }
-        .reg-logo .accent { color: var(--pink, #f060a8); }
-        .reg-subtitle {
-            font-size: 0.58rem; letter-spacing: 0.2em; text-transform: lowercase;
-            color: var(--faint, #c8b8d8); margin-bottom: 1.75rem;
-            font-family: var(--font-body, 'Nunito Sans', sans-serif);
-        }
-        .reg-heading {
-            font-family: var(--font-display, 'Nunito', sans-serif);
-            font-size: 1rem; font-weight: 800; color: var(--ink, #2a1f35); margin-bottom: 0.35rem;
-        }
-        .reg-hint {
-            font-size: 0.78rem; color: var(--muted, #9080a8); margin-bottom: 1.5rem; line-height: 1.4;
-        }
-        .reg-field { margin-bottom: 0.75rem; }
-        .reg-field label {
-            display: block; font-size: 0.7rem; color: var(--muted, #9080a8);
-            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.3rem;
-            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
-        }
-        .reg-field input {
-            width: 100%; padding: 0.65rem 1rem;
-            background: var(--panel2, #fdf5ff); border: 1.5px solid var(--border2, rgba(180,140,220,0.4));
-            border-radius: 50px; color: var(--ink, #2a1f35); font-size: 0.88rem; outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            font-family: var(--font-body, 'Nunito Sans', sans-serif);
-        }
-        .reg-field input:focus { border-color: var(--pink, #f060a8); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
-        .reg-strength { height: 5px; border-radius: 50px; background: var(--border, rgba(180,140,220,0.25)); margin-top: 0.35rem; overflow: hidden; }
-        .reg-strength-bar { height: 100%; width: 0; border-radius: 50px; transition: width 0.2s, background 0.2s; }
-        .reg-generate {
-            width: 100%; margin-top: 0.5rem; padding: 0.55rem 1rem;
-            background: transparent; border: 1.5px solid var(--pink, #f060a8);
-            border-radius: 50px; color: var(--pink, #f060a8);
-            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800;
-            font-size: 0.78rem; letter-spacing: 0.05em; cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-        }
-        .reg-generate:hover { background: var(--pink, #f060a8); color: #fff; }
-        .reg-submit {
-            width: 100%; margin-top: 1.25rem; padding: 0.75rem;
-            background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
-            border: none; border-radius: 50px; color: #fff;
-            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800;
-            font-size: 0.88rem; letter-spacing: 0.05em; cursor: pointer;
-            box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s, transform 0.1s;
-        }
-        .reg-submit:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
-        .reg-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        .reg-error { font-size: 0.8rem; color: var(--pink, #f060a8); margin-top: 0.75rem; line-height: 1.4; display: none; }
-        .reg-error a { color: var(--pink, #f060a8); }
-
-        /* Success card */
-        .reg-success { display: none; text-align: center; }
-        .reg-success-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
-        .reg-success-title { font-family: var(--font-display, 'Nunito', sans-serif); font-size: 1.1rem; font-weight: 800; color: var(--mint, #40c8a8); margin-bottom: 0.4rem; }
-        .reg-success-text { font-size: 0.82rem; color: var(--muted, #9080a8); margin-bottom: 1.5rem; line-height: 1.45; }
-        .reg-open-btn {
-            display: inline-block; padding: 0.65rem 1.5rem;
-            background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
-            border: none; border-radius: 50px; color: #fff;
-            font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 800;
-            font-size: 0.88rem; text-decoration: none;
-            box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s;
-        }
-        .reg-open-btn:hover { opacity: 0.9; }
-        .reg-qr { margin: 1.25rem auto 0; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
-        .reg-qr-label { font-size: 0.68rem; color: var(--faint, #c8b8d8); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; }
-
-        /* Dead link page */
-        .reg-dead { text-align: center; }
-        .reg-dead-icon { font-size: 2rem; margin-bottom: 0.75rem; color: var(--faint, #c8b8d8); }
-        .reg-dead-title { font-family: var(--font-display, 'Nunito', sans-serif); font-size: 1rem; font-weight: 800; color: var(--muted, #9080a8); margin-bottom: 0.4rem; }
-        .reg-dead-text { font-size: 0.8rem; color: var(--faint, #c8b8d8); line-height: 1.45; }
-
-        /* Loading state */
-        .reg-loading { text-align: center; color: var(--faint, #c8b8d8); font-size: 0.82rem; padding: 1rem 0; }
-
-        .pw-field-wrap { position: relative; }
-        .pw-eye-btn {
-            position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);
-            background: none; border: none; cursor: pointer; font-size: 1rem;
-            color: var(--muted, #9080a8); padding: 0.25rem; line-height: 1;
-            transition: color 0.15s;
-        }
-        .pw-eye-btn:hover { color: var(--pink, #f060a8); }
-    </style>
+    <link rel="stylesheet" href="/register.css">
 </head>
 <body>
     <div class="reg-wrap">
@@ -138,24 +32,24 @@
                 <div class="reg-heading">Create your account</div>
                 <div class="reg-hint">Pick a username and password. You'll use these to log in to the Pelicula dashboard.</div>
                 <form id="reg-form" autocomplete="off">
-                    <div class="reg-field">
-                        <label for="reg-username">Username</label>
+                    <div class="field">
+                        <label class="field-label" for="reg-username">Username</label>
                         <input id="reg-username" type="text" autocomplete="username" placeholder="yourname" maxlength="64" required>
                     </div>
-                    <div class="reg-field">
-                        <label for="reg-password">Password</label>
+                    <div class="field">
+                        <label class="field-label" for="reg-password">Password</label>
                         <div class="pw-field-wrap">
                             <input id="reg-password" type="password" autocomplete="new-password" placeholder="Choose a password" required>
                             <button type="button" id="pw-toggle" class="pw-eye-btn" title="Toggle visibility">👁</button>
                         </div>
-                        <button type="button" id="suggest-pw" class="reg-generate">Generate password</button>
-                        <div class="reg-strength"><div class="reg-strength-bar" id="reg-strength-bar"></div></div>
+                        <button type="button" id="suggest-pw" class="btn-secondary">Generate password</button>
+                        <div class="strength-meter"><div class="strength-bar" id="reg-strength-bar"></div></div>
                     </div>
-                    <div class="reg-field">
-                        <label for="reg-confirm">Confirm password</label>
+                    <div class="field">
+                        <label class="field-label" for="reg-confirm">Confirm password</label>
                         <input id="reg-confirm" type="password" autocomplete="new-password" placeholder="Repeat password" required>
                     </div>
-                    <button type="submit" class="reg-submit" id="reg-submit">Create account</button>
+                    <button type="submit" class="btn-primary" id="reg-submit">Create account</button>
                 </form>
                 <div class="reg-error" id="reg-error"></div>
             </div>

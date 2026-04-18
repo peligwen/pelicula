@@ -323,6 +323,7 @@ services:
       - ./nginx/services.js:/usr/share/nginx/html/services.js:ro
       - ./nginx/register.html:/usr/share/nginx/html/register.html:ro
       - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
+      - ./nginx/register.css:/usr/share/nginx/html/register.css:ro
       - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
       - ./nginx/sse.js:/usr/share/nginx/html/sse.js:ro
       - ./nginx/fonts:/usr/share/nginx/html/fonts:ro
