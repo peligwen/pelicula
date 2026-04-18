@@ -43,6 +43,7 @@ type App struct {
 	statusTTL     statusTTLCache
 	dlHandler     *downloads.Handler
 	healthHandler *health.Handler
+	vpnConfigured bool
 }
 
 // indexerCountCacheApp caches the Prowlarr indexer count.
@@ -111,7 +112,8 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	urls := config.LoadURLs()
+	cfg := config.Load()
+	urls := cfg.URLs
 
 	// Setup mode: only serve setup endpoints
 	if isSetupMode() {
@@ -133,14 +135,14 @@ func main() {
 	svc := NewServiceClients("/config")
 	initSearchMode()
 
-	cfg, err := loadLibraries("/config/pelicula")
+	libCfg, err := loadLibraries("/config/pelicula")
 	if err != nil {
 		slog.Warn("library registry", "component", "main", "error", err)
 	}
 	libraryRegistryMu.Lock()
-	libraryRegistry = cfg
+	libraryRegistry = libCfg
 	libraryRegistryMu.Unlock()
-	slog.Info("library registry loaded", "component", "main", "count", len(cfg.Libraries))
+	slog.Info("library registry loaded", "component", "main", "count", len(libCfg.Libraries))
 	for _, w := range CheckLibraryAccess() {
 		slog.Warn("library access check", "component", "main", "warning", w)
 	}
@@ -179,11 +181,11 @@ func main() {
 
 	go StartMissingWatcher(svc, 2*time.Minute)
 
-	if os.Getenv("WIREGUARD_PRIVATE_KEY") != "" {
+	if cfg.WireguardPrivateKey != "" {
 		go StartVPNWatchdog(svc)
 	}
 
-	peligrosa.SetOpenRegistration(os.Getenv("PELICULA_OPEN_REGISTRATION") == "true")
+	peligrosa.SetOpenRegistration(cfg.OpenRegistration)
 
 	auth := peligrosa.NewAuth(peligrosa.AuthConfig{
 		DB:       db,
@@ -199,16 +201,17 @@ func main() {
 
 	// Build App struct — all new-style handler state lives here.
 	app := &App{
-		svc:       svc,
-		urls:      urls,
-		sseHub:    hub,
-		ssePoller: poller,
-		catalogDB: cdb,
-		mainDB:    db,
-		auth:      auth,
-		invites:   invites,
-		requests:  requests,
-		statusTTL: statusTTLCache{ttl: 5 * time.Second},
+		svc:           svc,
+		urls:          urls,
+		sseHub:        hub,
+		ssePoller:     poller,
+		catalogDB:     cdb,
+		mainDB:        db,
+		auth:          auth,
+		invites:       invites,
+		requests:      requests,
+		statusTTL:     statusTTLCache{ttl: 5 * time.Second},
+		vpnConfigured: cfg.WireguardPrivateKey != "",
 		dlHandler: &downloads.Handler{
 			Svc:       svc,
 			SonarrURL: urls.Sonarr,
@@ -363,7 +366,7 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"services":       svcHealth,
 		"wired":          a.svc.IsWired(),
 		"indexers":       idxCount,
-		"vpn_configured": os.Getenv("WIREGUARD_PRIVATE_KEY") != "",
+		"vpn_configured": a.vpnConfigured,
 		"warnings":       CheckLibraryAccess(),
 	}
 	httputil.WriteJSON(w, status)
