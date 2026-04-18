@@ -1,4 +1,4 @@
-package main
+package sse
 
 import (
 	"context"
@@ -9,21 +9,23 @@ import (
 	"time"
 )
 
-// TestSSEHubBroadcastFanOut verifies that a broadcast reaches all registered clients.
-func TestSSEHubBroadcastFanOut(t *testing.T) {
-	hub := NewSSEHub()
+// TestHubBroadcastFanOut verifies that a broadcast reaches all registered clients.
+func TestHubBroadcastFanOut(t *testing.T) {
+	t.Parallel()
 
-	clients := make([]*sseClient, 3)
+	hub := NewHub()
+
+	clients := make([]*client, 3)
 	for i := range clients {
-		c := &sseClient{
-			events: make(chan SSEMessage, 16),
+		c := &client{
+			events: make(chan Message, 16),
 			done:   make(chan struct{}),
 		}
 		hub.register(c)
 		clients[i] = c
 	}
 
-	msg := SSEMessage{Event: "test", Data: []byte(`{"hello":"world"}`), ID: "1"}
+	msg := Message{Event: "test", Data: []byte(`{"hello":"world"}`), ID: "1"}
 	hub.Broadcast(msg)
 
 	for i, c := range clients {
@@ -41,19 +43,21 @@ func TestSSEHubBroadcastFanOut(t *testing.T) {
 	}
 }
 
-// TestSSEHubBroadcastDropsWhenFull verifies that broadcasting to a full client
+// TestHubBroadcastDropsWhenFull verifies that broadcasting to a full client
 // channel does not block.
-func TestSSEHubBroadcastDropsWhenFull(t *testing.T) {
-	hub := NewSSEHub()
+func TestHubBroadcastDropsWhenFull(t *testing.T) {
+	t.Parallel()
+
+	hub := NewHub()
 
 	// Register a client with a buffer of 16 and fill it completely.
-	c := &sseClient{
-		events: make(chan SSEMessage, 16),
+	c := &client{
+		events: make(chan Message, 16),
 		done:   make(chan struct{}),
 	}
 	hub.register(c)
 
-	filler := SSEMessage{Event: "fill", Data: []byte("x"), ID: "0"}
+	filler := Message{Event: "fill", Data: []byte("x"), ID: "0"}
 	for i := 0; i < 16; i++ {
 		c.events <- filler
 	}
@@ -61,7 +65,7 @@ func TestSSEHubBroadcastDropsWhenFull(t *testing.T) {
 	// Now broadcast should not block even though the channel is full.
 	done := make(chan struct{})
 	go func() {
-		hub.Broadcast(SSEMessage{Event: "overflow", Data: []byte("y"), ID: "17"})
+		hub.Broadcast(Message{Event: "overflow", Data: []byte("y"), ID: "17"})
 		close(done)
 	}()
 
@@ -73,13 +77,15 @@ func TestSSEHubBroadcastDropsWhenFull(t *testing.T) {
 	}
 }
 
-// TestSSEHubUnregisterCleansUp verifies that unregistering a client removes it
+// TestHubUnregisterCleansUp verifies that unregistering a client removes it
 // from the hub and closes its done channel.
-func TestSSEHubUnregisterCleansUp(t *testing.T) {
-	hub := NewSSEHub()
+func TestHubUnregisterCleansUp(t *testing.T) {
+	t.Parallel()
 
-	c := &sseClient{
-		events: make(chan SSEMessage, 16),
+	hub := NewHub()
+
+	c := &client{
+		events: make(chan Message, 16),
 		done:   make(chan struct{}),
 	}
 	hub.register(c)
@@ -108,9 +114,11 @@ func TestSSEHubUnregisterCleansUp(t *testing.T) {
 	}
 }
 
-// TestSSEHubHandleSSE_WireFormat verifies the SSE wire format written by HandleSSE.
-func TestSSEHubHandleSSE_WireFormat(t *testing.T) {
-	hub := NewSSEHub()
+// TestHubHandleSSEWireFormat verifies the SSE wire format written by HandleSSE.
+func TestHubHandleSSEWireFormat(t *testing.T) {
+	t.Parallel()
+
+	hub := NewHub()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -140,7 +148,7 @@ func TestSSEHubHandleSSE_WireFormat(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	msg := SSEMessage{
+	msg := Message{
 		Event: "download",
 		Data:  []byte(`{"id":42}`),
 		ID:    "99",

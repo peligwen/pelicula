@@ -1,4 +1,4 @@
-package main
+package sse
 
 import (
 	"context"
@@ -8,17 +8,53 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
-
-	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
-// TestSSEPollerBroadcastsOnChange verifies that:
+// stubSvc is a minimal ServiceQuerier for tests.
+type stubSvc struct {
+	qbtHandler http.Handler
+}
+
+func (s *stubSvc) CheckHealth() map[string]string { return map[string]string{} }
+func (s *stubSvc) IsWired() bool                  { return false }
+func (s *stubSvc) QbtGet(path string) ([]byte, error) {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	s.qbtHandler.ServeHTTP(rec, req)
+	if rec.Code >= 400 {
+		return nil, &httpStatusError{Code: rec.Code, URL: path}
+	}
+	return rec.Body.Bytes(), nil
+}
+
+// newTestClient registers a buffered client against hub and returns it.
+// The caller must defer hub.unregister(c) to clean up.
+func newTestClient(hub *Hub, cap int) *client {
+	c := &client{
+		events: make(chan Message, cap),
+		done:   make(chan struct{}),
+	}
+	hub.register(c)
+	return c
+}
+
+// drainEvents collects all buffered events from c into a slice of event names.
+func drainEvents(c *client) []string {
+	var names []string
+	for len(c.events) > 0 {
+		msg := <-c.events
+		names = append(names, msg.Event)
+	}
+	return names
+}
+
+// TestPollerBroadcastsOnChange verifies that:
 //  1. The first pollOnce broadcasts events for all successfully-fetched types.
 //  2. The second pollOnce with identical data broadcasts nothing.
 //  3. After data changes on the server, the next pollOnce broadcasts again.
-func TestSSEPollerBroadcastsOnChange(t *testing.T) {
-	// NOTE: mutates package globals (proculaURL, qbtBaseURL) — cannot use t.Parallel()
-	// Use an atomic so the HTTP handler can read an updated value.
+func TestPollerBroadcastsOnChange(t *testing.T) {
+	t.Parallel()
+
 	var storageUsed atomic.Int64
 
 	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,36 +75,25 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 	}))
 	defer procula.Close()
 
-	qbt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	qbtMux := http.NewServeMux()
+	qbtMux.HandleFunc("/api/v2/torrents/info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v2/torrents/info":
-			w.Write([]byte(`[]`))
-		case "/api/v2/transfer/info":
-			w.Write([]byte(`{"dl_info_speed":0,"up_info_speed":0}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer qbt.Close()
+		w.Write([]byte(`[]`))
+	})
+	qbtMux.HandleFunc("/api/v2/transfer/info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"dl_info_speed":0,"up_info_speed":0}`))
+	})
 
-	origProculaURL := proculaURL
-	proculaURL = procula.URL
-	t.Cleanup(func() { proculaURL = origProculaURL })
+	hub := NewHub()
+	svc := &stubSvc{qbtHandler: qbtMux}
+	poller := NewPoller(hub, svc, procula.URL, func(name string, tail int, ts bool) ([]byte, error) {
+		return []byte{}, nil
+	})
+	// Restrict allowed containers to avoid spinning up real docker calls.
+	poller.allowedContainers = map[string]bool{}
 
-	hub := NewSSEHub()
-	svc := &ServiceClients{
-		client: &http.Client{},
-		Qbt:    qbtclient.New(qbt.URL),
-	}
-	poller := NewSSEPoller(hub, svc)
-
-	// Register a buffered client so we can inspect received messages.
-	c := &sseClient{
-		events: make(chan SSEMessage, 64),
-		done:   make(chan struct{}),
-	}
-	hub.register(c)
+	c := newTestClient(hub, 64)
 	defer hub.unregister(c)
 
 	ctx := context.Background()
@@ -80,22 +105,12 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 	if firstCount == 0 {
 		t.Fatal("expected at least one broadcast on first pollOnce, got 0")
 	}
-
-	// Drain the channel.
-	for len(c.events) > 0 {
-		<-c.events
-	}
+	drainEvents(c)
 
 	// ── Second poll: same data → expect no broadcasts ─────────────────────────
 	poller.pollOnce(ctx)
 
-	secondCount := len(c.events)
-	if secondCount != 0 {
-		got := make([]string, 0, secondCount)
-		for len(c.events) > 0 {
-			msg := <-c.events
-			got = append(got, msg.Event)
-		}
+	if got := drainEvents(c); len(got) != 0 {
 		t.Errorf("unexpected broadcast(s) on second pollOnce for unchanged data: events=%v", got)
 	}
 
@@ -103,16 +118,9 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 	storageUsed.Store(42)
 	poller.pollOnce(ctx)
 
-	thirdCount := len(c.events)
-	if thirdCount == 0 {
+	got := drainEvents(c)
+	if len(got) == 0 {
 		t.Error("expected at least one broadcast after storage data changed, got 0")
-	}
-
-	// Verify we got a "storage" event.
-	got := make([]string, 0, thirdCount)
-	for len(c.events) > 0 {
-		msg := <-c.events
-		got = append(got, msg.Event)
 	}
 	found := false
 	for _, ev := range got {
@@ -125,10 +133,11 @@ func TestSSEPollerBroadcastsOnChange(t *testing.T) {
 	}
 }
 
-// TestSSEPollerTriggerImmediate verifies that TriggerImmediate always broadcasts
+// TestPollerTriggerImmediate verifies that TriggerImmediate always broadcasts
 // even when the data has not changed (bypasses hash check).
-func TestSSEPollerTriggerImmediate(t *testing.T) {
-	// NOTE: mutates package globals (proculaURL, qbtBaseURL) — cannot use t.Parallel()
+func TestPollerTriggerImmediate(t *testing.T) {
+	t.Parallel()
+
 	const fixedStorage = `{"used":0,"total":100}`
 
 	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -141,20 +150,13 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 	}))
 	defer procula.Close()
 
-	origProculaURL := proculaURL
-	proculaURL = procula.URL
-	t.Cleanup(func() { proculaURL = origProculaURL })
+	hub := NewHub()
+	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	poller := NewPoller(hub, svc, procula.URL, func(name string, tail int, ts bool) ([]byte, error) {
+		return []byte{}, nil
+	})
 
-	hub := NewSSEHub()
-	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc)
-
-	// Register a test client.
-	c := &sseClient{
-		events: make(chan SSEMessage, 64),
-		done:   make(chan struct{}),
-	}
-	hub.register(c)
+	c := newTestClient(hub, 64)
 	defer hub.unregister(c)
 
 	ctx := context.Background()
@@ -166,7 +168,6 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 	poller.mu.Unlock()
 
 	// TriggerImmediate must broadcast regardless of stored hash.
-	// Both sends are synchronous via buffered channel; check immediately.
 	poller.TriggerImmediate(ctx, "storage")
 
 	if len(c.events) == 0 {
@@ -178,14 +179,13 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 		t.Errorf("expected event=storage, got %q", msg.Event)
 	}
 
-	// Validate the payload is the raw storage JSON.
+	// Validate the payload is valid JSON.
 	var payload map[string]any
 	if err := json.Unmarshal(msg.Data, &payload); err != nil {
 		t.Errorf("TriggerImmediate broadcast data is not valid JSON: %v", err)
 	}
 
 	// Second call — must still broadcast even though hash is now current.
-	// Both sends are synchronous via buffered channel; check immediately.
 	poller.TriggerImmediate(ctx, "storage")
 
 	if len(c.events) == 0 {
@@ -193,9 +193,14 @@ func TestSSEPollerTriggerImmediate(t *testing.T) {
 	}
 }
 
+// TestFetchLogsTimestampedAndSorted verifies that fetchLogs passes timestamps=true,
+// parses RFC3339 prefixes, and returns entries sorted newest-first.
 func TestFetchLogsTimestampedAndSorted(t *testing.T) {
-	orig := dockerLogsFunc
-	dockerLogsFunc = func(name string, tail int, ts bool) ([]byte, error) {
+	t.Parallel()
+
+	hub := NewHub()
+	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	poller := NewPoller(hub, svc, "", func(name string, tail int, ts bool) ([]byte, error) {
 		if !ts {
 			t.Errorf("fetchLogs should pass timestamps=true, got false for %q", name)
 		}
@@ -206,16 +211,11 @@ func TestFetchLogsTimestampedAndSorted(t *testing.T) {
 			return []byte("2024-01-15T12:34:05.000000000Z radarr middle\n"), nil
 		}
 		return []byte{}, nil
-	}
-	t.Cleanup(func() { dockerLogsFunc = orig })
+	})
+	// Only test against two services to keep the test hermetic.
+	poller.allowedContainers = map[string]bool{"sonarr": true, "radarr": true}
 
-	// Temporarily restrict allowedContainers to avoid needing all services
-	origAC := allowedContainers
-	allowedContainers = map[string]bool{"sonarr": true, "radarr": true}
-	t.Cleanup(func() { allowedContainers = origAC })
-
-	p := &SSEPoller{hub: NewSSEHub(), hashes: make(map[string][32]byte)}
-	data, err := p.fetchLogs(context.Background())
+	data, err := poller.fetchLogs(context.Background())
 	if err != nil {
 		t.Fatalf("fetchLogs error: %v", err)
 	}
@@ -237,18 +237,18 @@ func TestFetchLogsTimestampedAndSorted(t *testing.T) {
 	}
 }
 
-// TestSSEPollerUnknownEventType verifies that TriggerImmediate with an
+// TestPollerUnknownEventType verifies that TriggerImmediate with an
 // unrecognized event type does not panic and sends nothing.
-func TestSSEPollerUnknownEventType(t *testing.T) {
-	hub := NewSSEHub()
-	svc := &ServiceClients{client: &http.Client{}}
-	poller := NewSSEPoller(hub, svc)
+func TestPollerUnknownEventType(t *testing.T) {
+	t.Parallel()
 
-	c := &sseClient{
-		events: make(chan SSEMessage, 4),
-		done:   make(chan struct{}),
-	}
-	hub.register(c)
+	hub := NewHub()
+	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	poller := NewPoller(hub, svc, "", func(name string, tail int, ts bool) ([]byte, error) {
+		return []byte{}, nil
+	})
+
+	c := newTestClient(hub, 4)
 	defer hub.unregister(c)
 
 	// Must not panic.

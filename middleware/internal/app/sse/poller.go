@@ -36,8 +36,9 @@ type LogEntry struct {
 	Timestamp time.Time `json:"ts,omitempty"`
 }
 
-// AllowedContainers is the set of Compose service names the log fetcher may query.
-var AllowedContainers = map[string]bool{
+// defaultAllowedContainers is the set of Compose service names the log fetcher
+// may query in production. Tests pass a per-instance override via Poller.allowedContainers.
+var defaultAllowedContainers = map[string]bool{
 	"nginx":        true,
 	"pelicula-api": true,
 	"procula":      true,
@@ -53,12 +54,13 @@ var AllowedContainers = map[string]bool{
 // Poller polls backend data sources every pollInterval and broadcasts SSE
 // events on change (detected via SHA-256 hash comparison).
 type Poller struct {
-	hub        *Hub
-	svc        ServiceQuerier
-	proculaURL string
-	dockerLogs DockerLogsFunc
-	hashes     map[string][32]byte
-	mu         sync.Mutex
+	hub               *Hub
+	svc               ServiceQuerier
+	proculaURL        string
+	dockerLogs        DockerLogsFunc
+	allowedContainers map[string]bool
+	hashes            map[string][32]byte
+	mu                sync.Mutex
 }
 
 // NewPoller creates a Poller that will broadcast to hub using svc.
@@ -66,11 +68,12 @@ type Poller struct {
 // dockerLogs is the function to fetch container log lines.
 func NewPoller(hub *Hub, svc ServiceQuerier, proculaURL string, dockerLogs DockerLogsFunc) *Poller {
 	return &Poller{
-		hub:        hub,
-		svc:        svc,
-		proculaURL: proculaURL,
-		dockerLogs: dockerLogs,
-		hashes:     make(map[string][32]byte),
+		hub:               hub,
+		svc:               svc,
+		proculaURL:        proculaURL,
+		dockerLogs:        dockerLogs,
+		allowedContainers: defaultAllowedContainers,
+		hashes:            make(map[string][32]byte),
 	}
 }
 
@@ -249,9 +252,9 @@ func (p *Poller) fetchLogs(ctx context.Context) ([]byte, error) {
 		raw []byte
 		err error
 	}
-	ch := make(chan result, len(AllowedContainers))
+	ch := make(chan result, len(p.allowedContainers))
 	var wg sync.WaitGroup
-	for name := range AllowedContainers {
+	for name := range p.allowedContainers {
 		wg.Add(1)
 		go func(svc string) {
 			defer wg.Done()
