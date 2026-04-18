@@ -41,17 +41,6 @@
     font-family: var(--font-display, 'Nunito', sans-serif);
 }
 .btn-danger:hover { background: var(--pink, #f060a8); color: #fff; }
-.btn-sm {
-    padding: 0.3rem 1rem; font-size: 0.7rem;
-}
-.btn-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    background: none; border: 1px solid var(--border2, rgba(180,140,220,0.4));
-    border-radius: 20px; cursor: pointer; color: var(--faint, #c8b8d8);
-    font-size: 1rem; padding: 0.25rem 0.45rem; line-height: 1;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.btn-icon:hover { color: var(--periwinkle, #7080e8); border-color: var(--periwinkle, #7080e8); background: var(--peri-l, #eaecfd); }
 
 /* ── Fields ─────────────────────────────────────────────────────────────── */
 .field {
@@ -62,6 +51,7 @@
     text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--muted, #9080a8);
     font-family: var(--font-display, 'Nunito', sans-serif);
+    margin-top: 1.25rem; margin-bottom: 0.3rem;
 }
 .field-help { font-size: 0.72rem; color: var(--muted, #9080a8); line-height: 1.5; margin-bottom: 0.5rem; }
 .field-help strong { color: var(--ink, #2a1f35); }

@@ -128,7 +128,8 @@
     const bar = document.getElementById('reg-strength-bar');
     const pct = Math.min(score / 4, 1) * 100;
     bar.style.width = pct + '%';
-    bar.style.background = score <= 1 ? '#f87171' : score <= 2 ? '#f0c060' : '#7dda93';
+    const lvl = score === 0 ? 0 : score === 1 ? 1 : score === 2 ? 2 : score <= 3 ? 3 : 4;
+    bar.className = lvl > 0 ? 'strength-bar strength-' + lvl : 'strength-bar';
   });
 
   // ── Form submission ───────────────────────────────────────────────────────
