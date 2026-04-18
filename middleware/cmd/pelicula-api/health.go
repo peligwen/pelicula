@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"pelicula-api/internal/app/vpnwatchdog"
 	gluetunclient "pelicula-api/internal/clients/gluetun"
 	"time"
 )
@@ -61,11 +62,14 @@ func queryVPNStatus() VPNStatus {
 
 	// Annotate port_status from watchdog state. The watchdog is the authority —
 	// transient states (grace, restarting, unknown) leave port_status empty.
-	ws := GetWatchdogState()
+	var ws vpnwatchdog.State
+	if watchdogInst != nil {
+		ws = watchdogInst.State()
+	}
 	switch ws.PortForwardStatus {
-	case string(wdDegraded):
+	case "degraded":
 		vpn.PortStatus = "degraded"
-	case string(wdSynced):
+	case "synced":
 		if vpn.Port > 0 {
 			vpn.PortStatus = "ok"
 		}

@@ -33,6 +33,7 @@ import (
 	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
+	"pelicula-api/internal/app/vpnwatchdog"
 	"pelicula-api/internal/clients/apprise"
 	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/config"
@@ -266,8 +267,11 @@ func main() {
 
 	go missingwatcher.New(svc, sonarrURL, radarrURL).Run(2 * time.Minute)
 
+	var watchdog *vpnwatchdog.Watchdog
 	if cfg.WireguardPrivateKey != "" {
-		go StartVPNWatchdog(svc)
+		watchdog = vpnwatchdog.New(svc, dockerCli, gluetunClient)
+		watchdogInst = watchdog
+		go watchdog.Run()
 	}
 
 	peligrosa.SetOpenRegistration(cfg.OpenRegistration)
@@ -311,8 +315,13 @@ func main() {
 			RadarrURL: urls.Radarr,
 		},
 		healthHandler: &health.Handler{
-			Services:       svc,
-			GetWatchdog:    func() health.WatchdogState { return watchdogStateAdapter(GetWatchdogState()) },
+			Services: svc,
+			GetWatchdog: func() health.WatchdogState {
+				if watchdog == nil {
+					return watchdogStateAdapter(vpnwatchdog.State{})
+				}
+				return watchdogStateAdapter(watchdog.State())
+			},
 			GluetunBaseURL: urls.Gluetun,
 		},
 		hooksHandler: &hooks.Handler{
@@ -499,8 +508,8 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, status)
 }
 
-// watchdogStateAdapter converts VPNWatchdogState to the health package's WatchdogState.
-func watchdogStateAdapter(ws VPNWatchdogState) health.WatchdogState {
+// watchdogStateAdapter converts vpnwatchdog.State to the health package's WatchdogState.
+func watchdogStateAdapter(ws vpnwatchdog.State) health.WatchdogState {
 	return health.WatchdogState{
 		PortForwardStatus: ws.PortForwardStatus,
 		ForwardedPort:     ws.ForwardedPort,

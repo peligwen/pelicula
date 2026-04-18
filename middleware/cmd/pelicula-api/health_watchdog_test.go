@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"pelicula-api/internal/app/vpnwatchdog"
 	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
 
@@ -29,14 +30,10 @@ func TestQueryVPNStatus_PortStatusDegraded(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	watchdogMu.Lock()
-	watchdogState = VPNWatchdogState{PortForwardStatus: string(wdDegraded), RestartAttempts: 1}
-	watchdogMu.Unlock()
-	t.Cleanup(func() {
-		watchdogMu.Lock()
-		watchdogState = VPNWatchdogState{}
-		watchdogMu.Unlock()
-	})
+	wd := vpnwatchdog.New(nil, nil, nil)
+	wd.ForceState(vpnwatchdog.State{PortForwardStatus: "degraded", RestartAttempts: 1})
+	watchdogInst = wd
+	t.Cleanup(func() { watchdogInst = nil })
 
 	vpn := queryVPNStatus()
 
@@ -67,18 +64,14 @@ func TestQueryVPNStatus_PortStatusOK(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	watchdogMu.Lock()
-	watchdogState = VPNWatchdogState{
-		PortForwardStatus: string(wdSynced),
+	wd := vpnwatchdog.New(nil, nil, nil)
+	wd.ForceState(vpnwatchdog.State{
+		PortForwardStatus: "synced",
 		ForwardedPort:     51413,
 		LastSyncedAt:      time.Now(),
-	}
-	watchdogMu.Unlock()
-	t.Cleanup(func() {
-		watchdogMu.Lock()
-		watchdogState = VPNWatchdogState{}
-		watchdogMu.Unlock()
 	})
+	watchdogInst = wd
+	t.Cleanup(func() { watchdogInst = nil })
 
 	vpn := queryVPNStatus()
 

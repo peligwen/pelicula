@@ -51,7 +51,7 @@ func TestGluetunClient_SuccessReturnsPort(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	port, err := fetchForwardedPort()
+	port, err := gluetunClient.GetPortForward(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

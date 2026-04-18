@@ -6,28 +6,25 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"pelicula-api/internal/app/vpnwatchdog"
 	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
 
-// TestWatchdogState_NewFieldsReadable verifies the new diagnostic fields on
-// VPNWatchdogState are readable via GetWatchdogState.
+// TestWatchdogState_NewFieldsReadable verifies the diagnostic fields on
+// vpnwatchdog.State are readable via Watchdog.State().
 func TestWatchdogState_NewFieldsReadable(t *testing.T) {
-	watchdogMu.Lock()
-	watchdogState = VPNWatchdogState{
-		PortForwardStatus: string(wdGrace),
+	wd := vpnwatchdog.New(nil, nil, nil)
+	wd.ForceState(vpnwatchdog.State{
+		PortForwardStatus: "grace",
 		ConsecutiveZero:   4,
 		GraceRemaining:    6,
 		CooldownRemaining: 0,
 		VPNTunnelStatus:   "running",
-	}
-	watchdogMu.Unlock()
-	t.Cleanup(func() {
-		watchdogMu.Lock()
-		watchdogState = VPNWatchdogState{}
-		watchdogMu.Unlock()
 	})
+	watchdogInst = wd
+	t.Cleanup(func() { watchdogInst = nil })
 
-	st := GetWatchdogState()
+	st := watchdogInst.State()
 	if st.ConsecutiveZero != 4 {
 		t.Fatalf("ConsecutiveZero = %d, want 4", st.ConsecutiveZero)
 	}
@@ -59,19 +56,15 @@ func TestQueryVPNStatus_WatchdogDetailsPopulated(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	watchdogMu.Lock()
-	watchdogState = VPNWatchdogState{
-		PortForwardStatus: string(wdGrace),
+	wd := vpnwatchdog.New(nil, nil, nil)
+	wd.ForceState(vpnwatchdog.State{
+		PortForwardStatus: "grace",
 		ConsecutiveZero:   4,
 		GraceRemaining:    6,
 		VPNTunnelStatus:   "running",
-	}
-	watchdogMu.Unlock()
-	t.Cleanup(func() {
-		watchdogMu.Lock()
-		watchdogState = VPNWatchdogState{}
-		watchdogMu.Unlock()
 	})
+	watchdogInst = wd
+	t.Cleanup(func() { watchdogInst = nil })
 
 	vpn := queryVPNStatus()
 
@@ -147,14 +140,8 @@ func TestQueryVPNStatus_WatchdogNilWhenUnknown(t *testing.T) {
 	gluetunClient = gluetunclient.New(srv.URL, "", "")
 	t.Cleanup(func() { gluetunClient = old })
 
-	watchdogMu.Lock()
-	watchdogState = VPNWatchdogState{} // empty / VPN not configured
-	watchdogMu.Unlock()
-	t.Cleanup(func() {
-		watchdogMu.Lock()
-		watchdogState = VPNWatchdogState{}
-		watchdogMu.Unlock()
-	})
+	// No watchdog set — simulate VPN not configured.
+	watchdogInst = nil
 
 	vpn := queryVPNStatus()
 

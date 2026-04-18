@@ -1,4 +1,8 @@
-package main
+// Package vpnwatchdog supervises VPN port-forward health and keeps qBittorrent's
+// listen port in sync. It implements a small FSM that detects port-forward loss,
+// waits through a grace period, restarts VPN containers, and declares degraded
+// state if the port never comes back.
+package vpnwatchdog
 
 import (
 	"context"
@@ -7,6 +11,8 @@ import (
 	"time"
 
 	appservices "pelicula-api/internal/app/services"
+	"pelicula-api/internal/clients/docker"
+	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
 
 // ── Timing constants ───────────────────────────────────────────────────────────
@@ -47,8 +53,9 @@ type wdInternalState struct {
 	restartCooldown int // ticks remaining in post-restart cooldown
 }
 
-// VPNWatchdogState is the package-level public state read by internal/app/health.Handler.
-type VPNWatchdogState struct {
+// State is the public snapshot of the current watchdog state.
+// Replaces the old VPNWatchdogState to avoid stutter.
+type State struct {
 	PortForwardStatus string
 	ForwardedPort     int
 	LastSyncedAt      time.Time
@@ -61,16 +68,39 @@ type VPNWatchdogState struct {
 	VPNTunnelStatus   string // last known gluetun tunnel status ("running", "stopped", "unknown")
 }
 
-var (
-	watchdogMu    sync.RWMutex
-	watchdogState VPNWatchdogState
-)
+// Watchdog supervises VPN port-forward health and triggers restarts when needed.
+type Watchdog struct {
+	Services *appservices.Clients
+	Docker   *docker.Client
+	Gluetun  *gluetunclient.Client
 
-// GetWatchdogState returns a snapshot of the current watchdog state.
-func GetWatchdogState() VPNWatchdogState {
-	watchdogMu.RLock()
-	defer watchdogMu.RUnlock()
-	return watchdogState
+	mu    sync.RWMutex
+	state State
+}
+
+// New constructs a Watchdog. svc is used for qBittorrent port sync; dockerCli
+// is used for container restarts; gluetunCli is used to query forwarded port
+// and tunnel status.
+func New(svc *appservices.Clients, dockerCli *docker.Client, gluetunCli *gluetunclient.Client) *Watchdog {
+	return &Watchdog{
+		Services: svc,
+		Docker:   dockerCli,
+		Gluetun:  gluetunCli,
+	}
+}
+
+// State returns a snapshot of the current watchdog state.
+func (w *Watchdog) State() State {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.state
+}
+
+// ForceState overwrites the internal state snapshot. Intended for tests only.
+func (w *Watchdog) ForceState(s State) {
+	w.mu.Lock()
+	w.state = s
+	w.mu.Unlock()
 }
 
 // ── Pure state machine ─────────────────────────────────────────────────────────
@@ -135,9 +165,8 @@ func wdTick(port int, s wdInternalState) (wdInternalState, watchdogAction) {
 // ── Port sync ──────────────────────────────────────────────────────────────────
 
 // syncQbtListenPort tells qBittorrent to listen on port via the preferences API.
-// Uses form encoding: POST /api/v2/app/setPreferences with json={"listen_port":N}
-func syncQbtListenPort(s *appservices.Clients, port int) error {
-	if err := s.Qbt.SetPreferences(context.Background(), port); err != nil {
+func (w *Watchdog) syncQbtListenPort(port int) error {
+	if err := w.Services.Qbt.SetPreferences(context.Background(), port); err != nil {
 		slog.Error("failed to sync qBittorrent listen port",
 			"component", "vpn_watchdog", "port", port, "error", err)
 		return err
@@ -146,12 +175,27 @@ func syncQbtListenPort(s *appservices.Clients, port int) error {
 	return nil
 }
 
+// ── Gluetun queries ────────────────────────────────────────────────────────────
+
+// fetchForwardedPort queries gluetun for the currently forwarded port.
+// Returns (port, nil) on success — port may be 0 if forwarding is inactive.
+func (w *Watchdog) fetchForwardedPort() (int, error) {
+	return w.Gluetun.GetPortForward(context.Background())
+}
+
+// fetchTunnelStatus queries gluetun for the VPN tunnel connection status.
+// Returns the status string (e.g. "running", "stopped") or "" on any error.
+func (w *Watchdog) fetchTunnelStatus() string {
+	status, _ := w.Gluetun.GetTunnelStatus(context.Background())
+	return status
+}
+
 // ── Watchdog goroutine ─────────────────────────────────────────────────────────
 
-// StartVPNWatchdog monitors VPN port forwarding and keeps qBittorrent's listen
-// port in sync. Call as a goroutine from main(). Only active when VPN is
-// configured (caller should guard on WIREGUARD_PRIVATE_KEY).
-func StartVPNWatchdog(s *appservices.Clients) {
+// Run monitors VPN port forwarding and keeps qBittorrent's listen port in sync.
+// It blocks forever; call as a goroutine. Only start when VPN is configured
+// (caller should guard on WIREGUARD_PRIVATE_KEY).
+func (w *Watchdog) Run() {
 	ticker := time.NewTicker(watchdogInterval)
 	defer ticker.Stop()
 
@@ -159,14 +203,14 @@ func StartVPNWatchdog(s *appservices.Clients) {
 	prevStatus := wdUnknown
 
 	// Publish initial state so health endpoint never returns an empty string.
-	watchdogMu.Lock()
-	watchdogState.PortForwardStatus = string(wdUnknown)
-	watchdogMu.Unlock()
+	w.mu.Lock()
+	w.state.PortForwardStatus = string(wdUnknown)
+	w.mu.Unlock()
 
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
 	for range ticker.C {
-		port, err := fetchForwardedPort()
+		port, err := w.fetchForwardedPort()
 		if err != nil {
 			slog.Warn("failed to query gluetun port forwarding — skipping tick",
 				"component", "vpn_watchdog", "error", err)
@@ -184,7 +228,7 @@ func StartVPNWatchdog(s *appservices.Clients) {
 		// failure (tunnel up, port=0) from VPN not yet connected (tunnel down).
 		tunnelStatus := ""
 		if port == 0 {
-			tunnelStatus = fetchTunnelStatus()
+			tunnelStatus = w.fetchTunnelStatus()
 			if tunnelStatus != "" {
 				slog.Debug("gluetun tunnel status",
 					"component", "vpn_watchdog", "tunnel", tunnelStatus)
@@ -224,58 +268,45 @@ func StartVPNWatchdog(s *appservices.Clients) {
 
 		// Publish state for health endpoint.
 		now := time.Now()
-		watchdogMu.Lock()
-		if string(internal.status) != watchdogState.PortForwardStatus {
-			watchdogState.LastTransitionAt = now
+		w.mu.Lock()
+		if string(internal.status) != w.state.PortForwardStatus {
+			w.state.LastTransitionAt = now
 		}
-		watchdogState.PortForwardStatus = string(internal.status)
-		watchdogState.ForwardedPort = internal.lastKnownPort
-		watchdogState.RestartAttempts = internal.restartAttempts
-		watchdogState.ConsecutiveZero = internal.consecutiveZero
-		watchdogState.GraceRemaining = graceRemaining
-		watchdogState.CooldownRemaining = internal.restartCooldown
+		w.state.PortForwardStatus = string(internal.status)
+		w.state.ForwardedPort = internal.lastKnownPort
+		w.state.RestartAttempts = internal.restartAttempts
+		w.state.ConsecutiveZero = internal.consecutiveZero
+		w.state.GraceRemaining = graceRemaining
+		w.state.CooldownRemaining = internal.restartCooldown
 		if tunnelStatus != "" {
-			watchdogState.VPNTunnelStatus = tunnelStatus
+			w.state.VPNTunnelStatus = tunnelStatus
 		}
-		watchdogMu.Unlock()
+		w.mu.Unlock()
 
 		switch action {
 		case wdActSync:
-			if err := syncQbtListenPort(s, port); err != nil {
+			if err := w.syncQbtListenPort(port); err != nil {
 				// Sync failed — revert lastKnownPort so next tick retries
 				internal.lastKnownPort = prevPort
 			} else {
-				watchdogMu.Lock()
-				watchdogState.LastSyncedAt = time.Now()
-				watchdogMu.Unlock()
+				w.mu.Lock()
+				w.state.LastSyncedAt = time.Now()
+				w.mu.Unlock()
 			}
 		case wdActRestart:
 			slog.Warn("port forwarding unavailable after grace period — restarting VPN containers",
 				"component", "vpn_watchdog", "tunnel", tunnelStatus)
-			for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
-				if !dockerCli.IsAllowed(svc) {
-					continue
-				}
-				if err := dockerCli.Restart(svc); err != nil {
-					slog.Error("vpn watchdog restart failed",
-						"component", "vpn_watchdog", "svc", svc, "error", err)
+			if w.Docker != nil {
+				for _, svc := range []string{"gluetun", "qbittorrent", "prowlarr"} {
+					if !w.Docker.IsAllowed(svc) {
+						continue
+					}
+					if err := w.Docker.Restart(svc); err != nil {
+						slog.Error("vpn watchdog restart failed",
+							"component", "vpn_watchdog", "svc", svc, "error", err)
+					}
 				}
 			}
 		}
 	}
-}
-
-// fetchForwardedPort queries gluetun for the currently forwarded port.
-// Returns (port, nil) on success — port may be 0 if forwarding is inactive.
-// Returns (0, err) on any transport/JSON error.
-func fetchForwardedPort() (int, error) {
-	return gluetunClient.GetPortForward(context.Background())
-}
-
-// fetchTunnelStatus queries gluetun for the VPN tunnel connection status.
-// Returns the status string (e.g. "running", "stopped") or "" on any error.
-// This is best-effort — callers should treat "" as unknown.
-func fetchTunnelStatus() string {
-	status, _ := gluetunClient.GetTunnelStatus(context.Background())
-	return status
 }
