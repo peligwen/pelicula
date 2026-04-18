@@ -60,14 +60,3 @@ var dockerCli *docker.Client
 // appriseCli is the package-level Apprise notification client.
 // Set by main() once constructed; never nil after startup.
 var appriseCli *apprise.Client
-
-// indexerCount is the package-level indexer count cache, used by autowire to
-// invalidate the cached count after wiring completes.
-var indexerCount indexerCountApp
-
-// indexerCountApp is a minimal invalidation handle for the Prowlarr indexer count.
-// Used by package-level code (notably autowire) that doesn't have access to App.
-// The App's idxCache will expire via its TTL regardless, so invalidate is a no-op.
-type indexerCountApp struct{}
-
-func (c *indexerCountApp) invalidate() {}

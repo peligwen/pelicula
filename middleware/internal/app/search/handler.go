@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,11 +26,10 @@ type Handler struct {
 	RadarrURL   string
 	ProwlarrURL string
 	LibHandler  *library.Handler
-	tmdbKey     string // loaded at construction, not per-request
-	searchMode  string // "" or "tmdb" for TMDB/TVDB; "indexer" for Prowlarr filtering
+	// TODO: wire tmdbKey into direct TMDB API calls when they are added
+	searchMode string // "" or "tmdb" for TMDB/TVDB; "indexer" for Prowlarr filtering
 
-	idxCache indexerCountCache
-	cache    struct {
+	cache struct {
 		mu      sync.Mutex
 		entries map[string]indexerSearchEntry
 	}
@@ -44,7 +44,6 @@ func New(svc *services.Clients, sonarrURL, radarrURL, prowlarrURL string, libHan
 		RadarrURL:   radarrURL,
 		ProwlarrURL: prowlarrURL,
 		LibHandler:  libHandler,
-		tmdbKey:     tmdbKey,
 		searchMode:  searchMode,
 	}
 	h.cache.entries = make(map[string]indexerSearchEntry)
@@ -62,27 +61,10 @@ const indexerSearchTTL = 2 * time.Minute
 
 func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
 	_, _, prowlarrKey := h.Services.Keys()
-	key := ""
-	for _, c := range query {
-		if c >= 'A' && c <= 'Z' {
-			key += string(c + 32)
-		} else {
-			key += string(c)
-		}
-	}
-	// trim leading/trailing spaces
-	trimmed := ""
-	start, end := 0, len(key)
-	for start < len(key) && key[start] == ' ' {
-		start++
-	}
-	for end > start && key[end-1] == ' ' {
-		end--
-	}
-	trimmed = key[start:end]
+	key := strings.ToLower(strings.TrimSpace(query))
 
 	h.cache.mu.Lock()
-	if e, ok := h.cache.entries[trimmed]; ok && time.Since(e.fetchedAt) < indexerSearchTTL {
+	if e, ok := h.cache.entries[key]; ok && time.Since(e.fetchedAt) < indexerSearchTTL {
 		h.cache.mu.Unlock()
 		return e.data, nil
 	}
@@ -101,50 +83,10 @@ func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
 			delete(h.cache.entries, k)
 		}
 	}
-	h.cache.entries[trimmed] = indexerSearchEntry{data: data, fetchedAt: time.Now()}
+	h.cache.entries[key] = indexerSearchEntry{data: data, fetchedAt: time.Now()}
 	h.cache.mu.Unlock()
 
 	return data, nil
-}
-
-// ---- indexer count cache ----
-
-type indexerCountCache struct {
-	mu        sync.Mutex
-	count     *int
-	fetchedAt time.Time
-}
-
-const indexerCountTTL = 5 * time.Minute
-
-func (h *Handler) getIndexerCount() *int {
-	h.idxCache.mu.Lock()
-	defer h.idxCache.mu.Unlock()
-	if h.idxCache.count != nil && time.Since(h.idxCache.fetchedAt) < indexerCountTTL {
-		return h.idxCache.count
-	}
-	_, _, prowlarrKey := h.Services.Keys()
-	if prowlarrKey == "" {
-		return h.idxCache.count
-	}
-	data, err := h.Services.ArrGet(h.ProwlarrURL, prowlarrKey, "/api/v1/indexer")
-	if err != nil {
-		return h.idxCache.count
-	}
-	var indexers []map[string]any
-	if json.Unmarshal(data, &indexers) != nil {
-		return h.idxCache.count
-	}
-	n := len(indexers)
-	h.idxCache.count = &n
-	h.idxCache.fetchedAt = time.Now()
-	return h.idxCache.count
-}
-
-func (h *Handler) invalidateIndexerCount() {
-	h.idxCache.mu.Lock()
-	h.idxCache.fetchedAt = time.Time{}
-	h.idxCache.mu.Unlock()
 }
 
 // ---- SearchResult type ----

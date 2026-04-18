@@ -244,6 +244,11 @@ func main() {
 	go poller.Run(ctx)
 	go catalog.RunQueuePoller(ctx, cdb, svc, urls.Radarr, urls.Sonarr)
 
+	// app is declared here so the autowire closure below can capture it.
+	// The closure is only called after network I/O completes in the background
+	// goroutine, well after app is assigned below.
+	var app *App
+
 	// Build the Autowirer. wireJellyfin is a callback so Jellyfin-specific
 	// logic (envPath, envMu, wizard, API key persistence) stays in cmd/ until
 	// a future phase extracts it.
@@ -275,7 +280,7 @@ func main() {
 			return out
 		},
 		WireJellyfin:           func() { jfWirer.Wire(libHandler) },
-		InvalidateIndexerCache: func() { indexerCount.invalidate() },
+		InvalidateIndexerCache: func() { app.idxCache.invalidate() },
 	})
 
 	// Auto-wire in background so the HTTP server starts immediately.
@@ -308,7 +313,7 @@ func main() {
 	deps.GenPassword = generateReadablePassword
 
 	// Build App struct — all new-style handler state lives here.
-	app := &App{
+	app = &App{
 		svc:           svc,
 		urls:          urls,
 		sseHub:        hub,
