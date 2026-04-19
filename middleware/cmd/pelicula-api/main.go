@@ -20,6 +20,7 @@ import (
 
 	"pelicula-api/httputil"
 	"pelicula-api/internal/app/actions"
+	"pelicula-api/internal/app/adminops"
 	"pelicula-api/internal/app/autowire"
 	"pelicula-api/internal/app/backup"
 	"pelicula-api/internal/app/catalog"
@@ -386,6 +387,14 @@ func main() {
 
 	actionsHandler := actions.New(services.HTTPClient(), proculaURL, strings.TrimSpace(os.Getenv("PROCULA_API_KEY")))
 
+	adminHandler := adminops.New(dockerCli, func(r *http.Request) (string, bool) {
+		if authMiddleware == nil {
+			return "", false
+		}
+		username, _, ok := authMiddleware.SessionFor(r)
+		return username, ok
+	})
+
 	mux := http.NewServeMux()
 
 	router.Register(mux, router.Config{
@@ -403,7 +412,7 @@ func main() {
 		Search:        searchHandler,
 		Settings:      settingsHandler,
 		Actions:       actionsHandler,
-		Docker:        dockerCli,
+		Admin:         adminHandler,
 		StatusHandler: http.HandlerFunc(app.handleStatus),
 		JobsHandler:   http.HandlerFunc(handleJobsList),
 	})

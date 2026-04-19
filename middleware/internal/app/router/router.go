@@ -19,7 +19,6 @@ import (
 	"pelicula-api/internal/app/settings"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
-	"pelicula-api/internal/clients/docker"
 	"pelicula-api/internal/peligrosa"
 )
 
@@ -41,7 +40,7 @@ type Config struct {
 	Search        *search.Handler
 	Settings      *settings.Handler
 	Actions       *actions.Handler
-	Docker        *docker.Client
+	Admin         *adminops.Handler
 	StatusHandler http.HandlerFunc
 	JobsHandler   http.HandlerFunc
 }
@@ -152,15 +151,8 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(cfg.Sysinfo.ServeSpeedtest)))
 
 	// admin only: container control
-	adminHandler := adminops.New(cfg.Docker, func(r *http.Request) (string, bool) {
-		if auth == nil {
-			return "", false
-		}
-		username, _, ok := auth.SessionFor(r)
-		return username, ok
-	})
-	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(adminHandler.HandleStackRestart)))
-	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(adminHandler.HandleVPNRestart)))
-	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(adminHandler.HandleServiceLogs)))
+	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(cfg.Admin.HandleStackRestart)))
+	mux.Handle("/api/pelicula/admin/vpn/restart", auth.GuardAdmin(http.HandlerFunc(cfg.Admin.HandleVPNRestart)))
+	mux.Handle("/api/pelicula/admin/logs", auth.GuardAdmin(http.HandlerFunc(cfg.Admin.HandleServiceLogs)))
 	mux.Handle("/api/pelicula/logs/aggregate", auth.GuardAdmin(http.HandlerFunc(cfg.Sysinfo.ServeLogs)))
 }
