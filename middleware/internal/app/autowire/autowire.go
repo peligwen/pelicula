@@ -220,7 +220,7 @@ func (a *Autowirer) waitForServices(ctx context.Context) error {
 		"sonarr":   a.urls.Sonarr + "/ping",
 		"radarr":   a.urls.Radarr + "/ping",
 		"jellyfin": a.urls.Jellyfin + "/System/Info/Public",
-		"bazarr":   a.urls.Bazarr + "/api/system/status",
+		"bazarr":   a.urls.Bazarr + "/",
 	}
 	if a.vpnConfigured {
 		endpoints["prowlarr"] = a.urls.Prowlarr + "/ping"
