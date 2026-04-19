@@ -21,12 +21,18 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.waitForSelector('[data-testid="storage-explorer-section"]:not(.hidden)', { timeout: 10_000 });
         await page.waitForSelector('[data-testid="browse-tree"] .browse-entry', { timeout: 10_000 });
 
-        // ── 3. Expand the "movies" directory ───────────────────────
+        // ── 3. Expand media → movies
+        // Browse root exposes /downloads and /media; Sintel is at /media/movies/…
+        const mediaEntry = page.locator('[data-testid="browse-tree"] .browse-entry').filter({ hasText: 'media' }).first();
+        await mediaEntry.click();
+        await page.waitForSelector('[data-testid="browse-tree"] .browse-children[data-path="/media"] .browse-entry', {
+            timeout: 10_000,
+        });
         const moviesEntry = page.locator('[data-testid="browse-tree"] .browse-entry').filter({ hasText: 'movies' }).first();
         await moviesEntry.click();
 
         // Wait for movies children to load
-        await page.waitForSelector('[data-testid="browse-tree"] .browse-children[data-path="/movies"] .browse-entry', {
+        await page.waitForSelector('[data-testid="browse-tree"] .browse-children[data-path="/media/movies"] .browse-entry', {
             timeout: 10_000,
         });
 
@@ -68,21 +74,24 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         // Wait for scan to complete and btn-configure to be enabled
         await expect(page.locator('[data-testid="btn-configure"]')).toBeEnabled({ timeout: 30_000 });
 
-        // ── 7. Configure import ────────────────────────────────────
+        // ── 7. Configure import (or Register in Library shortcut)
+        // When the file is already in the library location, the wizard presents
+        // "Register in Library" which calls doApply() directly, skipping step-configure.
+        const btnText = await page.locator('[data-testid="btn-configure"]').textContent();
         await page.locator('[data-testid="btn-configure"]').click();
-        await page.waitForSelector('#step-configure:not(.hidden)', { timeout: 5_000 });
-
-        // Select "import" strategy (move files into library)
-        await page.locator('input[name="strategy"][value="import"]').check();
-        // Leave validate-toggle checked (default) — Procula's validation_enabled=false
-        // setting (set by e2e.sh Stage 3) prevents FFprobe from running on the
-        // synthetic file, but the toggle must stay on to queue a Procula job.
-
-        // ── 8. Apply import ────────────────────────────────────────
-        await page.locator('#step-configure button.import-btn.primary').click();
+        if ((btnText || '').includes('Configure')) {
+            await page.waitForSelector('#step-configure:not(.hidden)', { timeout: 5_000 });
+            // Select "import" strategy (move files into library)
+            await page.locator('input[name="strategy"][value="import"]').check();
+            // Leave validate-toggle checked (default) — Procula's validation_enabled=false
+            // setting (set by e2e.sh Stage 3) prevents FFprobe from running.
+            // ── 8. Apply import
+            await page.locator('#step-configure button.import-btn.primary').click();
+        }
+        // Both paths (Configure→Apply and Register-in-Library) end at step-apply.
 
         // Wait for apply panel
-        await page.waitForSelector('#step-apply:not(.hidden)', { timeout: 5_000 });
+        await page.waitForSelector('#step-apply:not(.hidden)', { timeout: 10_000 });
 
         // Wait for done nav to appear (import finished)
         await page.waitForSelector('[data-testid="apply-nav"]:not(.hidden)', { timeout: 30_000 });
