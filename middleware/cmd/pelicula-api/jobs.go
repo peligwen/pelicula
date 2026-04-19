@@ -6,8 +6,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
 	"pelicula-api/httputil"
+	appservices "pelicula-api/internal/app/services"
 )
+
+// services is the package-level Clients instance used by handleJobsList.
+// Set by main() after bootstrap.New completes.
+var services *appservices.Clients
 
 // handleJobsList fetches /api/procula/jobs and groups rows by state.
 // The response shape is {groups: {queued: [...], processing: [...], ...}, total}.
