@@ -304,6 +304,7 @@ services:
       - ./nginx/service-overrides.css:/usr/share/nginx/html/service-overrides.css:ro
       - ./nginx/dashboard.js:/usr/share/nginx/html/dashboard.js:ro
       - ./nginx/framework.js:/usr/share/nginx/html/framework.js:ro
+      - ./nginx/api.js:/usr/share/nginx/html/api.js:ro
       - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
       - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
       - ./nginx/components.css:/usr/share/nginx/html/components.css:ro
