@@ -14,6 +14,7 @@ import (
 // qbtResponses maps path → raw JSON bytes. qbtPostErr controls QbtPost failures.
 // keysReturned are the API keys returned by Keys().
 // arrResponses maps baseURL+path → raw JSON bytes for ArrGet calls.
+// arrPostCalled, arrPutCalled, arrDeleteCalled record whether those methods fired.
 type stubClient struct {
 	qbtResponses map[string][]byte
 	qbtGetErr    error
@@ -25,6 +26,11 @@ type stubClient struct {
 	arrGetErr    error
 	arrQueueResp []map[string]any
 	arrQueueErr  error
+
+	// call tracking for mutation methods
+	arrPostCalled   bool
+	arrPutCalled    bool
+	arrDeleteCalled bool
 }
 
 func (s *stubClient) QbtGet(path string) ([]byte, error) {
@@ -57,14 +63,17 @@ func (s *stubClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
 }
 
 func (s *stubClient) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	s.arrPostCalled = true
 	return []byte("{}"), nil
 }
 
 func (s *stubClient) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+	s.arrPutCalled = true
 	return []byte("{}"), nil
 }
 
 func (s *stubClient) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
+	s.arrDeleteCalled = true
 	return []byte("{}"), nil
 }
 
@@ -258,13 +267,19 @@ func TestHandleDownloadCancel_Happy(t *testing.T) {
 	if resp["status"] != "removed" {
 		t.Errorf("HandleDownloadCancel happy: status = %q, want removed", resp["status"])
 	}
+
+	// Radarr category + blocklist:false → unmonitor path fires ArrPut, queue removal fires ArrDelete.
+	if !srv.arrPutCalled {
+		t.Error("HandleDownloadCancel happy: expected ArrPut (unmonitor movie) to be called, but it was not")
+	}
+	if !srv.arrDeleteCalled {
+		t.Error("HandleDownloadCancel happy: expected ArrDelete (remove from queue) to be called, but it was not")
+	}
 }
 
-func TestHandleDownloadCancel_Upstream_Down(t *testing.T) {
-	// qbt delete fails; arr queue errors too — but handler still returns 200
-	// since it logs but doesn't fail on qbt delete error. Test the upstream
-	// failure case by using an unknown category which causes an early 422.
-	// For a true "upstream down" test we validate unknown category → 422.
+// TestHandleDownloadCancel_UnknownCategory verifies that an unrecognised category
+// is rejected with 422 UnprocessableEntity before any arr or qbt operations fire.
+func TestHandleDownloadCancel_UnknownCategory(t *testing.T) {
 	svc := &stubClient{
 		keysRet: [3]string{"", "", ""},
 	}
@@ -309,6 +324,41 @@ func TestHandleDownloadCancel_QbtPostErr(t *testing.T) {
 	// Handler still returns 200 even when qbt delete fails
 	if w.Code != http.StatusOK {
 		t.Errorf("HandleDownloadCancel qbt err: code = %d, want 200", w.Code)
+	}
+}
+
+// TestHandleDownloadCancel_QbtDown verifies that when qBittorrent is unreachable
+// the handler still returns 200 (best-effort cleanup — arr side effects may still
+// have fired, but qbt delete failure is non-fatal).
+func TestHandleDownloadCancel_QbtDown(t *testing.T) {
+	// Arr queue is empty, so no arr mutations fire, but qbt delete will fail.
+	svc := &stubClient{
+		keysRet:      [3]string{"sonarr-key", "radarr-key", ""},
+		qbtPostErr:   downstreamDown,
+		arrQueueResp: []map[string]any{},
+	}
+	h := &Handler{
+		Svc:       svc,
+		SonarrURL: "http://sonarr",
+		RadarrURL: "http://radarr",
+	}
+
+	body := `{"hash":"deadbeef1234","category":"radarr","blocklist":false,"reason":"qbt offline"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/downloads/cancel", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleDownloadCancel(w, req)
+
+	// qbt delete failure is logged but must not change the response — caller gets 200.
+	if w.Code != http.StatusOK {
+		t.Errorf("HandleDownloadCancel qbt down: code = %d, want 200", w.Code)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("HandleDownloadCancel qbt down: unmarshal: %v", err)
+	}
+	if resp["status"] != "removed" {
+		t.Errorf("HandleDownloadCancel qbt down: status = %q, want removed", resp["status"])
 	}
 }
 
