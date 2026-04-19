@@ -1,67 +1,142 @@
 # Middleware Refactor Status
 
-Phase 2 of the architectural refactor established the `internal/` skeleton and wired the highest-impact packages. This document tracks which packages are actively used by production code, which are scaffolding stubs awaiting Phase 2.1 extraction, and the criteria for each.
+This document is the authoritative retrospective for Phases 2–3 of the middleware refactor and the live tracker for Phase 4. It replaced a stale mid-Phase-2 snapshot.
 
-## Wired and live
+---
 
-These packages are imported by production code and carry real logic.
+## Retrospective
 
-| Package | Imported by | Notes |
+### Phase 2.1 — Package split (middleware)
+
+Moved all handler and logic code out of the flat `cmd/pelicula-api/` structure into `internal/` subpackages. Each extraction was a discrete commit; key clusters:
+
+- **Drift cleanup:** Deleted parallel `cmd/catalog_db.go` and `cmd/sse.go`/`cmd/sse_poller.go`; migrated tests to the canonical `internal/app/` owners.
+- **Config extraction:** `internal/config` centralised env loading; deduplicated `envIntOr` via `config.IntOr`.
+- **`internal/peligrosa/` move:** Relocated the top-level `peligrosa/` directory into `internal/peligrosa/` (auth, invites, requests, registration, roles, routes).
+- **Handler extractions (autowire → backup → library → hooks → catalog → jellyfin → sse → downloads):** Each flat `cmd/*.go` file moved into its corresponding `internal/app/<pkg>/` package with a `Handler` struct replacing package-level globals.
+- **Client extractions:** `internal/clients/arr`, `gluetun`, `qbt`, `bazarr`, `jellyfin`, `procula` — each replaced raw inline HTTP helpers in `cmd/`.
+
+### Phase 2.2 — Repo layer
+
+Extracted typed SQL stores from inline queries scattered across `cmd/` and `peligrosa/`:
+
+- **`internal/repo/roles`** — typed store for the roles table.
+- **`internal/repo/invites`** — typed store for the invites table; simplified `InsertRedemption` to plain exec.
+- **`internal/repo/requests`** — typed store for the requests table.
+- **`internal/repo/sessions`** — typed store for sessions + rate-limit tables; wired DB-backed rate-limit into auth (replaced in-memory map).
+- **`internal/repo/catalog`** — typed store for the catalog table; propagated context through repo wrapper functions.
+- **`internal/repo/dbutil`** — `ParseTime`, `Migrate` unified runner for both DBs.
+
+### Phase 3.1–3.5 — Frontend (nginx static)
+
+A five-pass overhaul of the dashboard's HTML/CSS/JS:
+
+- **3.1 CSS custom properties:** Introduced `components.css` with shared UI primitives; deduped button and field rules from `setup.css` and `catalog.css`; wired strength classes to `register.js`.
+- **3.2 JS modularisation:** Migrated `register.html` inline styles to `components.css`; tabbar hamburger nav at `<480px`.
+- **3.3 Component extraction:** Drawers full-screen at `<768px`, modals full-screen at `<480px`; container queries for catalog, search, and library grids; fixed container query scope for `um-metrics`.
+- **3.4 Responsive pass:** Stacked forms and full-width buttons at `<480px`.
+- **3.5 Accessibility pass:** `wireSwitches()` for keyboard a11y on `role=switch` elements; documented import redirect shim.
+
+---
+
+## Current package inventory
+
+### `middleware/internal/app/`
+
+| Package | Purpose | Replaced |
 |---|---|---|
-| `internal/httpx` | `internal/clients/*` | Shared HTTP base with retry/redaction |
-| `internal/clients/arr` | `cmd/pelicula-api/services.go`, `catalog_sync.go` | Sonarr/Radarr/Prowlarr typed client |
-| `internal/clients/gluetun` | `cmd/pelicula-api/health.go`, `vpn_watchdog.go` | Replaces raw `gluetunGet()` |
-| `internal/clients/qbt` | `cmd/pelicula-api/services.go` | qBittorrent typed client |
-| `internal/clients/bazarr` | `cmd/pelicula-api/autowire.go` | Replaces raw `bzGet()`/`bzPostForm()` |
-| `internal/clients/procula` | `cmd/pelicula-api/main.go` | Procula job/status/notification client |
-| `internal/repo/dbutil` | `internal/peligrosa/auth.go`, `internal/peligrosa/invites.go`, `internal/peligrosa/requests.go` | `ParseTime` replaces all RFC3339 dual-parse pairs |
-| `internal/app/catalog` | `cmd/pelicula-api/main.go` | `OpenCatalogDB`, `RunQueuePoller` — used at startup |
-| `internal/app/downloads` | `cmd/pelicula-api/main.go` | `downloads.Handler` wired for all download mux routes |
-| `internal/app/health` | `cmd/pelicula-api/main.go` | `health.Handler` wired for `/api/pelicula/health` |
-| `internal/app/sse` | `cmd/pelicula-api/main.go` | `sse.Hub` + `sse.Poller` are the live SSE broadcaster and handler |
-| `internal/peligrosa` | `cmd/pelicula-api/main.go`, `globals.go`, `operators.go`, `export.go`, `migrate_json.go` | Moved from `peligrosa/`; auth, invites, requests, registration, roles, routes |
+| `app/` | `App` struct: owns all handlers, DB handles, and the HTTP server | `cmd/pelicula-api/main.go` (server lifecycle) |
+| `bootstrap/` | One-shot startup sequence: DB init, auto-wire, queue start | `cmd/pelicula-api/main.go` (startup block) |
+| `supervisor/` | Long-running goroutine supervisor with restart loop | `cmd/pelicula-api/main.go` (background goroutines) |
+| `router/` | Route registration — wires all handlers onto the mux | `cmd/pelicula-api/main.go` (mux setup) |
+| `actions/` | Action-bus registry and per-item action create handlers | `cmd/pelicula-api/actions.go` |
+| `adminops/` | Admin rate-limiter, service restart, and log-streaming handlers | `cmd/pelicula-api/admin.go` |
+| `autowire/` | *arr stack auto-wiring on startup | `cmd/pelicula-api/autowire.go` |
+| `backup/` | Watchlist/library export and import-backup handlers | `cmd/pelicula-api/export.go` |
+| `catalog/` | Catalog DB open, queue poller, catalog sync, catalog HTTP handlers | `cmd/pelicula-api/catalog.go`, `catalog_sync.go` |
+| `downloads/` | Download list, pause/resume, cancel, category management handlers | `cmd/pelicula-api/downloads.go` (deleted) |
+| `health/` | Health aggregation across all services: VPN, arr, jellyfin | `cmd/pelicula-api/health.go` |
+| `hooks/` | Procula webhook handlers (import notify, job status) | `cmd/pelicula-api/hooks_*.go` |
+| `jellyfin/` | Jellyfin env/auth wiring via `Wirer`; library handlers | `cmd/pelicula-api/jellyfin_*.go` |
+| `library/` | Library scan, proxy, and apply handlers; `libraryRegistry` | `cmd/pelicula-api/library_*.go`, `libraries.go` |
+| `missingwatcher/` | Missing content watcher with backoff cooldown | `cmd/pelicula-api/missing_watcher.go` |
+| `search/` | Unified search, add-to-arr, Prowlarr provider handlers | `cmd/pelicula-api/search.go` |
+| `services/` | Typed `Clients` aggregator passed to all handlers | `cmd/pelicula-api/services.go` |
+| `settings/` | Settings read/update/reset handlers with env file I/O | `cmd/pelicula-api/settings.go` |
+| `setup/` | Setup wizard handlers and env writer | `cmd/pelicula-api/setup.go` |
+| `sse/` | SSE hub and poller — live event broadcaster | `cmd/pelicula-api/sse.go`, `sse_poller.go` (deleted) |
+| `sysinfo/` | Host info, speedtest, and system log handlers | `cmd/pelicula-api/sysinfo.go` |
+| `vpnwatchdog/` | VPN port-forward watchdog FSM | `cmd/pelicula-api/vpn_watchdog.go` |
 
-## Scaffolding stubs (Phase 2.1 targets)
+### `middleware/internal/clients/`
 
-These directories contain `doc.go` or minimal stubs. They exist to establish the target package layout. Each will be filled when the corresponding flat file in `cmd/pelicula-api/` is extracted during Phase 2.1 (package split).
-
-| Package | Source file(s) to extract | Phase 2.1 step |
+| Package | Purpose | Replaced |
 |---|---|---|
-| `internal/app/autowire` | `cmd/pelicula-api/autowire.go` (~450 LOC) | Package split |
-| `internal/app/backup` | `cmd/pelicula-api/export.go` (~750 LOC) | Package split |
-| `internal/app/library` | `cmd/pelicula-api/library_scan.go`, `library_proxy.go`, `library_apply.go` | Package split |
-| ~~`internal/peligrosa`~~ | ~~`peligrosa/` subpackage — move to `internal/peligrosa/`~~ | Done — see "Wired and live" |
-| `internal/repo` | Full SQL repo per table (invites, requests, roles, sessions, catalog) | Phase 2.2 repo layer |
-| `internal/config` | `cmd/pelicula-api/main.go` env loading | Package split |
+| `arr/` | Typed client for Sonarr, Radarr, and Prowlarr APIs | Inline `arrGet()`/`arrPost()` helpers in `cmd/` |
+| `apprise/` | Apprise notification client | Inline HTTP calls in `cmd/` |
+| `bazarr/` | Typed client for Bazarr subtitle API | Inline `bzGet()`/`bzPostForm()` in `cmd/` |
+| `docker/` | Docker socket-proxy client (restart, logs) | Inline HTTP calls in `cmd/` |
+| `gluetun/` | Typed client for gluetun control API | Inline `gluetunGet()` in `cmd/` |
+| `jellyfin/` | Typed client for Jellyfin API (auth, libraries, items) | Inline helpers in `cmd/pelicula-api/jellyfin_core.go` (deleted) |
+| `procula/` | Typed client for procula job/status/notification API | Inline HTTP calls in `cmd/` |
+| `qbt/` | Typed client for qBittorrent v5 API | Inline `qbtGet()`/`qbtPost()` in `cmd/` |
 
-## Known drift (Phase 2.1 cleanup targets)
+### `middleware/internal/repo/`
 
-These are parallel implementations that exist in both the cmd package and an internal package. They use the same DB handle so there is no runtime bug, but they will drift if not consolidated.
-
-| Issue | Location | Plan |
+| Package | Purpose | Replaced |
 |---|---|---|
-| Parallel catalog DB | `cmd/catalog_db.go` and `internal/app/catalog/db.go` define identical `CatalogItem`, `OpenCatalogDB`, `UpsertCatalogItem`, etc. | Phase 2.1: delete `cmd/catalog_db.go`, have cmd handlers import from `internal/app/catalog` |
-| Legacy SSE types | `cmd/sse.go` (`SSEHub`) and `cmd/sse_poller.go` (`SSEPoller`) are tested but no longer wired to the mux | Phase 2.1: delete after tests migrate to `internal/app/sse` |
+| `catalog/` | Typed SQL store for the catalog table | Inline queries in `cmd/pelicula-api/catalog_db.go` (deleted) |
+| `dbutil/` | `ParseTime` RFC3339 helper; `Migrate` shared runner for both DBs | Scattered dual-parse pairs and per-package migration runners |
+| `invites/` | Typed SQL store for the invites table | Inline queries in `peligrosa/invites.go` |
+| `migratejson/` | One-shot JSON→SQLite migration for legacy data | `cmd/pelicula-api/migrate_json.go` |
+| `peliculadb/` | Shared pelicula DB handle and schema migration entrypoint | `cmd/pelicula-api/main.go` (DB open block) |
+| `requests/` | Typed SQL store for the requests table | Inline queries in `peligrosa/requests.go` |
+| `roles/` | Typed SQL store for the roles table | Inline queries in `peligrosa/auth.go` |
+| `sessions/` | Typed SQL store for sessions and rate-limit tables | Inline queries + in-memory rate-limit map in `peligrosa/auth.go` |
 
-## Deleted (not deferred)
+### `middleware/internal/peligrosa/`
 
-These were created or existed as parallel implementations and have been removed:
+| Package | Purpose | Replaced |
+|---|---|---|
+| `auth.go` | Session validation, login/logout, rate-limit enforcement | `peligrosa/auth.go` (top-level dir, now deleted) |
+| `invites.go` | Invite creation, redemption, expiry | `peligrosa/invites.go` |
+| `loopback.go` | Loopback/self-request helper for internal API calls | `peligrosa/loopback.go` |
+| `operators_http.go` | Operator CRUD HTTP handlers (moved from `cmd/`) | `cmd/pelicula-api/operators.go` |
+| `register.go` | Open and invite-gated registration handlers | `peligrosa/register.go` |
+| `requests.go` | Request queue: create, list, fulfil, reject | `peligrosa/requests.go` |
+| `roles.go` | Role assignment and lookup helpers | `peligrosa/roles.go` |
+| `routes.go` | Route wiring for all peligrosa endpoints | `peligrosa/routes.go` |
 
-| Package / File | Reason |
-|---|---|
-| `internal/app/hooks/hooks.go` | Complete parallel implementation of `hooks_*.go`; neither was the right authority — removed to eliminate ambiguity. The cmd-package `hooks_*.go` files remain the live handlers. Will be re-extracted to `internal/app/hooks/` as part of Phase 2.1. |
-| `internal/services/clients.go` | 379-line parallel implementation of `cmd/services.go`; zero live importers. Deleted. |
-| `cmd/downloads.go` | Dead: all four handlers replaced by `internal/app/downloads.Handler`. |
-| `cmd/arrqueue.go` | Dead: only called from the now-deleted `cmd/downloads.go`. Queue logic lives in `internal/app/downloads`. |
-| `internal/clients/jellyfin` | `jellyfin_core.go` is 673 LOC; full migration is a Phase 2.1 item. |
-| `internal/repo/invites`, `requests`, `roles`, `sessions` | Full SQL migration deferred to Phase 2.2; `dbutil.ParseTime` is the only Phase 2 extraction. |
+---
 
-## Criteria for moving a stub to wired
+## Phase 4 tracker
 
-1. At least one production call site in `cmd/pelicula-api/` imports and uses it.
-2. The package has a test or is covered by an integration test.
-3. The corresponding flat file in `cmd/pelicula-api/` is either removed or marked for removal.
+Phase 4 covers three sub-phases: **4.1** drain `cmd/pelicula-api/` of handler files, **4.2** finish main.go diet and route extraction, **4.3** add test coverage.
 
-## Criteria for deleting a stub
+| Task | Description | Status |
+|---|---|---|
+| T1 | Extract `internal/app/sysinfo` (host, speedtest, logs handlers) + `internal/clients/docker` + `internal/clients/apprise` | done |
+| T2 | Extract `internal/repo/migratejson` (JSON→SQLite one-shot migration) | done |
+| T3 | Extract `internal/app/services` (typed `Clients` aggregator) | done |
+| T4 | Extract `internal/app/adminops` (admin rate-limiter, restart, log-stream handlers) | done |
+| T5 | Extract `internal/app/actions` (action-bus registry and create handlers) | done |
+| T6 | Move operator CRUD handlers into `internal/peligrosa` as `Auth` methods | done |
+| T7 | Extract `internal/app/missingwatcher` (missing content watcher with backoff) | done |
+| T8 | Extract `internal/app/vpnwatchdog` (VPN port-forward watchdog FSM) | done |
+| T9 | Extract `internal/app/setup` (setup wizard handlers and env writer) | done |
+| T10 | Fold `jellyfin_wiring.go` into `internal/app/jellyfin` via `Wirer`; complete `internal/clients/jellyfin` | done |
+| T11 | Extract `internal/app/settings` (settings read/update/reset with env file I/O) | done |
+| T12 | Extract `internal/app/search` (unified search, add-to-arr, Prowlarr providers) | done |
+| T13 | Extract `internal/app/router` (route registration) | done |
+| T14 | Move `adminops` construction out of `router.Register` | done |
+| T15 | Extract `App`/`bootstrap`/`supervisor`; shrink `main.go` to ≤100 LOC | done |
+| T16 | Delete all remaining drift files from `cmd/pelicula-api/` | done |
+| T17 | Add handler tests for `internal/app/health` (≥70% coverage) | done |
+| T18 | Rewrite `docs/REFACTOR_STATUS.md` as Phase 2/3 retrospective + Phase 4 tracker | done |
+| T19 | Add handler tests for `internal/app/downloads` (≥60% coverage) | done |
 
-A stub is deleted (not deferred) when it adds confusion without value (e.g., a full parallel implementation that is never wired). It is re-created when the Phase 2.1 extraction begins.
+---
+
+## Known deferred
+
+**procula flat-to-layered split** is explicitly out of scope for this refactor. The `procula/` service has its own flat structure mirroring the pre-refactor middleware layout. Applying the same `internal/app/` + `internal/repo/` pattern to procula is a separate project tracked in `docs/ROADMAP.md`.
