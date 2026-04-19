@@ -45,7 +45,7 @@ type App struct {
 	Invites         *peligrosa.InviteStore
 	Requests        *peligrosa.RequestStore
 	IdxCache        IndexerCountCache
-	StatusTTL       statusTTLCache
+	StatusTTL       StatusTTLCache
 	BackupHandler   *backup.Handler
 	DLHandler       *downloads.Handler
 	HealthHandler   *health.Handler
@@ -110,20 +110,20 @@ func (c *IndexerCountCache) Invalidate() {
 
 // ── statusTTLCache ─────────────────────────────────────────────────────────────
 
-// statusTTLCache is a simple single-value cache with a TTL for the status endpoint.
-type statusTTLCache struct {
+// StatusTTLCache is a simple single-value cache with a TTL for the status endpoint.
+type StatusTTLCache struct {
 	mu        sync.Mutex
 	value     map[string]string
 	fetchedAt time.Time
 	ttl       time.Duration
 }
 
-// NewStatusTTLCache constructs a statusTTLCache with the given TTL.
-func NewStatusTTLCache(ttl time.Duration) statusTTLCache {
-	return statusTTLCache{ttl: ttl}
+// NewStatusTTLCache constructs a StatusTTLCache with the given TTL.
+func NewStatusTTLCache(ttl time.Duration) StatusTTLCache {
+	return StatusTTLCache{ttl: ttl}
 }
 
-func (c *statusTTLCache) get(fetch func() (map[string]string, error)) (map[string]string, error) {
+func (c *StatusTTLCache) get(fetch func() (map[string]string, error)) (map[string]string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.value != nil && time.Since(c.fetchedAt) < c.ttl {
