@@ -16,6 +16,7 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
 
         // ── 2. Open storage explorer ───────────────────────────────
         await page.click('[data-tab="storage"]');
+        await page.waitForFunction(() => document.body.dataset.tab === 'storage');
         await page.click('[data-stab="explorer"]');
         await page.waitForSelector('[data-testid="storage-explorer-section"]:not(.hidden)', { timeout: 10_000 });
         await page.waitForSelector('[data-testid="browse-tree"] .browse-entry', { timeout: 10_000 });

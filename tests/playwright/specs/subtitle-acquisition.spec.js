@@ -17,6 +17,7 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
 
         // ── 2. Switch to jobs tab and confirm job appears ──────────
         await page.click('[data-tab="jobs"]');
+        await page.waitForFunction(() => document.body.dataset.tab === 'jobs');
         await page.waitForSelector('#jobs-section', { state: 'visible' });
 
         await page.waitForFunction(
@@ -80,6 +81,7 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         await page.reload();
         // After reload, switch to jobs tab (reload resets to default "search" tab)
         await page.click('[data-tab="jobs"]');
+        await page.waitForFunction(() => document.body.dataset.tab === 'jobs');
         await page.waitForSelector('#jobs-section', { state: 'visible' });
         const completedCards = page.locator('.jobs-group-completed');
         await expect(completedCards).toContainText(TITLE, { timeout: 15_000 });
