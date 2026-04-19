@@ -25,7 +25,7 @@ Pelicula is **LAN-first**. The design baseline assumes:
 
 ## The Safety Surface
 
-### Authentication (`middleware/peligrosa/`)
+### Authentication (`middleware/internal/peligrosa/`)
 
 Auth is always on. Credentials are verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `pelicula.db` (SQLite, `roles` table). Jellyfin admins automatically get `admin` role. No passwords stored by Pelicula — Jellyfin is the authority. (On first startup after upgrade, existing `roles.json` is auto-migrated into SQLite and renamed to `roles.json.migrated`.)
 
@@ -181,4 +181,4 @@ See [ROADMAP.md — Shipped](ROADMAP.md#shipped) for the full backlog. Active it
 
 - **HMAC invite tokens** — sign tokens so validity is verifiable without a DB read
 - ~~**Central CSRF middleware**~~ — shipped: `requireLocalOriginStrict` / `requireLocalOriginSoft` wired per-route in `main.go`
-- ~~**`middleware/peligrosa/` subpackage**~~ — shipped: auth, invites, requests, and webhook validation extracted into `middleware/peligrosa/` with an explicit API surface (`peligrosa.RegisterRoutes`)
+- ~~**`middleware/internal/peligrosa/` subpackage**~~ — shipped: auth, invites, requests, and webhook validation extracted into `middleware/internal/peligrosa/` with an explicit API surface (`peligrosa.RegisterRoutes`)
