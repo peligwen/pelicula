@@ -356,7 +356,7 @@ function wireSwitches(root) {
 export { createStore, initStore };
 export { component, mount, unmount };
 export { html, raw };
-export { byTestId, setText, esc as escHtml };
+export { byTestId, setText, _escapeHtml as escHtml };
 export { router };
 export { trapFocus, releaseFocus };
 export { openDrawer, closeDrawer };

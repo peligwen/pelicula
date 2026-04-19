@@ -109,7 +109,8 @@ component('downloads', function (el, storeProxy) {
 
 // ── Event listeners ───────────────────────────────────────────────────────
 
-document.getElementById('downloads-list').addEventListener('click', e => {
+const _dlList = document.getElementById('downloads-list');
+if (_dlList) _dlList.addEventListener('click', e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
