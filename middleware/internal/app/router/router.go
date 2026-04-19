@@ -105,8 +105,8 @@ func Register(mux *http.ServeMux, cfg Config) {
 	// viewer+: active Jellyfin sessions
 	mux.Handle("/api/pelicula/sessions", auth.Guard(http.HandlerFunc(cfg.JF.HandleSessions)))
 
-	// viewer+: library metadata
-	mux.Handle("GET /api/pelicula/libraries", auth.Guard(http.HandlerFunc(cfg.Library.HandleListLibraries)))
+	// public: library list (read-only, no secrets, same convention as /status)
+	mux.Handle("GET /api/pelicula/libraries", http.HandlerFunc(cfg.Library.HandleListLibraries))
 	// admin only: library CRUD
 	mux.Handle("POST /api/pelicula/libraries", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(cfg.Library.HandleAddLibrary))))
 	mux.Handle("PUT /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(cfg.Library.HandleUpdateLibrary))))
