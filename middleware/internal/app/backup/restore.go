@@ -95,7 +95,7 @@ func (h *Handler) importInvites(invites []peligrosa.InviteExport, result *Import
 	for _, inv := range invites {
 		if err := h.Invites.InsertFull(inv); err != nil {
 			slog.Warn("failed to insert invite from backup", "component", "export",
-				"token", inv.Token[:8]+"...", "error", err)
+				"token", fmt.Sprintf("%.8s...", inv.Token), "error", err)
 			// Don't add to errors — duplicate tokens are expected and silently skipped
 		}
 	}
