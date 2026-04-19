@@ -15,20 +15,14 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         // ── 1. Open dashboard, log in ─────────────────────────────
         await ensureLoggedIn(page);
 
-        // ── 2. Switch to pipeline tab and confirm job appears ──────
-        await page.click('[data-tab="coming"]');
-        await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
+        // ── 2. Switch to jobs tab and confirm job appears ──────────
+        await page.click('[data-tab="jobs"]');
+        await page.waitForSelector('#jobs-section', { state: 'visible' });
 
         await page.waitForFunction(
             (title) => {
-                const allCards = document.querySelectorAll(
-                    '[data-testid="pipeline-lane-validating"] .download-item, ' +
-                    '[data-testid="pipeline-lane-processing"] .download-item, ' +
-                    '[data-testid="pipeline-lane-cataloging"] .download-item, ' +
-                    '[data-testid="pipeline-lane-imported"] .download-item, ' +
-                    '[data-testid="pipeline-cards-completed"] .download-item'
-                );
-                return Array.from(allCards).some(c => c.textContent.includes(title));
+                const rows = document.querySelectorAll('.jobs-row-title');
+                return Array.from(rows).some(r => r.textContent.includes(title));
             },
             TITLE,
             { timeout: 30_000, polling: 2000 }
@@ -41,10 +35,11 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         let sawAwaitSubs = false;
 
         while (Date.now() < awaitSubsDeadline) {
-            const res = await page.request.get(`${BASE}/api/procula/jobs`);
+            const res = await page.request.get(`${BASE}/api/pelicula/jobs`);
             if (res.ok()) {
-                const jobs = await res.json();
-                const job = jobs.find(j =>
+                const data = await res.json();
+                const allJobs = Object.values(data.groups || {}).flat();
+                const job = allJobs.find(j =>
                     (j.source?.title || '').toLowerCase().includes(TITLE.toLowerCase())
                 );
                 if (job) {
@@ -81,12 +76,12 @@ test.describe('Subtitle acquisition: Night of the Living Dead (1968)', () => {
         expect(job.state).toBe('completed');
         expect(job.catalog?.jellyfin_synced).toBe(true);
 
-        // ── 6. Verify completed card in UI ─────────────────────────
+        // ── 6. Verify completed job in UI ──────────────────────────
         await page.reload();
-        // After reload, switch to pipeline tab (reload resets to default "search" tab)
-        await page.click('[data-tab="coming"]');
-        await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
-        const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
+        // After reload, switch to jobs tab (reload resets to default "search" tab)
+        await page.click('[data-tab="jobs"]');
+        await page.waitForSelector('#jobs-section', { state: 'visible' });
+        const completedCards = page.locator('.jobs-group-completed');
         await expect(completedCards).toContainText(TITLE, { timeout: 15_000 });
 
         // ── 7. Verify Jellyfin library ─────────────────────────────

@@ -38,10 +38,10 @@ test.describe('Dualsub: stacked ASS sidecar generation', () => {
         // CatalogLate fires when DualSubOutputs is non-empty
         expect(job.catalog?.jellyfin_synced).toBe(true);
 
-        // ── 3. Verify completed card in UI ─────────────────────────
-        await page.click('[data-tab="coming"]');
-        await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
-        const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
+        // ── 3. Verify completed job in UI ──────────────────────────
+        await page.click('[data-tab="jobs"]');
+        await page.waitForSelector('#jobs-section', { state: 'visible' });
+        const completedCards = page.locator('.jobs-group-completed');
         await expect(completedCards).toContainText(TITLE, { timeout: 15_000 });
     });
 });

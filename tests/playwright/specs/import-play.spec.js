@@ -15,10 +15,8 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await ensureLoggedIn(page);
 
         // ── 2. Open storage explorer ───────────────────────────────
-        // Use evaluate instead of hash navigation — hash change doesn't reload
-        // the page, so window.location.hash check at startup won't fire again.
-
-        await page.evaluate(() => openStorageExplorer());
+        await page.click('[data-tab="storage"]');
+        await page.click('[data-stab="explorer"]');
         await page.waitForSelector('[data-testid="storage-explorer-section"]:not(.hidden)', { timeout: 10_000 });
         await page.waitForSelector('[data-testid="browse-tree"] .browse-entry', { timeout: 10_000 });
 
@@ -97,23 +95,16 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         await page.locator('[data-testid="apply-nav"] button.import-btn.primary').click();
         await page.locator('[data-testid="import-modal"]').waitFor({ state: 'hidden', timeout: 5_000 });
 
-        // ── 10. Watch pipeline section ─────────────────────────────
-        // Switch to the pipeline tab — pipeline-section is only visible on "coming" tab
-        await page.click('[data-tab="coming"]');
-        await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
+        // ── 10. Watch jobs section ─────────────────────────────────
+        await page.click('[data-tab="jobs"]');
+        await page.waitForSelector('#jobs-section', { state: 'visible' });
 
-        // Wait for a job card to appear in any pipeline lane (including completed —
+        // Wait for a job row to appear in any state (including completed —
         // the job may finish before Playwright starts polling).
         await page.waitForFunction(
             (title) => {
-                const cards = document.querySelectorAll(
-                    '[data-testid="pipeline-lane-validating"] .download-item, ' +
-                    '[data-testid="pipeline-lane-processing"] .download-item, ' +
-                    '[data-testid="pipeline-lane-cataloging"] .download-item, ' +
-                    '[data-testid="pipeline-lane-imported"] .download-item, ' +
-                    '[data-testid="pipeline-cards-completed"] .download-item'
-                );
-                return Array.from(cards).some(c => c.textContent.includes(title));
+                const rows = document.querySelectorAll('.jobs-row-title');
+                return Array.from(rows).some(r => r.textContent.includes(title));
             },
             TEST_TITLE,
             { timeout: 30_000, polling: 2000 }
@@ -124,13 +115,13 @@ test.describe('Import wizard → pipeline → Jellyfin', () => {
         const job = await waitForJobState(page.request, TEST_TITLE, 'completed', 90_000);
         expect(job.catalog?.jellyfin_synced).toBe(true);
 
-        // ── 12. Verify completed card appears in UI ─────────────────
+        // ── 12. Verify completed job appears in UI ──────────────────
         await page.reload();
         // After reload, session cookie is still valid — no re-login needed
-        // Switch to pipeline tab (reload resets to default "search" tab)
-        await page.click('[data-tab="coming"]');
-        await page.waitForSelector('[data-testid="pipeline-section"]', { state: 'visible' });
-        const completedCards = page.locator('[data-testid="pipeline-cards-completed"]');
+        // Switch to jobs tab (reload resets to default "search" tab)
+        await page.click('[data-tab="jobs"]');
+        await page.waitForSelector('#jobs-section', { state: 'visible' });
+        const completedCards = page.locator('.jobs-group-completed');
         await expect(completedCards).toContainText(TEST_TITLE, { timeout: 15_000 });
 
         // ── 13. Verify Jellyfin library ────────────────────────────

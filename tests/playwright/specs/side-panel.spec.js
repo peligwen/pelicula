@@ -62,7 +62,7 @@ test.describe('Collapsible side panel', () => {
         await page.setViewportSize(MOBILE_VIEWPORT);
         await ensureLoggedIn(page);
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
-        await expect(page.locator('#side-strip')).toBeVisible();
+        await expect(page.locator('#side-toggle')).toBeVisible();
         await expect(page.locator('.pane-side')).toBeHidden();
     });
 
@@ -70,7 +70,7 @@ test.describe('Collapsible side panel', () => {
         await mockStatus(page, {});
         await page.setViewportSize(MOBILE_VIEWPORT);
         await ensureLoggedIn(page);
-        await page.locator('#side-strip').click();
+        await page.locator('#side-toggle').click();
         await expect(page.locator('body')).not.toHaveClass(/side-collapsed/);
         await expect(page.locator('.pane-side')).toBeVisible();
     });
@@ -79,7 +79,7 @@ test.describe('Collapsible side panel', () => {
         await mockStatus(page, {});
         await page.setViewportSize(MOBILE_VIEWPORT);
         await ensureLoggedIn(page);
-        await page.locator('#side-strip').click();
+        await page.locator('#side-toggle').click();
         await expect(page.locator('.pane-side')).toBeVisible();
         // Click somewhere inside pane-main, well away from the panel.
         await page.locator('.pane-main').click({ position: { x: 20, y: 200 } });
@@ -92,9 +92,9 @@ test.describe('Collapsible side panel', () => {
         await ensureLoggedIn(page);
         await expect(page.locator('body')).not.toHaveClass(/side-collapsed/);
         await expect(page.locator('.pane-side')).toBeVisible();
-        await page.locator('#side-collapse-btn').click();
+        await page.locator('#side-toggle').click();
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
-        await expect(page.locator('#side-strip')).toBeVisible();
+        await expect(page.locator('#side-toggle')).toBeVisible();
     });
 
     test('mobile: clicks inside an open modal do not collapse the panel', async ({ page }) => {
@@ -102,7 +102,7 @@ test.describe('Collapsible side panel', () => {
         await page.setViewportSize(MOBILE_VIEWPORT);
         await ensureLoggedIn(page);
         // Open the panel so the tap-outside handler is armed.
-        await page.locator('#side-strip').click();
+        await page.locator('#side-toggle').click();
         await expect(page.locator('.pane-side')).toBeVisible();
         // Force a visible modal overlay (none of the built-in modals are
         // reachable from the mobile dashboard yet, so inject a stub).
@@ -127,7 +127,7 @@ test.describe('Collapsible side panel', () => {
         await mockStatus(page, {});
         await page.setViewportSize(DESKTOP_VIEWPORT);
         await ensureLoggedIn(page);
-        await page.locator('#side-collapse-btn').click();
+        await page.locator('#side-toggle').click();
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
         await page.reload();
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
@@ -141,7 +141,7 @@ test.describe('Collapsible side panel', () => {
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
         await expect(page.locator('body')).toHaveClass(/panel-alert/);
         // The strip should have a non-'none' animation-name when in alert state.
-        const animName = await page.locator('#side-strip').evaluate(
+        const animName = await page.locator('#side-toggle').evaluate(
             (el) => getComputedStyle(el).animationName
         );
         expect(animName).not.toBe('none');
@@ -154,7 +154,7 @@ test.describe('Collapsible side panel', () => {
         await ensureLoggedIn(page);
         await expect(page.locator('body')).toHaveClass(/side-collapsed/);
         await expect(page.locator('body')).not.toHaveClass(/panel-alert/);
-        const animName = await page.locator('#side-strip').evaluate(
+        const animName = await page.locator('#side-toggle').evaluate(
             (el) => getComputedStyle(el).animationName
         );
         expect(animName).toBe('none');
@@ -171,11 +171,11 @@ test.describe('Collapsible side panel', () => {
             await expect(page.locator('body')).toHaveClass(/panel-alert/);
             // Animation is suppressed under reduced-motion; the strip should
             // still be visually distinct (static yellow background).
-            const animName = await page.locator('#side-strip').evaluate(
+            const animName = await page.locator('#side-toggle').evaluate(
                 (el) => getComputedStyle(el).animationName
             );
             expect(animName).toBe('none');
-            const bg = await page.locator('#side-strip').evaluate(
+            const bg = await page.locator('#side-toggle').evaluate(
                 (el) => getComputedStyle(el).backgroundColor
             );
             // #ffcb3d

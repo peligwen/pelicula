@@ -48,10 +48,11 @@ async function searchJellyfin(request, token, searchTerm) {
 async function waitForJobState(request, titleSubstring, targetState, timeoutMs = 90_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const res = await request.get(`${BASE}/api/procula/jobs`);
+        const res = await request.get(`${BASE}/api/pelicula/jobs`);
         if (res.ok()) {
-            const jobs = await res.json();
-            const job = jobs.find(j =>
+            const data = await res.json();
+            const allJobs = Object.values(data.groups || {}).flat();
+            const job = allJobs.find(j =>
                 (j.source?.title || '').toLowerCase().includes(titleSubstring.toLowerCase())
             );
             if (job) {
