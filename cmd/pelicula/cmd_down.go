@@ -18,9 +18,14 @@ func cmdDown(ctx *Context, _ []string) {
 		return
 	}
 
-	// Normal path: .env exists — load env and set profiles from config.
+	// Normal path: .env exists — activate every known profile unconditionally so
+	// that teardown covers whatever `up` started, regardless of current env state.
+	// composeInvocation is intentionally NOT used here: it only activates profiles
+	// matching the current env, which would leak profile-gated containers if env
+	// changed between `up` and `down` (e.g. WireGuard key cleared after VPN start).
 	ctx.LoadEnv()
 	c := composeInvocation(ctx)
+	c.profiles = []string{"vpn", "apprise"}
 	if err := c.Run("down", "--remove-orphans"); err != nil {
 		fatal("docker compose down failed: " + err.Error())
 	}
