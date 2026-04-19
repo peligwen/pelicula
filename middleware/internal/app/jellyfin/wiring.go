@@ -155,13 +155,32 @@ func (w *Wirer) Wire(lh *library.Handler) {
 					adminUser := credVars["JELLYFIN_ADMIN_USER"]
 					adminPass := credVars["JELLYFIN_PASSWORD"]
 					if adminUser != "" && adminUser != w.ServiceUser && adminPass != "" {
+						createdUser := false
 						if userID, createErr := w.CreateUser(adminUser, adminPass); createErr != nil {
-							slog.Warn("could not create operator admin account", "component", "autowire", "username", adminUser, "error", createErr)
+							// Leave credentials in .env so the next startup can retry.
+							slog.Warn("could not create operator admin account — credentials retained for retry", "component", "autowire", "username", adminUser, "error", createErr)
 						} else {
+							createdUser = true
 							slog.Info("operator admin account created", "component", "autowire", "username", adminUser)
 							if adminToken, authErr := w.Auth(); authErr == nil {
 								PromoteAdmin(jfc, adminToken, userID, adminUser)
 							}
+						}
+						if !createdUser {
+							// Skip credential erasure — we need them on the next attempt.
+							w.EnvMu.Lock()
+							vars, readErr := w.ParseEnvFile(w.EnvPath)
+							if readErr != nil {
+								vars = make(map[string]string)
+							}
+							vars["JELLYFIN_API_KEY"] = apiKey
+							if writeErr := w.WriteEnvFile(w.EnvPath, vars); writeErr != nil {
+								slog.Error("failed to persist Jellyfin API key to .env", "component", "autowire", "error", writeErr)
+							} else {
+								slog.Info("Jellyfin API key created and saved", "component", "autowire")
+							}
+							w.EnvMu.Unlock()
+							return
 						}
 					}
 				}
