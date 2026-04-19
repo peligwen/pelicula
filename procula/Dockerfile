@@ -4,7 +4,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
 COPY cmd/ ./cmd/
-COPY internal/ ./internal/
 RUN go build -o procula ./cmd/procula/
 
 FROM alpine:3.20
