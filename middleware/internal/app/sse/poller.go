@@ -14,9 +14,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"pelicula-api/internal/app/util"
 )
 
 const pollInterval = 5 * time.Second
+
+// StatusCache is a single-value cache for service health results.
+// Implemented by app.StatusTTLCache.
+type StatusCache interface {
+	Get(fetch func() (map[string]string, error)) (map[string]string, error)
+	Invalidate()
+}
 
 // ServiceQuerier is the subset of ServiceClients that SSEPoller needs.
 type ServiceQuerier interface {
@@ -61,6 +70,14 @@ type Poller struct {
 	allowedContainers map[string]bool
 	hashes            map[string][32]byte
 	mu                sync.Mutex
+	statusCache       StatusCache
+}
+
+// SetStatusCache wires a shared StatusCache into the poller so that
+// fetchServices reuses the cached value rather than calling CheckHealth
+// on every tick.
+func (p *Poller) SetStatusCache(c StatusCache) {
+	p.statusCache = c
 }
 
 // NewPoller creates a Poller that will broadcast to hub using svc.
@@ -79,13 +96,21 @@ func NewPoller(hub *Hub, svc ServiceQuerier, proculaURL string, dockerLogs Docke
 
 // Run starts the polling loop and blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) {
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	tick := util.JitteredTicker(ctx, pollInterval, 0.1)
+	skipCount := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-tick:
+			if p.hub.ClientCount() == 0 {
+				skipCount++
+				if skipCount%60 == 0 {
+					slog.Info("sse: no clients connected, skipping poll", "component", "sse_poller", "skipped", skipCount)
+				}
+				continue
+			}
+			skipCount = 0
 			p.pollOnce(ctx)
 		}
 	}
@@ -168,6 +193,9 @@ func (p *Poller) TriggerImmediate(ctx context.Context, eventType string) {
 	var fn func(context.Context) ([]byte, []byte, error)
 	switch eventType {
 	case "services":
+		if p.statusCache != nil {
+			p.statusCache.Invalidate()
+		}
 		fn = wrapFetch(p.fetchServices)
 	case "downloads":
 		fn = wrapFetch(p.fetchDownloads)
@@ -201,8 +229,20 @@ func (p *Poller) TriggerImmediate(ctx context.Context, eventType string) {
 }
 
 // fetchServices builds a lightweight service-status map and marshals it to JSON.
+// If a StatusTTLCache is wired in, the CheckHealth result is served from cache.
 func (p *Poller) fetchServices(ctx context.Context) ([]byte, error) {
-	svcs := p.svc.CheckHealth()
+	var svcs map[string]string
+	if p.statusCache != nil {
+		var err error
+		svcs, err = p.statusCache.Get(func() (map[string]string, error) {
+			return p.svc.CheckHealth(), nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		svcs = p.svc.CheckHealth()
+	}
 	status := map[string]any{
 		"status":         "ok",
 		"services":       svcs,

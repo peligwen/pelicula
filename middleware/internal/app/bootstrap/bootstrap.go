@@ -272,5 +272,9 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 	a.Autowirer = autowirer
 	a.AutowireState = autowireState
 
+	// Wire the shared StatusTTLCache into the SSE poller so that fetchServices
+	// reuses the same cached CheckHealth result as the status HTTP endpoint.
+	a.SSEPoller.SetStatusCache(&a.StatusTTL)
+
 	return a, nil
 }

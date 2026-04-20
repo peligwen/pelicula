@@ -123,7 +123,8 @@ func NewStatusTTLCache(ttl time.Duration) StatusTTLCache {
 	return StatusTTLCache{ttl: ttl}
 }
 
-func (c *StatusTTLCache) get(fetch func() (map[string]string, error)) (map[string]string, error) {
+// Get returns the cached value if fresh, otherwise calls fetch to refresh it.
+func (c *StatusTTLCache) Get(fetch func() (map[string]string, error)) (map[string]string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.value != nil && time.Since(c.fetchedAt) < c.ttl {
@@ -135,6 +136,14 @@ func (c *StatusTTLCache) get(fetch func() (map[string]string, error)) (map[strin
 		c.fetchedAt = time.Now()
 	}
 	return v, err
+}
+
+// Invalidate clears the cached value so the next Get re-fetches.
+func (c *StatusTTLCache) Invalidate() {
+	c.mu.Lock()
+	c.value = nil
+	c.fetchedAt = time.Time{}
+	c.mu.Unlock()
 }
 
 // ── HandleStatus ──────────────────────────────────────────────────────────────
@@ -153,7 +162,7 @@ func (a *App) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		idxCount = a.IdxCache.Get(a.Svc)
 	}
 
-	svcHealth, _ := a.StatusTTL.get(func() (map[string]string, error) {
+	svcHealth, _ := a.StatusTTL.Get(func() (map[string]string, error) {
 		return a.Svc.CheckHealth(), nil
 	})
 	status := map[string]any{
