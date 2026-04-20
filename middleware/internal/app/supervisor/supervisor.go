@@ -27,7 +27,9 @@ func Run(ctx context.Context, a *pelapp.App) {
 
 	// TODO: missingwatcher.Run and vpnwatchdog.Run do not yet accept ctx —
 	// they rely on process exit for cleanup (pre-existing from main.go).
-	go missingwatcher.New(a.Svc, a.URLs.Sonarr, a.URLs.Radarr).Run(2 * time.Minute)
+	mw := missingwatcher.New(a.Svc, a.URLs.Sonarr, a.URLs.Radarr)
+	mw.CatalogCache = a.ArrCatalogCache
+	go mw.Run(10 * time.Minute)
 
 	if a.Watchdog != nil {
 		go a.Watchdog.Run()

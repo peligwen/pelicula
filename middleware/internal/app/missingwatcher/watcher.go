@@ -3,12 +3,15 @@
 package missingwatcher
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
 
+	"pelicula-api/internal/app/catalog"
 	services "pelicula-api/internal/app/services"
+	"pelicula-api/internal/app/util"
 )
 
 // searchCooldown tracks per-item search history to prevent hammering the *arr
@@ -70,11 +73,12 @@ func (c *searchCooldown) clear(id int) {
 
 // Watcher periodically scans Sonarr/Radarr for monitored content without files.
 type Watcher struct {
-	Services  *services.Clients
-	SonarrURL string
-	RadarrURL string
-	movie     *searchCooldown
-	episode   *searchCooldown
+	Services     *services.Clients
+	SonarrURL    string
+	RadarrURL    string
+	CatalogCache *catalog.CatalogCache // optional; nil falls back to direct ArrGet
+	movie        *searchCooldown
+	episode      *searchCooldown
 }
 
 // New creates a Watcher wired to the given service clients and URLs.
@@ -98,7 +102,7 @@ func (w *Watcher) Run(interval time.Duration) {
 	slog.Info("started", "component", "watcher", "interval", interval.String())
 
 	for {
-		time.Sleep(interval)
+		time.Sleep(util.JitteredDuration(interval, 0.1))
 		w.searchMissingMovies()
 		w.searchMissingSeries()
 	}
@@ -110,7 +114,13 @@ func (w *Watcher) searchMissingMovies() {
 		return
 	}
 
-	data, err := w.Services.ArrGet(w.RadarrURL, radarrKey, "/api/v3/movie")
+	var data []byte
+	var err error
+	if w.CatalogCache != nil {
+		data, err = w.CatalogCache.GetMovies(context.Background())
+	} else {
+		data, err = w.Services.ArrGet(w.RadarrURL, radarrKey, "/api/v3/movie")
+	}
 	if err != nil {
 		slog.Error("failed to fetch movies", "component", "watcher", "service", "radarr", "error", err)
 		return

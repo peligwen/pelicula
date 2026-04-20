@@ -141,6 +141,20 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 	invites := peligrosa.NewInviteStore(db, jellyfinClient)
 	requests := peligrosa.NewRequestStore(reporeqs.New(db), search.NewArrFulfiller(searchHandler))
 
+	// Construct the shared catalog cache once; both CatalogHandler and
+	// missingwatcher draw from it to avoid redundant full-library fetches.
+	catalogCacheSvc := svc // capture for closures below
+	arrCatalogCache := catalog.NewCatalogCache(
+		func(ctx context.Context) ([]byte, error) {
+			_, radarrKey, _ := catalogCacheSvc.Keys()
+			return catalogCacheSvc.ArrGet(urls.Radarr, radarrKey, "/api/v3/movie")
+		},
+		func(ctx context.Context) ([]byte, error) {
+			sonarrKey, _, _ := catalogCacheSvc.Keys()
+			return catalogCacheSvc.ArrGet(urls.Sonarr, sonarrKey, "/api/v3/series")
+		},
+	)
+
 	hub := sse.NewHub()
 
 	peligrosa.SetOpenRegistration(cfg.OpenRegistration)
@@ -199,8 +213,9 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			TriggerJellyfinRefresh: func() error { return jfWirer.TriggerRefresh() },
 			Notify:                 func(t, b string) error { appriseCli.Notify(t, b); return nil },
 		},
-		LibHandler: libHandler,
-		JFHandler:  jfHandler,
+		LibHandler:      libHandler,
+		JFHandler:       jfHandler,
+		ArrCatalogCache: arrCatalogCache,
 		CatalogHandler: &catalog.Handler{
 			DB:         cdb,
 			Arr:        svc,
@@ -209,6 +224,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			ProculaURL: urls.Procula,
 			RadarrURL:  urls.Radarr,
 			SonarrURL:  urls.Sonarr,
+			Cache:      arrCatalogCache,
 		},
 		SearchHandler:   searchHandler,
 		SettingsHandler: settings.New(envPath, cryptogen.GenerateAPIKey),

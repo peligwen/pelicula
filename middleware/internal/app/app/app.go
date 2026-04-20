@@ -39,6 +39,7 @@ type App struct {
 	SSEHub          *sse.Hub
 	SSEPoller       *sse.Poller
 	CatalogDB       *sql.DB
+	ArrCatalogCache *catalog.CatalogCache
 	MainDB          *sql.DB
 	Auth            *peligrosa.Auth
 	Deps            *peligrosa.Deps

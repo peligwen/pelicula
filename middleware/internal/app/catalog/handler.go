@@ -40,6 +40,7 @@ type Handler struct {
 	ProculaURL string
 	RadarrURL  string
 	SonarrURL  string
+	Cache      *CatalogCache // optional shared cache; nil means fetch directly
 	jfCache    jellyfinCacheState
 }
 
@@ -71,7 +72,13 @@ func (h *Handler) HandleCatalogList(w http.ResponseWriter, r *http.Request) {
 			radarrCh <- arrFetch{}
 			return
 		}
-		body, err := h.Arr.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie")
+		var body []byte
+		var err error
+		if h.Cache != nil {
+			body, err = h.Cache.GetMovies(r.Context())
+		} else {
+			body, err = h.Arr.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie")
+		}
 		radarrCh <- arrFetch{data: body, err: err}
 	}()
 	go func() {
@@ -79,7 +86,13 @@ func (h *Handler) HandleCatalogList(w http.ResponseWriter, r *http.Request) {
 			sonarrCh <- arrFetch{}
 			return
 		}
-		body, err := h.Arr.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series")
+		var body []byte
+		var err error
+		if h.Cache != nil {
+			body, err = h.Cache.GetSeries(r.Context())
+		} else {
+			body, err = h.Arr.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series")
+		}
 		sonarrCh <- arrFetch{data: body, err: err}
 	}()
 
