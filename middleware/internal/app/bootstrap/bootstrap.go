@@ -23,6 +23,7 @@ import (
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
+	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/search"
 	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/app/settings"
@@ -233,6 +234,10 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			username, _, ok := auth.SessionFor(r)
 			return username, ok
 		}),
+		NetworkHandler: &network.Handler{
+			NetcapURL: cfg.NetcapURL,
+			HTTP:      &http.Client{Timeout: 5 * time.Second},
+		},
 	}
 
 	// HealthHandler closure captures a.Watchdog which is set below — the

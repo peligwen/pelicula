@@ -73,6 +73,7 @@ func main() {
 		Settings:      a.SettingsHandler,
 		Actions:       a.ActionsHandler,
 		Admin:         a.AdminHandler,
+		Network:       a.NetworkHandler,
 		StatusHandler: http.HandlerFunc(a.HandleStatus),
 		JobsHandler:   http.HandlerFunc(handleJobsList),
 	})

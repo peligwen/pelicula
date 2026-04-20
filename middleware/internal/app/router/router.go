@@ -15,6 +15,7 @@ import (
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
+	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/search"
 	"pelicula-api/internal/app/settings"
 	"pelicula-api/internal/app/sse"
@@ -41,6 +42,7 @@ type Config struct {
 	Settings      *settings.Handler
 	Actions       *actions.Handler
 	Admin         *adminops.Handler
+	Network       *network.Handler
 	StatusHandler http.HandlerFunc
 	JobsHandler   http.HandlerFunc
 }
@@ -151,6 +153,9 @@ func Register(mux *http.ServeMux, cfg Config) {
 
 	// admin only: VPN speed test
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(cfg.Sysinfo.ServeSpeedtest)))
+
+	// admin only: network connections (proxies netcap sidecar)
+	mux.Handle("/api/pelicula/network", auth.GuardAdmin(http.HandlerFunc(cfg.Network.ServeConnections)))
 
 	// admin only: container control
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(cfg.Admin.HandleStackRestart)))

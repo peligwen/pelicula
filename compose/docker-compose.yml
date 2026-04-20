@@ -221,6 +221,10 @@ services:
       - ALLOW_RESTARTS=1   # POST /containers/{id}/restart only
       # Everything else (IMAGES, VOLUMES, NETWORKS, EXEC, BUILD, AUTH, INFO)
       # defaults to 0 — not exposed.
+    ports:
+      # Loopback-only: gives netcap (network_mode: host) access to docker-proxy
+      # without exposing the Docker API outside the host.
+      - "127.0.0.1:2375:2375"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     security_opt:
@@ -251,6 +255,10 @@ services:
       - GLUETUN_HTTP_PASS=${GLUETUN_HTTP_PASS}
       - GLUETUN_PROXY_URL=${GLUETUN_PROXY_URL:-http://gluetun:8888}
       - PELICULA_PROJECT_NAME=${PELICULA_PROJECT_NAME:-pelicula}
+      - NETCAP_URL=http://host.docker.internal:9191
+    extra_hosts:
+      # Allows pelicula-api to reach netcap, which runs with network_mode: host.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./.env:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
@@ -270,12 +278,45 @@ services:
       - sonarr
       - radarr
       - docker-proxy
+      - netcap
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8181/api/pelicula/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════
+  # Network Monitor — reads /proc/net/tcp to show outbound connections
+  # per container. Runs with network_mode: host so it sees the full host
+  # socket table (including all Docker container traffic).
+  #
+  # NOTE: On Docker Desktop (macOS), network_mode: host is a no-op and
+  # /proc/net/tcp reflects the Linux VM's namespace, not the Mac's.
+  # This service is designed for Linux (Synology/bare-metal) deployments.
+  # ═══════════════════════════════════════════════════
+  netcap:
+    build: ./netcap
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - NETCAP_LISTEN=127.0.0.1:9191
+      - DOCKER_HOST=http://127.0.0.1:2375
+      - PELICULA_PROJECT_NAME=${PELICULA_PROJECT_NAME:-pelicula}
+      - NETCAP_POLL_INTERVAL=${NETCAP_POLL_INTERVAL:-5s}
+      - NETCAP_RETENTION=${NETCAP_RETENTION:-1h}
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - docker-proxy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9191/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
@@ -327,6 +368,8 @@ services:
       - ./nginx/register.css:/usr/share/nginx/html/register.css:ro
       - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
       - ./nginx/sse.js:/usr/share/nginx/html/sse.js:ro
+      - ./nginx/network.js:/usr/share/nginx/html/network.js:ro
+      - ./nginx/network.css:/usr/share/nginx/html/network.css:ro
       - ./nginx/fonts:/usr/share/nginx/html/fonts:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
       - ${CONFIG_DIR}/nginx/remote.conf:/etc/nginx/conf.d/remote.conf:ro

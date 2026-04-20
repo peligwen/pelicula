@@ -21,6 +21,7 @@ import (
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
 	"pelicula-api/internal/app/library"
+	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/search"
 	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/app/settings"
@@ -59,6 +60,7 @@ type App struct {
 	SettingsHandler *settings.Handler
 	ActionsHandler  *actions.Handler
 	AdminHandler    *adminops.Handler
+	NetworkHandler  *network.Handler
 	VPNConfigured   bool
 	AutowireState   *autowire.AutowireState
 	Autowirer       *autowire.Autowirer

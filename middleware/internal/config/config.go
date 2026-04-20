@@ -94,6 +94,10 @@ type Config struct {
 	RequestsSonarrProfileID int
 	RequestsSonarrRoot      string
 
+	// --- Sidecar services ---
+	// NetcapURL is the base URL of the netcap network-monitor sidecar.
+	NetcapURL string
+
 	// --- Docker ---
 	DockerHost string
 
@@ -140,6 +144,8 @@ func Load() *Config {
 		RequestsRadarrRoot:      os.Getenv("REQUESTS_RADARR_ROOT"),
 		RequestsSonarrProfileID: IntOr("REQUESTS_SONARR_PROFILE_ID", 0),
 		RequestsSonarrRoot:      os.Getenv("REQUESTS_SONARR_ROOT"),
+
+		NetcapURL: envOr("NETCAP_URL", "http://host.docker.internal:9191"),
 
 		DockerHost: envOr("DOCKER_HOST", "http://docker-proxy:2375"),
 
