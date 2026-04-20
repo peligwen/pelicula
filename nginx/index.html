@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/import.css">
     <link rel="stylesheet" href="/catalog.css">
+    <link rel="stylesheet" href="/network.css">
     <script>(function(){var t=localStorage.getItem('pelicula-theme');if(t)document.documentElement.dataset.theme=t;})()</script>
 </head>
 <body data-dashboard="1">
@@ -638,7 +639,8 @@
                 <span class="svc-totals" id="svc-totals"></span>
                 <div class="svc-header-actions">
                     <button class="section-action" id="svc-refresh-btn" title="Refresh now">&#8635;</button>
-                    <div class="svc-stack-menu-wrap admin-only">
+                    <button class="section-action admin-only" id="net-drawer-btn" title="Network connections">&#9728;</button>
+                <div class="svc-stack-menu-wrap admin-only">
                         <button class="section-action" id="svc-menu-btn" title="Stack actions">&#8943;</button>
                         <div class="svc-stack-menu hidden" id="svc-stack-menu">
                             <button id="svc-stack-restart-btn">Restart stack</button>
@@ -1056,6 +1058,22 @@
             <button class="sm-btn" data-close-drawer="subs">Cancel</button>
             <span class="settings-save-status" id="st-subs-save-status"></span>
         </div>
+    </div>
+
+    <!-- Network connections drawer -->
+    <div class="drawer-backdrop hidden" id="net-drawer-backdrop"></div>
+    <div class="drawer hidden" id="net-drawer" role="dialog" aria-modal="true" aria-label="Network connections" tabindex="-1">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">Network Connections</div>
+                <div class="drawer-sub">Active outbound TCP connections</div>
+            </div>
+            <button class="drawer-close" id="net-drawer-close">&times;</button>
+        </div>
+        <div class="drawer-actions">
+            <button class="sm-btn" id="net-drawer-refresh">Refresh</button>
+        </div>
+        <div class="drawer-body" id="net-drawer-body"></div>
     </div>
 
     <!-- Job detail drawer -->

@@ -1,0 +1,100 @@
+/* network.css — Network Connections drawer styles */
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+
+.net-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    padding: 0 1rem 1rem;
+}
+
+.net-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+/* ── Section header ─────────────────────────────────────────────────────────── */
+
+.net-section-hdr {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.35rem;
+}
+
+/* ── Connection list ────────────────────────────────────────────────────────── */
+
+.net-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+/* ── Row ────────────────────────────────────────────────────────────────────── */
+
+.net-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--panel2);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    min-width: 0;
+}
+
+/* ── Host ───────────────────────────────────────────────────────────────────── */
+
+.net-host {
+    font-size: 0.78rem;
+    color: var(--ink);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.net-port {
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
+/* ── Container badge ────────────────────────────────────────────────────────── */
+
+.net-container-badge {
+    display: inline-block;
+    font-family: monospace;
+    font-size: 0.68rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 50px;
+    background: var(--panel);
+    border: 1.5px solid var(--border2);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+/* ── Time ───────────────────────────────────────────────────────────────────── */
+
+.net-time {
+    font-size: 0.68rem;
+    color: var(--faint);
+}
+
+/* ── Responsive: stack columns on narrow drawer ─────────────────────────────── */
+
+@media (max-width: 420px) {
+    .net-grid {
+        grid-template-columns: 1fr;
+    }
+}

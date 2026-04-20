@@ -11,6 +11,7 @@ import './jobs.js';
 import './services.js';
 import './notifications.js';
 import './sse.js';
+import './network.js';
 
 // ── App store ────────────────────────────
 // Initialised here; framework.js must be loaded first.
