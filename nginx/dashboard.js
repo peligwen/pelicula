@@ -864,6 +864,12 @@ async function refresh() {
 
 function updateStaleBanner() {
     if (!lastRefreshAt) return;
+    if (window.sseIsActive && window.sseIsActive()) {
+        document.body.classList.remove('stale');
+        const el = document.getElementById('footer-update');
+        if (el && el.textContent.startsWith('stale')) el.textContent = '';
+        return;
+    }
     const age = Date.now() - lastRefreshAt;
     const stale = age > 30000;
     document.body.classList.toggle('stale', stale);
@@ -874,6 +880,12 @@ function updateStaleBanner() {
         el.textContent = '';
     }
 }
+
+window.markRefreshed = function() {
+    lastRefreshAt = Date.now();
+    window.updateTimestamp();
+    updateStaleBanner();
+};
 
 // ── Storage Explorer ──────────────────────────────────────────────────────────
 

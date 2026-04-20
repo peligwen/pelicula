@@ -22,6 +22,7 @@ if (typeof EventSource === 'undefined') {
             retryCount = 0;
             sseActive = true;
             disablePollers();
+            if (window.markRefreshed) window.markRefreshed();
         };
 
         source.onerror = function() {
@@ -38,12 +39,14 @@ if (typeof EventSource === 'undefined') {
             try {
                 const data = JSON.parse(e.data);
                 if (window.updateServicesFromData) window.updateServicesFromData(data);
+                if (window.markRefreshed) window.markRefreshed();
             } catch(err) { console.warn('[sse] services parse error', err); }
         });
 
         // downloads event: trigger a targeted re-fetch
         source.addEventListener('downloads', function() {
             if (window.checkDownloads) window.checkDownloads();
+            if (window.markRefreshed) window.markRefreshed();
         });
 
         // notifications event: array shape matches renderNotifications
@@ -52,12 +55,14 @@ if (typeof EventSource === 'undefined') {
                 const data = JSON.parse(e.data);
                 if (window.renderNotifications) window.renderNotifications(data);
                 if (window.renderActivity) window.renderActivity(data);
+                if (window.markRefreshed) window.markRefreshed();
             } catch(err) { console.warn('[sse] notifications parse error', err); }
         });
 
         // storage event: trigger targeted re-fetch
         source.addEventListener('storage', function() {
             if (window.checkStorage) window.checkStorage();
+            if (window.markRefreshed) window.markRefreshed();
         });
 
         // logs event: {entries: [{service, line, ts},...]}
@@ -65,6 +70,7 @@ if (typeof EventSource === 'undefined') {
             try {
                 const data = JSON.parse(e.data);
                 if (window.renderLogsFromSSE) window.renderLogsFromSSE(data);
+                if (window.markRefreshed) window.markRefreshed();
             } catch(err) { console.warn('[sse] logs parse error', err); }
         });
     }
