@@ -77,6 +77,8 @@ func main() {
 		cmdImport(ctx, args[1:])
 	case "test":
 		cmdTest(ctx, args[1:])
+	case "doctor":
+		cmdDoctor(ctx, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		usage()
@@ -148,6 +150,9 @@ Data:
 
 Network:
   check-vpn           Verify VPN connectivity
+
+Diagnostics:
+  doctor              Dump container status and error logs for troubleshooting
 
 Options:
   -v, --verbose       Verbose output
