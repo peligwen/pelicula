@@ -302,7 +302,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      - NETCAP_LISTEN=127.0.0.1:9191
+      - NETCAP_LISTEN=0.0.0.0:9191
       - DOCKER_HOST=http://127.0.0.1:2375
       - PELICULA_PROJECT_NAME=${PELICULA_PROJECT_NAME:-pelicula}
       - NETCAP_POLL_INTERVAL=${NETCAP_POLL_INTERVAL:-5s}
