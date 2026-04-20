@@ -130,6 +130,11 @@ func TestScoreMatch(t *testing.T) {
 		{"no overlap", "Star Wars", 1977, "Alien", 1979, "unmatched"},
 		{"empty title", "", 2008, "The Dark Knight", 2008, "unmatched"},
 		{"empty match title", "The Dark Knight", 2008, "", 2008, "unmatched"},
+		// Same title, different year: only the matching year is high
+		{"same title year match", "A Star Is Born", 1937, "A Star Is Born", 1937, "high"},
+		{"same title year mismatch", "A Star Is Born", 1937, "A Star Is Born", 2018, "medium"},
+		{"all quiet year match", "All Quiet on the Western Front", 2022, "All Quiet on the Western Front", 2022, "high"},
+		{"all quiet year mismatch", "All Quiet on the Western Front", 1930, "All Quiet on the Western Front", 2022, "medium"},
 	}
 	for _, c := range cases {
 		c := c
@@ -141,6 +146,56 @@ func TestScoreMatch(t *testing.T) {
 					c.title, c.year, c.matchTitle, c.matchYear, got, c.want)
 			}
 		})
+	}
+}
+
+func TestPickBestMatch(t *testing.T) {
+	t.Parallel()
+
+	// Simulates Radarr returning popularity-ordered results: 2018 version first,
+	// then 1976, 1954, 1937. When the filename year is 1937 the matcher must
+	// skip the more-popular 2018 entry and return the high-confidence 1937 one.
+	starIsBorn := []map[string]any{
+		{"title": "A Star Is Born", "year": float64(2018), "tmdbId": float64(332562)},
+		{"title": "A Star Is Born", "year": float64(1976), "tmdbId": float64(3072)},
+		{"title": "A Star Is Born", "year": float64(1954), "tmdbId": float64(3073)},
+		{"title": "A Star Is Born", "year": float64(1937), "tmdbId": float64(3074)},
+	}
+
+	m := pickBestMatch(starIsBorn, "a star is born", 1937, "movie")
+	if m == nil {
+		t.Fatal("expected a match, got nil")
+	}
+	if m.Year != 1937 {
+		t.Errorf("expected year 1937, got %d (title=%q confidence=%q)", m.Year, m.Title, m.Confidence)
+	}
+	if m.Confidence != "high" {
+		t.Errorf("expected confidence high, got %q", m.Confidence)
+	}
+	if m.TmdbID != 3074 {
+		t.Errorf("expected tmdbId 3074, got %d", m.TmdbID)
+	}
+
+	// When no year is given, the first non-unmatched (most popular) result wins.
+	m2 := pickBestMatch(starIsBorn, "a star is born", 0, "movie")
+	if m2 == nil {
+		t.Fatal("expected a match (no year), got nil")
+	}
+	if m2.TmdbID != 332562 {
+		t.Errorf("no-year: expected most popular (2018) tmdbId 332562, got %d", m2.TmdbID)
+	}
+
+	// All Quiet: returns two candidates; 1930 should score high against year=1930.
+	allQuiet := []map[string]any{
+		{"title": "All Quiet on the Western Front", "year": float64(2022), "tmdbId": float64(560050)},
+		{"title": "All Quiet on the Western Front", "year": float64(1930), "tmdbId": float64(143)},
+	}
+	m3 := pickBestMatch(allQuiet, "all quiet on the western front", 1930, "movie")
+	if m3 == nil {
+		t.Fatal("expected a match for 1930, got nil")
+	}
+	if m3.Year != 1930 {
+		t.Errorf("expected year 1930, got %d", m3.Year)
 	}
 }
 

@@ -110,6 +110,43 @@ func cachedLookup(
 	return m
 }
 
+// confidenceRank maps confidence strings to numeric priority (higher = better).
+var confidenceRank = map[string]int{"high": 3, "medium": 2, "low": 1}
+
+// pickBestMatch iterates up to 5 Arr lookup results and returns the one that
+// scores highest against (cleanTitle, year). Ties go to the first (most
+// popular) result. Returns nil if nothing scores above "unmatched".
+func pickBestMatch(results []map[string]any, cleanTitle string, year int, kind string) *MediaMatch {
+	var best *MediaMatch
+	bestRank := 0
+	for i, r := range results {
+		if i >= 5 {
+			break
+		}
+		mt := strVal(r, "title")
+		my := int(floatVal(r, "year"))
+		confidence := scoreMatch(cleanTitle, year, mt, my)
+		if confidenceRank[confidence] > bestRank {
+			m := &MediaMatch{
+				Type:       kind,
+				Title:      mt,
+				Year:       my,
+				TmdbID:     int(floatVal(r, "tmdbId")),
+				Confidence: confidence,
+			}
+			if kind == "series" {
+				m.TvdbID = int(floatVal(r, "tvdbId"))
+			}
+			best = m
+			bestRank = confidenceRank[confidence]
+			if bestRank == 3 {
+				break // can't do better than "high"
+			}
+		}
+	}
+	return best
+}
+
 func (h *Handler) lookupMovie(apiKey, encoded, cleanTitle string, year int) *MediaMatch {
 	data, err := h.Svc.ArrGet(h.RadarrURL, apiKey, "/api/v3/movie/lookup?term="+encoded)
 	if err != nil {
@@ -119,25 +156,7 @@ func (h *Handler) lookupMovie(apiKey, encoded, cleanTitle string, year int) *Med
 	if err := json.Unmarshal(data, &results); err != nil || len(results) == 0 {
 		return nil
 	}
-	for i, r := range results {
-		if i >= 5 {
-			break
-		}
-		mt := strVal(r, "title")
-		my := int(floatVal(r, "year"))
-		confidence := scoreMatch(cleanTitle, year, mt, my)
-		if confidence == "unmatched" {
-			continue
-		}
-		return &MediaMatch{
-			Type:       "movie",
-			Title:      mt,
-			Year:       my,
-			TmdbID:     int(floatVal(r, "tmdbId")),
-			Confidence: confidence,
-		}
-	}
-	return nil
+	return pickBestMatch(results, cleanTitle, year, "movie")
 }
 
 func (h *Handler) lookupSeries(apiKey, encoded, cleanTitle string, year int) *MediaMatch {
@@ -149,26 +168,7 @@ func (h *Handler) lookupSeries(apiKey, encoded, cleanTitle string, year int) *Me
 	if err := json.Unmarshal(data, &results); err != nil || len(results) == 0 {
 		return nil
 	}
-	for i, r := range results {
-		if i >= 5 {
-			break
-		}
-		mt := strVal(r, "title")
-		my := int(floatVal(r, "year"))
-		confidence := scoreMatch(cleanTitle, year, mt, my)
-		if confidence == "unmatched" {
-			continue
-		}
-		return &MediaMatch{
-			Type:       "series",
-			Title:      mt,
-			Year:       my,
-			TvdbID:     int(floatVal(r, "tvdbId")),
-			TmdbID:     int(floatVal(r, "tmdbId")),
-			Confidence: confidence,
-		}
-	}
-	return nil
+	return pickBestMatch(results, cleanTitle, year, "series")
 }
 
 // matchFile resolves a single ScanFile to a MatchItem.
@@ -192,7 +192,7 @@ func (h *Handler) matchFile(
 	tvRoot := h.FirstLibraryPath("sonarr", "/media/tv")
 
 	if isTV {
-		m := cachedLookup(cache, cacheMu, "series:"+title, func() *MediaMatch {
+		m := cachedLookup(cache, cacheMu, fmt.Sprintf("series:%s:%d", title, year), func() *MediaMatch {
 			return h.lookupSeries(sonarrKey, encoded, title, year)
 		})
 		if m != nil {
@@ -212,11 +212,11 @@ func (h *Handler) matchFile(
 		}
 	} else {
 		// Try Radarr first, fall back to Sonarr.
-		m := cachedLookup(cache, cacheMu, "movie:"+title, func() *MediaMatch {
+		m := cachedLookup(cache, cacheMu, fmt.Sprintf("movie:%s:%d", title, year), func() *MediaMatch {
 			return h.lookupMovie(radarrKey, encoded, title, year)
 		})
 		if m == nil {
-			m = cachedLookup(cache, cacheMu, "series:"+title, func() *MediaMatch {
+			m = cachedLookup(cache, cacheMu, fmt.Sprintf("series:%s:%d", title, year), func() *MediaMatch {
 				return h.lookupSeries(sonarrKey, encoded, title, year)
 			})
 		}
