@@ -555,6 +555,13 @@ func (a *Autowirer) wireBazarr() {
 	form.Set("settings-general-serie_default_profile", "1")
 	form.Set("settings-general-movie_default_enabled", "true")
 	form.Set("settings-general-movie_default_profile", "1")
+	// Silence telemetry and automatic update checks
+	form.Set("settings-general-analytics_enabled", "false")
+	form.Set("settings-general-auto_update", "false")
+	// Reduce unnecessary subtitle search frequency (hours)
+	form.Set("settings-general-wanted_search_frequency", "12")
+	form.Set("settings-general-wanted_search_frequency_movie", "12")
+	form.Set("settings-general-upgrade_frequency", "24")
 
 	form.Set("settings-sonarr-ip", "sonarr")
 	form.Set("settings-sonarr-port", "8989")
