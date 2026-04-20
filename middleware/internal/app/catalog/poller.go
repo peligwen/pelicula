@@ -18,29 +18,37 @@ type QueueArrClient interface {
 
 // RunQueuePoller polls Radarr and Sonarr's download queues every 60 seconds
 // (±10% jitter) and upserts queue-tier catalog records for items actively
-// downloading.
+// downloading. Consecutive arr fetch errors engage a skip-backoff of up to 5
+// ticks to avoid hammering unavailable services.
 func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string) {
 	tick := util.JitteredTicker(ctx, 60*time.Second, 0.1)
+	skip := util.NewSkipCounter(5)
 
-	pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL)
+	pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL, skip)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick:
-			pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL)
+			if skip.ShouldSkip() {
+				slog.Debug("catalog poller: skipping queue fetch (backoff)", "component", "catalog_poller")
+				continue
+			}
+			pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL, skip)
 		}
 	}
 }
 
-func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string) {
+func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string, skip *util.SkipCounter) {
 	sonarrKey, radarrKey, _ := svc.Keys()
+	anyErr := false
 
 	if radarrKey != "" {
 		records, err := svc.ArrGetAllQueueRecords(radarrURL, radarrKey, "/api/v3", "&includeUnknownMovieItems=false")
 		if err != nil {
 			slog.Error("catalog poller: radarr queue fetch", "component", "catalog_poller", "error", err)
+			anyErr = true
 		} else {
 			for _, rec := range records {
 				upsertQueueMovie(ctx, db, rec)
@@ -52,11 +60,18 @@ func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, rada
 		records, err := svc.ArrGetAllQueueRecords(sonarrURL, sonarrKey, "/api/v3", "&includeUnknownSeriesItems=false")
 		if err != nil {
 			slog.Error("catalog poller: sonarr queue fetch", "component", "catalog_poller", "error", err)
+			anyErr = true
 		} else {
 			for _, rec := range records {
 				upsertQueueEpisode(ctx, db, rec)
 			}
 		}
+	}
+
+	if anyErr {
+		skip.RecordFailure()
+	} else {
+		skip.RecordSuccess()
 	}
 }
 

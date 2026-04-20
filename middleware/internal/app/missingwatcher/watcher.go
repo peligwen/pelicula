@@ -94,6 +94,8 @@ func New(svc *services.Clients, sonarrURL, radarrURL string) *Watcher {
 
 // Run blocks forever, calling scan every interval.
 // Waits for svc.IsWired() before starting.
+// Consecutive arr fetch errors engage a skip-backoff of up to 5 iterations
+// to avoid hammering unavailable services.
 func (w *Watcher) Run(interval time.Duration) {
 	for !w.Services.IsWired() {
 		time.Sleep(5 * time.Second)
@@ -101,17 +103,30 @@ func (w *Watcher) Run(interval time.Duration) {
 
 	slog.Info("started", "component", "watcher", "interval", interval.String())
 
+	skip := util.NewSkipCounter(5)
+
 	for {
 		time.Sleep(util.JitteredDuration(interval, 0.1))
-		w.searchMissingMovies()
-		w.searchMissingSeries()
+		if skip.ShouldSkip() {
+			slog.Debug("watcher: skipping iteration (backoff)", "component", "watcher")
+			continue
+		}
+		radarrErr := w.searchMissingMovies()
+		sonarrErr := w.searchMissingSeries()
+		if radarrErr || sonarrErr {
+			skip.RecordFailure()
+		} else {
+			skip.RecordSuccess()
+		}
 	}
 }
 
-func (w *Watcher) searchMissingMovies() {
+// searchMissingMovies fetches Radarr's movie list and triggers searches for
+// monitored movies without files. Returns true if an arr fetch error occurred.
+func (w *Watcher) searchMissingMovies() bool {
 	_, radarrKey, _ := w.Services.Keys()
 	if radarrKey == "" {
-		return
+		return false
 	}
 
 	var data []byte
@@ -123,12 +138,12 @@ func (w *Watcher) searchMissingMovies() {
 	}
 	if err != nil {
 		slog.Error("failed to fetch movies", "component", "watcher", "service", "radarr", "error", err)
-		return
+		return true
 	}
 
 	var movies []map[string]any
 	if json.Unmarshal(data, &movies) != nil {
-		return
+		return false
 	}
 
 	// Get queue to avoid re-searching items already downloading
@@ -147,7 +162,7 @@ func (w *Watcher) searchMissingMovies() {
 	}
 
 	if len(missing) == 0 {
-		return
+		return false
 	}
 
 	slog.Info("triggering search for missing movies", "component", "watcher", "service", "radarr", "count", len(missing))
@@ -157,7 +172,9 @@ func (w *Watcher) searchMissingMovies() {
 	})
 	if err != nil {
 		slog.Error("search command failed", "component", "watcher", "service", "radarr", "error", err)
+		return true
 	}
+	return false
 }
 
 func (w *Watcher) radarrQueuedMovieIDs() map[int]bool {
@@ -175,23 +192,25 @@ func (w *Watcher) radarrQueuedMovieIDs() map[int]bool {
 	return ids
 }
 
-func (w *Watcher) searchMissingSeries() {
+// searchMissingSeries fetches Sonarr's missing episodes and triggers searches.
+// Returns true if an arr fetch error occurred.
+func (w *Watcher) searchMissingSeries() bool {
 	sonarrKey, _, _ := w.Services.Keys()
 	if sonarrKey == "" {
-		return
+		return false
 	}
 
 	data, err := w.Services.ArrGet(w.SonarrURL, sonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
 	if err != nil {
 		slog.Error("failed to fetch missing episodes", "component", "watcher", "service", "sonarr", "error", err)
-		return
+		return true
 	}
 
 	var wanted struct {
 		Records []map[string]any `json:"records"`
 	}
 	if json.Unmarshal(data, &wanted) != nil {
-		return
+		return false
 	}
 
 	// Get queue to avoid re-searching items already downloading
@@ -207,7 +226,7 @@ func (w *Watcher) searchMissingSeries() {
 	}
 
 	if len(missing) == 0 {
-		return
+		return false
 	}
 
 	slog.Info("triggering search for missing episodes", "component", "watcher", "service", "sonarr", "count", len(missing))
@@ -217,7 +236,9 @@ func (w *Watcher) searchMissingSeries() {
 	})
 	if err != nil {
 		slog.Error("search command failed", "component", "watcher", "service", "sonarr", "error", err)
+		return true
 	}
+	return false
 }
 
 func (w *Watcher) sonarrQueuedEpisodeIDs() map[int]bool {

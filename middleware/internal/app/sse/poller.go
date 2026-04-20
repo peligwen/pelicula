@@ -18,6 +18,9 @@ import (
 	"pelicula-api/internal/app/util"
 )
 
+// backoff limits for SSE fetchers: skip at most 5 ticks after consecutive errors.
+const sseMaxSkip = 5
+
 const pollInterval = 5 * time.Second
 
 // StatusCache is a single-value cache for service health results.
@@ -71,6 +74,10 @@ type Poller struct {
 	hashes            map[string][32]byte
 	mu                sync.Mutex
 	statusCache       StatusCache
+
+	// backoff counters: skip polling an arr/qbt service after consecutive errors.
+	statusSkip *util.SkipCounter // for fetchServices (CheckHealth / arr status)
+	qbtSkip    *util.SkipCounter // for fetchDownloads (qBittorrent)
 }
 
 // SetStatusCache wires a shared StatusCache into the poller so that
@@ -91,6 +98,8 @@ func NewPoller(hub *Hub, svc ServiceQuerier, proculaURL string, dockerLogs Docke
 		dockerLogs:        dockerLogs,
 		allowedContainers: defaultAllowedContainers,
 		hashes:            make(map[string][32]byte),
+		statusSkip:        util.NewSkipCounter(sseMaxSkip),
+		qbtSkip:           util.NewSkipCounter(sseMaxSkip),
 	}
 }
 
@@ -132,11 +141,19 @@ func (p *Poller) pollOnce(ctx context.Context) {
 	}
 
 	fetches := []namedFetch{
-		{"services", wrapFetch(p.fetchServices)},
-		{"downloads", wrapFetch(p.fetchDownloads)},
 		{"storage", wrapFetch(p.fetchStorage)},
 		{"notifications", wrapFetch(p.fetchNotifications)},
 		{"logs", wrapFetch(p.fetchLogs)},
+	}
+	if !p.statusSkip.ShouldSkip() {
+		fetches = append(fetches, namedFetch{"services", wrapFetch(p.fetchServices)})
+	} else {
+		slog.Debug("sse poller: skipping services fetch (backoff)", "component", "sse_poller")
+	}
+	if !p.qbtSkip.ShouldSkip() {
+		fetches = append(fetches, namedFetch{"downloads", wrapFetch(p.fetchDownloads)})
+	} else {
+		slog.Debug("sse poller: skipping downloads fetch (backoff)", "component", "sse_poller")
 	}
 
 	results := make(chan fetchResult, len(fetches))
@@ -157,7 +174,19 @@ func (p *Poller) pollOnce(ctx context.Context) {
 	for res := range results {
 		if res.err != nil {
 			slog.Debug("sse poller fetch failed", "component", "sse_poller", "event", res.event, "error", res.err)
+			switch res.event {
+			case "services":
+				p.statusSkip.RecordFailure()
+			case "downloads":
+				p.qbtSkip.RecordFailure()
+			}
 			continue
+		}
+		switch res.event {
+		case "services":
+			p.statusSkip.RecordSuccess()
+		case "downloads":
+			p.qbtSkip.RecordSuccess()
 		}
 		hash := sha256.Sum256(res.hashData)
 		p.mu.Lock()
