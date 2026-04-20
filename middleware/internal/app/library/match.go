@@ -224,7 +224,8 @@ func (h *Handler) matchFile(
 			item.Aliases = f.Aliases
 			if m.Type == "movie" {
 				item.Match = m // movie matches have no Season/Episode; safe to share
-				item.SuggestedPath = suggestedMoviePath(movieRoot, m.Title, m.Year, filename)
+				item.Edition = extractEdition(filename)
+				item.SuggestedPath = suggestedMoviePath(movieRoot, m.Title, m.Year, filename, item.Edition)
 				if existingMovies[m.TmdbID] {
 					item.Status = "exists"
 				} else {
@@ -257,12 +258,55 @@ func (h *Handler) matchFile(
 	return item
 }
 
+// ── Edition extraction ────────────────────────────────────────────────────────
+
+// editionKeywords maps lowercase tokens found in filenames to their canonical labels.
+// Longer/more-specific phrases must appear before shorter ones so the first match wins.
+var editionKeywords = []struct {
+	tokens []string
+	label  string
+}{
+	{[]string{"final cut"}, "Final Cut"},
+	{[]string{"director's cut", "directors cut"}, "Director's Cut"},
+	{[]string{"theatrical cut", "theatrical"}, "Theatrical Cut"},
+	{[]string{"extended cut", "extended"}, "Extended Cut"},
+	{[]string{"unrated cut", "unrated"}, "Unrated"},
+	{[]string{"international cut", "international"}, "International Cut"},
+	{[]string{"special edition"}, "Special Edition"},
+	{[]string{"definitive edition"}, "Definitive Edition"},
+	{[]string{"ultimate edition"}, "Ultimate Edition"},
+	{[]string{"remastered"}, "Remastered"},
+	{[]string{"restored"}, "Restored"},
+	{[]string{"redux"}, "Redux"},
+}
+
+// extractEdition returns a human-readable edition label extracted from the
+// filename, or an empty string if no known cut marker is found.
+func extractEdition(filename string) string {
+	lower := strings.ToLower(strings.NewReplacer(".", " ", "_", " ").Replace(filename))
+	for _, e := range editionKeywords {
+		for _, tok := range e.tokens {
+			if strings.Contains(lower, tok) {
+				return e.label
+			}
+		}
+	}
+	return ""
+}
+
 // ── Suggested path helpers ────────────────────────────────────────────────────
 
-func suggestedMoviePath(root, title string, year int, filename string) string {
+// suggestedMoviePath returns the destination path for a movie file. When
+// edition is non-empty the filename is rewritten to Jellyfin's multi-version
+// format: "{title} ({year}) - {edition}.{ext}".
+func suggestedMoviePath(root, title string, year int, filename, edition string) string {
 	folder := title
 	if year > 0 {
 		folder = fmt.Sprintf("%s (%d)", title, year)
+	}
+	if edition != "" {
+		ext := filepath.Ext(filename)
+		return root + "/" + folder + "/" + folder + " - " + edition + ext
 	}
 	return root + "/" + folder + "/" + filepath.Base(filename)
 }

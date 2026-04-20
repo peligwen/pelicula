@@ -37,6 +37,7 @@ type MatchItem struct {
 	SuggestedPath string      `json:"suggestedPath,omitempty"`
 	GroupKey      string      `json:"groupKey,omitempty"`
 	Aliases       []string    `json:"aliases,omitempty"` // other paths that are hardlinks to the same inode
+	Edition       string      `json:"edition,omitempty"` // extracted cut label, e.g. "Theatrical Cut", "Redux"
 }
 
 // MediaMatch describes the *arr match found for a file.

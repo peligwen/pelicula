@@ -38,6 +38,7 @@ type ApplyItem struct {
 	Monitored      bool   `json:"monitored"`
 	SourcePath     string `json:"sourcePath,omitempty"` // original file path, used for FS ops and Procula
 	DestPath       string `json:"destPath,omitempty"`   // pre-computed destination (client-supplied for confirmation)
+	Edition        string `json:"edition,omitempty"`    // cut label for multi-version movies (e.g. "Theatrical Cut", "Redux")
 }
 
 // LibraryApplyResult is the response shape for HandleLibraryApply.
@@ -160,8 +161,19 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if seen[k] {
+			// Non-primary edition: file placed on disk by fsOps, but we skip
+			// Radarr/Sonarr registration (1:1 per tmdbId/tvdbId). Report it as
+			// placed and include in Procula forwarding.
 			mu.Lock()
-			result.Skipped++
+			reportedOp := fsResult.op
+			if reportedOp == "" {
+				reportedOp = "kept"
+			}
+			result.Added++
+			addedItems = append(addedItems, item)
+			result.Items = append(result.Items, ApplyItemResult{
+				Title: item.Title, Src: item.SourcePath, Dest: item.DestPath, FSOp: reportedOp,
+			})
 			mu.Unlock()
 			continue
 		}
@@ -240,10 +252,16 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, result)
 }
 
-// applyGroupKey computes the group key from an ApplyItem.
+// applyGroupKey computes the group key from an ApplyItem. When a movie item
+// carries a non-empty Edition, the edition is included in the key so that
+// multiple cuts of the same film (different editions) are treated as distinct
+// entries rather than duplicates.
 func applyGroupKey(item ApplyItem) string {
 	switch item.Type {
 	case "movie":
+		if item.Edition != "" {
+			return fmt.Sprintf("movie:%d:%s", item.TmdbID, strings.ToLower(item.Edition))
+		}
 		return fmt.Sprintf("movie:%d", item.TmdbID)
 	case "series":
 		return fmt.Sprintf("series:%d:s%de%d", item.TvdbID, item.Season, item.Episode)
@@ -435,7 +453,7 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 		dst := item.DestPath
 		if dst == "" {
 			if item.Type == "movie" {
-				dst = suggestedMoviePath(movieRoot, item.Title, item.Year, filepath.Base(src))
+				dst = suggestedMoviePath(movieRoot, item.Title, item.Year, filepath.Base(src), item.Edition)
 			} else {
 				dst = suggestedTVPath(tvRoot, item.Title, 0, filepath.Base(src))
 			}

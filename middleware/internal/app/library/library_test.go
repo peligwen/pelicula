@@ -205,20 +205,25 @@ func TestSuggestedMoviePath(t *testing.T) {
 		title    string
 		year     int
 		filename string
+		edition  string
 		want     string
 	}{
-		{"Alien", 1979, "alien.1979.mkv", "/media/movies/Alien (1979)/alien.1979.mkv"},
-		{"Alien", 0, "alien.mkv", "/media/movies/Alien/alien.mkv"},
-		{"The Dark Knight", 2008, "the.dark.knight.mkv", "/media/movies/The Dark Knight (2008)/the.dark.knight.mkv"},
+		{"Alien", 1979, "alien.1979.mkv", "", "/media/movies/Alien (1979)/alien.1979.mkv"},
+		{"Alien", 0, "alien.mkv", "", "/media/movies/Alien/alien.mkv"},
+		{"The Dark Knight", 2008, "the.dark.knight.mkv", "", "/media/movies/The Dark Knight (2008)/the.dark.knight.mkv"},
+		// Edition cases — Jellyfin multi-version naming.
+		{"Apocalypse Now", 1979, "Apocalypse.Now.Redux.mkv", "Redux", "/media/movies/Apocalypse Now (1979)/Apocalypse Now (1979) - Redux.mkv"},
+		{"Apocalypse Now", 1979, "Apocalypse.Now.Theatrical.mkv", "Theatrical Cut", "/media/movies/Apocalypse Now (1979)/Apocalypse Now (1979) - Theatrical Cut.mkv"},
+		{"Blade Runner", 1982, "blade.runner.final.cut.mkv", "Final Cut", "/media/movies/Blade Runner (1982)/Blade Runner (1982) - Final Cut.mkv"},
 	}
 	for _, c := range cases {
 		c := c
-		t.Run(c.title, func(t *testing.T) {
+		t.Run(c.title+"/"+c.edition, func(t *testing.T) {
 			t.Parallel()
-			got := suggestedMoviePath("/media/movies", c.title, c.year, c.filename)
+			got := suggestedMoviePath("/media/movies", c.title, c.year, c.filename, c.edition)
 			if got != c.want {
-				t.Errorf("suggestedMoviePath(%q,%d,%q) = %q, want %q",
-					c.title, c.year, c.filename, got, c.want)
+				t.Errorf("suggestedMoviePath(%q,%d,%q,%q) = %q, want %q",
+					c.title, c.year, c.filename, c.edition, got, c.want)
 			}
 		})
 	}
@@ -846,6 +851,63 @@ func TestApplyGroupKey_DifferentEpisodes_NotDups(t *testing.T) {
 	}
 	if k2 != "series:888:s1e2" {
 		t.Errorf("ep2 group key = %q, want %q", k2, "series:888:s1e2")
+	}
+}
+
+func TestExtractEdition(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		filename string
+		want     string
+	}{
+		{"Apocalypse.Now.Redux.1979.mkv", "Redux"},
+		{"Apocalypse.Now.Final.Cut.1979.mkv", "Final Cut"},
+		{"Apocalypse.Now.Theatrical.Cut.1979.mkv", "Theatrical Cut"},
+		{"Apocalypse.Now.Theatrical.1979.mkv", "Theatrical Cut"},
+		{"Blade.Runner.Directors.Cut.1982.mkv", "Director's Cut"},
+		{"Blade.Runner.Director's.Cut.1982.mkv", "Director's Cut"},
+		{"The.Dark.Knight.2008.mkv", ""},
+		{"Alien.1979.mkv", ""},
+		{"Film.Extended.Cut.mkv", "Extended Cut"},
+		{"Film.Extended.mkv", "Extended Cut"},
+		{"Film.Unrated.mkv", "Unrated"},
+		{"Film.Remastered.2160p.mkv", "Remastered"},
+		{"Film.Special.Edition.mkv", "Special Edition"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.filename, func(t *testing.T) {
+			t.Parallel()
+			got := extractEdition(c.filename)
+			if got != c.want {
+				t.Errorf("extractEdition(%q) = %q, want %q", c.filename, got, c.want)
+			}
+		})
+	}
+}
+
+func TestApplyGroupKey_Editions(t *testing.T) {
+	t.Parallel()
+
+	// Different editions of the same movie → different group keys (pass duplicate guard).
+	theatrical := ApplyItem{Type: "movie", TmdbID: 100, Edition: "Theatrical Cut"}
+	redux := ApplyItem{Type: "movie", TmdbID: 100, Edition: "Redux"}
+	if applyGroupKey(theatrical) == applyGroupKey(redux) {
+		t.Error("different editions of same movie should have different group keys")
+	}
+
+	// Same movie, no edition → same group key (caught as duplicate).
+	dup1 := ApplyItem{Type: "movie", TmdbID: 200}
+	dup2 := ApplyItem{Type: "movie", TmdbID: 200}
+	if applyGroupKey(dup1) != applyGroupKey(dup2) {
+		t.Error("same movie without edition should have the same group key")
+	}
+
+	// Edition is case-folded — same edition with different casing → same key.
+	lower := ApplyItem{Type: "movie", TmdbID: 300, Edition: "redux"}
+	upper := ApplyItem{Type: "movie", TmdbID: 300, Edition: "Redux"}
+	if applyGroupKey(lower) != applyGroupKey(upper) {
+		t.Error("edition comparison should be case-insensitive")
 	}
 }
 
