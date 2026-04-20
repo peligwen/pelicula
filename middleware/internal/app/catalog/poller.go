@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"pelicula-api/internal/app/util"
 )
 
 // QueueArrClient is the subset of ArrClient needed for queue polling.
@@ -15,10 +17,10 @@ type QueueArrClient interface {
 }
 
 // RunQueuePoller polls Radarr and Sonarr's download queues every 60 seconds
-// and upserts queue-tier catalog records for items actively downloading.
+// (±10% jitter) and upserts queue-tier catalog records for items actively
+// downloading.
 func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string) {
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
+	tick := util.JitteredTicker(ctx, 60*time.Second, 0.1)
 
 	pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL)
 
@@ -26,7 +28,7 @@ func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrU
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-tick:
 			pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL)
 		}
 	}

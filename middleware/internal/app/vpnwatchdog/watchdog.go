@@ -11,6 +11,7 @@ import (
 	"time"
 
 	appservices "pelicula-api/internal/app/services"
+	"pelicula-api/internal/app/util"
 	"pelicula-api/internal/clients/docker"
 	gluetunclient "pelicula-api/internal/clients/gluetun"
 )
@@ -19,7 +20,7 @@ import (
 
 const (
 	watchdogInterval     = 30 * time.Second
-	gracePolls           = 10 // 10 × 30s = 5 min before first restart
+	gracePolls           = 10 // ≈5 min (jittered) before first restart
 	restartCooldownPolls = 3  // 3 × 30s = 90s wait after restart
 	postRestartGrace     = 2  // 2 × 30s = 60s post-cooldown grace before degraded
 )
@@ -189,8 +190,8 @@ func (w *Watchdog) fetchTunnelStatus() string {
 // It blocks forever; call as a goroutine. Only start when VPN is configured
 // (caller should guard on WIREGUARD_PRIVATE_KEY).
 func (w *Watchdog) Run() {
-	ticker := time.NewTicker(watchdogInterval)
-	defer ticker.Stop()
+	// TODO: accept ctx when missingwatcher and vpnwatchdog are made ctx-aware.
+	tick := util.JitteredTicker(context.Background(), watchdogInterval, 0.1)
 
 	internal := wdInternalState{status: wdUnknown}
 	prevStatus := wdUnknown
@@ -202,7 +203,7 @@ func (w *Watchdog) Run() {
 
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
-	for range ticker.C {
+	for range tick {
 		port, err := w.fetchForwardedPort()
 		if err != nil {
 			slog.Warn("failed to query gluetun port forwarding — skipping tick",
