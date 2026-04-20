@@ -116,6 +116,8 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleBrowse)))
 	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleLibraryScan)))
 	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleLibraryApply)))
+	// manager+: suggest a library path for a given title/year (used by import wizard)
+	mux.Handle("GET /api/pelicula/library/suggest-path", auth.GuardManager(http.HandlerFunc(cfg.Library.HandleSuggestPath)))
 
 	// admin only: transcoding
 	mux.Handle("/api/pelicula/transcode/profiles", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleTranscodeProfiles)))

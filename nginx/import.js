@@ -6,6 +6,7 @@ const state = {
     selected: [],           // [{path, name, size, isDir}]
     scanResults: [],        // from /library/scan
     dismissed: new Set(),
+    confirmed: new Set(),   // idx of items confirmed via "Use anyway"
     groupSelections: {},    // groupKey → chosen file path (for dup groups)
     libraries: [],          // fetched from /api/pelicula/libraries
 };
@@ -327,6 +328,7 @@ function closeImportModal() {
     // Reset modal state for re-use
     state.scanResults = [];
     state.dismissed = new Set();
+    state.confirmed = new Set();
     state.groupSelections = {};
     document.getElementById('apply-content').innerHTML =
         '<div class="apply-progress"><div class="apply-spinner"></div><span>Applying import...</span></div>';
@@ -360,6 +362,7 @@ async function onImportClick() {
         }
         state.scanResults = await res.json();
         state.dismissed = new Set();
+        state.confirmed = new Set();
         state.groupSelections = {};
         renderMatchResults();
     } catch (e) {
@@ -388,43 +391,147 @@ function renderMatchResults() {
     document.getElementById('match-stats').textContent = statParts.join(', ');
 
     // Group "new" items by groupKey so duplicates get a picker card.
-    const newByKey = new Map(); // groupKey → [item, ...]
+    const dupGroups = new Map(); // groupKey → [item, ...]
     buckets.new.forEach(item => {
         const key = item.groupKey || ('singleton:' + item.idx);
-        if (!newByKey.has(key)) newByKey.set(key, []);
-        newByKey.get(key).push(item);
+        if (!dupGroups.has(key)) dupGroups.set(key, []);
+        dupGroups.get(key).push(item);
     });
 
-    // Count unresolved dup groups (>1 candidate, none dismissed, no selection).
-    let unresolvedDups = 0;
-    newByKey.forEach((items, key) => {
+    // Classify dup groups: unresolved (attention) vs resolved/dismissed (confident).
+    const attentionDups = new Map();
+    const confidentDupGroups = new Map();
+    dupGroups.forEach((items, key) => {
         if (items.length > 1) {
             const allDismissed = items.every(it => state.dismissed.has(it.idx));
             const hasPick = key in state.groupSelections;
-            if (!allDismissed && !hasPick) unresolvedDups++;
+            if (!allDismissed && !hasPick) {
+                attentionDups.set(key, items);
+            } else {
+                confidentDupGroups.set(key, items);
+            }
         }
     });
 
-    if (newByKey.size) {
-        container.appendChild(groupHeader('New (' + buckets.new.length + ')'));
+    // Classify singleton new items by confidence level.
+    const attentionLow = [];
+    const attentionMedium = [];
+    const confidentSingletons = [];
+    dupGroups.forEach((items, key) => {
+        if (items.length === 1) {
+            const item = items[0];
+            // Confirmed ("use anyway") or overridden items always go to confident bucket.
+            if (state.confirmed.has(item.idx) || item.overridden) {
+                confidentSingletons.push(item);
+                return;
+            }
+            const conf = item.match && item.match.confidence;
+            if (conf === 'low') attentionLow.push(item);
+            else if (conf === 'medium') attentionMedium.push(item);
+            else confidentSingletons.push(item); // high or no match → confident bucket
+        }
+    });
 
-        if (unresolvedDups > 0) {
-            const banner = document.createElement('div');
-            banner.className = 'dup-banner';
-            banner.id = 'dup-banner';
-            banner.textContent = unresolvedDups + ' duplicate group' + (unresolvedDups > 1 ? 's' : '') +
-                ' need a selection before applying';
-            container.appendChild(banner);
+    // Unmatched items always need attention, unless overridden (got a match via popover).
+    const attentionUnmatched = [];
+    buckets.unmatched.forEach(item => {
+        if (item.overridden) {
+            confidentSingletons.push(item);
+        } else {
+            attentionUnmatched.push(item);
+        }
+    });
+
+    // Count unresolved dup groups — gates btn-configure.
+    const unresolvedDups = attentionDups.size;
+
+    // ── Section 1: Attention (always expanded, lemon-tint wrapper) ─────────────
+    const hasAttention = attentionDups.size > 0 || attentionUnmatched.length > 0 ||
+                         attentionLow.length > 0 || attentionMedium.length > 0;
+
+    if (hasAttention) {
+        const attentionWrap = document.createElement('div');
+        attentionWrap.className = 'attention-section';
+
+        const subtitle = document.createElement('div');
+        subtitle.className = 'attention-section-subtitle';
+        subtitle.textContent = 'Title-match confidence \u2014 review these before importing';
+        attentionWrap.appendChild(subtitle);
+
+        // Dup groups first (no sub-header — dup cards are self-explanatory).
+        attentionDups.forEach((items, key) => {
+            attentionWrap.appendChild(createDupGroup(items, key));
+        });
+
+        // Unmatched items.
+        if (attentionUnmatched.length > 0) {
+            attentionWrap.appendChild(groupHeader('Unmatched (' + attentionUnmatched.length + ')'));
+            attentionUnmatched.forEach(item => attentionWrap.appendChild(createMatchItem(item)));
         }
 
-        newByKey.forEach((items, key) => {
-            if (items.length === 1) {
-                container.appendChild(createMatchItem(items[0]));
-            } else {
-                container.appendChild(createDupGroup(items, key));
-            }
-        });
+        // Low-confidence items.
+        if (attentionLow.length > 0) {
+            attentionWrap.appendChild(groupHeader('Low confidence (' + attentionLow.length + ')'));
+            attentionLow.forEach(item => {
+                const node = createMatchItem(item);
+                node.classList.add('conf-low');
+                attentionWrap.appendChild(node);
+            });
+        }
+
+        // Medium-confidence items.
+        if (attentionMedium.length > 0) {
+            attentionWrap.appendChild(groupHeader('Medium confidence (' + attentionMedium.length + ')'));
+            attentionMedium.forEach(item => {
+                const node = createMatchItem(item);
+                node.classList.add('conf-medium');
+                attentionWrap.appendChild(node);
+            });
+        }
+
+        container.appendChild(attentionWrap);
     }
+
+    // ── Section 2: Confident (collapsed <details>) ─────────────────────────────
+    const hasConfident = confidentSingletons.length > 0 || confidentDupGroups.size > 0;
+
+    if (hasConfident) {
+        const totalConfident = confidentSingletons.length + confidentDupGroups.size;
+        const details = document.createElement('details');
+        details.className = 'confident-section';
+
+        const summary = document.createElement('summary');
+        summary.className = 'confident-summary';
+        const chevron = document.createElement('span');
+        chevron.className = 'confident-chevron';
+        chevron.textContent = '\u25B6';
+        summary.appendChild(chevron);
+        const label = document.createElement('span');
+        label.className = 'confident-label';
+        label.textContent = 'Ready to import (' + totalConfident + ')';
+        summary.appendChild(label);
+        const hint = document.createElement('span');
+        hint.className = 'confident-hint';
+        hint.textContent = 'High confidence \u2014 expand to review';
+        summary.appendChild(hint);
+        details.appendChild(summary);
+
+        const body = document.createElement('div');
+        body.className = 'confident-section-body';
+
+        confidentDupGroups.forEach((items, key) => {
+            body.appendChild(createDupGroup(items, key));
+        });
+
+        confidentSingletons.forEach(item => {
+            body.appendChild(createMatchItem(item));
+        });
+
+        details.appendChild(body);
+        container.appendChild(details);
+    }
+
+    // ── Section 3: In-place and existing (unchanged collapsibles) ──────────────
     if (buckets.in_place.length) {
         container.appendChild(createCollapsibleSummary(
             'In place (' + buckets.in_place.length + ')',
@@ -438,10 +545,6 @@ function renderMatchResults() {
             'Already tracked by Sonarr/Radarr \u2014 no action needed',
             buckets.exists
         ));
-    }
-    if (buckets.unmatched.length) {
-        container.appendChild(groupHeader('Unmatched (' + buckets.unmatched.length + ')'));
-        buckets.unmatched.forEach(item => container.appendChild(createMatchItem(item)));
     }
 
     // Enable "Next" when there are actionable items and no unresolved dup groups.
@@ -630,9 +733,10 @@ function createMatchItem(item) {
     }
 
     if (item.match) {
+        const conf = item.overridden ? 'overridden' : (state.confirmed.has(item.idx) ? 'confirmed' : item.match.confidence);
         const badge = document.createElement('span');
-        badge.className = 'match-badge badge-' + item.match.confidence;
-        badge.textContent = item.match.confidence;
+        badge.className = 'match-badge badge-' + conf;
+        badge.textContent = conf;
         row.appendChild(badge);
     }
 
@@ -641,7 +745,54 @@ function createMatchItem(item) {
     statusBadge.textContent = item.status;
     row.appendChild(statusBadge);
 
-    if (item.status === 'new') {
+    // Determine if this item is in the attention section (medium/low confidence or unmatched).
+    const conf = item.match && item.match.confidence;
+    const isAttention = !item.overridden && !state.confirmed.has(item.idx) &&
+                        (conf === 'medium' || conf === 'low' || !item.match);
+
+    if (isAttention) {
+        // Action cluster: Change match / Use anyway / Dismiss
+        const cluster = document.createElement('div');
+        cluster.className = 'action-cluster';
+
+        if (item.match) {
+            // Medium or low confidence — has a candidate match
+            const changeBtn = document.createElement('button');
+            changeBtn.className = 'action-btn primary-action';
+            changeBtn.textContent = 'Change match';
+            changeBtn.addEventListener('click', () => openChangeMatchPopover(item, row));
+            cluster.appendChild(changeBtn);
+
+            const useBtn = document.createElement('button');
+            useBtn.className = 'action-btn';
+            useBtn.textContent = 'Use anyway';
+            useBtn.addEventListener('click', () => confirmItem(item));
+            cluster.appendChild(useBtn);
+        } else {
+            // Unmatched — no candidate yet
+            const findBtn = document.createElement('button');
+            findBtn.className = 'action-btn primary-action';
+            findBtn.textContent = 'Find match';
+            findBtn.addEventListener('click', () => openChangeMatchPopover(item, row));
+            cluster.appendChild(findBtn);
+        }
+
+        const dismiss = document.createElement('button');
+        dismiss.className = 'action-btn match-dismiss';
+        dismiss.textContent = state.dismissed.has(item.idx) ? 'Restore' : 'Dismiss';
+        dismiss.addEventListener('click', () => {
+            if (state.dismissed.has(item.idx)) {
+                state.dismissed.delete(item.idx);
+            } else {
+                state.dismissed.add(item.idx);
+            }
+            renderMatchResults();
+        });
+        cluster.appendChild(dismiss);
+
+        row.appendChild(cluster);
+    } else {
+        // Non-attention items (high confidence, confirmed, overridden): just a dismiss button for new items
         const dismiss = document.createElement('button');
         dismiss.className = 'match-dismiss';
         dismiss.textContent = state.dismissed.has(item.idx) ? 'Restore' : 'Dismiss';
@@ -657,6 +808,193 @@ function createMatchItem(item) {
     }
 
     return row;
+}
+
+// confirmItem marks an item as "use anyway" regardless of its confidence score,
+// routing it to the confident section on next render.
+function confirmItem(item) {
+    state.confirmed.add(item.idx);
+    renderMatchResults();
+}
+
+// openChangeMatchPopover opens the change-match search popover anchored to rowEl.
+let _activePopover = null;
+
+function openChangeMatchPopover(item, rowEl) {
+    // Close any existing popover first
+    if (_activePopover) {
+        _activePopover.remove();
+        _activePopover = null;
+    }
+
+    const popover = document.createElement('div');
+    popover.className = 'match-popover';
+    _activePopover = popover;
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'match-popover-header';
+    header.textContent = 'Search for a different match';
+    popover.appendChild(header);
+
+    // Search input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Title\u2026';
+    // Pre-populate with parsed title from match or filename
+    const defaultTitle = (item.match && item.match.title) ||
+        item.file.split('/').pop().replace(/\.\w+$/, '').replace(/[._]/g, ' ').trim();
+    input.value = defaultTitle;
+    popover.appendChild(input);
+
+    // Results container
+    const resultsEl = document.createElement('div');
+    resultsEl.className = 'match-popover-results';
+    popover.appendChild(resultsEl);
+
+    // Determine media type filter from existing match or default to both
+    const typeFilter = (item.match && item.match.type) || '';
+
+    // Debounced search
+    let debounceTimer = null;
+    function doSearch(q) {
+        if (!q.trim()) {
+            resultsEl.replaceChildren();
+            return;
+        }
+        let url = '/api/pelicula/search?q=' + encodeURIComponent(q.trim());
+        if (typeFilter) url += '&type=' + encodeURIComponent(typeFilter);
+        apiFetch(url).then(res => res.json()).then(data => {
+            const results = data.results || [];
+            resultsEl.replaceChildren();
+            if (!results.length) {
+                const empty = document.createElement('div');
+                empty.className = 'match-popover-empty';
+                empty.textContent = 'No results found';
+                resultsEl.appendChild(empty);
+                return;
+            }
+            results.forEach(result => {
+                const row = document.createElement('div');
+                row.className = 'match-popover-result';
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'match-popover-result-title';
+                titleEl.textContent = result.title + (result.year ? ' (' + result.year + ')' : '');
+                row.appendChild(titleEl);
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'match-popover-result-meta';
+                const parts = [result.type];
+                if (result.network) parts.push(result.network);
+                if (result.seasonCount) parts.push(result.seasonCount + ' season' + (result.seasonCount !== 1 ? 's' : ''));
+                metaEl.textContent = parts.join(' \u00B7 ');
+                row.appendChild(metaEl);
+
+                if (result.overview) {
+                    const overviewEl = document.createElement('div');
+                    overviewEl.className = 'match-popover-result-overview';
+                    overviewEl.textContent = result.overview;
+                    row.appendChild(overviewEl);
+                }
+
+                row.addEventListener('click', () => {
+                    applyOverride(item, result);
+                    closePopover();
+                });
+                resultsEl.appendChild(row);
+            });
+        }).catch(() => {
+            resultsEl.replaceChildren();
+            const empty = document.createElement('div');
+            empty.className = 'match-popover-empty';
+            empty.textContent = 'Search failed';
+            resultsEl.appendChild(empty);
+        });
+    }
+
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => doSearch(input.value), 300);
+    });
+
+    // Position popover anchored to rowEl
+    document.body.appendChild(popover);
+    const rect = rowEl.getBoundingClientRect();
+    const popW = Math.min(340, window.innerWidth * 0.9);
+    let left = rect.left;
+    if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+    if (left < 8) left = 8;
+    let top = rect.bottom + 4;
+    if (top + 400 > window.innerHeight - 8) top = rect.top - 404;
+    if (top < 8) top = 8;
+    popover.style.left = left + 'px';
+    popover.style.top = top + 'px';
+
+    // Focus input and trigger initial search
+    input.focus();
+    input.select();
+    doSearch(input.value);
+
+    // Close helpers
+    function closePopover() {
+        if (_activePopover === popover) {
+            popover.remove();
+            _activePopover = null;
+        }
+        document.removeEventListener('keydown', onKey);
+        document.removeEventListener('mousedown', onOutsideClick);
+    }
+
+    function onKey(e) {
+        if (e.key === 'Escape') closePopover();
+    }
+    function onOutsideClick(e) {
+        if (!popover.contains(e.target)) closePopover();
+    }
+
+    // Delay outside-click listener so it doesn't fire on the button click that opened it
+    setTimeout(() => {
+        document.addEventListener('keydown', onKey);
+        document.addEventListener('mousedown', onOutsideClick);
+    }, 0);
+}
+
+// applyOverride updates the match for an item to the operator-selected result.
+async function applyOverride(item, searchResult) {
+    const scanItem = state.scanResults[item.idx];
+    // Mutate the canonical scan result
+    scanItem.match = {
+        tmdbId: searchResult.tmdbId || 0,
+        tvdbId: searchResult.tvdbId || 0,
+        title: searchResult.title,
+        year: searchResult.year || 0,
+        type: searchResult.type,
+        confidence: 'overridden',
+    };
+    scanItem.overridden = true;
+    // If the item was unmatched, give it status 'new' so doApply picks it up
+    if (scanItem.status === 'unmatched') {
+        scanItem.status = 'new';
+    }
+
+    // Fetch updated destination path; clear stale path on any failure so
+    // doApply sends an empty destPath and the backend recomputes it.
+    scanItem.suggestedPath = '';
+    try {
+        const params = new URLSearchParams({
+            type: searchResult.type,
+            title: searchResult.title,
+            year: String(searchResult.year || 0),
+        });
+        const res = await apiFetch('/api/pelicula/library/suggest-path?' + params.toString());
+        if (res.ok) {
+            const data = await res.json();
+            if (data.path) scanItem.suggestedPath = data.path;
+        }
+    } catch (e) { /* non-fatal */ }
+
+    renderMatchResults();
 }
 
 // ── Import apply ─────────────────────────────────────────────────────────────
