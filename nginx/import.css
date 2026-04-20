@@ -328,9 +328,15 @@ details[open] .confident-chevron { transform: rotate(90deg); }
 .dup-candidate:has(input:checked) { background: var(--peri-l, #eaecfd); border-color: rgba(112,128,232,0.3); }
 .dup-candidate.dismissed { opacity: 0.4; }
 .dup-candidate input[type="radio"] { margin-top: 0.2rem; accent-color: var(--pink, #f060a8); flex-shrink: 0; }
+.dup-candidate input[type="checkbox"] { margin-top: 0.2rem; accent-color: var(--periwinkle, #7080e8); flex-shrink: 0; }
+.dup-candidate-movie { cursor: default; align-items: center; }
+.dup-candidate-movie:hover { background: var(--peri-l, #eaecfd); }
 .dup-candidate-info { flex: 1; min-width: 0; font-size: 0.82rem; }
 .dup-candidate-filename { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 60%; vertical-align: bottom; font-family: var(--font-display, 'Nunito', sans-serif); color: var(--ink, #2a1f35); }
 .dup-alias-hint { font-size: 0.68rem; color: var(--muted, #9080a8); margin-left: 0.3rem; }
+.dup-edition-input { font-size: 0.78rem; padding: 0.2rem 0.45rem; border: 1.5px solid rgba(112,128,232,0.35); border-radius: 6px; background: var(--panel, #fff); color: var(--ink, #2a1f35); font-family: var(--font-display, 'Nunito', sans-serif); width: 14rem; flex-shrink: 0; }
+.dup-edition-input:focus { outline: none; border-color: var(--periwinkle, #7080e8); background: var(--peri-l, #eaecfd); }
+.dup-edition-error { font-size: 0.72rem; color: var(--red, #e04060); margin-top: 0.3rem; padding: 0.2rem 0.5rem; }
 
 /* In-place badge */
 .badge-in_place { background: var(--mint-l, #e4f8f4); color: var(--mint, #40c8a8); border: 1px solid rgba(64,200,168,0.35); }

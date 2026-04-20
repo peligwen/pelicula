@@ -7,7 +7,9 @@ const state = {
     scanResults: [],        // from /library/scan
     dismissed: new Set(),
     confirmed: new Set(),   // idx of items confirmed via "Use anyway"
-    groupSelections: {},    // groupKey → chosen file path (for dup groups)
+    groupSelections: {},    // groupKey → chosen file path (TV dup groups, radio)
+    groupChecked: {},       // "groupKey:idx" → bool (movie dup groups, checkbox; default true)
+    groupEditions: {},      // "groupKey:idx" → edition string (user-edited label)
     libraries: [],          // fetched from /api/pelicula/libraries
 };
 
@@ -404,8 +406,14 @@ function renderMatchResults() {
     dupGroups.forEach((items, key) => {
         if (items.length > 1) {
             const allDismissed = items.every(it => state.dismissed.has(it.idx));
-            const hasPick = key in state.groupSelections;
-            if (!allDismissed && !hasPick) {
+            const isMovie = items[0].match && items[0].match.type === 'movie';
+            let resolved;
+            if (isMovie) {
+                resolved = allDismissed || isMovieGroupResolved(items, key);
+            } else {
+                resolved = allDismissed || (key in state.groupSelections);
+            }
+            if (!resolved) {
                 attentionDups.set(key, items);
             } else {
                 confidentDupGroups.set(key, items);
@@ -564,8 +572,33 @@ function renderMatchResults() {
     }
 }
 
+// ── Multi-version (edition) helpers ─────────────────────────────────────────
+
+function dupItemKey(groupKey, idx) { return groupKey + ':' + idx; }
+
+function getEffectiveEdition(item, groupKey) {
+    const k = dupItemKey(groupKey, item.idx);
+    return k in state.groupEditions ? state.groupEditions[k] : (item.edition || '');
+}
+
+function isDupItemChecked(item, groupKey) {
+    return state.groupChecked[dupItemKey(groupKey, item.idx)] !== false;
+}
+
+// Returns true when all checked items in a movie dup group can proceed:
+// single selection always OK; multiple require distinct non-empty labels.
+function isMovieGroupResolved(items, groupKey) {
+    const checked = items.filter(it => !state.dismissed.has(it.idx) && isDupItemChecked(it, groupKey));
+    if (checked.length === 0) return false;
+    if (checked.length === 1) return true;
+    const labels = checked.map(it => getEffectiveEdition(it, groupKey).trim());
+    if (labels.some(l => l === '')) return false;
+    return new Set(labels.map(l => l.toLowerCase())).size === labels.length;
+}
+
 // createDupGroup renders a single card for a duplicate group (multiple files
-// that match the same title/episode). The user must pick one before applying.
+// that match the same title/episode). For movies the user selects which cuts
+// to import and labels each edition; for TV the user picks exactly one file.
 function createDupGroup(items, groupKey) {
     const card = document.createElement('div');
     card.className = 'dup-group';
@@ -573,6 +606,8 @@ function createDupGroup(items, groupKey) {
 
     const allDismissed = items.every(it => state.dismissed.has(it.idx));
     if (allDismissed) card.classList.add('dismissed');
+
+    const isMovie = items[0].match && items[0].match.type === 'movie';
 
     const hdr = document.createElement('div');
     hdr.className = 'dup-group-header';
@@ -583,47 +618,133 @@ function createDupGroup(items, groupKey) {
         titleText += '  S' + String(firstMatch.season).padStart(2, '0') +
                      'E' + String(firstMatch.episode || 0).padStart(2, '0');
     }
-    hdr.innerHTML =
-        '<span class="dup-group-title">' + escHtml(titleText) + '</span>' +
-        '<span class="dup-group-hint">Pick one file to import</span>';
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'dup-group-title';
+    titleSpan.textContent = titleText;
+    const hintSpan = document.createElement('span');
+    hintSpan.className = 'dup-group-hint';
+    hintSpan.textContent = isMovie
+        ? 'Multiple cuts found \u2014 select versions to import'
+        : 'Pick one file to import';
+    hdr.appendChild(titleSpan);
+    hdr.appendChild(hintSpan);
     card.appendChild(hdr);
 
-    const currentPick = state.groupSelections[groupKey] || null;
-    items.forEach(item => {
-        const row = document.createElement('label');
-        row.className = 'dup-candidate' + (state.dismissed.has(item.idx) ? ' dismissed' : '');
+    if (isMovie) {
+        // Checkboxes + editable edition labels for multi-version movie import.
+        items.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'dup-candidate dup-candidate-movie' +
+                (state.dismissed.has(item.idx) ? ' dismissed' : '');
 
-        const radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = 'dup-' + groupKey.replace(/[^a-z0-9]/gi, '_');
-        radio.value = item.file;
-        radio.checked = currentPick === item.file;
-        radio.addEventListener('change', () => {
-            state.groupSelections[groupKey] = item.file;
-            renderMatchResults();
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = isDupItemChecked(item, groupKey);
+            cb.addEventListener('change', () => {
+                state.groupChecked[dupItemKey(groupKey, item.idx)] = cb.checked;
+                renderMatchResults();
+            });
+            row.appendChild(cb);
+
+            const fileSpan = document.createElement('span');
+            fileSpan.className = 'dup-candidate-info';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'dup-candidate-filename';
+            nameSpan.title = item.file;
+            nameSpan.textContent = item.file.split('/').pop();
+            fileSpan.appendChild(nameSpan);
+
+            if (item.size) {
+                const sizeSpan = document.createElement('span');
+                sizeSpan.className = 'browse-size';
+                sizeSpan.textContent = ' ' + formatSize(item.size);
+                fileSpan.appendChild(sizeSpan);
+            }
+            if (item.match && item.match.confidence) {
+                const badge = document.createElement('span');
+                badge.className = 'match-badge badge-' + item.match.confidence;
+                badge.textContent = item.match.confidence;
+                fileSpan.appendChild(badge);
+            }
+            if (item.aliases && item.aliases.length) {
+                const aliasSpan = document.createElement('span');
+                aliasSpan.className = 'dup-alias-hint';
+                aliasSpan.textContent = '+ ' + item.aliases.length + ' hardlink' +
+                    (item.aliases.length > 1 ? 's' : '');
+                fileSpan.appendChild(aliasSpan);
+            }
+            row.appendChild(fileSpan);
+
+            const editionInput = document.createElement('input');
+            editionInput.type = 'text';
+            editionInput.className = 'dup-edition-input';
+            editionInput.placeholder = 'Version label (e.g. Theatrical Cut)';
+            editionInput.value = getEffectiveEdition(item, groupKey);
+            editionInput.addEventListener('input', () => {
+                state.groupEditions[dupItemKey(groupKey, item.idx)] = editionInput.value;
+                renderMatchResults();
+            });
+            row.appendChild(editionInput);
+
+            card.appendChild(row);
         });
-        row.appendChild(radio);
 
-        const info = document.createElement('span');
-        info.className = 'dup-candidate-info';
-        const filename = item.file.split('/').pop();
-        let infoHtml = '<span class="dup-candidate-filename" title="' + escHtml(item.file) + '">' + escHtml(filename) + '</span>';
-        if (item.size) infoHtml += ' <span class="browse-size">' + formatSize(item.size) + '</span>';
-        if (item.match && item.match.confidence) {
-            infoHtml += ' <span class="match-badge badge-' + escHtml(item.match.confidence) + '">' + escHtml(item.match.confidence) + '</span>';
+        // Inline validation hint when multiple cuts are selected.
+        const checkedItems = items.filter(
+            it => !state.dismissed.has(it.idx) && isDupItemChecked(it, groupKey));
+        if (checkedItems.length > 1) {
+            const labels = checkedItems.map(it => getEffectiveEdition(it, groupKey).trim());
+            const hasEmpty = labels.some(l => l === '');
+            const hasDups = new Set(labels.map(l => l.toLowerCase())).size < labels.length;
+            if (hasEmpty || hasDups) {
+                const hint = document.createElement('div');
+                hint.className = 'dup-edition-error';
+                hint.textContent = hasEmpty
+                    ? 'Each selected version needs a label before importing.'
+                    : 'Version labels must be unique.';
+                card.appendChild(hint);
+            }
         }
-        if (item.aliases && item.aliases.length) {
-            infoHtml += ' <span class="dup-alias-hint">+ ' + item.aliases.length + ' hardlink' + (item.aliases.length > 1 ? 's' : '') + '</span>';
-        }
-        if (item.suggestedPath) {
-            infoHtml += '<div class="match-dest" title="' + escHtml(item.suggestedPath) + '">' +
-                        '<span class="match-dest-arrow">&rarr;</span>' + escHtml(item.suggestedPath) + '</div>';
-        }
-        info.innerHTML = infoHtml;
-        row.appendChild(info);
+    } else {
+        // Radio buttons: pick exactly one file (TV series behaviour).
+        const currentPick = state.groupSelections[groupKey] || null;
+        items.forEach(item => {
+            const row = document.createElement('label');
+            row.className = 'dup-candidate' + (state.dismissed.has(item.idx) ? ' dismissed' : '');
 
-        card.appendChild(row);
-    });
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'dup-' + groupKey.replace(/[^a-z0-9]/gi, '_');
+            radio.value = item.file;
+            radio.checked = currentPick === item.file;
+            radio.addEventListener('change', () => {
+                state.groupSelections[groupKey] = item.file;
+                renderMatchResults();
+            });
+            row.appendChild(radio);
+
+            const info = document.createElement('span');
+            info.className = 'dup-candidate-info';
+            const filename = item.file.split('/').pop();
+            let infoHtml = '<span class="dup-candidate-filename" title="' + escHtml(item.file) + '">' + escHtml(filename) + '</span>';
+            if (item.size) infoHtml += ' <span class="browse-size">' + formatSize(item.size) + '</span>';
+            if (item.match && item.match.confidence) {
+                infoHtml += ' <span class="match-badge badge-' + escHtml(item.match.confidence) + '">' + escHtml(item.match.confidence) + '</span>';
+            }
+            if (item.aliases && item.aliases.length) {
+                infoHtml += ' <span class="dup-alias-hint">+ ' + item.aliases.length + ' hardlink' + (item.aliases.length > 1 ? 's' : '') + '</span>';
+            }
+            if (item.suggestedPath) {
+                infoHtml += '<div class="match-dest" title="' + escHtml(item.suggestedPath) + '">' +
+                            '<span class="match-dest-arrow">&rarr;</span>' + escHtml(item.suggestedPath) + '</div>';
+            }
+            info.innerHTML = infoHtml;
+            row.appendChild(info);
+
+            card.appendChild(row);
+        });
+    }
 
     const dismiss = document.createElement('button');
     dismiss.className = 'match-dismiss';
@@ -633,7 +754,7 @@ function createDupGroup(items, groupKey) {
             items.forEach(it => state.dismissed.delete(it.idx));
         } else {
             items.forEach(it => state.dismissed.add(it.idx));
-            delete state.groupSelections[groupKey];
+            if (!isMovie) delete state.groupSelections[groupKey];
         }
         renderMatchResults();
     });
@@ -1012,18 +1133,38 @@ async function doApply() {
     const validateEl = document.getElementById('validate-toggle');
     const validate = validateEl ? validateEl.checked : false;
 
+    // Pre-build a map of which group keys are movie dup groups (>1 item, movie type).
+    const allDupGroups = new Map();
+    state.scanResults.forEach((r, i) => {
+        if (r.groupKey) {
+            if (!allDupGroups.has(r.groupKey)) allDupGroups.set(r.groupKey, []);
+            allDupGroups.get(r.groupKey).push({ ...r, idx: i });
+        }
+    });
+    const movieDupKeys = new Set();
+    allDupGroups.forEach((grpItems, key) => {
+        if (grpItems.length > 1 && grpItems[0].match && grpItems[0].match.type === 'movie') {
+            movieDupKeys.add(key);
+        }
+    });
+
     // Build the item list, respecting group selections for duplicate groups.
-    const newItems = state.scanResults
-        .filter((r, i) => {
-            if (r.status !== 'new' || !r.match || state.dismissed.has(i)) return false;
-            const key = r.groupKey;
-            if (!key) return true;
-            if (key in state.groupSelections) {
-                return state.groupSelections[key] === r.file;
+    const newItems = [];
+    state.scanResults.forEach((r, i) => {
+        if (r.status !== 'new' || !r.match || state.dismissed.has(i)) return;
+        const key = r.groupKey;
+        if (key) {
+            if (movieDupKeys.has(key)) {
+                if (!isDupItemChecked({ idx: i }, key)) return;
+            } else if (key in state.groupSelections) {
+                if (state.groupSelections[key] !== r.file) return;
             }
-            return true;
-        })
-        .map(r => ({
+        }
+        const isMultiEdition = key && movieDupKeys.has(key);
+        const edition = isMultiEdition
+            ? getEffectiveEdition({ idx: i, edition: r.edition }, key).trim()
+            : '';
+        newItems.push({
             type: r.match.type === 'series' ? 'series' : 'movie',
             tmdbId: r.match.tmdbId || 0,
             tvdbId: r.match.tvdbId || 0,
@@ -1034,8 +1175,11 @@ async function doApply() {
             rootFolderPath: getLibraryPathForType(r.match.type),
             monitored: strategy !== 'register',
             sourcePath: r.file,
-            destPath: r.suggestedPath || '',
-        }));
+            // For edition items let the backend compute the edition-aware filename.
+            destPath: edition ? '' : (r.suggestedPath || ''),
+            edition,
+        });
+    });
 
     // In-place items need registration but no FS operation — always use "register".
     const inPlaceItems = state.scanResults
