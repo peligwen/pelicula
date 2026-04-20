@@ -180,7 +180,7 @@ func poll(store *connStore, cmap *containerMap, dns *dnsCache, dnsJobs chan<- st
 		localIP := te.LocalIP.String()
 		container := cmap.lookup(localIP)
 		if container == "" {
-			container = "unknown"
+			continue
 		}
 
 		kind := "internet"
