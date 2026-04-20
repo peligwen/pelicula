@@ -63,6 +63,13 @@ func (h *Hub) unregister(c *client) {
 	c.closeDone()
 }
 
+// ClientCount returns the number of currently connected SSE clients.
+func (h *Hub) ClientCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
+}
+
 // Broadcast sends msg to every registered client. The send is non-blocking;
 // if a client's buffer (capacity 16) is full the message is dropped for that
 // client rather than blocking the broadcaster. If msg.ID is empty, a
