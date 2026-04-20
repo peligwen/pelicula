@@ -46,7 +46,7 @@ func TestSeedConfigCreatesDir(t *testing.T) {
 	}
 }
 
-func TestEnforceArrAuth_AuthEnabled(t *testing.T) {
+func TestEnforceArrConfig_AuthEnabled(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "config.xml")
 
@@ -61,8 +61,8 @@ func TestEnforceArrAuth_AuthEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := enforceArrAuth(file); err != nil {
-		t.Fatalf("enforceArrAuth error: %v", err)
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
 	}
 
 	data, _ := os.ReadFile(file)
@@ -79,7 +79,7 @@ func TestEnforceArrAuth_AuthEnabled(t *testing.T) {
 	}
 }
 
-func TestEnforceArrAuth_AlreadyPatched(t *testing.T) {
+func TestEnforceArrConfig_AlreadyPatched(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "config.xml")
 
@@ -88,25 +88,227 @@ func TestEnforceArrAuth_AlreadyPatched(t *testing.T) {
   <AuthenticationMethod>External</AuthenticationMethod>
   <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
   <Theme>dark</Theme>
+  <AnalyticsEnabled>False</AnalyticsEnabled>
 </Config>`
 	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := enforceArrAuth(file); err != nil {
-		t.Fatalf("enforceArrAuth error: %v", err)
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
 	}
 
 	data, _ := os.ReadFile(file)
 	if string(data) != content {
-		t.Error("enforceArrAuth modified already-correct config")
+		t.Error("enforceArrConfig modified already-correct config")
 	}
 }
 
-func TestEnforceArrAuth_Missing(t *testing.T) {
+func TestEnforceArrConfig_Missing(t *testing.T) {
 	// Should not error on missing file
-	if err := enforceArrAuth("/nonexistent/path/config.xml"); err != nil {
+	if err := enforceArrConfig("/nonexistent/path/config.xml"); err != nil {
 		t.Errorf("expected no error for missing file, got: %v", err)
+	}
+}
+
+func TestEnforceArrConfig_FreshInstall(t *testing.T) {
+	// Fresh install: no AnalyticsEnabled, no Theme, no LogLevel
+	// Should add AnalyticsEnabled, NOT add LogLevel (it doesn't exist), leave auth correct.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config>
+  <UrlBase>/sonarr</UrlBase>
+  <AuthenticationMethod>External</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+</Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+
+	if !strings.Contains(patched, "<AnalyticsEnabled>False</AnalyticsEnabled>") {
+		t.Error("expected AnalyticsEnabled=False to be inserted")
+	}
+	if strings.Contains(patched, "<LogLevel>") {
+		t.Error("LogLevel should not be added if it didn't exist")
+	}
+	if !strings.Contains(patched, "<AuthenticationMethod>External</AuthenticationMethod>") {
+		t.Error("auth fields should be preserved")
+	}
+}
+
+func TestEnforceArrConfig_DebugToInfo(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config>
+  <AuthenticationMethod>External</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <LogLevel>debug</LogLevel>
+</Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+
+	if !strings.Contains(patched, "<LogLevel>info</LogLevel>") {
+		t.Error("expected debug to be replaced with info")
+	}
+	if strings.Contains(patched, "<LogLevel>debug</LogLevel>") {
+		t.Error("debug log level should have been replaced")
+	}
+}
+
+func TestEnforceArrConfig_OtherLogLevelUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config>
+  <AuthenticationMethod>External</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <LogLevel>trace</LogLevel>
+</Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+
+	if !strings.Contains(patched, "<LogLevel>trace</LogLevel>") {
+		t.Error("trace log level should be left unchanged")
+	}
+}
+
+func TestEnforceArrConfig_AnalyticsFlippedToFalse(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config>
+  <AuthenticationMethod>External</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <AnalyticsEnabled>True</AnalyticsEnabled>
+</Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+
+	if !strings.Contains(patched, "<AnalyticsEnabled>False</AnalyticsEnabled>") {
+		t.Error("expected AnalyticsEnabled=True to be flipped to False")
+	}
+}
+
+func TestEnforceArrConfig_OneLinerConfig(t *testing.T) {
+	// The seeded config format is a one-liner; AnalyticsEnabled must be inserted correctly.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config><UrlBase>/sonarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceArrConfig(file); err != nil {
+		t.Fatalf("enforceArrConfig error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+
+	if !strings.Contains(patched, "<AnalyticsEnabled>False</AnalyticsEnabled>") {
+		t.Error("expected AnalyticsEnabled=False to be inserted in one-liner config")
+	}
+	if !strings.Contains(patched, "</Config>") {
+		t.Error("</Config> closing tag must be present")
+	}
+	// The result must end with </Config> (no trailing junk)
+	if !strings.HasSuffix(strings.TrimSpace(patched), "</Config>") {
+		t.Errorf("result must end with </Config>, got: %q", patched)
+	}
+	// Basic structural check: AnalyticsEnabled must appear before </Config>
+	aIdx := strings.Index(patched, "<AnalyticsEnabled>")
+	cIdx := strings.Index(patched, "</Config>")
+	if aIdx < 0 || cIdx < 0 || aIdx > cIdx {
+		t.Error("AnalyticsEnabled must appear before </Config>")
+	}
+}
+
+func TestEnforceJellyfinSystem_FlipsToFalse(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `<?xml version="1.0" encoding="utf-8"?>
+<ServerConfiguration>
+  <AllowClientLogUpload>true</AllowClientLogUpload>
+</ServerConfiguration>`
+	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceJellyfinSystem(dir); err != nil {
+		t.Fatalf("enforceJellyfinSystem error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
+	patched := string(data)
+
+	if !strings.Contains(patched, "<AllowClientLogUpload>false</AllowClientLogUpload>") {
+		t.Error("expected AllowClientLogUpload to be set to false")
+	}
+	if strings.Contains(patched, "<AllowClientLogUpload>true</AllowClientLogUpload>") {
+		t.Error("true value should have been replaced")
+	}
+}
+
+func TestEnforceJellyfinSystem_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `<?xml version="1.0" encoding="utf-8"?>
+<ServerConfiguration>
+  <AllowClientLogUpload>false</AllowClientLogUpload>
+</ServerConfiguration>`
+	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceJellyfinSystem(dir); err != nil {
+		t.Fatalf("enforceJellyfinSystem error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
+	if string(data) != content {
+		t.Error("enforceJellyfinSystem modified already-correct system.xml")
+	}
+}
+
+func TestEnforceJellyfinSystem_Missing(t *testing.T) {
+	// Should not error when system.xml doesn't exist (Jellyfin hasn't run yet)
+	if err := enforceJellyfinSystem("/nonexistent/dir"); err != nil {
+		t.Errorf("expected no error for missing system.xml, got: %v", err)
 	}
 }
 
