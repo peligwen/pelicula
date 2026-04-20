@@ -23,6 +23,24 @@ import (
 	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
+// Version is the middleware service version. Set at build time via ldflags:
+//
+//	-ldflags "-X pelicula-api/internal/app/services.Version=1.2.3"
+var Version = "dev"
+
+// uaTransport wraps an http.RoundTripper to inject a User-Agent header on
+// every outbound request.
+type uaTransport struct {
+	base      http.RoundTripper
+	userAgent string
+}
+
+func (t *uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("User-Agent", t.userAgent)
+	return t.base.RoundTrip(r)
+}
+
 // Clients aggregates all downstream service clients and HTTP helpers.
 type Clients struct {
 	configDir string
@@ -67,8 +85,14 @@ type xmlConfig struct {
 // parseEnvFile / envPath which live in cmd/.
 func New(cfg *config.Config, jellyfinAPIKey string) *Clients {
 	c := &Clients{
-		configDir:   cfg.ConfigDir,
-		client:      &http.Client{Timeout: 10 * time.Second},
+		configDir: cfg.ConfigDir,
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &uaTransport{
+				base:      http.DefaultTransport,
+				userAgent: "Pelicula/" + Version + " (+https://github.com/peligwen/pelicula)",
+			},
+		},
 		sonarrURL:   cfg.URLs.Sonarr,
 		radarrURL:   cfg.URLs.Radarr,
 		prowlarrURL: cfg.URLs.Prowlarr,

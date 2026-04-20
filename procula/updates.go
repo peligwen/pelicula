@@ -52,7 +52,7 @@ func checkForUpdates() UpdateInfo {
 		return info
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "pelicula/"+Version)
+	req.Header.Set("User-Agent", "Pelicula/"+Version+" (+https://github.com/peligwen/pelicula)")
 
 	resp, err := client.Do(req)
 	if err != nil {
