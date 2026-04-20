@@ -305,6 +305,34 @@ func TestEnforceJellyfinSystem_Idempotent(t *testing.T) {
 	}
 }
 
+func TestEnforceJellyfinSystem_Insert(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `<?xml version="1.0" encoding="utf-8"?>
+<ServerConfiguration>
+  <SomeOtherField>true</SomeOtherField>
+</ServerConfiguration>`
+	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceJellyfinSystem(dir); err != nil {
+		t.Fatalf("enforceJellyfinSystem error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
+	patched := string(data)
+	if !strings.Contains(patched, "<AllowClientLogUpload>false</AllowClientLogUpload>") {
+		t.Error("expected AllowClientLogUpload to be inserted")
+	}
+	if !strings.Contains(patched, "</ServerConfiguration>") {
+		t.Error("expected </ServerConfiguration> to still be present")
+	}
+}
+
 func TestEnforceJellyfinSystem_Missing(t *testing.T) {
 	// Should not error when system.xml doesn't exist (Jellyfin hasn't run yet)
 	if err := enforceJellyfinSystem("/nonexistent/dir"); err != nil {
