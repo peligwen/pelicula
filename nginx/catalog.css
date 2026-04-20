@@ -304,11 +304,16 @@
 .sub-req-lang {
     padding: 0.25rem 0.6rem;
     border-radius: 999px;
-    background: rgba(255,255,255,0.06);
+    border: 1.5px solid var(--border2);
+    background: none;
+    color: var(--muted);
+    font-size: 0.8rem;
     cursor: pointer;
     user-select: none;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
-.sub-req-lang.active { background: rgba(200,160,255,0.75); color: #000; }
+.sub-req-lang:hover { color: var(--ink); border-color: var(--border2); }
+.sub-req-lang.active { background: var(--pink); border-color: var(--pink); color: #fff; }
 
 .logs-filters { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
 .logs-filter-chip {

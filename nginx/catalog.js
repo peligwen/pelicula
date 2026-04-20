@@ -800,14 +800,10 @@ component('catalog', function (el, store, _props) {
         allLangs.forEach(lang => {
             const chip = document.createElement('span');
             chip.textContent = lang;
-            chip.className = 'sub-req-chip';
             chip.dataset.lang = lang;
             chip.dataset.active = langs.includes(lang) ? '1' : '0';
-            chip.style.cssText = 'padding:.2rem .6rem;border-radius:4px;font-size:.8rem;cursor:pointer;margin:.15rem';
             const updateChip = () => {
-                const on = chip.dataset.active === '1';
-                chip.style.background = on ? 'var(--accent)' : 'var(--border)';
-                chip.style.color = on ? '#000' : 'var(--muted)';
+                chip.className = 'sub-req-lang' + (chip.dataset.active === '1' ? ' active' : '');
             };
             updateChip();
             chip.addEventListener('click', () => {
