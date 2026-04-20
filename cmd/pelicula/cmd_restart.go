@@ -47,8 +47,8 @@ func cmdRestartAcquire(ctx *Context, _ []string) {
 	configDir := ctx.Env["CONFIG_DIR"]
 	for _, svc := range []string{"sonarr", "radarr", "prowlarr"} {
 		cfgPath := filepath.Join(configDir, svc, "config.xml")
-		if err := enforceArrAuth(cfgPath); err != nil {
-			warn("enforceArrAuth " + svc + ": " + err.Error())
+		if err := enforceArrConfig(cfgPath); err != nil {
+			warn("enforceArrConfig " + svc + ": " + err.Error())
 		}
 	}
 

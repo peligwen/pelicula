@@ -48,10 +48,11 @@ func seedConfig(file, content string) error {
 	return os.WriteFile(file, []byte(content), 0644)
 }
 
-// enforceArrAuth patches an *arr config.xml to use External authentication
-// (DisabledForLocalAddresses) and enforce dark theme.
+// enforceArrConfig patches an *arr config.xml to use External authentication
+// (DisabledForLocalAddresses), enforce dark theme, disable analytics, and
+// ensure the log level is not set to debug.
 // This is idempotent and safe to call on every startup.
-func enforceArrAuth(configPath string) error {
+func enforceArrConfig(configPath string) error {
 	if _, err := os.Stat(configPath); err != nil {
 		return nil // doesn't exist yet — nothing to do
 	}
@@ -78,11 +79,64 @@ func enforceArrAuth(configPath string) error {
 		patched = reTheme.ReplaceAllString(patched, "<Theme>dark</Theme>")
 	}
 
+	// Disable analytics telemetry
+	reAnalytics := regexp.MustCompile(`<AnalyticsEnabled>[^<]*</AnalyticsEnabled>`)
+	if reAnalytics.MatchString(patched) {
+		patched = reAnalytics.ReplaceAllString(patched, "<AnalyticsEnabled>False</AnalyticsEnabled>")
+	} else {
+		// Insert before </Config>. The seeded config is a one-liner; capture leading
+		// whitespace so pretty-printed configs keep their indentation.
+		reClose := regexp.MustCompile(`(\s*)</Config>\s*$`)
+		patched = reClose.ReplaceAllString(patched, "${1}<AnalyticsEnabled>False</AnalyticsEnabled>${1}</Config>")
+	}
+
+	// Silence debug log level — replace debug→info only; leave trace/warn/fatal alone
+	reLogDebug := regexp.MustCompile(`(?i)<LogLevel>debug</LogLevel>`)
+	patched = reLogDebug.ReplaceAllString(patched, "<LogLevel>info</LogLevel>")
+
 	if patched == original {
 		return nil // no changes
 	}
 
 	return os.WriteFile(configPath, []byte(patched), 0644)
+}
+
+// purgeSentryDirs removes Sentry crash-report cache directories for the *arr
+// services. These are safe to delete at startup (the arrs recreate them on
+// next crash); they must NOT be removed while the services are running.
+func purgeSentryDirs(configDir string) {
+	for _, svc := range []string{"sonarr", "radarr", "prowlarr"} {
+		_ = os.RemoveAll(filepath.Join(configDir, svc, "Sentry"))
+	}
+}
+
+// enforceJellyfinSystem patches Jellyfin's system.xml to disable client log
+// uploads. The file lives inside the config subdirectory (linuxserver image
+// maps CONFIG_DIR/jellyfin → /config; system.xml is at /config/config/).
+// This is idempotent and safe to call on every startup.
+func enforceJellyfinSystem(configDir string) error {
+	path := filepath.Join(configDir, "jellyfin", "config", "system.xml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil // file doesn't exist yet; Jellyfin hasn't run
+	}
+	original := string(data)
+	patched := original
+
+	// Disable client log uploads to the Jellyfin server
+	re := regexp.MustCompile(`<AllowClientLogUpload>[^<]*</AllowClientLogUpload>`)
+	if re.MatchString(patched) {
+		patched = re.ReplaceAllString(patched, "<AllowClientLogUpload>false</AllowClientLogUpload>")
+	} else {
+		// Insert before </ServerConfiguration>
+		patched = strings.Replace(patched, "</ServerConfiguration>",
+			"  <AllowClientLogUpload>false</AllowClientLogUpload>\n</ServerConfiguration>", 1)
+	}
+
+	if patched == original {
+		return nil
+	}
+	return os.WriteFile(path, []byte(patched), 0644)
 }
 
 // extractAPIKey reads the <ApiKey> value from an *arr config.xml.
@@ -123,11 +177,20 @@ func SeedAllConfigs(configDir string) error {
 		return fmt.Errorf("seed prowlarr: %w", err)
 	}
 
-	// Enforce auth bypass on existing arr configs (arr rewrites config.xml on first boot)
+	// Enforce auth bypass and privacy settings on existing arr configs
+	// (*arr apps rewrite config.xml on first boot, re-enabling auth)
 	for _, svc := range []string{"sonarr", "radarr", "prowlarr"} {
-		if err := enforceArrAuth(filepath.Join(configDir, svc, "config.xml")); err != nil {
-			return fmt.Errorf("enforceArrAuth %s: %w", svc, err)
+		if err := enforceArrConfig(filepath.Join(configDir, svc, "config.xml")); err != nil {
+			return fmt.Errorf("enforceArrConfig %s: %w", svc, err)
 		}
+	}
+
+	// Purge Sentry crash-report cache dirs (safe at startup; arrs recreate on next crash)
+	purgeSentryDirs(configDir)
+
+	// Disable Jellyfin client log uploads (system.xml; no-op if Jellyfin hasn't run yet)
+	if err := enforceJellyfinSystem(configDir); err != nil {
+		return fmt.Errorf("enforceJellyfinSystem: %w", err)
 	}
 
 	// Jellyfin network.xml
