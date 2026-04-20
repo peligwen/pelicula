@@ -13,6 +13,9 @@ if (typeof EventSource === 'undefined') {
     let retryCount = 0;
     let sseActive = false;
     let _started = false;
+    // Set true before disconnecting due to tab visibility; prevents the
+    // polling fallback from starting while the tab is hidden.
+    let _hiddenByVisibility = false;
 
     function connect() {
         if (source) source.close();
@@ -99,7 +102,26 @@ if (typeof EventSource === 'undefined') {
         _started = false;
         if (source) { source.close(); source = null; }
         sseActive = false;
-        enablePollers();
+        // When hidden by visibility, suppress the polling fallback entirely
+        // so an idle background tab generates zero traffic.
+        if (_hiddenByVisibility) {
+            disablePollers();
+        } else {
+            enablePollers();
+        }
     };
     window.sseIsActive = function() { return sseActive; };
+
+    // Pause SSE when the tab goes hidden; resume when it returns.
+    // This ensures an idle background tab generates zero server traffic.
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            _hiddenByVisibility = true;
+            window.disconnectSSE();
+        } else {
+            _hiddenByVisibility = false;
+            // _started was cleared by disconnectSSE, so connectSSE re-enters.
+            window.connectSSE();
+        }
+    });
 }
