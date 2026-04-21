@@ -2,7 +2,9 @@
 services:
   nginx:
     ports:
+{{- if not .SimpleMode}}
       - "{{.HTTPPort}}:80"
+{{- end}}
       - "{{.HTTPSPort}}:8443"
 {{if .LetsEncrypt}}
   certbot:

@@ -46,11 +46,29 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 
 	// Validate required vars
 	hostname := env["REMOTE_HOSTNAME"]
-	if hostname == "" {
-		return fmt.Errorf("REMOTE_ACCESS_ENABLED=true but REMOTE_HOSTNAME is not set\nSet REMOTE_HOSTNAME in your .env file and re-run: pelicula up")
+	httpsPort := envDefault(env, "REMOTE_HTTPS_PORT", "8920")
+	simpleMode := hostname == ""
+
+	if simpleMode {
+		certDir := filepath.Join(configDir, "certs", "remote")
+		if err := os.MkdirAll(certDir, 0755); err != nil {
+			return err
+		}
+		if err := SetupRemoteSelfSignedCert(certDir, "pelicula-remote"); err != nil {
+			return err
+		}
+		simpleTmplPath := filepath.Join(scriptDir, "nginx", "remote-simple.conf.template")
+		simpleBytes, err := os.ReadFile(simpleTmplPath)
+		if err != nil {
+			return fmt.Errorf("nginx/remote-simple.conf.template not found: %w", err)
+		}
+		if err := os.WriteFile(remoteConf, simpleBytes, 0644); err != nil {
+			return err
+		}
+		pass(fmt.Sprintf("Rendered nginx remote vhost (simple mode, port %s)", httpsPort))
+		return writeSimpleRemoteCompose(remoteCompose, httpsPort, certDir)
 	}
 
-	httpsPort := envDefault(env, "REMOTE_HTTPS_PORT", "8920")
 	httpPort := envDefault(env, "REMOTE_HTTP_PORT", "80")
 	certMode := envDefault(env, "REMOTE_CERT_MODE", "self-signed")
 	leEmail := env["REMOTE_LE_EMAIL"]
@@ -123,6 +141,7 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 type remoteComposeData struct {
 	HTTPPort    string
 	HTTPSPort   string
+	SimpleMode  bool
 	LetsEncrypt bool
 	LEStateDir  string
 	CertDir     string
@@ -148,6 +167,7 @@ func writeRemoteCompose(path, httpPort, httpsPort, certMode, leEmail, leStaging,
 	data := remoteComposeData{
 		HTTPPort:    httpPort,
 		HTTPSPort:   httpsPort,
+		SimpleMode:  false,
 		LetsEncrypt: certMode == "letsencrypt",
 		LEStateDir:  leStateDir,
 		CertDir:     certDir,
@@ -171,6 +191,25 @@ func writeRemoteCompose(path, httpPort, httpsPort, certMode, leEmail, leStaging,
 		pass(fmt.Sprintf("Certbot sidecar configured (%s, staging: %s)", hostname, leStaging))
 	}
 
+	return os.WriteFile(path, buf.Bytes(), 0644)
+}
+
+// writeSimpleRemoteCompose renders docker-compose.remote.yml for simple mode
+// (no HTTP port, no certbot, self-signed cert only).
+func writeSimpleRemoteCompose(path, httpsPort, certDir string) error {
+	data := remoteComposeData{
+		HTTPSPort:  httpsPort,
+		SimpleMode: true,
+		CertDir:    certDir,
+	}
+	tmpl, err := template.New("remote.yml").Parse(remoteTmpl)
+	if err != nil {
+		return fmt.Errorf("parse remote.yml.tmpl: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("render remote.yml.tmpl: %w", err)
+	}
 	return os.WriteFile(path, buf.Bytes(), 0644)
 }
 
