@@ -259,6 +259,17 @@ func cmdUp(ctx *Context, _ []string) {
 			fmt.Println()
 			fmt.Printf("  Port forwarding: route port %s to this machine.\n", rHTTPS)
 			fmt.Printf("  Do %sNOT%s forward port %s — it exposes admin tools.\n", colorBold, colorReset, port)
+		} else {
+			fmt.Println()
+			fmt.Printf("  %sRemote Jellyfin (simple mode)%s\n", colorBold, colorReset)
+			fmt.Println("  ────────────────────────────────────────────")
+			fmt.Printf("  https://%s:%s/\n", host, rHTTPS)
+			fmt.Println()
+			fmt.Printf("  Certificate: self-signed. TV apps accept it automatically;\n")
+			fmt.Printf("  browsers will show a security warning — click through to proceed.\n")
+			fmt.Println()
+			fmt.Printf("  Port forwarding: route port %s to this machine.\n", rHTTPS)
+			fmt.Printf("  Do %sNOT%s forward port %s — it exposes admin tools.\n", colorBold, colorReset, port)
 		}
 	}
 

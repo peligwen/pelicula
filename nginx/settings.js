@@ -65,11 +65,14 @@ function updateRemoteSummary() {
     const dot = document.createElement('span');
     if (ms.remote_access_enabled === 'true') {
         dot.className = 'status-dot active';
-        const host = ms.remote_hostname || 'configured';
-        const cert = ms.remote_cert_mode || 'self-signed';
         el.textContent = '';
         el.appendChild(dot);
-        el.appendChild(document.createTextNode(host + ' \u00b7 ' + cert));
+        if (ms.remote_hostname) {
+            const cert = ms.remote_cert_mode || 'self-signed';
+            el.appendChild(document.createTextNode(ms.remote_hostname + ' \u00b7 ' + cert));
+        } else {
+            el.appendChild(document.createTextNode('simple mode \u00b7 self-signed'));
+        }
     } else {
         dot.className = 'status-dot inactive';
         el.textContent = '';

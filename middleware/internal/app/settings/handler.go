@@ -252,7 +252,11 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.RemoteAccessEnabled != "" {
 		vars["REMOTE_ACCESS_ENABLED"] = req.RemoteAccessEnabled
 	}
-	if req.RemoteHostname != "" {
+	// RemoteHostname is always written when RemoteAccessEnabled is present in
+	// the payload — an empty hostname is valid (simple mode: self-signed, no DNS).
+	if req.RemoteAccessEnabled != "" {
+		vars["REMOTE_HOSTNAME"] = req.RemoteHostname
+	} else if req.RemoteHostname != "" {
 		vars["REMOTE_HOSTNAME"] = req.RemoteHostname
 	}
 	if req.RemoteHTTPPort != "" {

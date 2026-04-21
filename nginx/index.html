@@ -887,9 +887,9 @@
             </label>
             <div id="st-remote-opts">
                 <div class="settings-field-row">
-                    <label class="settings-field-label" for="st-remote-hostname">Hostname</label>
-                    <span class="settings-field-hint">Bare hostname, no scheme or port (e.g. <code>jellyfin.example.com</code>)</span>
-                    <input type="text" id="st-remote-hostname" class="settings-input" placeholder="jellyfin.example.com">
+                    <label class="settings-field-label" for="st-remote-hostname">Hostname <span style="font-weight:normal;opacity:0.7">(optional)</span></label>
+                    <span class="settings-field-hint">Leave blank for <strong>simple mode</strong>: self-signed cert, no DNS needed, reachable by IP. Set a bare hostname (e.g. <code>jellyfin.example.com</code>) for full mode with Let&#x2019;s Encrypt or a BYO cert.</span>
+                    <input type="text" id="st-remote-hostname" class="settings-input" placeholder="Leave blank for simple mode">
                 </div>
                 <div class="settings-field-row">
                     <label class="settings-field-label" for="st-remote-http-port">HTTP port</label>
@@ -901,6 +901,7 @@
                 </div>
                 <div class="settings-field-row">
                     <label class="settings-field-label">Certificate mode</label>
+                    <span class="settings-field-hint">Ignored when hostname is blank (simple mode always uses self-signed).</span>
                     <div class="settings-radio-row">
                         <label><input type="radio" name="st-cert-mode" value="letsencrypt"> Let&#x2019;s Encrypt</label>
                         <label><input type="radio" name="st-cert-mode" value="byo"> BYO certificate</label>
