@@ -6,6 +6,7 @@ package docker
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -128,6 +129,39 @@ func (c *Client) logs(name string, tail int, timestamps bool) ([]byte, error) {
 		return nil, fmt.Errorf("docker logs %s: HTTP %d", name, resp.StatusCode)
 	}
 	return demuxDockerLogs(resp.Body)
+}
+
+// NetIO holds the receive/transmit byte counters for a single network interface.
+type NetIO struct {
+	RxBytes uint64 `json:"rx_bytes"`
+	TxBytes uint64 `json:"tx_bytes"`
+}
+
+// StatsResponse captures the fields we need from Docker's one-shot stats JSON.
+// Containers sharing another container's network namespace (e.g. qbittorrent,
+// prowlarr sharing gluetun) return Networks: null — callers must handle nil.
+type StatsResponse struct {
+	Read     time.Time        `json:"read"`
+	Networks map[string]NetIO `json:"networks"`
+}
+
+// Stats fetches a one-shot stats snapshot for the named Compose service.
+// GET /containers/{container}/stats?stream=false
+func (c *Client) Stats(name string) (*StatsResponse, error) {
+	url := c.baseURL + "/containers/" + c.serviceToContainer(name) + "/stats?stream=false"
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("docker stats %s: %w", name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("docker stats %s: HTTP %d", name, resp.StatusCode)
+	}
+	var s StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return nil, fmt.Errorf("docker stats %s: decode: %w", name, err)
+	}
+	return &s, nil
 }
 
 // demuxDockerLogs strips the Docker stream multiplexing headers and returns

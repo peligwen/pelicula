@@ -235,8 +235,8 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			return username, ok
 		}),
 		NetworkHandler: &network.Handler{
-			NetcapURL: cfg.NetcapURL,
-			HTTP:      &http.Client{Timeout: 5 * time.Second},
+			Docker:        dockerCli,
+			VPNContainers: network.DefaultVPNContainers,
 		},
 	}
 

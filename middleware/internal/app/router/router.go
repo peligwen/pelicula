@@ -154,8 +154,8 @@ func Register(mux *http.ServeMux, cfg Config) {
 	// admin only: VPN speed test
 	mux.Handle("/api/pelicula/speedtest", auth.GuardAdmin(http.HandlerFunc(cfg.Sysinfo.ServeSpeedtest)))
 
-	// admin only: network connections (proxies netcap sidecar)
-	mux.Handle("/api/pelicula/network", auth.GuardAdmin(http.HandlerFunc(cfg.Network.ServeConnections)))
+	// admin only: per-container bandwidth stats
+	mux.Handle("/api/pelicula/network", auth.GuardAdmin(http.HandlerFunc(cfg.Network.ServeStats)))
 
 	// admin only: container control
 	mux.Handle("/api/pelicula/admin/stack/restart", auth.GuardAdmin(http.HandlerFunc(cfg.Admin.HandleStackRestart)))

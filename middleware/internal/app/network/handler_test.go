@@ -1,142 +1,227 @@
 package network_test
 
 import (
-	"bytes"
-	"io"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
 	"pelicula-api/internal/app/network"
+	"pelicula-api/internal/clients/docker"
 )
 
-// newHandler returns a Handler pointed at the given server URL.
-func newHandler(serverURL string) *network.Handler {
-	return &network.Handler{
-		NetcapURL: serverURL,
-		HTTP:      &http.Client{},
-	}
+// fakeDocker is a test implementation of statsSource.
+type fakeDocker struct {
+	allowed map[string]bool
+	stats   map[string]*docker.StatsResponse
+	errs    map[string]error
 }
 
-// TestServeConnections_ProxySuccess verifies that a 2xx response from netcap
-// is streamed through with the original Content-Type preserved.
-func TestServeConnections_ProxySuccess(t *testing.T) {
-	const payload = `{"connections":[{"pid":42,"comm":"curl"}]}`
+func (f *fakeDocker) AllowedNames() map[string]bool { return f.allowed }
+func (f *fakeDocker) Stats(name string) (*docker.StatsResponse, error) {
+	if err, ok := f.errs[name]; ok && err != nil {
+		return nil, err
+	}
+	return f.stats[name], nil
+}
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/connections" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, payload)
-	}))
-	defer upstream.Close()
+func fixedNow() time.Time {
+	return time.Date(2026, 4, 21, 12, 0, 0, 0, time.UTC)
+}
 
-	h := newHandler(upstream.URL)
+// TestServeStats_Success verifies the happy path: bytes are summed across
+// interfaces and the response shape is correct.
+func TestServeStats_Success(t *testing.T) {
+	h := &network.Handler{
+		Docker: &fakeDocker{
+			allowed: map[string]bool{"sonarr": true, "radarr": true},
+			stats: map[string]*docker.StatsResponse{
+				"sonarr": {
+					Read: fixedNow(),
+					Networks: map[string]docker.NetIO{
+						"eth0": {RxBytes: 1000, TxBytes: 500},
+						"eth1": {RxBytes: 200, TxBytes: 100},
+					},
+				},
+				"radarr": {
+					Read: fixedNow(),
+					Networks: map[string]docker.NetIO{
+						"eth0": {RxBytes: 3000, TxBytes: 1500},
+					},
+				},
+			},
+			errs: map[string]error{},
+		},
+		VPNContainers: map[string]bool{},
+		Now:           fixedNow,
+	}
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/network", nil)
-	h.ServeConnections(rec, req)
+	h.ServeStats(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
-		t.Errorf("expected Content-Type application/json, got %q", got)
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
 	}
-	if got := rec.Body.String(); got != payload {
-		t.Errorf("expected body %q, got %q", payload, got)
+
+	var resp struct {
+		Containers []struct {
+			Name     string `json:"name"`
+			BytesIn  uint64 `json:"bytes_in"`
+			BytesOut uint64 `json:"bytes_out"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	byName := map[string]struct {
+		BytesIn  uint64
+		BytesOut uint64
+	}{}
+	for _, c := range resp.Containers {
+		byName[c.Name] = struct {
+			BytesIn  uint64
+			BytesOut uint64
+		}{c.BytesIn, c.BytesOut}
+	}
+
+	if s := byName["sonarr"]; s.BytesIn != 1200 || s.BytesOut != 600 {
+		t.Errorf("sonarr: want in=1200 out=600, got in=%d out=%d", s.BytesIn, s.BytesOut)
+	}
+	if r := byName["radarr"]; r.BytesIn != 3000 || r.BytesOut != 1500 {
+		t.Errorf("radarr: want in=3000 out=1500, got in=%d out=%d", r.BytesIn, r.BytesOut)
 	}
 }
 
-// TestServeConnections_Unreachable verifies graceful degradation when netcap
-// is not reachable at all.
-func TestServeConnections_Unreachable(t *testing.T) {
-	// Point at a server that is immediately closed — guaranteed connection refused.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	url := srv.URL
-	srv.Close() // close before the request
+// TestServeStats_VPNFlag verifies that containers in the VPN set get
+// vpn_routed=true and others get false.
+func TestServeStats_VPNFlag(t *testing.T) {
+	h := &network.Handler{
+		Docker: &fakeDocker{
+			allowed: map[string]bool{"gluetun": true, "sonarr": true},
+			stats: map[string]*docker.StatsResponse{
+				"gluetun": {Read: fixedNow(), Networks: nil},
+				"sonarr":  {Read: fixedNow(), Networks: nil},
+			},
+			errs: map[string]error{},
+		},
+		VPNContainers: map[string]bool{"gluetun": true},
+		Now:           fixedNow,
+	}
 
-	h := newHandler(url)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/network", nil)
-	h.ServeConnections(rec, req)
+	h.ServeStats(rec, req)
 
-	assertFallback(t, rec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Containers []struct {
+			Name      string `json:"name"`
+			VPNRouted bool   `json:"vpn_routed"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	byName := map[string]bool{}
+	for _, c := range resp.Containers {
+		byName[c.Name] = c.VPNRouted
+	}
+
+	if !byName["gluetun"] {
+		t.Error("expected gluetun vpn_routed=true")
+	}
+	if byName["sonarr"] {
+		t.Error("expected sonarr vpn_routed=false")
+	}
 }
 
-// TestServeConnections_NonTwoXX verifies graceful degradation when netcap
-// returns a non-2xx status code.
-func TestServeConnections_NonTwoXX(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		io.WriteString(w, "boom")
-	}))
-	defer upstream.Close()
+// TestServeStats_MethodNotAllowed verifies that non-GET methods return 405.
+func TestServeStats_MethodNotAllowed(t *testing.T) {
+	h := &network.Handler{
+		Docker: &fakeDocker{
+			allowed: map[string]bool{},
+			stats:   map[string]*docker.StatsResponse{},
+			errs:    map[string]error{},
+		},
+		Now: fixedNow,
+	}
 
-	h := newHandler(upstream.URL)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/network", nil)
-	h.ServeConnections(rec, req)
-
-	assertFallback(t, rec)
-}
-
-// TestServeConnections_MethodNotAllowed verifies that non-GET methods return 405.
-func TestServeConnections_MethodNotAllowed(t *testing.T) {
-	h := newHandler("http://unused")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/network", nil)
-	h.ServeConnections(rec, req)
+	h.ServeStats(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rec.Code)
 	}
 }
 
-// TestServeConnections_BodyCapped verifies that responses larger than 1 MiB
-// are truncated to exactly 1 MiB by the LimitReader.
-func TestServeConnections_BodyCapped(t *testing.T) {
-	const oneMiB = 1 << 20
-	bigBody := bytes.Repeat([]byte("x"), oneMiB+1024) // 1 MiB + 1 KiB
+// TestServeStats_PerContainerError verifies that a Stats error for one service
+// results in that service appearing with zero bytes, while other services are
+// unaffected.
+func TestServeStats_PerContainerError(t *testing.T) {
+	h := &network.Handler{
+		Docker: &fakeDocker{
+			allowed: map[string]bool{"sonarr": true, "radarr": true},
+			stats: map[string]*docker.StatsResponse{
+				"radarr": {
+					Read: fixedNow(),
+					Networks: map[string]docker.NetIO{
+						"eth0": {RxBytes: 9999, TxBytes: 4444},
+					},
+				},
+			},
+			errs: map[string]error{
+				"sonarr": http.ErrServerClosed, // any non-nil error
+			},
+		},
+		VPNContainers: map[string]bool{},
+		Now:           fixedNow,
+	}
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.WriteHeader(http.StatusOK)
-		w.Write(bigBody)
-	}))
-	defer upstream.Close()
-
-	h := newHandler(upstream.URL)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/network", nil)
-	h.ServeConnections(rec, req)
+	h.ServeStats(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	got := rec.Body.Len()
-	if got > oneMiB {
-		t.Errorf("response body %d bytes exceeds 1 MiB cap", got)
-	}
-	if got != oneMiB {
-		t.Errorf("expected exactly 1 MiB (%d bytes), got %d bytes", oneMiB, got)
-	}
-}
 
-// assertFallback checks that the recorder contains the graceful degradation response.
-func assertFallback(t *testing.T, rec *httptest.ResponseRecorder) {
-	t.Helper()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for fallback, got %d", rec.Code)
+	var resp struct {
+		Containers []struct {
+			Name     string `json:"name"`
+			BytesIn  uint64 `json:"bytes_in"`
+			BytesOut uint64 `json:"bytes_out"`
+		} `json:"containers"`
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `"connections":[]`) {
-		t.Errorf("expected fallback body with empty connections, got %q", body)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if !strings.Contains(body, `"error":"netcap unavailable"`) {
-		t.Errorf("expected fallback error message, got %q", body)
+
+	byName := map[string]struct {
+		BytesIn  uint64
+		BytesOut uint64
+	}{}
+	for _, c := range resp.Containers {
+		byName[c.Name] = struct {
+			BytesIn  uint64
+			BytesOut uint64
+		}{c.BytesIn, c.BytesOut}
+	}
+
+	if s := byName["sonarr"]; s.BytesIn != 0 || s.BytesOut != 0 {
+		t.Errorf("sonarr should have 0/0 on error, got in=%d out=%d", s.BytesIn, s.BytesOut)
+	}
+	if r := byName["radarr"]; r.BytesIn != 9999 || r.BytesOut != 4444 {
+		t.Errorf("radarr: want in=9999 out=4444, got in=%d out=%d", r.BytesIn, r.BytesOut)
 	}
 }

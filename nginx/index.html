@@ -639,7 +639,7 @@
                 <span class="svc-totals" id="svc-totals"></span>
                 <div class="svc-header-actions">
                     <button class="section-action" id="svc-refresh-btn" title="Refresh now">&#8635;</button>
-                    <button class="section-action admin-only" id="net-drawer-btn" title="Network connections">&#9728;</button>
+                    <button class="section-action admin-only" id="net-drawer-btn" title="Bandwidth stats">&#128202;</button>
                 <div class="svc-stack-menu-wrap admin-only">
                         <button class="section-action" id="svc-menu-btn" title="Stack actions">&#8943;</button>
                         <div class="svc-stack-menu hidden" id="svc-stack-menu">
@@ -1060,13 +1060,13 @@
         </div>
     </div>
 
-    <!-- Network connections drawer -->
+    <!-- Bandwidth stats drawer -->
     <div class="drawer-backdrop hidden" id="net-drawer-backdrop"></div>
-    <div class="drawer hidden" id="net-drawer" role="dialog" aria-modal="true" aria-label="Network connections" tabindex="-1">
+    <div class="drawer hidden" id="net-drawer" role="dialog" aria-modal="true" aria-label="Bandwidth stats" tabindex="-1">
         <div class="drawer-header">
             <div>
-                <div class="drawer-title">Network Connections</div>
-                <div class="drawer-sub">Active outbound TCP connections</div>
+                <div class="drawer-title">Bandwidth</div>
+                <div class="drawer-sub">Per-container bandwidth &mdash; <span id="net-drawer-asof"></span></div>
             </div>
             <button class="drawer-close" id="net-drawer-close">&times;</button>
         </div>

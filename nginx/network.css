@@ -1,100 +1,83 @@
-/* network.css — Network Connections drawer styles */
+/* network.css — Bandwidth stats drawer styles */
 
-/* ── Layout ─────────────────────────────────────────────────────────────────── */
+/* ── Table ───────────────────────────────────────────────────────────────────── */
 
-.net-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    padding: 0 1rem 1rem;
+.net-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    margin: 0 0 1rem;
 }
 
-.net-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    min-width: 0;
-}
-
-/* ── Section header ─────────────────────────────────────────────────────────── */
-
-.net-section-hdr {
+.net-table thead th {
+    text-align: left;
     font-family: var(--font-display);
     font-size: 0.65rem;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--muted);
-    margin: 0 0 0.35rem;
+    padding: 0 0.75rem 0.5rem;
+    border-bottom: 1.5px solid var(--border);
 }
 
-/* ── Connection list ────────────────────────────────────────────────────────── */
-
-.net-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
-
-/* ── Row ────────────────────────────────────────────────────────────────────── */
-
-.net-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    padding: 0.45rem 0.6rem;
+.net-table tbody tr:hover {
     background: var(--panel2);
-    border: 1.5px solid var(--border);
-    border-radius: 10px;
-    min-width: 0;
 }
 
-/* ── Host ───────────────────────────────────────────────────────────────────── */
-
-.net-host {
-    font-size: 0.78rem;
-    color: var(--ink);
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
+.net-table tbody td {
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
 }
 
-.net-port {
-    color: var(--muted);
-    font-size: 0.75rem;
-    font-weight: 400;
-}
+/* ── Columns ─────────────────────────────────────────────────────────────────── */
 
-/* ── Container badge ────────────────────────────────────────────────────────── */
-
-.net-container-badge {
-    display: inline-block;
+.net-td-name {
     font-family: monospace;
-    font-size: 0.68rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 50px;
-    background: var(--panel);
-    border: 1.5px solid var(--border2);
+    font-size: 0.8rem;
+    color: var(--ink);
+    white-space: nowrap;
+}
+
+.net-td-bytes {
     color: var(--muted);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
+    text-align: right;
 }
 
-/* ── Time ───────────────────────────────────────────────────────────────────── */
+.net-td-route {
+    white-space: nowrap;
+}
 
-.net-time {
-    font-size: 0.68rem;
+/* ── Route badges ────────────────────────────────────────────────────────────── */
+
+.net-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+    border-radius: 50px;
+    border: 1.5px solid transparent;
+}
+
+.net-badge-vpn {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    color: var(--accent);
+}
+
+.net-badge-host {
+    background: var(--panel);
+    border-color: var(--border2);
+    color: var(--muted);
+}
+
+/* ── As-of line ─────────────────────────────────────────────────────────────── */
+
+#net-drawer-asof {
+    font-size: 0.7rem;
     color: var(--faint);
-}
-
-/* ── Responsive: stack columns on narrow drawer ─────────────────────────────── */
-
-@media (max-width: 420px) {
-    .net-grid {
-        grid-template-columns: 1fr;
-    }
 }

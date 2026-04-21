@@ -1,5 +1,5 @@
-// network.js — Network Connections drawer for the pelicula dashboard.
-// Fetches /api/pelicula/network on open; renders VPN/Internet two-column layout.
+// network.js — Bandwidth stats drawer for the pelicula dashboard.
+// Fetches /api/pelicula/network on open; renders a per-container table.
 // Exposed as window.openNetworkDrawer / window.closeNetworkDrawer.
 
 import { get } from './api.js';
@@ -16,6 +16,15 @@ function relTime(isoStr) {
     return `${hrs}h ago`;
 }
 
+// ── Bytes formatter ───────────────────────────────────────────────────────────
+
+function fmtBytes(n) {
+    if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(1) + ' GiB';
+    if (n >= 1024 * 1024)        return (n / (1024 * 1024)).toFixed(1) + ' MiB';
+    if (n >= 1024)               return (n / 1024).toFixed(1) + ' KiB';
+    return n + ' B';
+}
+
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 
 function el(tag, cls, text) {
@@ -25,89 +34,59 @@ function el(tag, cls, text) {
     return e;
 }
 
-// ── Row rendering ─────────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────────────────
 
-function renderRow(conn) {
-    const row = el('div', 'net-row');
-
-    // Host / dest
-    const isPeer = conn.peer_count > 0;
-    const hostSpan = el('span', 'net-host', isPeer ? `peers (${conn.peer_count})` : conn.dest_host);
-    if (!isPeer && conn.dest_port) {
-        const portSpan = el('span', 'net-port', `:${conn.dest_port}`);
-        hostSpan.appendChild(portSpan);
-    }
-
-    // Container badge
-    const badge = el('span', 'net-container-badge', conn.container);
-
-    // Last seen
-    const time = el('span', 'net-time', relTime(conn.last_seen));
-
-    row.appendChild(hostSpan);
-    row.appendChild(badge);
-    row.appendChild(time);
-    return row;
-}
-
-// ── Section builder ───────────────────────────────────────────────────────────
-
-function renderSection(title, conns, body) {
-    if (conns.length === 0) return;
-
-    const hdr = el('h3', 'net-section-hdr', title);
-    body.appendChild(hdr);
-
-    const list = el('div', 'net-list');
-    for (const conn of conns) {
-        list.appendChild(renderRow(conn));
-    }
-    body.appendChild(list);
-}
-
-// ── Main render ───────────────────────────────────────────────────────────────
-
-function renderConnections(data, body) {
+function renderStats(data, body) {
     body.replaceChildren();
 
-    // Degraded: netcap unavailable
-    if (data.error) {
-        const msg = el('div', 'no-items', 'Network monitor unavailable. Is netcap running?');
-        body.appendChild(msg);
+    const containers = data.containers || [];
+
+    if (containers.length === 0) {
+        body.appendChild(el('div', 'no-items', 'No container stats available.'));
         return;
     }
 
-    const conns = data.connections || [];
-    if (conns.length === 0) {
-        const msg = el('div', 'no-items', 'No active connections.');
-        body.appendChild(msg);
-        return;
+    const table = el('table', 'net-table');
+    const thead = document.createElement('thead');
+    const hrow = document.createElement('tr');
+    for (const col of ['Container', 'In', 'Out', 'Route']) {
+        const th = el('th', null, col);
+        hrow.appendChild(th);
     }
+    thead.appendChild(hrow);
+    table.appendChild(thead);
 
-    const vpn = conns.filter(c => c.kind === 'vpn');
-    const internet = conns.filter(c => c.kind === 'internet');
+    const tbody = document.createElement('tbody');
+    for (const c of containers) {
+        const tr = document.createElement('tr');
 
-    const grid = el('div', 'net-grid');
-    body.appendChild(grid);
+        const tdName = el('td', 'net-td-name', c.name);
+        const tdIn   = el('td', 'net-td-bytes', fmtBytes(c.bytes_in));
+        const tdOut  = el('td', 'net-td-bytes', fmtBytes(c.bytes_out));
 
-    const vpnCol = el('div', 'net-col');
-    const internetCol = el('div', 'net-col');
-    grid.appendChild(vpnCol);
-    grid.appendChild(internetCol);
+        const tdRoute = el('td', 'net-td-route');
+        const badge = el('span', c.vpn_routed ? 'net-badge net-badge-vpn' : 'net-badge net-badge-host',
+            c.vpn_routed ? 'VPN' : 'Host');
+        tdRoute.appendChild(badge);
 
-    renderSection('VPN', vpn, vpnCol);
-    renderSection('Internet', internet, internetCol);
+        tr.appendChild(tdName);
+        tr.appendChild(tdIn);
+        tr.appendChild(tdOut);
+        tr.appendChild(tdRoute);
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    body.appendChild(table);
 
-    if (vpn.length === 0 && internet.length === 0) {
-        grid.replaceChildren();
-        const msg = el('div', 'no-items', 'No active connections.');
-        body.appendChild(msg);
+    if (data.as_of) {
+        const sub = document.getElementById('net-drawer-asof');
+        if (sub) sub.textContent = 'As of ' + relTime(data.as_of);
     }
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 
-async function fetchConnections() {
+async function fetchStats() {
     const body = document.getElementById('net-drawer-body');
     if (!body) return;
 
@@ -119,15 +98,13 @@ async function fetchConnections() {
         const data = await get('/api/pelicula/network');
         if (data === null) {
             body.replaceChildren();
-            const msg = el('div', 'no-items', 'Not authorised.');
-            body.appendChild(msg);
+            body.appendChild(el('div', 'no-items', 'Not authorised.'));
             return;
         }
-        renderConnections(data, body);
+        renderStats(data, body);
     } catch (_err) {
         body.replaceChildren();
-        const msg = el('div', 'no-items', 'Failed to load network connections.');
-        body.appendChild(msg);
+        body.appendChild(el('div', 'no-items', 'Failed to load bandwidth stats.'));
     }
 }
 
@@ -140,7 +117,7 @@ function openNetworkDrawer() {
     backdrop.classList.remove('hidden');
     drawer.classList.remove('hidden');
     drawer.focus();
-    fetchConnections();
+    fetchStats();
 }
 
 function closeNetworkDrawer() {
@@ -161,10 +138,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (triggerBtn) triggerBtn.addEventListener('click', openNetworkDrawer);
     if (closeBtn) closeBtn.addEventListener('click', closeNetworkDrawer);
-    if (refreshBtn) refreshBtn.addEventListener('click', fetchConnections);
+    if (refreshBtn) refreshBtn.addEventListener('click', fetchStats);
     if (backdrop) backdrop.addEventListener('click', closeNetworkDrawer);
 
-    // Escape key handler (scoped to when drawer is open)
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
             const drawer = document.getElementById('net-drawer');
