@@ -108,19 +108,25 @@ Path allowlist (`isUnderPrefixes` / `isAllowedWebhookPath`): validates that repo
 **Hardening:**
 - `return 444` catch-all on both ports drops requests with unknown Host headers (prevents IP scanning)
 - `GET/POST /System/Logs` and `/System/Info` hard-deny with 403
-- HSTS + TLS 1.2+ enforced
+- HSTS + TLS 1.2+ enforced (HSTS is full mode only — requires a real hostname)
 - Per-IP auth rate-limiting: `limit_req_zone jf_auth` on `AuthenticateByName` (5/min, burst 3)
 - `client_max_body_size 1m`
 - No admin paths (`/sonarr`, `/radarr`, `/api/pelicula`, etc.) are proxied — Jellyfin only
+
+**Simple mode** (no hostname): When `REMOTE_ACCESS_ENABLED=true` and `REMOTE_HOSTNAME` is not set, Peligrosa enters simple mode. A self-signed cert is auto-generated (`CN=pelicula-remote`). nginx listens on `REMOTE_HTTPS_PORT` (default 8920) with `server_name _` — no HTTP port, no ACME, no certbot. Clients connect via the host's LAN IP (or port-forwarded external IP) at `https://<ip>:8920/`. TV apps and native Jellyfin clients accept self-signed certs; browsers will show a certificate warning.
+
+Security isolation is identical to full mode: Jellyfin-only proxy, rate-limited auth, `/System/Logs` and `/System/Info` hard-denied, `X-Pelicula-Remote: true` injected (role capping applies). Only difference: no HSTS (requires a real hostname).
+
+Enable via Settings UI → Remote access. Leave the hostname field blank.
 
 **Ports:**
 
 | Port | Purpose |
 |------|---------|
-| `REMOTE_HTTPS_PORT` (default 8920) | Hardened Jellyfin HTTPS |
-| `REMOTE_HTTP_PORT` (default 80) | ACME challenge + 301 redirect to HTTPS |
+| `REMOTE_HTTPS_PORT` (default 8920) | Hardened Jellyfin HTTPS (both modes) |
+| `REMOTE_HTTP_PORT` (default 80) | ACME challenge + 301 redirect to HTTPS (full mode only) |
 
-**DNS:** Let's Encrypt cannot issue certs for raw IPs. A real DNS hostname is required. DDNS is handled externally (router DDNS, ddclient, Cloudflare, etc.).
+**DNS:** Let's Encrypt cannot issue certs for raw IPs. A real DNS hostname is required for full mode. Simple mode (no hostname) uses a self-signed cert and needs no DNS. DDNS for full mode is handled externally (router DDNS, ddclient, Cloudflare, etc.).
 
 **Certbot reload:** certbot runs with `pid: service:nginx` (shared PID namespace). After cert renewal, the deploy-hook copies resolved cert files to `${CONFIG_DIR}/certs/remote` and signals nginx master with `kill -HUP $(pgrep -o nginx)` — zero-downtime reload.
 
@@ -129,7 +135,7 @@ Path allowlist (`isUnderPrefixes` / `isAllowedWebhookPath`): validates that repo
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `REMOTE_ACCESS_ENABLED` | `false` | Master switch |
-| `REMOTE_HOSTNAME` | — | e.g. `home.duckdns.org`. Required when enabled. |
+| `REMOTE_HOSTNAME` | — | Optional. Blank = simple mode (self-signed cert, LAN-IP access, no DNS needed). Set for full mode (Let's Encrypt / BYO cert). |
 | `REMOTE_HTTP_PORT` | `80` | HTTP port for ACME challenge + redirect |
 | `REMOTE_HTTPS_PORT` | `8920` | HTTPS port for Jellyfin |
 | `REMOTE_CERT_MODE` | `letsencrypt` | `letsencrypt` \| `byo` \| `self-signed` |
