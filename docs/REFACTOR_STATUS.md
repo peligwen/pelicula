@@ -60,6 +60,7 @@ A five-pass overhaul of the dashboard's HTML/CSS/JS:
 | `jellyfin/` | Jellyfin env/auth wiring via `Wirer`; library handlers | `cmd/pelicula-api/jellyfin_*.go` |
 | `library/` | Library scan, proxy, and apply handlers; `libraryRegistry` | `cmd/pelicula-api/library_*.go`, `libraries.go` |
 | `missingwatcher/` | Missing content watcher with backoff cooldown | `cmd/pelicula-api/missing_watcher.go` |
+| `network/` | Per-container bandwidth stats handler — reads Docker stats via the docker-proxy client | _new feature (no predecessor)_ |
 | `search/` | Unified search, add-to-arr, Prowlarr provider handlers | `cmd/pelicula-api/search.go` |
 | `services/` | Typed `Clients` aggregator passed to all handlers | `cmd/pelicula-api/services.go` |
 | `settings/` | Settings read/update/reset handlers with env file I/O | `cmd/pelicula-api/settings.go` |

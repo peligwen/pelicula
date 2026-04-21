@@ -58,6 +58,7 @@ Auth levels: **Admin** = session with admin role; **Manager+** = manager or admi
 | `GET` | `/api/pelicula/storage` | Viewer+ | Proxies Procula storage stats |
 | `GET` | `/api/pelicula/updates` | Viewer+ | Proxies Procula update check |
 | `GET` | `/api/pelicula/processing` | Viewer+ | Proxies Procula job status + queue for dashboard |
+| `GET` | `/api/pelicula/network` | Admin | Per-container bandwidth. Response: `{containers: [{name, bytes_in, bytes_out, vpn_routed}...], as_of}`. Reads Docker stats via docker-proxy; 10s in-memory cache. VPN-profile containers (`gluetun`, `qbittorrent`, `prowlarr`) are flagged `vpn_routed: true` |
 | `GET` | `/api/pelicula/export` | Admin | Export watchlist/backup |
 | `POST` | `/api/pelicula/export` | Admin | Trigger export |
 | `POST` | `/api/pelicula/import-backup` | Admin | Restore from backup |

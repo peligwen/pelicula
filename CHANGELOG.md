@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Network dashboard drawer** — replaced the packet-capture-based connections list with a per-container bandwidth panel (Container / In / Out / Route). Backed by Docker stats through the existing docker-socket-proxy; no new container privileges. VPN-routed containers are flagged via a static membership list.
+
+### Removed
+- **`netcap` sidecar** — the raw-packet-capture container (`NET_ADMIN`/`NET_RAW`) and its `127.0.0.1:2375` host-gateway plumbing are gone. The dashboard's network view no longer shows individual connections or destination hosts; bandwidth totals replace them. The `/api/pelicula/network` endpoint keeps its path but returns a new shape (see API.md).
+
 ---
 
 ## [0.1.0] — 2026-04-14
