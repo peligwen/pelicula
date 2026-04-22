@@ -217,6 +217,11 @@ func readAPIKey(path string) string {
 // arrDo is the shared implementation for all *arr-compatible HTTP calls.
 // The apiKey is sent as X-Api-Key. For POST/PUT a JSON payload is required;
 // for GET/DELETE pass nil.
+//
+// Deprecated: prefer the typed arr.Client methods (GetMovies, GetSeries, etc.)
+// which use the shared client pool and provide better context propagation.
+// New call sites should use arr.Client; arrDo remains for the ~145 existing
+// callers that pre-date arr.Client.
 func (c *Clients) arrDo(method, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {

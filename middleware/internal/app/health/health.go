@@ -75,6 +75,9 @@ type Handler struct {
 	GluetunBaseURL string
 	GluetunUser    string
 	GluetunPass    string
+	// Client is the shared HTTP client used for Gluetun API requests.
+	// Callers may inject a custom client; if nil a default 5-second client is used.
+	Client *http.Client
 }
 
 // ServeHTTP implements http.Handler.
@@ -126,7 +129,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // queryVPNStatus queries the Gluetun control API for VPN status, public IP,
 // and forwarded port.
 func (h *Handler) queryVPNStatus() VPNStatus {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := h.Client
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
 	vpn := VPNStatus{Status: "unknown"}
 
 	gluetunURL := h.GluetunBaseURL

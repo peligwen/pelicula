@@ -302,3 +302,36 @@ func TestHealthHandler_GluetunUnavailable(t *testing.T) {
 		t.Errorf("checks_passed = %d, want 1", resp.ChecksPassed)
 	}
 }
+
+// TestHealthHandler_InjectedClient verifies that when Handler.Client is set
+// the injected client is used (the request reaches the server) rather than
+// creating a new one. This is the regression test for the F21 migration that
+// moved client construction out of queryVPNStatus.
+func TestHealthHandler_InjectedClient(t *testing.T) {
+	gluetun := newGluetunServer(t, "2.3.4.5", "Canada", 55000)
+	defer gluetun.Close()
+
+	// Inject a custom client with a short timeout — must still succeed.
+	injected := &http.Client{Timeout: 5 * time.Second}
+
+	h := &Handler{
+		Services:       &stubServices{health: map[string]string{}},
+		GluetunBaseURL: gluetun.URL,
+		Client:         injected,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var resp Response
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.VPN.IP != "2.3.4.5" {
+		t.Errorf("vpn.ip = %q, want %q (injected client should reach server)", resp.VPN.IP, "2.3.4.5")
+	}
+}
