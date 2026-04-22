@@ -236,7 +236,11 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	if resp, err := h.Client.Get(h.ProculaURL + "/api/procula/catalog/flags"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		_ = json.Unmarshal(body, &fw)
+		// best-effort file merge; unmarshal failure degrades to empty list
+		if err := json.Unmarshal(body, &fw); err != nil {
+			slog.Warn("catalog detail: failed to parse procula flags response",
+				"component", "catalog", "error", err)
+		}
 	}
 
 	flags := []map[string]any{}
@@ -258,7 +262,11 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		var all []map[string]any
-		_ = json.Unmarshal(body, &all)
+		// best-effort file merge; unmarshal failure degrades to empty list
+		if err := json.Unmarshal(body, &all); err != nil {
+			slog.Warn("catalog detail: failed to parse procula jobs response",
+				"component", "catalog", "error", err)
+		}
 		for _, j := range all {
 			src, _ := j["source"].(map[string]any)
 			if src == nil {
@@ -332,7 +340,11 @@ func (h *Handler) HandleCatalogItemHistory(w http.ResponseWriter, r *http.Reques
 	body, _ := io.ReadAll(resp.Body)
 
 	var all []map[string]any
-	_ = json.Unmarshal(body, &all)
+	// best-effort file merge; unmarshal failure degrades to empty list
+	if err := json.Unmarshal(body, &all); err != nil {
+		slog.Warn("catalog item history: failed to parse procula jobs response",
+			"component", "catalog", "error", err)
+	}
 	var matching []map[string]any
 	for _, j := range all {
 		src, _ := j["source"].(map[string]any)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -256,4 +257,26 @@ func containsStr(s, sub string) bool {
 		}
 		return false
 	}())
+}
+
+// ── F14: ErrUnknownSourceType sentinel ───────────────────────────────────────
+
+// TestUpsertFromHook_UnknownSourceTypeIsSentinel verifies that passing an
+// unrecognised source type returns an error that wraps ErrUnknownSourceType,
+// allowing callers to use errors.Is for targeted error handling.
+func TestUpsertFromHook_UnknownSourceTypeIsSentinel(t *testing.T) {
+	db := testSQLiteDB(t)
+
+	err := UpsertFromHook(context.Background(), db, ProculaJobSource{
+		Type:  "soundtrack", // unknown type
+		Title: "OST",
+		Year:  2024,
+	})
+
+	if err == nil {
+		t.Fatal("expected error for unknown source type, got nil")
+	}
+	if !errors.Is(err, ErrUnknownSourceType) {
+		t.Errorf("errors.Is(err, ErrUnknownSourceType) = false; err = %v", err)
+	}
 }

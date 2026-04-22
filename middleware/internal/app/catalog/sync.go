@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -132,6 +133,10 @@ func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, e
 	return resp.Items, nil
 }
 
+// ErrUnknownSourceType is returned by UpsertFromHook when the source type is
+// not recognised. Callers can use errors.Is to detect this sentinel.
+var ErrUnknownSourceType = errors.New("unknown source type")
+
 // UpsertFromHook creates or updates catalog records when a download completes.
 func UpsertFromHook(ctx context.Context, db *sql.DB, source ProculaJobSource) error {
 	switch source.Type {
@@ -197,7 +202,7 @@ func UpsertFromHook(ctx context.Context, db *sql.DB, source ProculaJobSource) er
 		return nil
 
 	default:
-		return fmt.Errorf("UpsertFromHook: unknown source type %q", source.Type)
+		return fmt.Errorf("%w: %q", ErrUnknownSourceType, source.Type)
 	}
 }
 

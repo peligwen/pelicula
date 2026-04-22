@@ -1,9 +1,12 @@
 package catalog
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -92,6 +95,78 @@ func TestFindImportHistoryID_BothUnmarshalsFail(t *testing.T) {
 	if len(joinedErrs) < 2 {
 		t.Errorf("expected at least 2 joined errors, got %d: %v", len(joinedErrs), joinedErrs)
 	}
+}
+
+// ── F15: slog.Warn on unmarshal failure ──────────────────────────────────────
+
+// TestHandleCatalogDetail_WarnOnBadProculaResponse verifies that when Procula
+// returns a flags response that cannot be unmarshalled into the expected shape,
+// a slog.Warn is emitted rather than silently discarding the error.
+func TestHandleCatalogDetail_WarnOnBadProculaResponse(t *testing.T) {
+	// Procula stub: flags endpoint returns {"flags":"not-an-object"} which
+	// cannot be unmarshalled into flagsWrap{Rows []map[string]any}.
+	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Invalid shape for flagsWrap — "rows" key is absent; top-level value
+		// is a string, not an object at all.
+		w.Write([]byte(`"not-an-object"`)) //nolint:errcheck
+	}))
+	defer procula.Close()
+
+	// Capture slog output.
+	var capture warnCapture
+	orig := slog.Default()
+	slog.SetDefault(slog.New(&capture))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
+	h := &Handler{
+		Client:     http.DefaultClient,
+		ProculaURL: procula.URL,
+		Arr:        &stubArrForHandler{},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/detail?path=/media/movie.mkv", nil)
+	w := httptest.NewRecorder()
+	h.HandleCatalogDetail(w, req)
+
+	// Handler should still return 200 (best-effort degraded to empty flags).
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	// A warn must have been logged about the parse failure.
+	if !capture.hasWarnContaining("failed to parse procula flags response") {
+		t.Error("expected slog.Warn about flags parse failure, got none")
+	}
+}
+
+// warnCapture is a slog.Handler that records warn+ messages.
+type warnCapture struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (c *warnCapture) Enabled(_ context.Context, lvl slog.Level) bool {
+	return lvl >= slog.LevelWarn
+}
+func (c *warnCapture) Handle(_ context.Context, r slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.msgs = append(c.msgs, r.Message)
+	return nil
+}
+func (c *warnCapture) WithAttrs(attrs []slog.Attr) slog.Handler { return c }
+func (c *warnCapture) WithGroup(name string) slog.Handler       { return c }
+
+func (c *warnCapture) hasWarnContaining(sub string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, m := range c.msgs {
+		if containsSubstr(m, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsSubstr(s, sub string) bool {
