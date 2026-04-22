@@ -181,6 +181,10 @@ cmd_test() {
     test_api_key="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 2>/dev/null \
         || openssl rand -base64 24 | tr -d '/+=')"
 
+    local test_webhook_secret
+    test_webhook_secret="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 2>/dev/null \
+        || openssl rand -base64 24 | tr -d '/+=')"
+
     local test_tz="UTC"
     if [[ -L /etc/localtime ]]; then
         test_tz="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')" || test_tz="UTC"
@@ -203,6 +207,7 @@ JELLYFIN_ADMIN_USER="admin"
 JELLYFIN_PASSWORD="test-jellyfin-pw"
 JELLYFIN_PUBLISHED_URL="http://127.0.0.1:${test_port}/jellyfin"
 PROCULA_API_KEY="${test_api_key}"
+WEBHOOK_SECRET="${test_webhook_secret}"
 TRANSCODING_ENABLED=false
 NOTIFICATIONS_ENABLED=false
 NOTIFICATIONS_MODE=internal
@@ -400,6 +405,7 @@ EOPROFILE
     webhook_resp="$($NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 \
         wget -qO- --timeout=10 \
         --header="Content-Type: application/json" \
+        --header="X-Webhook-Secret: ${test_webhook_secret}" \
         --post-data="{
             \"eventType\": \"Download\",
             \"movie\": {
@@ -1045,6 +1051,7 @@ assert 'Movies' in names and 'TV Shows' in names
             $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                 --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/media/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/media/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
                 --header='Content-Type: application/json' \
+                --header="X-Webhook-Secret: ${test_webhook_secret}" \
                 'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
 
             # Pre-fire Sub Timeout webhook.
@@ -1067,6 +1074,7 @@ assert 'Movies' in names and 'TV Shows' in names
                 $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/media/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/media/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
                     --header='Content-Type: application/json' \
+                    --header="X-Webhook-Secret: ${test_webhook_secret}" \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
                 # Brief wait so the worker has picked up the job and read validation=true.
                 sleep 5
@@ -1084,6 +1092,7 @@ assert 'Movies' in names and 'TV Shows' in names
                 $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2024,"title":"Dualsub Happy","year":2024,"folderPath":"/media/movies/Dualsub Happy (2024)"},"movieFile":{"path":"/media/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv","relativePath":"Dualsub.Happy.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-happy-test"}' \
                     --header='Content-Type: application/json' \
+                    --header="X-Webhook-Secret: ${test_webhook_secret}" \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
             fi
 
@@ -1093,6 +1102,7 @@ assert 'Movies' in names and 'TV Shows' in names
                 $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
                     --post-data='{"eventType":"Download","movie":{"id":2025,"title":"Dualsub Failed","year":2024,"folderPath":"/media/movies/Dualsub Failed (2024)"},"movieFile":{"path":"/media/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv","relativePath":"Dualsub.Failed.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-failed-test"}' \
                     --header='Content-Type: application/json' \
+                    --header="X-Webhook-Secret: ${test_webhook_secret}" \
                     'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
             fi
 
