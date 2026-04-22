@@ -633,6 +633,17 @@ except Exception:
     assert_http 200 "http://localhost:${test_port}/settings" "$cookie_file"
     assert_http 200 "http://localhost:${test_port}/api/pelicula/status" "$cookie_file"
 
+    # GET /api/pelicula/network — bandwidth stats endpoint (auth-gated)
+    assert_http 200 "http://localhost:${test_port}/api/pelicula/network" "$cookie_file"
+    local net_resp
+    net_resp="$(curl -sf --max-time 5 -b "$cookie_file" \
+        "http://localhost:${test_port}/api/pelicula/network" 2>/dev/null || echo "{}")"
+    if echo "$net_resp" | grep -q '"containers"'; then
+        t_pass "GET /api/pelicula/network returns JSON with 'containers' key"
+    else
+        t_fail "GET /api/pelicula/network response missing 'containers' key"
+    fi
+
     # Auth check should return valid:true
     local check_resp
     check_resp="$(curl -sf --max-time 5 -b "$cookie_file" \
