@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // overrideSettings saves settings into a fresh test DB and points appDB at it
@@ -906,6 +907,67 @@ func TestPipelineStampsValidationFailedFlag(t *testing.T) {
 	}
 	if row.Severity != "error" {
 		t.Errorf("severity = %s, want error", row.Severity)
+	}
+}
+
+// ── blocklist context tests ──────────────────────────────────────────────────
+
+// TestBlocklist_ContextCancellation verifies that blocklist returns promptly
+// when the context is cancelled before any retries complete.
+func TestBlocklist_ContextCancellation(t *testing.T) {
+	// Server that hangs until the connection is closed — ensures the test does
+	// not pass simply because the server responds quickly.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Delay longer than the test deadline so the context cancellation fires first.
+		time.Sleep(5 * time.Second)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately.
+	cancel()
+
+	job := &Job{Source: JobSource{DownloadHash: "abc123", ArrType: "radarr"}}
+	start := time.Now()
+	blocklist(ctx, job, srv.URL, "test cancellation")
+	elapsed := time.Since(start)
+
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("blocklist took %v after ctx cancel, want < 100ms", elapsed)
+	}
+}
+
+// TestBlocklist_RetriesOnFailure verifies that blocklist retries on non-2xx
+// responses and succeeds on the third attempt.
+func TestBlocklist_RetriesOnFailure(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n < 3 {
+			http.Error(w, "temporary error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	job := &Job{
+		ID:     "test-job",
+		Source: JobSource{DownloadHash: "deadbeef", ArrType: "sonarr", Title: "Test Show", Type: "episode"},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Use a tiny retry delay so the test is fast.
+	// blocklist uses time.Duration(attempt)*2*time.Second; we can't inject
+	// the delay, but the test just has to complete within 30s.
+	// Override by running with a real fast server (responds in <1ms each call).
+	blocklist(ctx, job, srv.URL, "bad audio")
+
+	if n := calls.Load(); n != 3 {
+		t.Errorf("expected 3 calls (2 failures + 1 success), got %d", n)
 	}
 }
 

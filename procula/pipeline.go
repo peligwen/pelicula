@@ -173,7 +173,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 
 			// Ask pelicula-api to blocklist in *arr so the watcher re-searches
 			if job.Source.DownloadHash != "" {
-				blocklist(job, peliculaAPI, failReason)
+				blocklist(ctx, job, peliculaAPI, failReason)
 			}
 
 			// Notify the dashboard
@@ -686,7 +686,8 @@ func isAllowedPath(path string) bool {
 
 // blocklist asks pelicula-api to remove the download from the *arr queue
 // and blocklist the release so the watcher triggers a new search.
-func blocklist(job *Job, peliculaAPI, reason string) {
+// ctx is threaded through so that job cancellation aborts the retry loop.
+func blocklist(ctx context.Context, job *Job, peliculaAPI, reason string) {
 	category := job.Source.ArrType // "radarr" or "sonarr"
 	payload := map[string]any{
 		"hash":      job.Source.DownloadHash,
@@ -706,16 +707,34 @@ func blocklist(job *Job, peliculaAPI, reason string) {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		resp, err := httpClient.Post(url, "application/json", bytes.NewReader(data))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+		if err != nil {
+			slog.Error("blocklist request error", "component", "pipeline", "error", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			lastErr = err
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			delay := time.Duration(attempt) * 2 * time.Second
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				slog.Debug("blocklist: context cancelled during retry backoff", "component", "pipeline")
+				return
+			}
 			continue
 		}
 		resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			delay := time.Duration(attempt) * 2 * time.Second
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				slog.Debug("blocklist: context cancelled during retry backoff", "component", "pipeline")
+				return
+			}
 			continue
 		}
 		hash := job.Source.DownloadHash

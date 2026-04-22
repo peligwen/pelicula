@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -700,7 +701,7 @@ func (h *Handler) findImportHistoryID(baseURL, apiKey, arrType string, arrID, ep
 			Records []map[string]any `json:"records"`
 		}
 		if err2 := json.Unmarshal(data, &wrapped); err2 != nil {
-			return 0, "", fmt.Errorf("parse history: %w", err)
+			return 0, "", fmt.Errorf("parse history: %w", errors.Join(err, err2))
 		}
 		records = wrapped.Records
 	}
