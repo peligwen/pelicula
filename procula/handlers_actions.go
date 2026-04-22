@@ -149,7 +149,7 @@ func (s *Server) handleDeleteBlockedRelease(w http.ResponseWriter, r *http.Reque
 		req, _ := http.NewRequest(http.MethodDelete,
 			fmt.Sprintf("%s/api/pelicula/catalog/blocklist/%d", s.peliculaAPI, blocklistID),
 			nil)
-		client := &http.Client{Timeout: 10 * time.Second}
+		client := newProculaClient(10 * time.Second)
 		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()

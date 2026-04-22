@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"net/http"
 	"time"
 )
 
@@ -13,7 +12,7 @@ func cmdStatus(ctx *Context, _ []string) {
 
 	url := fmt.Sprintf("http://localhost:%s/api/pelicula/health", port)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newHTTPClient(10 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		fail("Could not reach middleware at " + url + " — is the stack running?")

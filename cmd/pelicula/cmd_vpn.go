@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"sort"
 	"time"
 )
@@ -17,7 +16,7 @@ func cmdCheckVPN(ctx *Context, _ []string) {
 	fmt.Println()
 
 	url := fmt.Sprintf("http://localhost:%s/api/pelicula/health", port)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newHTTPClient(10 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		fail("Could not reach middleware at " + url + " — is the stack running?")

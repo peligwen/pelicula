@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -291,7 +290,7 @@ func cmdUp(ctx *Context, _ []string) {
 // checkNeedsAdmin polls the register/check endpoint (up to 15s) and returns
 // true if initial_setup is true (no admin has registered yet).
 func checkNeedsAdmin(url string) bool {
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := newHTTPClient(3 * time.Second)
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)

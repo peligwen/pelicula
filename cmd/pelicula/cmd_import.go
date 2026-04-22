@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"time"
 )
@@ -44,7 +43,7 @@ func cmdImportBackup(ctx *Context, args []string) {
 	info("Importing backup from " + backupFile + "...")
 
 	url := fmt.Sprintf("http://localhost:%s/api/pelicula/import-backup", port)
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := newHTTPClient(120 * time.Second)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		fail("Could not reach pelicula-api at " + url + " — is the stack running?")

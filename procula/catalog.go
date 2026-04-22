@@ -413,7 +413,7 @@ func sendApprise(urls []string, event NotificationEvent) {
 		"urls":  strings.Join(urls, ","),
 	}
 	data, _ := json.Marshal(payload)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newProculaClient(10 * time.Second)
 	resp, err := client.Post("http://apprise:8000/notify", "application/json", bytes.NewReader(data))
 	if err != nil {
 		slog.Error("Apprise notification failed", "component", "catalog", "error", err)
@@ -432,7 +432,7 @@ func sendDirect(webhookURL string, event NotificationEvent) {
 		"type":    event.Type,
 	}
 	data, _ := json.Marshal(payload)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newProculaClient(10 * time.Second)
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(data))
 	if err != nil {
 		slog.Error("direct notification failed", "component", "catalog", "error", err)
@@ -444,7 +444,7 @@ func sendDirect(webhookURL string, event NotificationEvent) {
 
 func triggerJellyfinRefresh(peliculaAPI string) error {
 	target := peliculaAPI + "/api/pelicula/jellyfin/refresh"
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newProculaClient(10 * time.Second)
 	req, err := http.NewRequest(http.MethodPost, target, nil)
 	if err != nil {
 		return err

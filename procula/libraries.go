@@ -88,7 +88,7 @@ func loadLibraries(peliculaAPI string) {
 // libraryMaxAttempts times. Returns the list and true on success, or nil and
 // false after all retries (including context deadline).
 func fetchLibrariesWithRetry(ctx context.Context, peliculaAPI string) ([]ProculaLibrary, bool) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := newProculaClient(5 * time.Second)
 	apiURL := peliculaAPI + "/api/pelicula/libraries"
 
 	for attempt := 1; attempt <= libraryMaxAttempts; attempt++ {
@@ -147,7 +147,7 @@ func fetchLibrariesOnce(client *http.Client, apiURL string) ([]ProculaLibrary, e
 // cache on success. On failure or empty response it logs a warning and keeps
 // the existing cache unchanged (never falls back to defaults during a refresh).
 func refreshLibraries(peliculaAPI string) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := newProculaClient(5 * time.Second)
 	url := peliculaAPI + "/api/pelicula/libraries"
 	resp, err := client.Get(url)
 	if err != nil {

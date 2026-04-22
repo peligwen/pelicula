@@ -44,7 +44,7 @@ func checkForUpdates() UpdateInfo {
 		CheckedAt:      time.Now().UTC(),
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newProculaClient(10 * time.Second)
 	req, err := http.NewRequest(http.MethodGet,
 		"https://api.github.com/repos/peligwen/pelicula/releases/latest", nil)
 	if err != nil {
@@ -52,7 +52,6 @@ func checkForUpdates() UpdateInfo {
 		return info
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "Pelicula/"+Version+" (+https://github.com/peligwen/pelicula)")
 
 	resp, err := client.Do(req)
 	if err != nil {

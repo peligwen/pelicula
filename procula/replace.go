@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -119,7 +118,7 @@ func runReplaceAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 	if err != nil {
 		return nil, fmt.Errorf("replace: marshal request: %w", err)
 	}
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpClient := newProculaClient(30 * time.Second)
 	resp, err := httpClient.Post(
 		peliculaAPI+"/api/pelicula/catalog/replace",
 		"application/json",

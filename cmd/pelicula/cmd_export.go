@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"time"
 )
@@ -23,7 +22,7 @@ func cmdExport(ctx *Context, args []string) {
 	info("Exporting library metadata...")
 
 	url := fmt.Sprintf("http://localhost:%s/api/pelicula/export", port)
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := newHTTPClient(60 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		fail("Could not reach pelicula-api at " + url + " — is the stack running?")

@@ -1,12 +1,10 @@
 package procula
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -704,54 +702,24 @@ func blocklist(ctx context.Context, job *Job, peliculaAPI, reason string) {
 
 	url := fmt.Sprintf("%s/api/pelicula/downloads/cancel", peliculaAPI)
 
-	httpClient := &http.Client{Timeout: 10 * time.Second}
-	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-		if err != nil {
-			slog.Error("blocklist request error", "component", "pipeline", "error", err)
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			lastErr = err
-			delay := time.Duration(attempt) * 2 * time.Second
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				slog.Debug("blocklist: context cancelled during retry backoff", "component", "pipeline")
-				return
-			}
-			continue
-		}
-		resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-			delay := time.Duration(attempt) * 2 * time.Second
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				slog.Debug("blocklist: context cancelled during retry backoff", "component", "pipeline")
-				return
-			}
-			continue
-		}
-		hash := job.Source.DownloadHash
-		if len(hash) > 8 {
-			hash = hash[:8]
-		}
-		slog.Info("blocklisted release", "component", "pipeline", "category", category, "hash", hash, "reason", reason)
-		emitEvent(PipelineEvent{
-			Type:      EventReleaseBlocklisted,
-			JobID:     job.ID,
-			Title:     job.Source.Title,
-			Year:      job.Source.Year,
-			MediaType: job.Source.Type,
-			Details:   map[string]any{"category": category, "hash": hash},
-			Message:   "Release blocklisted: " + reason,
-		})
+	httpClient := newProculaClient(10 * time.Second)
+	if err := retryHTTPPost(ctx, httpClient, url, data, 3); err != nil {
+		slog.Error("failed to blocklist after 3 attempts", "component", "pipeline", "error", err)
 		return
 	}
-	slog.Error("failed to blocklist after 3 attempts", "component", "pipeline", "error", lastErr)
+
+	hash := job.Source.DownloadHash
+	if len(hash) > 8 {
+		hash = hash[:8]
+	}
+	slog.Info("blocklisted release", "component", "pipeline", "category", category, "hash", hash, "reason", reason)
+	emitEvent(PipelineEvent{
+		Type:      EventReleaseBlocklisted,
+		JobID:     job.ID,
+		Title:     job.Source.Title,
+		Year:      job.Source.Year,
+		MediaType: job.Source.Type,
+		Details:   map[string]any{"category": category, "hash": hash},
+		Message:   "Release blocklisted: " + reason,
+	})
 }
