@@ -1,6 +1,8 @@
 package library
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,6 +265,65 @@ func TestCheckLibraryAccessPaths_Missing(t *testing.T) {
 	warns := CheckLibraryAccessPaths([]string{"/nonexistent/path/xyz123"})
 	if len(warns) != 1 {
 		t.Fatalf("expected 1 warning for missing path, got %d: %v", len(warns), warns)
+	}
+}
+
+// TestHandleListLibraries_NoPathOrBuiltIn asserts that the public GET
+// /api/pelicula/libraries endpoint never exposes the Path or BuiltIn fields,
+// even when the underlying Library has them populated.
+func TestHandleListLibraries_NoPathOrBuiltIn(t *testing.T) {
+	t.Parallel()
+	h := newRegistryHandler()
+	h.SetRegistry(LibraryConfig{
+		Libraries: []Library{
+			{
+				Name:       "Movies",
+				Slug:       "movies",
+				Type:       "movies",
+				Arr:        "radarr",
+				Processing: "full",
+				Path:       "/host/data/movies",
+				BuiltIn:    true,
+			},
+			{
+				Name:       "TV Shows",
+				Slug:       "tv",
+				Type:       "tvshows",
+				Arr:        "sonarr",
+				Processing: "full",
+				Path:       "/host/data/tv",
+				BuiltIn:    true,
+			},
+		},
+	})
+
+	w := httptest.NewRecorder()
+	h.HandleListLibraries(w, httptest.NewRequest("GET", "/api/pelicula/libraries", nil))
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	body := w.Body.String()
+	// "path" must not appear in the JSON output.
+	if strings.Contains(body, `"path"`) {
+		t.Errorf("response contains 'path' field, which must be stripped: %s", body)
+	}
+	// "builtin" must not appear in the JSON output.
+	if strings.Contains(body, `"builtin"`) {
+		t.Errorf("response contains 'builtin' field, which must be stripped: %s", body)
+	}
+
+	// Basic sanity: the response should still have public fields.
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d libraries, want 2", len(got))
+	}
+	if got[0]["slug"] != "movies" {
+		t.Errorf("first library slug = %v, want movies", got[0]["slug"])
 	}
 }
 

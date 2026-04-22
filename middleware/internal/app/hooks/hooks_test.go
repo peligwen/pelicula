@@ -381,8 +381,9 @@ func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
 
 	h := newImportHandler("http://127.0.0.1:1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import?secret=wrong-secret", bytes.NewReader(newRadarrPayload()))
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Webhook-Secret", "wrong-secret")
 	w := httptest.NewRecorder()
 	h.HandleImportHook(w, req)
 
@@ -397,8 +398,9 @@ func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
 
 	h := newImportHandler("http://127.0.0.1:1") // Procula unreachable — intentional
 
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import?secret=my-secret", bytes.NewReader(newRadarrPayload()))
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Webhook-Secret", "my-secret")
 	w := httptest.NewRecorder()
 	h.HandleImportHook(w, req)
 
@@ -416,11 +418,12 @@ func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
+	// No X-Webhook-Secret header set — should 401.
 	w := httptest.NewRecorder()
 	h.HandleImportHook(w, req)
 
 	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401 when secret missing from query", w.Code)
+		t.Errorf("status = %d, want 401 when X-Webhook-Secret header is missing", w.Code)
 	}
 }
 

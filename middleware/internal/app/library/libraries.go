@@ -31,6 +31,27 @@ type Library struct {
 	BuiltIn    bool   `json:"builtin,omitempty"`
 }
 
+// PublicLibrary is the safe-to-expose subset of Library for unauthenticated
+// callers. It deliberately omits Path (host filesystem path) and BuiltIn.
+type PublicLibrary struct {
+	Name       string `json:"name"`
+	Slug       string `json:"slug"`
+	Type       string `json:"type"`
+	Arr        string `json:"arr"`
+	Processing string `json:"processing"`
+}
+
+// toPublic converts a Library to its public representation.
+func (l Library) toPublic() PublicLibrary {
+	return PublicLibrary{
+		Name:       l.Name,
+		Slug:       l.Slug,
+		Type:       l.Type,
+		Arr:        l.Arr,
+		Processing: l.Processing,
+	}
+}
+
 // ContainerPath returns the path at which this library's media is mounted
 // inside the middleware container (always /media/<slug>).
 func (l Library) ContainerPath() string {
@@ -311,8 +332,15 @@ func (h *Handler) DeleteLibrary(configPeliculaDir string, slug string) error {
 
 // HandleListLibraries handles GET /api/pelicula/libraries.
 // No auth required — same convention as other read-only dashboard endpoints.
+// Path and BuiltIn are stripped from the response to avoid leaking filesystem
+// layout to unauthenticated callers.
 func (h *Handler) HandleListLibraries(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, h.GetLibraries())
+	libs := h.GetLibraries()
+	pub := make([]PublicLibrary, len(libs))
+	for i, l := range libs {
+		pub[i] = l.toPublic()
+	}
+	httputil.WriteJSON(w, pub)
 }
 
 // HandleAddLibrary handles POST /api/pelicula/libraries.

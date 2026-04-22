@@ -356,19 +356,25 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 	}
 
 	hookURL := a.urls.PeliculaAPI + "/api/pelicula/hooks/import"
+	fields := []map[string]any{
+		{"name": "url", "value": hookURL},
+		{"name": "method", "value": 1}, // 1 = POST
+		{"name": "username", "value": ""},
+		{"name": "password", "value": ""},
+	}
 	if a.webhookSecret != "" {
-		hookURL += "?secret=" + url.QueryEscape(a.webhookSecret)
+		// Pass the secret via a custom HTTP header rather than a URL query param
+		// so it does not appear in *arr log entries or access logs.
+		fields = append(fields, map[string]any{
+			"name":  "headers",
+			"value": []map[string]any{{"key": "X-Webhook-Secret", "value": a.webhookSecret}},
+		})
 	}
 	payload := map[string]any{
-		"name":           "Procula",
-		"implementation": "Webhook",
-		"configContract": "WebhookSettings",
-		"fields": []map[string]any{
-			{"name": "url", "value": hookURL},
-			{"name": "method", "value": 1}, // 1 = POST
-			{"name": "username", "value": ""},
-			{"name": "password", "value": ""},
-		},
+		"name":                "Procula",
+		"implementation":      "Webhook",
+		"configContract":      "WebhookSettings",
+		"fields":              fields,
 		"onGrab":              false,
 		"onDownload":          true,
 		"onUpgrade":           true,
