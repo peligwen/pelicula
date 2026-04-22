@@ -517,6 +517,18 @@ except Exception as e:
 
     # ── Stage 6: Verify in Jellyfin ──────────────────
 
+    # Give Jellyfin's scan (triggered by procula) a moment to finish, then
+    # fire an explicit refresh before polling. Procula's refresh fires at job
+    # completion; if that refresh races with an in-progress startup scan the
+    # file may not be indexed yet by the time polling begins.
+    sleep 5
+    $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
+        --post-data='' \
+        --header="X-API-Key: ${test_api_key}" \
+        "http://localhost:8181/api/pelicula/jellyfin/refresh" \
+        2>/dev/null || true
+    sleep 5
+
     info "Verifying movie appears in Jellyfin library..."
 
     # Authenticate with Jellyfin using the password set in the test env
@@ -543,14 +555,29 @@ except Exception:
         return 1
     fi
 
-    # Jellyfin library scan is async — retry a few times
+    # Jellyfin library scan is async. Poll up to 12×5s = 60s.
+    # Re-trigger a Jellyfin refresh every 3rd poll in case the initial
+    # refresh raced with an in-progress scan and was a no-op.
     local found=false
     local item_count=0
-    for _ in 1 2 3 4 5; do
+    local poll_n=0
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
         sleep 5
+        poll_n=$(( poll_n + 1 ))
+        if [[ $(( poll_n % 3 )) -eq 0 ]]; then
+            $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
+                --post-data='' \
+                --header="X-API-Key: ${test_api_key}" \
+                "http://localhost:8181/api/pelicula/jellyfin/refresh" \
+                2>/dev/null || true
+        fi
         local search_resp
+        # Query the library directly (no SearchTerm) so we bypass Jellyfin's
+        # search-index rebuild delay. For movies with no TMDB match the search
+        # index can lag 60-120s behind the library scan; a direct Items query
+        # returns items as soon as the filesystem scan detects them.
         search_resp="$(curl -sf --max-time 10 \
-            "http://localhost:${test_port}/jellyfin/Items?SearchTerm=Test+Movie&IncludeItemTypes=Movie&Recursive=true" \
+            "http://localhost:${test_port}/jellyfin/Items?IncludeItemTypes=Movie&Recursive=true&Limit=10" \
             -H "X-Emby-Authorization: MediaBrowser Client=\"PeliculaTest\", Device=\"e2e\", DeviceId=\"pelicula-e2e-test\", Version=\"1.0\", Token=\"${jf_token}\"" \
             2>/dev/null || echo "")"
         item_count="$(echo "$search_resp" | python3 -c "
@@ -569,7 +596,7 @@ except Exception:
     if [[ "$found" == "true" ]]; then
         t_pass "Movie found in Jellyfin library"
     else
-        t_fail "Movie not found in Jellyfin library after 25s"
+        t_fail "Movie not found in Jellyfin library after 60s"
         echo ""
         warn "Library scan may still be in progress. Jellyfin logs:"
         test_compose logs --tail 30 jellyfin 2>/dev/null || true
