@@ -2,6 +2,7 @@
 'use strict';
 
 import { get } from '/api.js';
+import { openDrawer, closeDrawer } from '/framework.js';
 
 const ALL_SERVICES = [
     'pelicula-api', 'procula', 'nginx',
@@ -141,8 +142,7 @@ function openLogsSheet() {
     const sheet = document.getElementById('logs-sheet');
     const backdrop = document.getElementById('logs-sheet-backdrop');
     if (!sheet || !backdrop) return;
-    backdrop.classList.remove('hidden');
-    sheet.classList.remove('hidden');
+    openDrawer(sheet, backdrop);
     logsState.userScrolled = false;
     renderFilters();
     if (window.sseIsActive && window.sseIsActive()) {
@@ -158,8 +158,8 @@ function openLogsSheet() {
 function closeLogsSheet() {
     const sheet = document.getElementById('logs-sheet');
     const backdrop = document.getElementById('logs-sheet-backdrop');
-    if (sheet) sheet.classList.add('hidden');
-    if (backdrop) backdrop.classList.add('hidden');
+    if (!sheet || !backdrop) return;
+    closeDrawer(sheet, backdrop);
 }
 
 document.getElementById('logs-sheet-panel-row').addEventListener('click', openLogsSheet);

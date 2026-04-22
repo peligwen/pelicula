@@ -1,4 +1,5 @@
 import { escHtml } from './framework.js';
+import { get, post, APIError } from './api.js';
 
 // ── Media browser state ──────────────────────────────────────────────────────
 
@@ -15,13 +16,15 @@ const state = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function apiFetch(url, opts) {
-    const res = await fetch(url, opts);
-    if (res.status === 401) {
+// apiOrRedirect calls fn() (which wraps a get/post from api.js) and redirects
+// to the login page if the session has expired (null return = 401).
+async function apiOrRedirect(fn) {
+    const data = await fn();
+    if (data === null) {
         window.location.href = '/?login=1';
         throw new Error('Session expired');
     }
-    return res;
+    return data;
 }
 
 function formatSize(bytes) {
@@ -89,9 +92,7 @@ function libraryForPath(path) {
 
 async function loadBrowseRoots() {
     try {
-        const res = await apiFetch('/api/pelicula/browse');
-        if (!res.ok) throw new Error('Failed to load directories');
-        const data = await res.json();
+        const data = await apiOrRedirect(() => get('/api/pelicula/browse'));
         renderRoots(data.entries || []);
     } catch (e) {
         document.getElementById('browse-tree').innerHTML =
@@ -225,9 +226,7 @@ async function toggleDir(expandEl, childrenEl, path) {
 
     childrenEl.innerHTML = '<div class="browse-loading">Loading...</div>';
     try {
-        const res = await apiFetch('/api/pelicula/browse?path=' + encodeURIComponent(path));
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
+        const data = await apiOrRedirect(() => get('/api/pelicula/browse?path=' + encodeURIComponent(path)));
         childrenEl.innerHTML = '';
         const entries = data.entries || [];
         if (!entries.length) {
@@ -353,16 +352,7 @@ async function onImportClick() {
     try {
         const files = state.selected.filter(s => !s.isDir).map(f => ({ path: f.path, size: f.size }));
         const folders = state.selected.filter(s => s.isDir).map(s => s.path);
-        const res = await apiFetch('/api/pelicula/library/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files, folders }),
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
-            throw new Error(err.error || 'Scan failed');
-        }
-        state.scanResults = await res.json();
+        state.scanResults = await apiOrRedirect(() => post('/api/pelicula/library/scan', { files, folders }));
         state.dismissed = new Set();
         state.confirmed = new Set();
         state.groupSelections = {};
@@ -985,8 +975,9 @@ function openChangeMatchPopover(item, rowEl) {
         }
         let url = '/api/pelicula/search?q=' + encodeURIComponent(q.trim());
         if (typeFilter) url += '&type=' + encodeURIComponent(typeFilter);
-        apiFetch(url).then(res => res.json()).then(data => {
-            const results = data.results || [];
+        get(url).then(data => {
+            if (data === null) { window.location.href = '/?login=1'; return; }
+            const results = (data && data.results) || [];
             resultsEl.replaceChildren();
             if (!results.length) {
                 const empty = document.createElement('div');
@@ -1108,11 +1099,8 @@ async function applyOverride(item, searchResult) {
             title: searchResult.title,
             year: String(searchResult.year || 0),
         });
-        const res = await apiFetch('/api/pelicula/library/suggest-path?' + params.toString());
-        if (res.ok) {
-            const data = await res.json();
-            if (data.path) scanItem.suggestedPath = data.path;
-        }
+        const data = await get('/api/pelicula/library/suggest-path?' + params.toString());
+        if (data && data.path) scanItem.suggestedPath = data.path;
     } catch (e) { /* non-fatal */ }
 
     renderMatchResults();
@@ -1207,16 +1195,7 @@ async function doApply() {
     }
 
     try {
-        const res = await apiFetch('/api/pelicula/library/apply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items, strategy: newItems.length === 0 ? 'register' : strategy, validate }),
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
-            throw new Error(err.error || 'Apply failed');
-        }
-        const result = await res.json();
+        const result = await apiOrRedirect(() => post('/api/pelicula/library/apply', { items, strategy: newItems.length === 0 ? 'register' : strategy, validate }));
         renderApplyResult(result, validate);
     } catch (e) {
         content.innerHTML = '<div class="no-items">Import failed: ' + escHtml(e.message) + '</div>';
@@ -1278,9 +1257,9 @@ function renderApplyResult(result, validate) {
 
 async function loadImportLibraries() {
     try {
-        const res = await apiFetch('/api/pelicula/libraries');
-        if (!res.ok) return;
-        state.libraries = await res.json() || [];
+        const data = await get('/api/pelicula/libraries');
+        if (data === null) return; // 401 handled silently on init
+        state.libraries = data || [];
         populateLibrarySelect();
     } catch (e) { /* non-fatal */ }
 }

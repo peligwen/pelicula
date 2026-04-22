@@ -3,6 +3,7 @@
 // Exposed as window.openNetworkDrawer / window.closeNetworkDrawer.
 
 import { get } from './api.js';
+import { openDrawer, closeDrawer } from './framework.js';
 
 // ── Relative time ────────────────────────────────────────────────────────────
 
@@ -114,9 +115,7 @@ function openNetworkDrawer() {
     const drawer = document.getElementById('net-drawer');
     const backdrop = document.getElementById('net-drawer-backdrop');
     if (!drawer || !backdrop) return;
-    backdrop.classList.remove('hidden');
-    drawer.classList.remove('hidden');
-    drawer.focus();
+    openDrawer(drawer, backdrop);
     fetchStats();
 }
 
@@ -124,8 +123,7 @@ function closeNetworkDrawer() {
     const drawer = document.getElementById('net-drawer');
     const backdrop = document.getElementById('net-drawer-backdrop');
     if (!drawer || !backdrop) return;
-    drawer.classList.add('hidden');
-    backdrop.classList.add('hidden');
+    closeDrawer(drawer, backdrop);
 }
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
