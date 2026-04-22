@@ -167,7 +167,12 @@ func serveWithShutdown(addr string, handler http.Handler) {
 
 // isLibraryPath returns true for any path under /media/ (the library root).
 // Used to restrict manual transcode and subtitle ops to already-imported library files.
-func isLibraryPath(path string) bool {
+// Swappable via isLibraryPathFn for tests.
+var isLibraryPathFn = defaultIsLibraryPath
+
+func isLibraryPath(path string) bool { return isLibraryPathFn(path) }
+
+func defaultIsLibraryPath(path string) bool {
 	return path == "/media" || strings.HasPrefix(path, "/media/")
 }
 

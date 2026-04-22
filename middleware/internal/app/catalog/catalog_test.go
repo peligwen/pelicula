@@ -404,6 +404,49 @@ func TestHandleCatalogReplaceValidation(t *testing.T) {
 	}
 }
 
+// TestHandleCatalogReplace_NoHistoryReturns409 verifies that HandleCatalogReplace
+// returns HTTP 409 with {"error":"no import history found"} when findImportHistoryID
+// returns zero (no downloadFolderImported event exists for the item).
+func TestHandleCatalogReplace_NoHistoryReturns409(t *testing.T) {
+	t.Parallel()
+
+	// Sonarr history returns an empty records list — no import history found.
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/api/v3/history/episode"):
+			// Return empty records list — triggers the 409 path.
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"records":[]}`)) //nolint:errcheck
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer sonarr.Close()
+
+	h := newTestHandler(nil, sonarr, nil, "", "sk")
+
+	body := `{"arr_type":"sonarr","arr_id":10,"episode_id":5,"path":"/tv/show/S01E01.mkv"}`
+	req := httptest.NewRequest("POST", "/api/pelicula/catalog/replace", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleCatalogReplace(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d (Conflict); body: %s", w.Code, http.StatusConflict, w.Body.String())
+	}
+	// Response must be JSON with {"error":"no import history found"}.
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if resp["error"] != "no import history found" {
+		t.Errorf("error = %q, want %q", resp["error"], "no import history found")
+	}
+}
+
 func TestHandleCatalogCommandRescan(t *testing.T) {
 	t.Parallel()
 

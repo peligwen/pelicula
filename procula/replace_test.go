@@ -1,6 +1,13 @@
 package procula
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,5 +80,65 @@ func TestDeleteBlockedReleaseNotFound(t *testing.T) {
 	_, err := DeleteBlockedRelease(db, 9999)
 	if err == nil {
 		t.Fatal("expected error for missing id")
+	}
+}
+
+// TestRunReplaceAction_AbortsWhenBlocklistIDZero verifies that runReplaceAction
+// returns an error and does NOT delete the file when the middleware returns
+// arr_blocklist_id == 0.
+func TestRunReplaceAction_AbortsWhenBlocklistIDZero(t *testing.T) {
+	// Stub middleware that returns arr_blocklist_id: 0.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := replaceRespBody{
+			ArrBlocklistID: 0,
+			ArrItemID:      1,
+			ArrApp:         "radarr",
+			DisplayTitle:   "Test Movie",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	// Create a real file to verify it is NOT deleted.
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.mkv")
+	if err := os.WriteFile(filePath, []byte("fake media"), 0644); err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+
+	// Override isLibraryPath to accept the temp dir path for this test.
+	old := isLibraryPathFn
+	isLibraryPathFn = func(p string) bool { return strings.HasPrefix(p, dir) }
+	t.Cleanup(func() { isLibraryPathFn = old })
+
+	// Override appDB for this test.
+	db := testDB(t)
+	oldDB := appDB
+	appDB = db
+	t.Cleanup(func() { appDB = oldDB })
+
+	t.Setenv("PELICULA_API_URL", srv.URL)
+
+	q := newTestQueue(t)
+	job, _ := q.Create(testSource(filePath))
+	jobPtr, _ := q.Get(job.ID)
+	jobPtr.Params = map[string]any{
+		"path":     filePath,
+		"arr_id":   float64(1),
+		"arr_type": "radarr",
+	}
+
+	_, err := runReplaceAction(context.Background(), q, jobPtr)
+	if err == nil {
+		t.Fatal("expected error when arr_blocklist_id == 0, got nil")
+	}
+	if !strings.Contains(err.Error(), "no import history found") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "no import history found")
+	}
+
+	// File must NOT have been deleted.
+	if _, statErr := os.Stat(filePath); os.IsNotExist(statErr) {
+		t.Error("file was deleted even though arr_blocklist_id == 0 (guard should have prevented deletion)")
 	}
 }

@@ -137,6 +137,13 @@ func runReplaceAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 		return nil, fmt.Errorf("replace: decode response: %w", err)
 	}
 
+	// Guard: if no import history was found the middleware could not create a
+	// blocklist entry. Deleting the file without a blocklist entry leaves the
+	// *arr queue unblocked and the release would be re-downloaded immediately.
+	if replaceResp.ArrBlocklistID == 0 {
+		return nil, fmt.Errorf("replace: no import history found for %q; aborting to avoid unblocked deletion", path)
+	}
+
 	// Step 2: delete the file from disk.
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("replace: delete file: %w", err)

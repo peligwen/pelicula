@@ -544,9 +544,11 @@ func (h *Handler) HandleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	historyID, displayTitle, err := h.findImportHistoryID(baseURL, apiKey, req.ArrType, req.ArrID, req.EpisodeID)
-	if err != nil {
-		slog.Warn("replace: history lookup failed", "arr_type", req.ArrType, "arr_id", req.ArrID, "error", err)
-		historyID = 0
+	if err != nil || historyID == 0 {
+		slog.Warn("replace: history lookup failed — no import history found",
+			"arr_type", req.ArrType, "arr_id", req.ArrID, "error", err)
+		httputil.WriteError(w, "no import history found", http.StatusConflict)
+		return
 	}
 
 	blocklistID := 0
