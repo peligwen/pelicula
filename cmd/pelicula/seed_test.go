@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -496,5 +497,153 @@ func TestResetArrService(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "/sonarr") {
 		t.Error("config.xml missing UrlBase")
+	}
+}
+
+// ── patchXMLFile unit tests ──────────────────────────────────────────────────
+
+// TestPatchXMLFile_NoOp verifies that patchXMLFile returns nil without writing
+// when no patch changes the content.
+func TestPatchXMLFile_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config><Foo>bar</Foo></Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record mtime before patch.
+	info0, _ := os.Stat(file)
+
+	patches := []xmlPatch{
+		{
+			matchRe:     regexp.MustCompile(`<Baz>[^<]*</Baz>`),
+			replacement: "<Baz>replaced</Baz>",
+			// No insertBeforeRe → only replaces, never inserts.
+		},
+	}
+	if err := patchXMLFile(file, patches); err != nil {
+		t.Fatalf("patchXMLFile error: %v", err)
+	}
+
+	info1, _ := os.Stat(file)
+	if info1.ModTime() != info0.ModTime() {
+		t.Error("patchXMLFile should not write when content is unchanged")
+	}
+	data, _ := os.ReadFile(file)
+	if string(data) != content {
+		t.Errorf("content changed unexpectedly: %q", string(data))
+	}
+}
+
+// TestPatchXMLFile_MissingFile verifies that patchXMLFile returns nil for a
+// non-existent file (treated as not-yet-created).
+func TestPatchXMLFile_MissingFile(t *testing.T) {
+	patches := []xmlPatch{
+		{
+			matchRe:     regexp.MustCompile(`<Foo>[^<]*</Foo>`),
+			replacement: "<Foo>bar</Foo>",
+		},
+	}
+	err := patchXMLFile("/nonexistent/path/config.xml", patches)
+	if err != nil {
+		t.Errorf("expected nil for missing file, got: %v", err)
+	}
+}
+
+// TestPatchXMLFile_MultiplePatches verifies that multiple patches are applied
+// in order and all take effect in a single write.
+func TestPatchXMLFile_MultiplePatches(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config><Alpha>old</Alpha><Beta>old</Beta></Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	patches := []xmlPatch{
+		{
+			matchRe:     regexp.MustCompile(`<Alpha>[^<]*</Alpha>`),
+			replacement: "<Alpha>new</Alpha>",
+		},
+		{
+			matchRe:     regexp.MustCompile(`<Beta>[^<]*</Beta>`),
+			replacement: "<Beta>new</Beta>",
+		},
+	}
+	if err := patchXMLFile(file, patches); err != nil {
+		t.Fatalf("patchXMLFile error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+	if !strings.Contains(patched, "<Alpha>new</Alpha>") {
+		t.Error("expected Alpha to be patched")
+	}
+	if !strings.Contains(patched, "<Beta>new</Beta>") {
+		t.Error("expected Beta to be patched")
+	}
+}
+
+// TestPatchXMLFile_InsertFallback verifies that when matchRe does not match
+// and insertBeforeRe is set, the text is inserted before the anchor.
+func TestPatchXMLFile_InsertFallback(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config><Existing>yes</Existing></Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	patches := []xmlPatch{
+		{
+			matchRe:        regexp.MustCompile(`<NewElement>[^<]*</NewElement>`),
+			replacement:    "<NewElement>value</NewElement>",
+			insertBeforeRe: regexp.MustCompile(`</Config>`),
+			insertText:     "<NewElement>value</NewElement></Config>",
+		},
+	}
+	if err := patchXMLFile(file, patches); err != nil {
+		t.Fatalf("patchXMLFile error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	patched := string(data)
+	if !strings.Contains(patched, "<NewElement>value</NewElement>") {
+		t.Errorf("expected NewElement to be inserted, got: %q", patched)
+	}
+	if !strings.Contains(patched, "</Config>") {
+		t.Error("</Config> must remain present after insert")
+	}
+}
+
+// TestPatchXMLFile_CondGuard verifies that a patch with condRe is skipped when
+// the guard condition does not match.
+func TestPatchXMLFile_CondGuard(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.xml")
+	content := `<Config><Status>inactive</Status><Foo>old</Foo></Config>`
+	if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	patches := []xmlPatch{
+		{
+			// Guard: only patch Foo if Status is "active" — it's not, so skip.
+			condRe:      regexp.MustCompile(`<Status>active</Status>`),
+			matchRe:     regexp.MustCompile(`<Foo>[^<]*</Foo>`),
+			replacement: "<Foo>new</Foo>",
+		},
+	}
+	if err := patchXMLFile(file, patches); err != nil {
+		t.Fatalf("patchXMLFile error: %v", err)
+	}
+
+	data, _ := os.ReadFile(file)
+	if strings.Contains(string(data), "<Foo>new</Foo>") {
+		t.Error("Foo should NOT have been patched when guard condition does not match")
+	}
+	if !strings.Contains(string(data), "<Foo>old</Foo>") {
+		t.Error("Foo should retain original value when guard condition does not match")
 	}
 }

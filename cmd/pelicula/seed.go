@@ -48,57 +48,90 @@ func seedConfig(file, content string) error {
 	return os.WriteFile(file, []byte(content), 0644)
 }
 
+// xmlPatch describes one targeted substitution in an XML config file.
+//
+// Behavior:
+//   - If condRe is non-nil the patch is skipped unless condRe matches the
+//     current file content (used for guarded patches like auth bypass).
+//   - matchRe is used with ReplaceAllString to replace existing elements.
+//   - If matchRe does not match and insertBeforeRe is non-nil, insertText is
+//     inserted immediately before the first match of insertBeforeRe.
+type xmlPatch struct {
+	condRe         *regexp.Regexp // optional guard: skip if this does NOT match
+	matchRe        *regexp.Regexp // replace all occurrences when present
+	replacement    string         // replacement string for matchRe
+	insertBeforeRe *regexp.Regexp // fallback insert anchor
+	insertText     string         // text to insert before insertBeforeRe
+}
+
+// patchXMLFile reads path, applies patches in order, and writes the result only
+// if the content changed. Returns nil if the file does not exist (treated as
+// not-yet-created) or if no patches changed the content.
+func patchXMLFile(path string, patches []xmlPatch) error {
+	if _, err := os.Stat(path); err != nil {
+		return nil // file doesn't exist yet — nothing to do
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	original := string(data)
+	patched := original
+
+	for _, p := range patches {
+		// Honour guard condition.
+		if p.condRe != nil && !p.condRe.MatchString(patched) {
+			continue
+		}
+		if p.matchRe.MatchString(patched) {
+			patched = p.matchRe.ReplaceAllString(patched, p.replacement)
+		} else if p.insertBeforeRe != nil {
+			patched = p.insertBeforeRe.ReplaceAllString(patched, p.insertText)
+		}
+	}
+
+	if patched == original {
+		return nil
+	}
+	return os.WriteFile(path, []byte(patched), 0644)
+}
+
 // enforceArrConfig patches an *arr config.xml to use External authentication
 // (DisabledForLocalAddresses), enforce dark theme, disable analytics, and
 // ensure the log level is not set to debug.
 // This is idempotent and safe to call on every startup.
 func enforceArrConfig(configPath string) error {
-	if _, err := os.Stat(configPath); err != nil {
-		return nil // doesn't exist yet — nothing to do
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-
-	original := string(data)
-	patched := original
-
-	// Fix auth bypass — only patch if Enabled (leave DisabledForLocalAddresses alone)
-	if strings.Contains(patched, "<AuthenticationRequired>Enabled</AuthenticationRequired>") {
-		reMethod := regexp.MustCompile(`<AuthenticationMethod>[^<]*</AuthenticationMethod>`)
-		reRequired := regexp.MustCompile(`<AuthenticationRequired>[^<]*</AuthenticationRequired>`)
-		patched = reMethod.ReplaceAllString(patched, "<AuthenticationMethod>External</AuthenticationMethod>")
-		patched = reRequired.ReplaceAllString(patched, "<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>")
-	}
-
-	// Enforce dark theme
-	if strings.Contains(patched, "<Theme>") {
-		reTheme := regexp.MustCompile(`<Theme>[^<]*</Theme>`)
-		patched = reTheme.ReplaceAllString(patched, "<Theme>dark</Theme>")
-	}
-
-	// Disable analytics telemetry
-	reAnalytics := regexp.MustCompile(`<AnalyticsEnabled>[^<]*</AnalyticsEnabled>`)
-	if reAnalytics.MatchString(patched) {
-		patched = reAnalytics.ReplaceAllString(patched, "<AnalyticsEnabled>False</AnalyticsEnabled>")
-	} else {
-		// Insert before </Config>. The seeded config is a one-liner; capture leading
-		// whitespace so pretty-printed configs keep their indentation.
-		reClose := regexp.MustCompile(`(\s*)</Config>\s*$`)
-		patched = reClose.ReplaceAllString(patched, "${1}<AnalyticsEnabled>False</AnalyticsEnabled>${1}</Config>")
-	}
-
-	// Silence debug log level — replace debug→info only; leave trace/warn/fatal alone
-	reLogDebug := regexp.MustCompile(`(?i)<LogLevel>debug</LogLevel>`)
-	patched = reLogDebug.ReplaceAllString(patched, "<LogLevel>info</LogLevel>")
-
-	if patched == original {
-		return nil // no changes
-	}
-
-	return os.WriteFile(configPath, []byte(patched), 0644)
+	return patchXMLFile(configPath, []xmlPatch{
+		// Fix auth bypass — only when still set to Enabled.
+		{
+			condRe:      regexp.MustCompile(`<AuthenticationRequired>Enabled</AuthenticationRequired>`),
+			matchRe:     regexp.MustCompile(`<AuthenticationMethod>[^<]*</AuthenticationMethod>`),
+			replacement: "<AuthenticationMethod>External</AuthenticationMethod>",
+		},
+		{
+			condRe:      regexp.MustCompile(`<AuthenticationRequired>Enabled</AuthenticationRequired>`),
+			matchRe:     regexp.MustCompile(`<AuthenticationRequired>[^<]*</AuthenticationRequired>`),
+			replacement: "<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>",
+		},
+		// Enforce dark theme (only if element exists).
+		{
+			condRe:      regexp.MustCompile(`<Theme>`),
+			matchRe:     regexp.MustCompile(`<Theme>[^<]*</Theme>`),
+			replacement: "<Theme>dark</Theme>",
+		},
+		// Disable analytics telemetry; insert before </Config> if absent.
+		{
+			matchRe:        regexp.MustCompile(`<AnalyticsEnabled>[^<]*</AnalyticsEnabled>`),
+			replacement:    "<AnalyticsEnabled>False</AnalyticsEnabled>",
+			insertBeforeRe: regexp.MustCompile(`(\s*)</Config>\s*$`),
+			insertText:     "${1}<AnalyticsEnabled>False</AnalyticsEnabled>${1}</Config>",
+		},
+		// Silence debug log level — replace debug→info only.
+		{
+			matchRe:     regexp.MustCompile(`(?i)<LogLevel>debug</LogLevel>`),
+			replacement: "<LogLevel>info</LogLevel>",
+		},
+	})
 }
 
 // purgeSentryDirs removes Sentry crash-report cache directories for the *arr
@@ -116,27 +149,14 @@ func purgeSentryDirs(configDir string) {
 // This is idempotent and safe to call on every startup.
 func enforceJellyfinSystem(configDir string) error {
 	path := filepath.Join(configDir, "jellyfin", "config", "system.xml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil // file doesn't exist yet; Jellyfin hasn't run
-	}
-	original := string(data)
-	patched := original
-
-	// Disable client log uploads to the Jellyfin server
-	re := regexp.MustCompile(`<AllowClientLogUpload>[^<]*</AllowClientLogUpload>`)
-	if re.MatchString(patched) {
-		patched = re.ReplaceAllString(patched, "<AllowClientLogUpload>false</AllowClientLogUpload>")
-	} else {
-		// Insert before </ServerConfiguration>
-		patched = strings.Replace(patched, "</ServerConfiguration>",
-			"  <AllowClientLogUpload>false</AllowClientLogUpload>\n</ServerConfiguration>", 1)
-	}
-
-	if patched == original {
-		return nil
-	}
-	return os.WriteFile(path, []byte(patched), 0644)
+	return patchXMLFile(path, []xmlPatch{
+		{
+			matchRe:        regexp.MustCompile(`<AllowClientLogUpload>[^<]*</AllowClientLogUpload>`),
+			replacement:    "<AllowClientLogUpload>false</AllowClientLogUpload>",
+			insertBeforeRe: regexp.MustCompile(`</ServerConfiguration>`),
+			insertText:     "  <AllowClientLogUpload>false</AllowClientLogUpload>\n</ServerConfiguration>",
+		},
+	})
 }
 
 // extractAPIKey reads the <ApiKey> value from an *arr config.xml.
