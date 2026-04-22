@@ -192,3 +192,34 @@ func TestHandleReset_RejectsEmptyOrigin(t *testing.T) {
 		t.Errorf("status = %d, want 403 for empty origin on reset", w.Code)
 	}
 }
+
+// TestHandleSettings_ErrorsAreJSON verifies that error responses from the
+// settings handler use Content-Type: application/json and the {"error":"..."}
+// body shape (not plain text from http.Error).
+func TestHandleSettings_ErrorsAreJSON(t *testing.T) {
+	_, h := newSettingsEnv(t)
+
+	// Trigger a 400 by sending a body with an invalid WireGuard key.
+	body, _ := json.Marshal(settingsResponse{WireguardKey: "short"})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+	h.handleSettingsUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json (not plain text)", ct)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if resp["error"] == "" {
+		t.Errorf("response body = %v, want {\"error\":\"...\"}", resp)
+	}
+}

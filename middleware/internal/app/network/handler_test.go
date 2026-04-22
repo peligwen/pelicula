@@ -165,6 +165,38 @@ func TestServeStats_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestServeStats_MethodNotAllowed_JSONShape verifies that the 405 error response
+// uses Content-Type: application/json and the {"error":"..."} body shape (F16).
+func TestServeStats_MethodNotAllowed_JSONShape(t *testing.T) {
+	h := &network.Handler{
+		Docker: &fakeDocker{
+			allowed: map[string]bool{},
+			stats:   map[string]*docker.StatsResponse{},
+			errs:    map[string]error{},
+		},
+		Now: fixedNow,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/network", nil)
+	h.ServeStats(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json (not plain text)", ct)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if resp["error"] == "" {
+		t.Errorf("body = %v, want {\"error\":\"...\"}", resp)
+	}
+}
+
 // TestServeStats_PerContainerError verifies that a Stats error for one service
 // results in that service appearing with zero bytes, while other services are
 // unaffected.

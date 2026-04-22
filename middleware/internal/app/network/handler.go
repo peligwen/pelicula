@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"pelicula-api/httputil"
 	"pelicula-api/internal/clients/docker"
 )
 
@@ -77,7 +78,7 @@ func (h *Handler) vpnSet() map[string]bool {
 // Returns JSON {containers:[{name,bytes_in,bytes_out,vpn_routed}...],as_of}.
 func (h *Handler) ServeStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -150,7 +151,7 @@ func (h *Handler) ServeStats(w http.ResponseWriter, r *http.Request) {
 
 	body, err := json.Marshal(resp)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"pelicula-api/httputil"
 	appsetup "pelicula-api/internal/app/setup"
 )
 
@@ -76,7 +77,7 @@ func (h *Handler) HandleSettings(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.handleSettingsUpdate(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -87,11 +88,11 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, "not configured", http.StatusNotFound)
+			httputil.WriteError(w, "not configured", http.StatusNotFound)
 			return
 		}
 		slog.Error("failed to read .env", "error", err)
-		http.Error(w, "failed to read config", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to read config", http.StatusInternalServerError)
 		return
 	}
 
@@ -138,7 +139,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req settingsResponse
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -154,7 +155,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, c := range toCheck {
 		if c.val != "" && strings.ContainsAny(c.val, "\"\n\r") {
-			http.Error(w, c.name+" contains invalid characters", http.StatusBadRequest)
+			httputil.WriteError(w, c.name+" contains invalid characters", http.StatusBadRequest)
 			return
 		}
 	}
@@ -162,7 +163,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	// Validate remote access fields if being changed
 	if req.RemoteHostname != "" {
 		if strings.ContainsAny(req.RemoteHostname, "\"/ \n\r:") {
-			http.Error(w, "remote_hostname must be a bare hostname with no scheme, port, or path", http.StatusBadRequest)
+			httputil.WriteError(w, "remote_hostname must be a bare hostname with no scheme, port, or path", http.StatusBadRequest)
 			return
 		}
 	}
@@ -171,12 +172,12 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		case "letsencrypt", "byo", "self-signed":
 			// valid
 		default:
-			http.Error(w, "remote_cert_mode must be one of: letsencrypt, byo, self-signed", http.StatusBadRequest)
+			httputil.WriteError(w, "remote_cert_mode must be one of: letsencrypt, byo, self-signed", http.StatusBadRequest)
 			return
 		}
 	}
 	if req.RemoteLEEmail != "" && !strings.Contains(req.RemoteLEEmail, "@") {
-		http.Error(w, "remote_le_email must be a valid email address", http.StatusBadRequest)
+		httputil.WriteError(w, "remote_le_email must be a valid email address", http.StatusBadRequest)
 		return
 	}
 
@@ -184,7 +185,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.WireguardKey != "" && req.WireguardKey != maskedValue {
 		key := strings.TrimSpace(req.WireguardKey)
 		if len(key) != 44 || key[43] != '=' {
-			http.Error(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
+			httputil.WriteError(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
 			return
 		}
 		req.WireguardKey = key
@@ -196,7 +197,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	vars, err := ParseEnvFile(h.EnvPath)
 	if err != nil {
 		slog.Error("failed to read .env for update", "error", err)
-		http.Error(w, "failed to read config", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to read config", http.StatusInternalServerError)
 		return
 	}
 
@@ -224,7 +225,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		case "true", "false":
 			vars["PELICULA_OPEN_REGISTRATION"] = req.OpenRegistration
 		default:
-			http.Error(w, "open_registration must be true or false", http.StatusBadRequest)
+			httputil.WriteError(w, "open_registration must be true or false", http.StatusBadRequest)
 			return
 		}
 	}
@@ -279,7 +280,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		case "true", "false":
 			vars["SEEDING_REMOVE_ON_COMPLETE"] = req.SeedingRemoveOnComplete
 		default:
-			http.Error(w, "seeding_remove_on_complete must be true or false", http.StatusBadRequest)
+			httputil.WriteError(w, "seeding_remove_on_complete must be true or false", http.StatusBadRequest)
 			return
 		}
 	}
@@ -300,14 +301,14 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		case "tmdb", "indexer":
 			vars["SEARCH_MODE"] = req.SearchMode
 		default:
-			http.Error(w, "search_mode must be tmdb or indexer", http.StatusBadRequest)
+			httputil.WriteError(w, "search_mode must be tmdb or indexer", http.StatusBadRequest)
 			return
 		}
 	}
 
 	if err := WriteEnvFile(h.EnvPath, vars); err != nil {
 		slog.Error("failed to write .env", "error", err)
-		http.Error(w, "failed to write config", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to write config", http.StatusInternalServerError)
 		return
 	}
 
@@ -320,14 +321,14 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 // using the same wizard body shape as the initial setup.
 func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req appsetup.SetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteError(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -340,7 +341,7 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 		{"work_dir", req.WorkDir},
 	} {
 		if strings.ContainsAny(check.val, "\"\n\r") {
-			http.Error(w, check.name+" contains invalid characters", http.StatusBadRequest)
+			httputil.WriteError(w, check.name+" contains invalid characters", http.StatusBadRequest)
 			return
 		}
 	}
@@ -349,11 +350,11 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	wgKey := strings.TrimSpace(req.WireguardKey)
 	if !req.VPNSkipped {
 		if wgKey == "" {
-			http.Error(w, "wireguard_key is required (or set vpn_skipped)", http.StatusBadRequest)
+			httputil.WriteError(w, "wireguard_key is required (or set vpn_skipped)", http.StatusBadRequest)
 			return
 		}
 		if len(wgKey) != 44 || wgKey[43] != '=' {
-			http.Error(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
+			httputil.WriteError(w, "wireguard_key must be a 44-character base64 WireGuard private key", http.StatusBadRequest)
 			return
 		}
 	} else {
@@ -425,7 +426,7 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 
 	if err := WriteEnvFile(h.EnvPath, vars); err != nil {
 		slog.Error("failed to write .env during reset", "error", err)
-		http.Error(w, "failed to write config", http.StatusInternalServerError)
+		httputil.WriteError(w, "failed to write config", http.StatusInternalServerError)
 		return
 	}
 

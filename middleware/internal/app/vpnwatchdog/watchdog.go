@@ -187,11 +187,10 @@ func (w *Watchdog) fetchTunnelStatus() string {
 // ── Watchdog goroutine ─────────────────────────────────────────────────────────
 
 // Run monitors VPN port forwarding and keeps qBittorrent's listen port in sync.
-// It blocks forever; call as a goroutine. Only start when VPN is configured
-// (caller should guard on WIREGUARD_PRIVATE_KEY).
-func (w *Watchdog) Run() {
-	// TODO: accept ctx when missingwatcher and vpnwatchdog are made ctx-aware.
-	tick := util.JitteredTicker(context.Background(), watchdogInterval, 0.1)
+// It blocks until ctx is cancelled; call as a goroutine. Only start when VPN
+// is configured (caller should guard on WIREGUARD_PRIVATE_KEY).
+func (w *Watchdog) Run(ctx context.Context) {
+	tick := util.JitteredTicker(ctx, watchdogInterval, 0.1)
 
 	internal := wdInternalState{status: wdUnknown}
 	prevStatus := wdUnknown
@@ -203,7 +202,14 @@ func (w *Watchdog) Run() {
 
 	slog.Info("started", "component", "vpn_watchdog", "poll_interval", watchdogInterval)
 
-	for range tick {
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Debug("vpn_watchdog: context cancelled, stopping", "component", "vpn_watchdog")
+			return
+		case <-tick:
+		}
+
 		port, err := w.fetchForwardedPort()
 		if err != nil {
 			slog.Warn("failed to query gluetun port forwarding — skipping tick",

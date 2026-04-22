@@ -92,31 +92,48 @@ func New(svc *services.Clients, sonarrURL, radarrURL string) *Watcher {
 	}
 }
 
-// Run blocks forever, calling scan every interval.
+// Run blocks until ctx is cancelled, calling scan every interval.
 // Waits for svc.IsWired() before starting.
 // Consecutive arr fetch errors engage a skip-backoff of up to 5 iterations
 // to avoid hammering unavailable services.
-func (w *Watcher) Run(interval time.Duration) {
-	for !w.Services.IsWired() {
-		time.Sleep(5 * time.Second)
+func (w *Watcher) Run(ctx context.Context, interval time.Duration) {
+	for {
+		if w.Services.IsWired() {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 
 	slog.Info("started", "component", "watcher", "interval", interval.String())
 
 	skip := util.NewSkipCounter(5)
 
+	ticker := time.NewTicker(util.JitteredDuration(interval, 0.1))
+	defer ticker.Stop()
+
 	for {
-		time.Sleep(util.JitteredDuration(interval, 0.1))
-		if skip.ShouldSkip() {
-			slog.Debug("watcher: skipping iteration (backoff)", "component", "watcher")
-			continue
-		}
-		radarrErr := w.searchMissingMovies()
-		sonarrErr := w.searchMissingSeries()
-		if radarrErr || sonarrErr {
-			skip.RecordFailure()
-		} else {
-			skip.RecordSuccess()
+		select {
+		case <-ctx.Done():
+			slog.Debug("watcher: context cancelled, stopping", "component", "watcher")
+			return
+		case <-ticker.C:
+			if skip.ShouldSkip() {
+				slog.Debug("watcher: skipping iteration (backoff)", "component", "watcher")
+				continue
+			}
+			radarrErr := w.searchMissingMovies()
+			sonarrErr := w.searchMissingSeries()
+			if radarrErr || sonarrErr {
+				skip.RecordFailure()
+			} else {
+				skip.RecordSuccess()
+			}
+			// Reset ticker with new jittered duration for next interval.
+			ticker.Reset(util.JitteredDuration(interval, 0.1))
 		}
 	}
 }
