@@ -25,6 +25,12 @@ func setupRemoteScriptDir(t *testing.T) string {
 		t.Fatalf("create compose dir: %v", err)
 	}
 
+	// Create nginx/snippets subdirectory
+	snippetsDir := filepath.Join(nginxDir, "snippets")
+	if err := os.MkdirAll(snippetsDir, 0755); err != nil {
+		t.Fatalf("create snippets dir: %v", err)
+	}
+
 	// Copy real template files from repo root
 	repoRoot := "../../"
 
@@ -44,6 +50,15 @@ func setupRemoteScriptDir(t *testing.T) string {
 	}
 	if err := os.WriteFile(filepath.Join(nginxDir, "remote.conf.template"), fullBytes, 0644); err != nil {
 		t.Fatalf("write remote.conf.template: %v", err)
+	}
+
+	snippetSrc := filepath.Join(repoRoot, "nginx", "snippets", "jellyfin-proxy.conf")
+	snippetBytes, err := os.ReadFile(snippetSrc)
+	if err != nil {
+		t.Fatalf("read nginx/snippets/jellyfin-proxy.conf: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(snippetsDir, "jellyfin-proxy.conf"), snippetBytes, 0644); err != nil {
+		t.Fatalf("write jellyfin-proxy.conf snippet: %v", err)
 	}
 
 	return scriptDir
@@ -75,11 +90,8 @@ func TestRenderRemoteConfigs_SimpleMode(t *testing.T) {
 	if !strings.Contains(conf, "server_name _;") {
 		t.Error("remote.conf should contain 'server_name _;' in simple mode")
 	}
-	if !strings.Contains(conf, `X-Pelicula-Remote "true"`) {
-		t.Error("remote.conf should contain X-Pelicula-Remote header")
-	}
-	if !strings.Contains(conf, "limit_req zone=jf_auth") {
-		t.Error("remote.conf should contain auth rate-limit directive")
+	if !strings.Contains(conf, "include /etc/nginx/snippets/jellyfin-proxy.conf;") {
+		t.Error("remote.conf should include jellyfin-proxy.conf snippet")
 	}
 	if strings.Contains(conf, "add_header Strict-Transport-Security") {
 		t.Error("remote.conf must NOT contain Strict-Transport-Security add_header directive in simple mode")
@@ -166,6 +178,9 @@ func TestRenderRemoteConfigs_FullMode(t *testing.T) {
 	}
 	if !strings.Contains(conf, "Content-Security-Policy") {
 		t.Error("remote.conf should contain Content-Security-Policy header in full mode")
+	}
+	if !strings.Contains(conf, "include /etc/nginx/snippets/jellyfin-proxy.conf;") {
+		t.Error("remote.conf should include jellyfin-proxy.conf snippet in full mode")
 	}
 
 	// Read compose overlay and check full-mode port bindings
