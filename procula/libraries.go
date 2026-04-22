@@ -1,7 +1,9 @@
 package procula
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -41,35 +43,25 @@ func defaultLibraries() []ProculaLibrary {
 	}
 }
 
+const (
+	libraryMaxAttempts   = 10
+	libraryRetryDelay    = 3 * time.Second
+	libraryTotalDeadline = 60 * time.Second
+)
+
 // loadLibraries fetches the library list from pelicula-api and caches it.
-// Falls back to the two built-in defaults if the API is unreachable.
+// Falls back to the two built-in defaults if the API is unreachable after all
+// retries. Retries up to libraryMaxAttempts times with a libraryRetryDelay
+// linear delay, bounded by a 60-second total deadline.
 // Should be called once at startup after the API is expected to be reachable.
 func loadLibraries(peliculaAPI string) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	url := peliculaAPI + "/api/pelicula/libraries"
-	resp, err := client.Get(url)
-	if err != nil {
-		slog.Warn("could not fetch libraries from pelicula-api, using defaults", "component", "libraries", "error", err)
-		setLibraries(defaultLibraries())
-		return
-	}
-	defer resp.Body.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), libraryTotalDeadline)
+	defer cancel()
 
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("pelicula-api returned non-200 for libraries, using defaults", "component", "libraries", "status", resp.StatusCode)
-		setLibraries(defaultLibraries())
-		return
-	}
-
-	var libs []ProculaLibrary
-	if err := json.NewDecoder(resp.Body).Decode(&libs); err != nil {
-		slog.Warn("could not decode libraries response, using defaults", "component", "libraries", "error", err)
-		setLibraries(defaultLibraries())
-		return
-	}
-
-	if len(libs) == 0 {
-		slog.Warn("pelicula-api returned empty library list, using defaults", "component", "libraries")
+	libs, ok := fetchLibrariesWithRetry(ctx, peliculaAPI)
+	if !ok {
+		slog.Warn("could not fetch libraries from pelicula-api after all retries, using defaults",
+			"component", "libraries", "max_attempts", libraryMaxAttempts)
 		setLibraries(defaultLibraries())
 		return
 	}
@@ -90,6 +82,65 @@ func loadLibraries(peliculaAPI string) {
 			}
 		}()
 	})
+}
+
+// fetchLibrariesWithRetry attempts to fetch the library list up to
+// libraryMaxAttempts times. Returns the list and true on success, or nil and
+// false after all retries (including context deadline).
+func fetchLibrariesWithRetry(ctx context.Context, peliculaAPI string) ([]ProculaLibrary, bool) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	apiURL := peliculaAPI + "/api/pelicula/libraries"
+
+	for attempt := 1; attempt <= libraryMaxAttempts; attempt++ {
+		slog.Debug("fetching libraries from pelicula-api",
+			"component", "libraries", "attempt", attempt)
+
+		libs, err := fetchLibrariesOnce(client, apiURL)
+		if err == nil && libs != nil {
+			return libs, true
+		}
+		if err != nil {
+			slog.Debug("library fetch attempt failed",
+				"component", "libraries", "attempt", attempt, "error", err)
+		}
+
+		if attempt == libraryMaxAttempts {
+			break
+		}
+
+		// Wait for the retry delay or context cancellation.
+		select {
+		case <-ctx.Done():
+			slog.Debug("library fetch context cancelled", "component", "libraries")
+			return nil, false
+		case <-time.After(libraryRetryDelay):
+		}
+	}
+	return nil, false
+}
+
+// fetchLibrariesOnce makes a single HTTP request for the library list.
+// Returns (nil, nil) on a parseable-but-empty response (treated as retriable).
+func fetchLibrariesOnce(client *http.Client, apiURL string) ([]ProculaLibrary, error) {
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var libs []ProculaLibrary
+	if err := json.NewDecoder(resp.Body).Decode(&libs); err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+
+	if len(libs) == 0 {
+		return nil, fmt.Errorf("empty library list")
+	}
+	return libs, nil
 }
 
 // refreshLibraries fetches the library list from pelicula-api and updates the

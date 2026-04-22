@@ -52,6 +52,8 @@ func floatVal(m map[string]any, key string) float64 {
 }
 
 // fetchJellyfinLibrary fetches all Movie/Series items from Jellyfin and caches them.
+// The write lock is held for the entire fetch-and-write-back sequence so that
+// concurrent cache misses serialize rather than fan-out to Jellyfin.
 func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, error) {
 	h.jfCache.mu.Lock()
 	if time.Since(h.jfCache.fetchedAt) < jellyfinCacheTTL {
@@ -59,7 +61,8 @@ func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, e
 		h.jfCache.mu.Unlock()
 		return items, nil
 	}
-	h.jfCache.mu.Unlock()
+	// Hold the write lock across the entire fetch so concurrent misses serialize.
+	defer h.jfCache.mu.Unlock()
 
 	userID := jf.GetJellyfinUserID()
 	if userID == "" {
@@ -122,15 +125,11 @@ func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, e
 		)
 	}
 
-	h.jfCache.mu.Lock()
-	if time.Since(h.jfCache.fetchedAt) >= jellyfinCacheTTL {
-		h.jfCache.items = resp.Items
-		h.jfCache.fetchedAt = time.Now()
-		slog.Info("jellyfin library cached", "component", "catalog_sync", "count", count)
-	}
-	items := h.jfCache.items
-	h.jfCache.mu.Unlock()
-	return items, nil
+	// Lock is still held (acquired at the top of the function; released via defer).
+	h.jfCache.items = resp.Items
+	h.jfCache.fetchedAt = time.Now()
+	slog.Info("jellyfin library cached", "component", "catalog_sync", "count", count)
+	return resp.Items, nil
 }
 
 // UpsertFromHook creates or updates catalog records when a download completes.
@@ -324,20 +323,13 @@ func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, a
 	var (
 		allEpisodesMu sync.Mutex
 		allEpisodes   []map[string]any
-		fetchErr      error
-		fetchErrMu    sync.Mutex
+		failCountMu   sync.Mutex
+		failCount     int
 		wg            sync.WaitGroup
 		sem           = make(chan struct{}, episodeConcurrency)
 	)
 
 	for _, id := range arrIDs {
-		fetchErrMu.Lock()
-		curErr := fetchErr
-		fetchErrMu.Unlock()
-		if curErr != nil {
-			break
-		}
-
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(arrID int) {
@@ -349,17 +341,18 @@ func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, a
 			if err != nil {
 				slog.Error("backfill: fetch episodes", "component", "catalog_sync",
 					"arr_id", arrID, "error", err)
-				fetchErrMu.Lock()
-				if fetchErr == nil {
-					fetchErr = err
-				}
-				fetchErrMu.Unlock()
+				failCountMu.Lock()
+				failCount++
+				failCountMu.Unlock()
 				return
 			}
 			var batch []map[string]any
 			if err := json.Unmarshal(epData, &batch); err != nil {
 				slog.Error("backfill: parse episodes", "component", "catalog_sync",
 					"arr_id", arrID, "error", err)
+				failCountMu.Lock()
+				failCount++
+				failCountMu.Unlock()
 				return
 			}
 			allEpisodesMu.Lock()
@@ -369,8 +362,9 @@ func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, a
 	}
 	wg.Wait()
 
-	if fetchErr != nil {
-		return fmt.Errorf("sonarr episode fetch: %w", fetchErr)
+	if failCount > 0 {
+		slog.Warn("backfill sonarr: some episode fetches failed",
+			"component", "catalog_sync", "failed_series", failCount)
 	}
 
 	type seasonKey struct {
