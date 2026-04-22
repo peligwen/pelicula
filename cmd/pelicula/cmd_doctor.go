@@ -10,6 +10,20 @@ import (
 
 var errPattern = regexp.MustCompile(`(?i)(error|warn|fatal|panic)`)
 
+// filterErrorLines scans log output and returns lines that match the error
+// pattern (case-insensitive: error, warn, fatal, panic). Matching is by
+// substring, so "errored" also matches — this is intentional and reflects
+// the pattern used in the doctor output.
+func filterErrorLines(out []byte) []string {
+	var result []string
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		if errPattern.Match(line) {
+			result = append(result, string(line))
+		}
+	}
+	return result
+}
+
 func cmdDoctor(ctx *Context, _ []string) {
 	requireEnv(ctx.EnvFile)
 	ctx.LoadEnv()
@@ -45,14 +59,11 @@ func cmdDoctor(ctx *Context, _ []string) {
 		fmt.Println("(could not retrieve logs)")
 		return
 	}
-	matched := 0
-	for _, line := range bytes.Split(out, []byte("\n")) {
-		if errPattern.Match(line) {
-			fmt.Println(string(line))
-			matched++
-		}
+	lines := filterErrorLines(out)
+	for _, line := range lines {
+		fmt.Println(line)
 	}
-	if matched == 0 {
+	if len(lines) == 0 {
 		fmt.Println("(no error or warning lines found)")
 	}
 }
