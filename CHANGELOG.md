@@ -10,6 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - **Network dashboard drawer** — replaced the packet-capture-based connections list with a per-container bandwidth panel (Container / In / Out / Route). Backed by Docker stats through the existing docker-socket-proxy; no new container privileges. VPN-routed containers are flagged via a static membership list.
+- **Webhook secret delivery** — `WEBHOOK_SECRET` is now sent via the `X-Webhook-Secret` request header instead of a `?secret=` URL query parameter. The header is injected by `wireImportWebhook()` when auto-wiring Radarr/Sonarr; the middleware validates it with `crypto/subtle.ConstantTimeCompare`. Existing installs without `WEBHOOK_SECRET` set continue to work (check is skipped when env var is unset).
+- **Remote vhost CSP** — both `nginx/remote.conf.template` (full mode) and `nginx/remote-simple.conf.template` (simple mode) now emit a `Content-Security-Policy` header on all responses.
+
+### Added
+- **Simple mode remote vhost** (`nginx/remote-simple.conf.template`) — static nginx config for `REMOTE_ACCESS_ENABLED=true` without a hostname. Self-signed cert, `server_name _`, no ACME/certbot, no HSTS. TV apps and native Jellyfin clients accept self-signed certs. Enable via Settings UI → Remote access, leave hostname blank.
 
 ### Removed
 - **`netcap` sidecar** — the raw-packet-capture container (`NET_ADMIN`/`NET_RAW`) and its `127.0.0.1:2375` host-gateway plumbing are gone. The dashboard's network view no longer shows individual connections or destination hosts; bandwidth totals replace them. The `/api/pelicula/network` endpoint keeps its path but returns a new shape (see API.md).

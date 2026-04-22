@@ -42,7 +42,7 @@ Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no C
    - Complete Jellyfin setup wizard
    - Add Movies + TV libraries to Jellyfin
    - Wire import webhooks into Radarr + Sonarr (`wireImportWebhook()`)
-5. Start the missing content watcher (2-minute interval) — auto-searches monitored items with no files
+5. Start the missing content watcher (10-minute interval) — auto-searches monitored items with no files
 6. Serve the HTTP API
 
 ## Config Seeding and Auth Enforcement
@@ -50,7 +50,7 @@ Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no C
 On every `pelicula up`, the Go CLI (`cmd/pelicula/`):
 
 - **Seeds** config files that are missing (UrlBase, auth settings, qBittorrent subnet bypass, Jellyfin BaseUrl). Seeding is idempotent — existing files are left alone.
-- **`enforce_arr_auth()`** patches any existing `*arr` `config.xml` where `AuthenticationRequired=Enabled` back to `DisabledForLocalAddresses`. This prevents the *arr apps from locking the user out: on first boot, *arr writes its own config on top of the seeded file, re-enabling auth. The enforcement pass corrects this every time the stack starts.
+- **`enforceArrConfig()`** patches any existing `*arr` `config.xml` where `AuthenticationRequired=Enabled` back to `DisabledForLocalAddresses`. This prevents the *arr apps from locking the user out: on first boot, *arr writes its own config on top of the seeded file, re-enabling auth. The enforcement pass corrects this every time the stack starts.
 
 ## VPN-Routed Services
 
@@ -83,12 +83,14 @@ Platform affects:
 
 ```
 nginx/
-  nginx.conf            reverse proxy config, path-based routing, no-cache on dashboard
-  index.html            dashboard: search, pipeline/monitoring, settings tab, job drawer, event log
-  dashboard.js          dashboard logic: search, pipeline, settings, registration, user management
-  styles.css            dashboard styles
-  register.html/js      registration page (invite flow, open registration, initial setup)
-  setup.html/css        browser-based setup wizard (served when SETUP_MODE=true)
-  import.html           redirect shim: /import → /#storage-explorer (wizard moved into dashboard 2026-04; URL kept for CLI and bookmarks)
-  remote.conf.template  envsubst template for the Peligrosa remote vhost (see PELIGROSA.md)
+  nginx.conf              reverse proxy config, path-based routing, no-cache on dashboard
+  index.html              dashboard: search, pipeline/monitoring, settings tab, job drawer, event log
+  dashboard.js            dashboard logic: search, pipeline, settings, registration, user management
+  styles.css              dashboard styles
+  register.html/js        registration page (invite flow, open registration, initial setup)
+  setup.html/css          browser-based setup wizard (served when SETUP_MODE=true)
+  import.html             redirect shim: /import → /#storage-explorer (wizard moved into dashboard 2026-04; URL kept for CLI and bookmarks)
+  remote.conf.template    envsubst template for the Peligrosa remote vhost — full mode (hostname + Let's Encrypt / BYO cert)
+  remote-simple.conf.template  static config for simple mode (no hostname, self-signed cert); written verbatim, no substitution
 ```
+(selected — not exhaustive)

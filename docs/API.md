@@ -20,7 +20,7 @@ Auth levels: **Admin** = session with admin role; **Manager+** = manager or admi
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | `GET` | `/api/pelicula/downloads` | Viewer+ | Current torrent list |
-| `POST` | `/api/pelicula/downloads/pause` | Admin | Pause/resume via qBittorrent stop/start API (v5+) |
+| `POST` | `/api/pelicula/downloads/pause` | Manager+ | Pause/resume via qBittorrent stop/start API (v5+) |
 | `POST` | `/api/pelicula/downloads/cancel` | Admin | Remove torrent + files, remove from *arr queue, unmonitor item. Optional `blocklist: true` |
 
 ## Settings and Setup
@@ -45,9 +45,14 @@ Auth levels: **Admin** = session with admin role; **Manager+** = manager or admi
 | `POST` | `/api/pelicula/users/:id` | Admin | Reset password |
 | `GET` | `/api/pelicula/invites` | Admin | List active invite links |
 | `POST` | `/api/pelicula/invites` | Admin | Create invite link |
-| `GET` | `/api/pelicula/invites/:token` | Public | Check invite validity |
+| `GET` | `/api/pelicula/invites/:token/check` | Public | Check invite validity |
 | `POST` | `/api/pelicula/invites/:token/redeem` | Public (invite gated) | Self-service viewer registration |
-| `GET` | `/api/pelicula/sessions` | Admin | Active Jellyfin sessions (now-playing card) |
+| `POST` | `/api/pelicula/invites/:token/revoke` | Admin | Revoke an active invite |
+| `DELETE` | `/api/pelicula/invites/:token` | Admin | Hard-delete an invite record |
+| `GET` | `/api/pelicula/register/check` | Public | Check whether open registration is enabled |
+| `GET` | `/api/pelicula/generate-password` | Public | Generate a random suggested password |
+| `POST` | `/api/pelicula/register` | Public (LAN-only) | Open registration — create viewer account without invite token. Requires local Origin. |
+| `GET` | `/api/pelicula/sessions` | Viewer+ | Active Jellyfin sessions (now-playing card) |
 
 ## Dashboard Data
 
@@ -67,7 +72,7 @@ Auth levels: **Admin** = session with admin role; **Manager+** = manager or admi
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| `POST` | `/api/pelicula/hooks/import` | Internal | Receives Radarr/Sonarr import webhooks, normalizes payload, forwards to Procula. Auto-wired by `wireImportWebhook()`. Validates `WEBHOOK_SECRET` query param when set in `.env` |
+| `POST` | `/api/pelicula/hooks/import` | Internal | Receives Radarr/Sonarr import webhooks, normalizes payload, forwards to Procula. Auto-wired by `wireImportWebhook()`. Validates `X-Webhook-Secret` request header against `WEBHOOK_SECRET` in `.env` (check skipped when env var is unset, for backward compat) |
 | `POST` | `/api/pelicula/jellyfin/refresh` | Internal | Triggers Jellyfin library scan. Called by Procula; requires `X-API-Key: <PROCULA_API_KEY>` |
 
 ## Procula API (port 8282, proxied at /api/procula/)

@@ -29,7 +29,7 @@ Radarr/Sonarr                   pelicula-api                    Procula (:8282)
 
 Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives these at `POST /api/pelicula/hooks/import`, normalizes the payload, and forwards it to Procula's job queue (`POST /api/procula/jobs`). This keeps Procula decoupled — it never talks to the *arr apps directly. The middleware remains the single coordination point.
 
-**Webhook authentication:** The import hook is protected by a shared secret (`WEBHOOK_SECRET` in `.env`), appended as `?secret=<value>` to the autowired Sonarr/Radarr webhook URL. The nginx config also restricts the route to the Docker internal network (172.16.0.0/12). Existing installs without `WEBHOOK_SECRET` in `.env` continue to work (the check is skipped when the env var is unset).
+**Webhook authentication:** The import hook is protected by a shared secret (`WEBHOOK_SECRET` in `.env`). The autowired Sonarr/Radarr webhook URL does not embed the secret; instead, it is delivered via the `X-Webhook-Secret` request header. The nginx config also restricts the route to the Docker internal network (172.16.0.0/12). Existing installs without `WEBHOOK_SECRET` in `.env` continue to work (the check is skipped when the env var is unset).
 
 ### Service layout
 
@@ -38,7 +38,7 @@ Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives t
 | `procula` | 8282 | Job queue, pipeline orchestration, FFmpeg processing, storage management |
 | `pelicula-api` | 8181 | Receives webhooks, forwards jobs, serves dashboard data, proxies Procula status |
 
-Procula runs as a single Go binary with FFmpeg installed in the container image (Alpine + FFmpeg). No external Go dependencies (stdlib only).
+Procula runs as a single Go binary with FFmpeg installed in the container image (Alpine + FFmpeg). Procula's single external Go dependency is `modernc.org/sqlite` (pure-Go SQLite driver, no CGO).
 
 Bazarr (subtitle acquisition) is integrated — see the Await Subs stage below.
 
@@ -71,22 +71,25 @@ procula:
 ### Dockerfile
 
 ```dockerfile
-FROM golang:1.23-alpine AS build
-RUN apk add --no-cache gcc musl-dev
+FROM golang:1.25-alpine AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
-RUN CGO_ENABLED=1 go build -o procula .
+COPY cmd/ ./cmd/
+RUN go build -o procula ./cmd/procula/
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates ffmpeg ffprobe
+RUN apk add --no-cache ca-certificates ffmpeg
+WORKDIR /
 COPY --from=build /app/procula /usr/local/bin/
 EXPOSE 8282
 CMD ["procula"]
 ```
 
-**Queue implementation:** Jobs are persisted in SQLite (`procula.db`, tables: `jobs`, `settings`) via `modernc.org/sqlite` (pure-Go driver, no CGO). On first startup, any existing JSON job files in `/config/procula/jobs/` are migrated automatically (idempotent). The single-goroutine worker means there is no lock contention beyond standard SQLite serialized writes.
+No CGO — pure-Go build. FFprobe is bundled as part of the `ffmpeg` Alpine package.
+
+**Queue implementation:** Jobs are persisted in SQLite (`procula.db`, tables: `jobs`, `settings`) via `modernc.org/sqlite` (pure-Go SQLite driver, no CGO — Procula's single external Go dependency). On first startup, any existing JSON job files in `/config/procula/jobs/` are migrated automatically (idempotent). The single-goroutine worker means there is no lock contention beyond standard SQLite serialized writes.
 
 ## API Endpoints
 
@@ -188,21 +191,13 @@ ffmpeg -i input.mkv -af loudnorm=I=-14:TP=-2:LRA=7 ...
 
 After processing completes:
 
-1. **Trigger Jellyfin scan** — `POST /jellyfin/Library/Refresh` (Jellyfin API)
+1. **Trigger Jellyfin scan** — Procula calls `POST /api/pelicula/jellyfin/refresh` on pelicula-api, which proxies the Jellyfin library scan. Authenticated via `X-API-Key: <PROCULA_API_KEY>`.
 2. **Verify Jellyfin picked it up** — poll `GET /jellyfin/Items?searchTerm=...` until the item appears (timeout after 60s)
 3. **Update job record** — mark as completed with metadata (final file paths, sizes, codecs, duration)
-4. **Notification** (if configured) — webhook to user-configured URL with payload:
-   ```json
-   {
-     "event": "ready",
-     "title": "The Voice of Hind Rajab",
-     "year": 2025,
-     "quality": "2160p",
-     "type": "movie",
-     "url": "http://localhost:7354/jellyfin/..."
-   }
-   ```
-   Supports: Slack webhook, Discord webhook, Gotify, generic HTTP POST. Configured via `/config/procula/notifications.json`.
+4. **Notification** (if configured) — sends an external notification with the event payload. Three notification modes, configured via `/config/procula/notifications.json` (or the Settings UI):
+   - **`internal`** (default) — notification stored in the dashboard feed only; no external call
+   - **`apprise`** — forwards to the Apprise container at `http://apprise:8000/notify` using provider URLs (e.g. `ntfy://topic`, `gotify://host/token`). Apprise supports dozens of services; see [Apprise docs](https://github.com/caronc/apprise) for the full URL schema.
+   - **`direct`** — POST to a single arbitrary webhook URL as JSON. Compatible with ntfy HTTP API, Gotify, and generic webhook receivers.
 
 ### Stage 4: Storage Management
 
@@ -282,24 +277,31 @@ location /bazarr {
 
 ## File Structure
 
+(abbreviated — not exhaustive)
+
 ```
 procula/
   Dockerfile
   go.mod
-  main.go               # HTTP server, route registration
+  cmd/
+    procula/
+      main.go           # Entry point: HTTP server startup, route registration
+  main.go               # Package-level HTTP route wiring
   db.go                 # SQLite schema, migration, job/settings CRUD
-  db_test.go
   migrate_json.go       # One-time migration from legacy JSON job files
-  migrate_json_test.go
   queue.go              # Job queue: create, list, update (backed by db.go)
   pipeline.go           # Stage orchestration: validate -> process -> catalog
   validate.go           # FFprobe checks, sample detection, duration sanity
   process.go            # FFmpeg transcoding, extraction, audio normalization
-  catalog.go            # Jellyfin refresh, verification, notifications
+  catalog.go            # Jellyfin refresh (via pelicula-api), notifications
   storage.go            # Disk monitoring, tiered storage, retention, dedup detection
   profiles.go           # Transcode profile CRUD
   dualsub.go            # Dual-subtitle ASS sidecar generation
-  dualsub_test.go
+  settings.go           # Procula settings (SQLite-backed)
+  actions.go            # Action bus handler registrations
+  events.go             # SSE pipeline event streaming
+  libraries.go          # Library management
+  updates.go            # Update check
 ```
 
 ## Job Schema
