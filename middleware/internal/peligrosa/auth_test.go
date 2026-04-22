@@ -546,8 +546,8 @@ func TestSession_CookieAttributes(t *testing.T) {
 			if !c.HttpOnly {
 				t.Error("HttpOnly should be true")
 			}
-			if c.SameSite != http.SameSiteLaxMode {
-				t.Errorf("SameSite = %v, want Lax", c.SameSite)
+			if c.SameSite != http.SameSiteStrictMode {
+				t.Errorf("SameSite = %v, want Strict", c.SameSite)
 			}
 			// Expiry should be ~24h from now
 			if time.Until(c.Expires) < 23*time.Hour {
@@ -1073,5 +1073,37 @@ func TestRolesStore_RoundTrip(t *testing.T) {
 	// Unknown ID
 	if _, ok := rs2.Lookup("unknown"); ok {
 		t.Error("Lookup of unknown ID should return false")
+	}
+}
+
+// ── Cookie SameSite=Strict (F6) ───────────────────────────────────────────────
+
+// TestLogin_SessionCookie_SameSiteStrict asserts that a successful login sets
+// Set-Cookie with SameSite=Strict.
+func TestLogin_SessionCookie_SameSiteStrict(t *testing.T) {
+	_, jc := fakeJellyfinAuthServer(t, true, false)
+	a := newTestJellyfinAuth(t, nil, jc)
+
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var found bool
+	for _, c := range w.Result().Cookies() {
+		if c.Name != "pelicula_session" {
+			continue
+		}
+		found = true
+		if c.SameSite != http.SameSiteStrictMode {
+			t.Errorf("SameSite = %v, want SameSiteStrictMode", c.SameSite)
+		}
+	}
+	if !found {
+		t.Error("pelicula_session cookie not found in login response")
 	}
 }

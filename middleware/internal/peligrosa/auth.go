@@ -312,7 +312,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  expiry,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 		Secure:   secure,
 	})
 

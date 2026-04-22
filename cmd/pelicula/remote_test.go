@@ -87,6 +87,9 @@ func TestRenderRemoteConfigs_SimpleMode(t *testing.T) {
 	if strings.Contains(conf, "listen 80") {
 		t.Error("remote.conf must NOT contain 'listen 80' in simple mode")
 	}
+	if !strings.Contains(conf, "Content-Security-Policy") {
+		t.Error("remote.conf should contain Content-Security-Policy header in simple mode")
+	}
 
 	// Assert self-signed certs were generated
 	certDir := filepath.Join(configDir, "certs", "remote")
@@ -157,6 +160,12 @@ func TestRenderRemoteConfigs_FullMode(t *testing.T) {
 	}
 	if !strings.Contains(conf, "add_header Strict-Transport-Security") {
 		t.Error("remote.conf should contain HSTS add_header directive in full mode")
+	}
+	if !strings.Contains(conf, "includeSubDomains") {
+		t.Error("remote.conf HSTS header should contain includeSubDomains in full mode")
+	}
+	if !strings.Contains(conf, "Content-Security-Policy") {
+		t.Error("remote.conf should contain Content-Security-Policy header in full mode")
 	}
 
 	// Read compose overlay and check full-mode port bindings
