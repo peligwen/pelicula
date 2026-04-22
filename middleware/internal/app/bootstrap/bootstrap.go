@@ -5,6 +5,8 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"os"
@@ -48,11 +50,53 @@ import (
 // envPath is the canonical path to the .env file inside the pelicula container.
 const envPath = "/project/.env"
 
+// ensureWebhookSecret generates a WEBHOOK_SECRET and writes it to envFile when
+// the variable is unset or empty, then sets it in the process environment so
+// subsequent os.Getenv calls (e.g. in autowire) pick it up. If WEBHOOK_SECRET
+// is already set the file and env are left untouched.
+// Exported as an unexported helper so it can be unit-tested without constructing
+// a full App. Extracted as a named function to make the bootstrap code readable.
+func ensureWebhookSecret(envFile string) error {
+	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
+		return nil // already set via env or a prior call
+	}
+
+	vars, err := settings.ParseEnvFile(envFile)
+	if err != nil {
+		// .env may not exist yet (first boot before setup wizard runs). Skip.
+		return nil //nolint:nilerr
+	}
+
+	if existing := strings.TrimSpace(vars["WEBHOOK_SECRET"]); existing != "" {
+		// Present in file but not in the process env — export it and return.
+		return os.Setenv("WEBHOOK_SECRET", existing)
+	}
+
+	// Generate 32 random bytes → 64-character hex string.
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	secret := hex.EncodeToString(b)
+
+	vars["WEBHOOK_SECRET"] = secret
+	if err := settings.WriteEnvFile(envFile, vars); err != nil {
+		return err
+	}
+	slog.Info("generated WEBHOOK_SECRET", "component", "bootstrap")
+	return os.Setenv("WEBHOOK_SECRET", secret)
+}
+
 // New constructs the full App from cfg. genPassword is injected by cmd/ because
 // the passphrase wordlist lives in cmd/pelicula-api/wordlist.go. Returns an
 // error if any required resource (DB, etc.) cannot be opened.
 func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 	urls := cfg.URLs
+
+	// Ensure WEBHOOK_SECRET is set; generate and persist one when absent.
+	if err := ensureWebhookSecret(envPath); err != nil {
+		slog.Warn("could not ensure WEBHOOK_SECRET", "component", "bootstrap", "error", err)
+	}
 
 	// Read jellyfinKey from env file if not already in cfg.
 	jellyfinKey := cfg.JellyfinAPIKey
