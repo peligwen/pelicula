@@ -29,6 +29,10 @@ var envKeyOrder = []string{
 	"TRANSCODING_ENABLED",
 	"NOTIFICATIONS_ENABLED",
 	"NOTIFICATIONS_MODE",
+	"REMOTE_MODE",
+	"CLOUDFLARE_TUNNEL_TOKEN",
+	"TAILSCALE_AUTH_KEY",
+	"TAILSCALE_HOSTNAME",
 	"PELICULA_PROJECT_NAME",
 }
 
@@ -184,6 +188,13 @@ func MigrateEnv(path string) (bool, error) {
 	if _, ok := m["GLUETUN_HTTP_PASS"]; !ok {
 		m["GLUETUN_HTTP_PASS"] = generateAPIKey()
 		changed = true
+	}
+
+	// Migration 5: REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward
+	if m["REMOTE_ACCESS_ENABLED"] == "true" && m["REMOTE_MODE"] == "" {
+		m["REMOTE_MODE"] = "portforward"
+		changed = true
+		info("Migrated REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward")
 	}
 
 	if changed {

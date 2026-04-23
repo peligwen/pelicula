@@ -1,0 +1,25 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    restart: unless-stopped
+    hostname: ${TAILSCALE_HOSTNAME:-pelicula}
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTH_KEY}
+      - TS_EXTRA_ARGS=--advertise-tags=tag:pelicula
+      - TS_STATE_DIR=/var/lib/tailscale
+    volumes:
+      - ${CONFIG_DIR}/tailscale:/var/lib/tailscale
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - pelicula
+    depends_on:
+      - nginx
+
+networks:
+  pelicula:
+    name: pelicula
+    external: true

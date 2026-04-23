@@ -14,6 +14,7 @@ type Compose struct {
 	isSynology  bool
 	profiles    []string // active profiles (e.g. "vpn", "apprise")
 	projectName string   // --project-name passed to every docker compose invocation
+	remoteMode  string   // REMOTE_MODE: "", "portforward", "cloudflared", or "tailscale"
 }
 
 // NewCompose creates a Compose helper rooted at scriptDir.
@@ -82,9 +83,16 @@ func (c *Compose) buildArgs(extra ...string) []string {
 		args = append(args, "-f", override)
 	}
 
-	remote := filepath.Join(c.projectDir, "compose", "docker-compose.remote.yml")
-	if _, err := os.Stat(remote); err == nil {
-		args = append(args, "-f", remote)
+	switch c.remoteMode {
+	case "cloudflared":
+		args = append(args, "-f", filepath.Join(c.projectDir, "compose", "docker-compose.cloudflared.yml"))
+	case "tailscale":
+		args = append(args, "-f", filepath.Join(c.projectDir, "compose", "docker-compose.tailscale.yml"))
+	default: // "portforward" or "" — existing behaviour: include remote.yml if it exists
+		remote := filepath.Join(c.projectDir, "compose", "docker-compose.remote.yml")
+		if _, err := os.Stat(remote); err == nil {
+			args = append(args, "-f", remote)
+		}
 	}
 
 	libraries := filepath.Join(c.projectDir, "compose", "docker-compose.libraries.yml")

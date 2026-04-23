@@ -149,6 +149,62 @@ Enable via `the Settings UI → 8) Remote access`.
 
 ---
 
+## Alternative Remote Access Modes
+
+The port-forward remote vhost (above) is one option. Two additional tunnel-based modes are available as alternatives, selected via the `REMOTE_MODE` env var:
+
+| `REMOTE_MODE` | Mechanism | Required env vars |
+|---------------|-----------|-------------------|
+| `portforward` (or unset) | nginx remote vhost on a published port; `REMOTE_ACCESS_ENABLED=true` required | See "Remote Jellyfin Vhost" above |
+| `cloudflared` | Cloudflare Tunnel — no open ports required | `CLOUDFLARE_TUNNEL_TOKEN` |
+| `tailscale` | Tailscale sidecar — devices on the tailnet reach nginx directly | `TAILSCALE_AUTH_KEY`, optionally `TAILSCALE_HOSTNAME` |
+
+### Cloudflare Tunnel (`REMOTE_MODE=cloudflared`)
+
+1. Create a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) and copy the tunnel token.
+2. Set `REMOTE_MODE=cloudflared` and `CLOUDFLARE_TUNNEL_TOKEN=<token>` in `.env`.
+3. Run `pelicula up` — a `cloudflared` container joins the `pelicula` Docker network and connects outbound to Cloudflare's edge.
+
+**Routing:** The `cloudflared` container proxies all of nginx (`:7354`). Configure the public hostname ingress rules in the Cloudflare dashboard to route **only** your desired path (e.g. `https://jellyfin.example.com → http://nginx:7354/jellyfin/`) — no admin routes should be pointed at the tunnel. nginx's existing auth gates still apply for any path that does reach it, but Cloudflare-side routing is the primary exposure control here.
+
+**No open ports required.** The tunnel is an outbound-only connection from `cloudflared` to Cloudflare's network. No ports need to be forwarded on your router.
+
+### Tailscale (`REMOTE_MODE=tailscale`)
+
+1. Generate an auth key in the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys) (reusable key recommended for restarts).
+2. Set `REMOTE_MODE=tailscale`, `TAILSCALE_AUTH_KEY=<key>`, and optionally `TAILSCALE_HOSTNAME=pelicula` in `.env`.
+3. Run `pelicula up` — a `tailscale` sidecar joins the `pelicula` Docker network and registers with your tailnet.
+
+**Routing:** The Tailscale node exposes nginx on its tailnet IP. Family members with the Tailscale app installed can reach `http://<tailnet-ip>:7354/jellyfin/` from any device. Access is restricted to devices enrolled in your tailnet — Tailscale's ACL policies provide the security boundary.
+
+**Security note:** Tailscale exposes all of nginx to tailnet members (including `/api/pelicula/`). If your tailnet has members you don't fully trust, configure Tailscale ACL policies to restrict access to port 7354, or rely on Pelicula's own auth layer (every path is auth-gated for non-loopback, non-LAN clients).
+
+### Security surface comparison
+
+All three modes ultimately proxy the same nginx instance. The difference is which paths are reachable from the internet:
+
+- **Port-forward mode:** nginx's remote vhost is a separate hardened listener that exposes only `/jellyfin/`. Admin routes are unreachable by design.
+- **Cloudflare Tunnel:** The tunnel proxies all of nginx. Cloudflare dashboard ingress rules are the exposure gate — configure them to expose only `/jellyfin/`.
+- **Tailscale:** All of nginx is reachable on the tailnet. Tailscale enrollment and ACL policies are the exposure gate. All Pelicula routes remain auth-gated.
+
+For the strictest isolation from the public internet, port-forward mode with the hardened remote vhost remains the recommended approach. For simplicity (no port forwarding, no DNS setup), Cloudflare Tunnel or Tailscale are good alternatives when you control who is on the tailnet / tunnel.
+
+---
+
+## Deferred hardening backlog
+
+These items are tracked but deferred — low risk for a home LAN stack, but worth picking up
+if the stack is exposed to the public internet.
+
+- **fail2ban / nginx IP banning** — ban IPs after repeated 401s on the remote vhost.
+  Trigger condition: adding a second authenticated public surface.
+- **GeoIP country allowlist** — reject requests from outside allowed countries at nginx.
+  Trigger condition: repeated unwanted traffic from outside the owner's country.
+- **CSP audit** — review and tighten Content-Security-Policy headers across all vhosts.
+  Trigger condition: before shipping any user-generated content rendering.
+
+---
+
 ## Known Limitations
 
 - **WireGuard private key** and API keys are stored in `.env` in plaintext on the host. ``pelicula up` (first-run setup)` sets `chmod 600`, but anyone with host access can read it.

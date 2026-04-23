@@ -69,5 +69,6 @@ func composeInvocation(ctx *Context) *Compose {
 	if envDefault(ctx.Env, "NOTIFICATIONS_MODE", "internal") == "apprise" {
 		c.profiles = append(c.profiles, "apprise")
 	}
+	c.remoteMode = ctx.Env["REMOTE_MODE"] // "" means portforward (existing behaviour)
 	return c
 }
