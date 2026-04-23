@@ -15,7 +15,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Simple mode remote vhost** (`nginx/remote-simple.conf.template`) — static nginx config for `REMOTE_ACCESS_ENABLED=true` without a hostname. Self-signed cert, `server_name _`, no ACME/certbot, no HSTS. TV apps and native Jellyfin clients accept self-signed certs. Enable via Settings UI → Remote access, leave hostname blank.
-- **Default Prowlarr indexers** (closes #10) — after Prowlarr wiring succeeds, pelicula seeds a curated list of public indexers (1337x, YTS) via the Prowlarr API. Idempotent; skips already-present indexers. Opt-out via `SeedIndexers: false` in autowire config.
 - **Cloudflare Tunnel remote access** (closes #7) — new `REMOTE_MODE=cloudflared` option adds a `cloudflare/cloudflared` sidecar that tunnels nginx traffic without open ports. Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`.
 - **Tailscale remote access** (closes #7) — new `REMOTE_MODE=tailscale` option adds a Tailscale sidecar for mesh-VPN access. Set `TAILSCALE_AUTH_KEY` (and optionally `TAILSCALE_HOSTNAME`) in `.env`.
 

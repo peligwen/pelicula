@@ -81,7 +81,6 @@ type Autowirer struct {
 	webhookSecret string
 	subLangs      string // PELICULA_SUB_LANGS env value
 	audioLang     string // PELICULA_AUDIO_LANG env value (unused here, for Jellyfin)
-	seedIndexers  bool   // whether to seed default Prowlarr indexers on wiring
 	getLibraries  func() []Library
 	wireJellyfin  func() // callback into cmd/ for Jellyfin-specific wiring
 	invalidateIdx func() // callback to clear indexer count cache
@@ -96,9 +95,6 @@ type Config struct {
 	WebhookSecret string
 	SubLangs      string
 	AudioLang     string
-	// SeedIndexers controls whether seedDefaultIndexers runs after Prowlarr wiring.
-	// Pass true in production; the zero value disables seeding (useful in tests).
-	SeedIndexers bool
 	// GetLibraries returns the current library slice (called at wiring time).
 	GetLibraries func() []Library
 	// WireJellyfin is called during Run() to wire Jellyfin.
@@ -120,7 +116,6 @@ func NewAutowirer(cfg Config) (*Autowirer, *AutowireState) {
 		webhookSecret: cfg.WebhookSecret,
 		subLangs:      cfg.SubLangs,
 		audioLang:     cfg.AudioLang,
-		seedIndexers:  cfg.SeedIndexers,
 		getLibraries:  cfg.GetLibraries,
 		wireJellyfin:  cfg.WireJellyfin,
 		invalidateIdx: cfg.InvalidateIndexerCache,
@@ -173,9 +168,6 @@ func (a *Autowirer) Run(ctx context.Context) error {
 			radarrWired = a.wireDownloadClient("Radarr", a.urls.Radarr, radarrKey, "/api/v3", "radarr")
 			prowlarrWired = a.wireProwlarrApp("Sonarr", a.urls.Sonarr, sonarrKey) &&
 				a.wireProwlarrApp("Radarr", a.urls.Radarr, radarrKey)
-			if prowlarrWired {
-				a.seedDefaultIndexers()
-			}
 		}
 	} else {
 		slog.Info("VPN not configured — skipping download client and indexer wiring", "component", "autowire")
