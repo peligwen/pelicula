@@ -318,6 +318,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 		WebhookSecret: strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")),
 		SubLangs:      cfg.SubLangs,
 		AudioLang:     cfg.AudioLang,
+		SeedIndexers:  true,
 		GetLibraries: func() []autowire.Library {
 			libs := libHandler.GetLibraries()
 			out := make([]autowire.Library, 0, len(libs))
