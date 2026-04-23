@@ -15,9 +15,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Simple mode remote vhost** (`nginx/remote-simple.conf.template`) — static nginx config for `REMOTE_ACCESS_ENABLED=true` without a hostname. Self-signed cert, `server_name _`, no ACME/certbot, no HSTS. TV apps and native Jellyfin clients accept self-signed certs. Enable via Settings UI → Remote access, leave hostname blank.
+- **Default Prowlarr indexers** (closes #10) — after Prowlarr wiring succeeds, pelicula seeds a curated list of public indexers (1337x, YTS) via the Prowlarr API. Idempotent; skips already-present indexers. Opt-out via `SeedIndexers: false` in autowire config.
+- **Cloudflare Tunnel remote access** (closes #7) — new `REMOTE_MODE=cloudflared` option adds a `cloudflare/cloudflared` sidecar that tunnels nginx traffic without open ports. Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`.
+- **Tailscale remote access** (closes #7) — new `REMOTE_MODE=tailscale` option adds a Tailscale sidecar for mesh-VPN access. Set `TAILSCALE_AUTH_KEY` (and optionally `TAILSCALE_HOSTNAME`) in `.env`.
 
 ### Removed
 - **`netcap` sidecar** — the raw-packet-capture container (`NET_ADMIN`/`NET_RAW`) and its `127.0.0.1:2375` host-gateway plumbing are gone. The dashboard's network view no longer shows individual connections or destination hosts; bandwidth totals replace them. The `/api/pelicula/network` endpoint keeps its path but returns a new shape (see API.md).
+
+### Fixed
+- **Stack-restart response flush** (closes #6) — `HandleStackRestart` now calls `http.Flusher.Flush()` before launching the self-restart goroutine, eliminating a race where the response might not reach the client before the process exits.
+- **Admin API nginx rate limit** (closes #6) — `/api/pelicula/admin/` routes are now behind a dedicated `limit_req` zone (30 req/min, burst 10) at the nginx layer.
+- **ffprobe context propagation** (closes #8) — `probeSubStreams` and `runFFprobe` now accept `context.Context`; HTTP handler deadlines and job cancellations propagate to the ffprobe subprocess, preventing indefinite hangs on stalled media files.
+- **Dualsub warning messages** (closes #9) — fixed `<nil>` appearing in dualsub warning messages when a subtitle track was present but empty. Messages now distinguish "load error" from "no cues found".
+- **Dualsub JSON sentinel leak** (closes #9) — `TrackPair` no longer emits `top_sub_index: -1` / `bottom_sub_index: -1` in JSON when using sidecar files; fields are now `*int` with omitempty.
+- **Dualsub JS filter** (closes #9) — replaced implicit `undefined >= 0` coercion with explicit `'top_sub_index' in p` property checks in the browser-side pair filter.
 
 ---
 
