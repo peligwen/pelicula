@@ -4,15 +4,23 @@ import (
 	"log/slog"
 	"net/http"
 	"pelicula-api/httputil"
-	"pelicula-api/internal/clients/docker"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// DockerClient is the minimal Docker proxy interface required by Handler.
+// *docker.Client (from pelicula-api/internal/clients/docker) satisfies it;
+// tests may substitute a fake.
+type DockerClient interface {
+	IsAllowed(name string) bool
+	Restart(name string) error
+	Logs(name string, tail int, timestamps bool) ([]byte, error)
+}
+
 // Handler owns the admin ops dependencies.
 type Handler struct {
-	Docker    *docker.Client                     // internal/clients/docker
+	Docker    DockerClient                       // internal/clients/docker (or test fake)
 	sessionFn func(*http.Request) (string, bool) // may be nil (no-auth mode)
 	limiter   *rateLimiter                       // unexported; initialized in New
 }
@@ -25,7 +33,7 @@ type Handler struct {
 //	    username, _, ok := auth.SessionFor(r)
 //	    return username, ok
 //	}
-func New(dockerClient *docker.Client, sessionFn func(*http.Request) (string, bool)) *Handler {
+func New(dockerClient DockerClient, sessionFn func(*http.Request) (string, bool)) *Handler {
 	return &Handler{
 		Docker:    dockerClient,
 		sessionFn: sessionFn,
@@ -96,10 +104,13 @@ func (h *Handler) HandleStackRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditLog(r, "stack_restart", "all", result)
 	httputil.WriteJSON(w, map[string]any{"ok": true, "errors": errs})
-	// Restart ourselves last — response has already been sent above (flush happens
-	// after httputil.WriteJSON returns). Give it 500ms.
+	// Flush response to client before restarting ourselves.
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	} else {
+		time.Sleep(100 * time.Millisecond) // fallback if writer doesn't support flush
+	}
 	go func() {
-		time.Sleep(500 * time.Millisecond)
 		h.Docker.Restart("pelicula-api") //nolint:errcheck — we won't be here to log it
 	}()
 }
