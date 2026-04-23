@@ -1,6 +1,7 @@
 package procula
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -431,5 +432,22 @@ func TestValidate_FullPass(t *testing.T) {
 	}
 	if result.Checks.Codecs.Audio != "aac" {
 		t.Errorf("audio codec = %q, want aac", result.Checks.Codecs.Audio)
+	}
+}
+
+// TestRunFFprobe_CancelledContext verifies that a pre-cancelled context causes
+// runFFprobe to return an error immediately rather than blocking.
+func TestRunFFprobe_CancelledContext(t *testing.T) {
+	setupFakeFFprobe(t)
+	// Use "success" so the fake ffprobe would otherwise succeed — the test
+	// exercises context propagation, not ffprobe failure.
+	t.Setenv("GO_TEST_FFPROBE", "success")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before calling runFFprobe
+
+	_, err := runFFprobe(ctx, "/nonexistent/path")
+	if err == nil {
+		t.Error("expected error from runFFprobe with pre-cancelled context, got nil")
 	}
 }

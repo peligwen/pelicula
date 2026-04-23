@@ -377,7 +377,7 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 	} else {
 		// Validation stage didn't populate codec info (e.g. validation_enabled=false).
 		// Probe directly so transcoding works independently of the validate stage.
-		probe, err := runFFprobe(job.Source.Path)
+		probe, err := runFFprobe(ctx, job.Source.Path)
 		if err != nil {
 			slog.Warn("transcode: ffprobe failed, skipping",
 				"component", "pipeline", "job_id", job.ID, "error", err)

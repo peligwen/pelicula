@@ -240,27 +240,36 @@ func parseDualSubPairs(rawPairs []any) []TrackPair {
 			continue
 		}
 		var p TrackPair
-		p.TopSubIndex = -1
-		p.BottomSubIndex = -1
 
 		p.TopFile, _ = m["top_file"].(string)
 		p.BottomFile, _ = m["bottom_file"].(string)
 
 		if v, ok := m["top_sub_index"].(float64); ok {
-			p.TopSubIndex = int(v)
+			n := int(v)
+			p.TopSubIndex = &n
 		}
 		if v, ok := m["bottom_sub_index"].(float64); ok {
-			p.BottomSubIndex = int(v)
+			n := int(v)
+			p.BottomSubIndex = &n
 		}
 
 		// At least one source on each side
-		hasTop := p.TopFile != "" || p.TopSubIndex >= 0
-		hasBot := p.BottomFile != "" || p.BottomSubIndex >= 0
+		hasTop := p.TopFile != "" || p.TopSubIndex != nil
+		hasBot := p.BottomFile != "" || p.BottomSubIndex != nil
 		if hasTop && hasBot {
 			pairs = append(pairs, p)
 		}
 	}
 	return pairs
+}
+
+// derefSubIndex converts a *int TrackPair index to the int sentinel convention
+// used internally: nil → -1 (use file path), non-nil → the stream index.
+func derefSubIndex(p *int) int {
+	if p == nil {
+		return -1
+	}
+	return *p
 }
 
 // resolvePairCues loads subtitle cues from either a sidecar file or an embedded stream.
@@ -301,7 +310,7 @@ func runDualSubAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 	}
 
 	// Probe embedded streams (needed for sub_index resolution and lang tags)
-	streams, _ := probeSubStreams(path)
+	streams, _ := probeSubStreams(ctx, path)
 
 	rawPairs, _ := job.Params["pairs"].([]any)
 	pairs := parseDualSubPairs(rawPairs)
@@ -315,30 +324,48 @@ func runDualSubAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 	var outputs []string
 	var warnings []string
 	for _, pair := range pairs {
+		// Dereference *int sentinel fields; -1 means "not set, use file path".
+		topIdx := derefSubIndex(pair.TopSubIndex)
+		botIdx := derefSubIndex(pair.BottomSubIndex)
+
 		// Determine language tags for the output filename
-		topLang := pairSideLang(pair.TopFile, pair.TopSubIndex, streams)
-		botLang := pairSideLang(pair.BottomFile, pair.BottomSubIndex, streams)
+		topLang := pairSideLang(pair.TopFile, topIdx, streams)
+		botLang := pairSideLang(pair.BottomFile, botIdx, streams)
 		mediaBase := strings.TrimSuffix(path, filepath.Ext(path))
 		outPath := mediaBase + "." + topLang + "-" + botLang + ".ass"
 
 		os.Remove(outPath) //nolint:errcheck
 
-		topCues, err := resolvePairCues(ctx, path, pair.TopFile, pair.TopSubIndex)
-		if err != nil || len(topCues) == 0 {
+		topCues, err := resolvePairCues(ctx, path, pair.TopFile, topIdx)
+		if err != nil {
 			label := pair.TopFile
-			if pair.TopSubIndex >= 0 {
-				label = fmt.Sprintf("embedded:%d", pair.TopSubIndex)
+			if topIdx >= 0 {
+				label = fmt.Sprintf("embedded:%d", topIdx)
 			}
 			warnings = append(warnings, fmt.Sprintf("top track %s: %v", label, err))
 			continue
+		} else if len(topCues) == 0 {
+			label := pair.TopFile
+			if topIdx >= 0 {
+				label = fmt.Sprintf("embedded:%d", topIdx)
+			}
+			warnings = append(warnings, fmt.Sprintf("top track %s: no cues found", label))
+			continue
 		}
-		botCues, err := resolvePairCues(ctx, path, pair.BottomFile, pair.BottomSubIndex)
-		if err != nil || len(botCues) == 0 {
+		botCues, err := resolvePairCues(ctx, path, pair.BottomFile, botIdx)
+		if err != nil {
 			label := pair.BottomFile
-			if pair.BottomSubIndex >= 0 {
-				label = fmt.Sprintf("embedded:%d", pair.BottomSubIndex)
+			if botIdx >= 0 {
+				label = fmt.Sprintf("embedded:%d", botIdx)
 			}
 			warnings = append(warnings, fmt.Sprintf("bottom track %s: %v", label, err))
+			continue
+		} else if len(botCues) == 0 {
+			label := pair.BottomFile
+			if botIdx >= 0 {
+				label = fmt.Sprintf("embedded:%d", botIdx)
+			}
+			warnings = append(warnings, fmt.Sprintf("bottom track %s: no cues found", label))
 			continue
 		}
 

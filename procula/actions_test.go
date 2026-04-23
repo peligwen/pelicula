@@ -224,3 +224,93 @@ func TestLangTagFromBase(t *testing.T) {
 		}
 	}
 }
+
+// ── resolvePairCues ───────────────────────────────────────────────────────────
+
+func TestResolvePairCues_SidecarHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	srtFile := filepath.Join(dir, "movie.en.srt")
+	srtContent := "1\n00:00:01,000 --> 00:00:03,000\nHello\n\n"
+	if err := os.WriteFile(srtFile, []byte(srtContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cues, err := resolvePairCues(context.Background(), "/fake/movie.mkv", srtFile, -1)
+	if err != nil {
+		t.Fatalf("resolvePairCues: %v", err)
+	}
+	if len(cues) != 1 {
+		t.Fatalf("expected 1 cue, got %d", len(cues))
+	}
+	if cues[0].Text != "Hello" {
+		t.Errorf("cue[0].Text = %q, want %q", cues[0].Text, "Hello")
+	}
+}
+
+func TestResolvePairCues_SidecarNotFound(t *testing.T) {
+	_, err := resolvePairCues(context.Background(), "/fake/movie.mkv", "/nonexistent/sub.srt", -1)
+	if err == nil {
+		t.Fatal("expected error for nonexistent sidecar file")
+	}
+}
+
+func TestResolvePairCues_EmbeddedStream(t *testing.T) {
+	// Stub ffmpeg to write a minimal SRT to its output path.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	srtContent := "1\n00:00:01,000 --> 00:00:03,000\nEmbedded cue\n\n"
+	scriptBody := "#!/bin/sh\nfor last; do true; done\nprintf '%s' '" + srtContent + "' > \"$last\"\nexit 0\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0755); err != nil {
+		t.Fatal(err)
+	}
+	old := ffmpegCommand
+	ffmpegCommand = script
+	t.Cleanup(func() { ffmpegCommand = old })
+
+	cues, err := resolvePairCues(context.Background(), "/fake/movie.mkv", "", 0)
+	if err != nil {
+		t.Fatalf("resolvePairCues (embedded): %v", err)
+	}
+	if len(cues) == 0 {
+		t.Fatal("expected at least one cue from embedded stream")
+	}
+}
+
+// ── pairSideLang ─────────────────────────────────────────────────────────────
+
+func TestPairSideLang_FileWithLangCode(t *testing.T) {
+	got := pairSideLang("movie.en.srt", -1, nil)
+	if got != "en" {
+		t.Errorf("pairSideLang(file=movie.en.srt) = %q, want %q", got, "en")
+	}
+}
+
+func TestPairSideLang_EmbeddedStreamMatches(t *testing.T) {
+	streams := []subStream{
+		{SubIndex: 0, Lang: "en"},
+		{SubIndex: 1, Lang: "es"},
+	}
+	got := pairSideLang("", 1, streams)
+	if got != "es" {
+		t.Errorf("pairSideLang(subIndex=1) = %q, want %q", got, "es")
+	}
+}
+
+func TestPairSideLang_EmbeddedNoMatchFallsBackToUnd(t *testing.T) {
+	streams := []subStream{
+		{SubIndex: 0, Lang: "en"},
+	}
+	got := pairSideLang("", 5, streams)
+	if got != "und" {
+		t.Errorf("pairSideLang(subIndex=5, no match) = %q, want %q", got, "und")
+	}
+}
+
+func TestPairSideLang_FileNoLangCode(t *testing.T) {
+	got := pairSideLang("subtitles.srt", -1, nil)
+	// langTagFromBase("subtitles") → normalizeLangCode("subtitles") → "und" or some
+	// non-standard tag; either way it must not be empty.
+	if got == "" {
+		t.Errorf("pairSideLang(file=subtitles.srt) returned empty string, want a fallback tag")
+	}
+}

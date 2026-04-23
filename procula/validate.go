@@ -59,7 +59,9 @@ func Validate(job *Job) (result ValidationResult, failReason string) {
 	fileSize := info.Size()
 
 	// ── 2. FFprobe parse ─────────────────────────────────────────────────────
-	probe, probeErr := runFFprobe(path)
+	ffCtx, ffCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer ffCancel()
+	probe, probeErr := runFFprobe(ffCtx, path)
 	if probeErr != nil {
 		result.Checks.Integrity = "fail"
 		result.Checks.Duration = "skip"
@@ -89,10 +91,7 @@ func Validate(job *Job) (result ValidationResult, failReason string) {
 	return result, ""
 }
 
-func runFFprobe(path string) (*ffprobeOutput, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
+func runFFprobe(ctx context.Context, path string) (*ffprobeOutput, error) {
 	args := []string{
 		"-v", "quiet",
 		"-print_format", "json",

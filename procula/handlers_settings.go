@@ -1,12 +1,14 @@
 package procula
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +176,9 @@ func (s *Server) handleSubtitleTracks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var embedded []EmbeddedTrack
-	streams, err := probeSubStreams(clean)
+	probeCtx, probeCancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer probeCancel()
+	streams, err := probeSubStreams(probeCtx, clean)
 	if err == nil {
 		embedded = filterTextEmbeddedTracks(streams)
 	} else {

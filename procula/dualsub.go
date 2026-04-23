@@ -224,7 +224,7 @@ func GenerateDualSubs(ctx context.Context, job *Job, settings PipelineSettings, 
 
 // generatePair produces a single ASS sidecar for one language pair.
 func generatePair(ctx context.Context, job *Job, baseLang, secLang, outPath string, settings PipelineSettings, configDir string, prof DualSubProfile) (string, error) {
-	streams, err := probeSubStreams(job.Source.Path)
+	streams, err := probeSubStreams(ctx, job.Source.Path)
 	if err != nil {
 		return "", fmt.Errorf("probe: %w", err)
 	}
@@ -272,8 +272,8 @@ func generatePair(ctx context.Context, job *Job, baseLang, secLang, outPath stri
 
 // probeSubStreams re-runs ffprobe on the media file to collect subtitle stream
 // metadata including per-stream ordinal index for ffmpeg extraction.
-func probeSubStreams(mediaPath string) ([]subStream, error) {
-	probe, err := runFFprobe(mediaPath)
+func probeSubStreams(ctx context.Context, mediaPath string) ([]subStream, error) {
+	probe, err := runFFprobe(ctx, mediaPath)
 	if err != nil {
 		return nil, err
 	}

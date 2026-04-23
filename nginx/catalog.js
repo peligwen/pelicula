@@ -1161,7 +1161,8 @@ component('catalog', function (el, store, _props) {
                 pair.bottom_file = botVal;
             }
             return pair;
-        }).filter(p => (p.top_file || p.top_sub_index >= 0) && (p.bottom_file || p.bottom_sub_index >= 0));
+        }).filter(p => (p.top_file || ('top_sub_index' in p && p.top_sub_index >= 0))
+                  && (p.bottom_file || ('bottom_sub_index' in p && p.bottom_sub_index >= 0)));
 
         if (!pairs.length) { statusEl.textContent = 'Add at least one track pair.'; return; }
 

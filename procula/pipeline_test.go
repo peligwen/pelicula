@@ -140,7 +140,7 @@ func TestMaybeTranscode_Disabled(t *testing.T) {
 	q := newTestQueue(t)
 	job := &Job{Source: testSource("/fake/movie.mkv")}
 
-	if err := maybeTranscode(nil, q, job, t.TempDir()); err != nil {
+	if err := maybeTranscode(context.Background(), q, job, t.TempDir()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -156,7 +156,7 @@ func TestMaybeTranscode_NoValidation_ProbeFailureReturnsNil(t *testing.T) {
 	job := &Job{Source: testSource("/nonexistent/movie.mkv")}
 	// job.Validation is nil and the file doesn't exist, so runFFprobe will fail
 
-	if err := maybeTranscode(nil, q, job, t.TempDir()); err != nil {
+	if err := maybeTranscode(context.Background(), q, job, t.TempDir()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -189,7 +189,7 @@ func TestMaybeTranscode_NoValidation_ProbesAndTranscodes(t *testing.T) {
 	job, _ := q.Get(created.ID)
 	// Deliberately leave job.Validation nil to exercise the direct-probe path
 
-	if err := maybeTranscode(nil, q, job, cfgDir); err != nil {
+	if err := maybeTranscode(context.Background(), q, job, cfgDir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestMaybeTranscode_NoMatchingProfile(t *testing.T) {
 	}
 
 	// No profiles dir means no profiles loaded
-	if err := maybeTranscode(nil, q, job, cfgDir); err != nil {
+	if err := maybeTranscode(context.Background(), q, job, cfgDir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -251,7 +251,7 @@ func TestMaybeTranscode_Passthrough(t *testing.T) {
 		},
 	}
 
-	if err := maybeTranscode(nil, q, job, cfgDir); err != nil {
+	if err := maybeTranscode(context.Background(), q, job, cfgDir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

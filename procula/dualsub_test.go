@@ -587,7 +587,7 @@ func TestProbeSubStreams_WithSubtitleStreams(t *testing.T) {
 	ffprobeCommand = script
 	t.Cleanup(func() { ffprobeCommand = old })
 
-	streams, err := probeSubStreams("/fake/movie.mkv")
+	streams, err := probeSubStreams(context.Background(), "/fake/movie.mkv")
 	if err != nil {
 		t.Fatalf("probeSubStreams: %v", err)
 	}
@@ -621,7 +621,7 @@ func TestProbeSubStreams_NoBitmapSubs(t *testing.T) {
 	ffprobeCommand = script
 	t.Cleanup(func() { ffprobeCommand = old })
 
-	streams, err := probeSubStreams("/fake/movie.mkv")
+	streams, err := probeSubStreams(context.Background(), "/fake/movie.mkv")
 	if err != nil {
 		t.Fatalf("probeSubStreams: %v", err)
 	}
@@ -735,26 +735,26 @@ func TestParseTrackPairWithSubIndex(t *testing.T) {
 	if len(pairs) != 3 {
 		t.Fatalf("expected 3 pairs, got %d", len(pairs))
 	}
-	// Pair 0: both files
+	// Pair 0: both files — no embedded index set
 	if pairs[0].TopFile != "/movies/Movie/Movie.en.srt" {
 		t.Errorf("pair[0].TopFile = %q", pairs[0].TopFile)
 	}
-	if pairs[0].TopSubIndex != -1 {
-		t.Errorf("pair[0].TopSubIndex = %d, want -1", pairs[0].TopSubIndex)
+	if pairs[0].TopSubIndex != nil {
+		t.Errorf("pair[0].TopSubIndex = %v, want nil", pairs[0].TopSubIndex)
 	}
 	// Pair 1: both embedded
-	if pairs[1].TopSubIndex != 0 {
-		t.Errorf("pair[1].TopSubIndex = %d, want 0", pairs[1].TopSubIndex)
+	if pairs[1].TopSubIndex == nil || *pairs[1].TopSubIndex != 0 {
+		t.Errorf("pair[1].TopSubIndex = %v, want pointer to 0", pairs[1].TopSubIndex)
 	}
-	if pairs[1].BottomSubIndex != 1 {
-		t.Errorf("pair[1].BottomSubIndex = %d, want 1", pairs[1].BottomSubIndex)
+	if pairs[1].BottomSubIndex == nil || *pairs[1].BottomSubIndex != 1 {
+		t.Errorf("pair[1].BottomSubIndex = %v, want pointer to 1", pairs[1].BottomSubIndex)
 	}
 	// Pair 2: mixed — file top, embedded bottom
 	if pairs[2].TopFile != "/movies/Movie/Movie.en.srt" {
 		t.Errorf("pair[2].TopFile = %q", pairs[2].TopFile)
 	}
-	if pairs[2].BottomSubIndex != 2 {
-		t.Errorf("pair[2].BottomSubIndex = %d, want 2", pairs[2].BottomSubIndex)
+	if pairs[2].BottomSubIndex == nil || *pairs[2].BottomSubIndex != 2 {
+		t.Errorf("pair[2].BottomSubIndex = %v, want pointer to 2", pairs[2].BottomSubIndex)
 	}
 }
 
