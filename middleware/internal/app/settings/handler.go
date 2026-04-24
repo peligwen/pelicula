@@ -67,6 +67,8 @@ type settingsResponse struct {
 	RequestsSonarrRoot      string `json:"requests_sonarr_root"`
 	// Search
 	SearchMode string `json:"search_mode"` // "tmdb" (default) or "indexer"
+	// Jellyfin client discovery
+	LanUrl string `json:"lan_url"`
 }
 
 // HandleSettings dispatches GET (read settings) and POST (update settings).
@@ -129,6 +131,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		RequestsSonarrProfileID: vars["REQUESTS_SONARR_PROFILE_ID"],
 		RequestsSonarrRoot:      vars["REQUESTS_SONARR_ROOT"],
 		SearchMode:              vars["SEARCH_MODE"],
+		LanUrl:                  vars["JELLYFIN_PUBLISHED_URL"],
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -304,6 +307,13 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, "search_mode must be tmdb or indexer", http.StatusBadRequest)
 			return
 		}
+	}
+	if req.LanUrl != "" {
+		if strings.ContainsAny(req.LanUrl, "\"\n\r") {
+			httputil.WriteError(w, "lan_url contains invalid characters", http.StatusBadRequest)
+			return
+		}
+		vars["JELLYFIN_PUBLISHED_URL"] = req.LanUrl
 	}
 
 	if err := WriteEnvFile(h.EnvPath, vars); err != nil {

@@ -57,6 +57,7 @@
                 </div>
             </details>
 
+            <div class="error-msg hidden" id="step1-error"></div>
             <div class="step-nav">
                 <a href="#" onclick="skipVPN(); return false;" class="skip-vpn-link">Skip — I'll set up VPN later</a>
                 <button onclick="goStep(2)" class="btn-primary">Next</button>
@@ -91,6 +92,7 @@
             <p class="field-help">What Jellyfin clients on your network should connect to. Leave blank to skip.</p>
             <input id="published-url" type="url" placeholder="http://192.168.1.42:7354/jellyfin">
 
+            <div class="error-msg hidden" id="step2-error"></div>
             <div class="step-nav">
                 <button onclick="goStep(1)" class="btn-secondary">Back</button>
                 <button onclick="goStep(3)" class="btn-primary">Next</button>
@@ -209,6 +211,12 @@ let setupCustomLibraries = []; // custom libraries added during setup
             if (r.ok) {
                 currentSettings = await r.json();
                 prefillSettings(currentSettings);
+            } else {
+                const errEl = document.getElementById('step1-error');
+                if (errEl) {
+                    errEl.textContent = 'Could not load current settings — are you logged in as admin?';
+                    errEl.classList.remove('hidden');
+                }
             }
         }
     } catch(e) {
@@ -231,6 +239,7 @@ function prefillSettings(s) {
     // Settings mode pre-fill — preserves existing behavior for settings page
     document.getElementById('path-config').value = s.config_dir || '';
     document.getElementById('path-media').value = s.library_dir || '';
+    document.getElementById('published-url').value = s.lan_url || '';
     if (s.library_dir !== s.work_dir) {
         document.getElementById('path-library').value = s.library_dir || '';
         document.getElementById('path-work').value = s.work_dir || '';
@@ -282,10 +291,17 @@ function goStep(n, skipValidation) {
             if (!el.value.trim()) {
                 el.focus();
                 el.classList.add('input-error');
+                const errEl = document.getElementById('step2-error');
+                if (errEl) {
+                    errEl.textContent = 'Config and media directories are required.';
+                    errEl.classList.remove('hidden');
+                }
                 return;
             }
             el.classList.remove('input-error');
         }
+        const errEl = document.getElementById('step2-error');
+        if (errEl) errEl.classList.add('hidden');
         buildSummary();
     }
     if (n === 3 && skipValidation) {
