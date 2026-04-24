@@ -211,10 +211,14 @@ async function saveRemoteAccess() {
         remote_le_staging:     document.getElementById('st-le-staging')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
     };
     try {
-        await post('/api/pelicula/settings', body);
-        if (statusEl) { statusEl.textContent = 'Saved \u2713 \u2014 restart nginx to apply'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000); }
-        Object.assign(_settingsData.middleware || (_settingsData.middleware = {}), body);
-        updateRemoteSummary();
+        const result = await post('/api/pelicula/settings', body);
+        if (result === null) {
+            if (statusEl) statusEl.textContent = 'Save failed: session expired \u2014 please reload';
+            return;
+        }
+        if (statusEl) { statusEl.textContent = 'Saved \u2713 \u2014 run pelicula up to apply'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000); }
+        _settingsLoaded = false;
+        await loadSettingsTab();
         closeSettingsDrawer('remote');
     } catch (e) {
         const errMsg = (e.body && e.body.error) || e.message || 'unknown';
