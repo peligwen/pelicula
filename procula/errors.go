@@ -35,6 +35,7 @@ func backoffDuration(retryCount int) time.Duration {
 }
 
 // permanentErrStrings are substrings that identify non-retriable failures.
+// permanent = retrying changes nothing (file gone, codec unsupported, perms wrong).
 var permanentErrStrings = []string{
 	// FFprobe/FFmpeg binary not found
 	"executable file not found",
@@ -45,9 +46,16 @@ var permanentErrStrings = []string{
 	// Source file missing at job execution time
 	"file not found",
 	"stat: no such file",
+	// EACCES on output dir/file — permissions won't fix themselves
+	"permission denied",
+	// FFmpeg received malformed/truncated input it cannot recover from
+	"invalid argument",
+	// EROFS — filesystem is mounted read-only; retrying won't help
+	"read-only file system",
 }
 
 // transientErrStrings are substrings that identify retriable failures.
+// transient = will likely succeed if we wait (network blip, OOM, disk-full).
 var transientErrStrings = []string{
 	// HTTP errors from Bazarr or other external services
 	"status 502",
@@ -67,12 +75,24 @@ var transientErrStrings = []string{
 	"write /tmp",
 }
 
+// errTranscodeTimeout is returned when FFmpeg exceeds its wall-clock deadline.
+// Classified as permanent: a file that takes longer than 6× its runtime to
+// transcode will not improve on retry without operator intervention.
+var errTranscodeTimeout = errors.New("transcode exceeded max runtime")
+
 // IsPermanentError reports whether err represents a non-retriable failure.
 // The check is performed on the full unwrapped error chain and on the
 // flat string representation.
+//
+// errTranscodeTimeout is checked first via errors.Is so that wrapping the
+// sentinel with additional context (e.g. fmt.Errorf("...: %w", errTranscodeTimeout))
+// still classifies correctly even if the message is truncated somewhere.
 func IsPermanentError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, errTranscodeTimeout) {
+		return true
 	}
 	msg := strings.ToLower(flattenErr(err))
 	for _, s := range permanentErrStrings {

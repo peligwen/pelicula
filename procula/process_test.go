@@ -2,11 +2,13 @@ package procula
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildFFmpegArgs(t *testing.T) {
@@ -262,6 +264,10 @@ fail)
     echo "Error: something went wrong" >&2
     exit 1
     ;;
+sleep)
+    sleep 1
+    exit 0
+    ;;
 *)
     echo "GO_TEST_FFMPEG not set or unknown: $GO_TEST_FFMPEG" >&2
     exit 1
@@ -411,6 +417,128 @@ func TestProcess_PartialCleanedOnFailure(t *testing.T) {
 	matches, _ := filepath.Glob(pattern)
 	if len(matches) > 0 {
 		t.Errorf("partial file(s) not cleaned up after failure: %v", matches)
+	}
+}
+
+// ── transcodeTimeout unit tests ──────────────────────────────────────────────
+
+func TestTranscodeTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		minutes int
+		want    time.Duration
+	}{
+		{
+			name:    "zero → floor (60m)",
+			minutes: 0,
+			want:    60 * time.Minute,
+		},
+		{
+			name:    "negative → floor (60m)",
+			minutes: -5,
+			want:    60 * time.Minute,
+		},
+		{
+			name:    "small (9m) → floor (6×9=54m < 60m)",
+			minutes: 9,
+			want:    60 * time.Minute,
+		},
+		{
+			name:    "normal (120m) → 6× (720m)",
+			minutes: 120,
+			want:    720 * time.Minute,
+		},
+		{
+			name:    "large (300m) → capped at 24h (6×300=1800m > 24h)",
+			minutes: 300,
+			want:    24 * time.Hour,
+		},
+		{
+			name:    "huge → cap (24h)",
+			minutes: 1000,
+			want:    24 * time.Hour,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := transcodeTimeout(tc.minutes)
+			if got != tc.want {
+				t.Errorf("transcodeTimeout(%d) = %v, want %v", tc.minutes, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestProcess_TimeoutReturnsSentinel verifies that when the hard wall-clock
+// deadline fires, processWithDir returns errTranscodeTimeout (not the raw
+// "signal: killed" error, which would incorrectly classify as transient).
+func TestProcess_TimeoutReturnsSentinel(t *testing.T) {
+	setupFakeFFmpeg(t)
+	t.Setenv("GO_TEST_FFMPEG", "sleep")
+
+	// Inject a very short timeout so the test completes quickly.
+	old := transcodeTimeoutFn
+	transcodeTimeoutFn = func(_ int) time.Duration { return 100 * time.Millisecond }
+	t.Cleanup(func() { transcodeTimeoutFn = old })
+
+	dir := t.TempDir()
+	input := filepath.Join(dir, "movie.mkv")
+	os.WriteFile(input, []byte("input"), 0644)
+
+	job := &Job{Source: JobSource{Path: input}}
+	profile := &TranscodeProfile{
+		Name:   "test",
+		Output: TranscodeOutput{VideoCodec: "libx264", AudioCodec: "aac", Suffix: ".test"},
+	}
+
+	_, err := processWithDir(context.Background(), job, profile, nil, dir)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !errors.Is(err, errTranscodeTimeout) {
+		t.Errorf("expected error to wrap errTranscodeTimeout, got: %v", err)
+	}
+	if !IsPermanentError(err) {
+		t.Errorf("IsPermanentError(timeout err) = false — timeout must be permanent to prevent re-queuing")
+	}
+}
+
+// TestProcess_CancelNotTimeout verifies that a user-initiated cancel (via
+// context.WithCancel) does NOT return errTranscodeTimeout, preserving the
+// distinction between operator cancel and our hard deadline.
+func TestProcess_CancelNotTimeout(t *testing.T) {
+	setupFakeFFmpeg(t)
+	t.Setenv("GO_TEST_FFMPEG", "sleep")
+
+	// Use a long timeout so the wall-clock deadline never fires.
+	old := transcodeTimeoutFn
+	transcodeTimeoutFn = func(_ int) time.Duration { return 24 * time.Hour }
+	t.Cleanup(func() { transcodeTimeoutFn = old })
+
+	dir := t.TempDir()
+	input := filepath.Join(dir, "movie.mkv")
+	os.WriteFile(input, []byte("input"), 0644)
+
+	job := &Job{Source: JobSource{Path: input}}
+	profile := &TranscodeProfile{
+		Name:   "test",
+		Output: TranscodeOutput{VideoCodec: "libx264", AudioCodec: "aac", Suffix: ".test"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after a short delay to simulate a user-initiated job cancel.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := processWithDir(ctx, job, profile, nil, dir)
+	if err == nil {
+		t.Fatal("expected error after cancel, got nil")
+	}
+	if errors.Is(err, errTranscodeTimeout) {
+		t.Errorf("user cancel should not return errTranscodeTimeout; got: %v", err)
 	}
 }
 

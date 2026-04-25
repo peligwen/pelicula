@@ -3,6 +3,7 @@ package procula
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -165,5 +166,84 @@ func TestContextCanceledNotPermanent(t *testing.T) {
 	}
 	if IsTransientError(context.Canceled) {
 		t.Error("IsTransientError(context.Canceled) = true — cancellations would be re-queued with backoff")
+	}
+}
+
+func TestIsPermanentError_NewEntries(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "permission denied — EACCES on output file",
+			err:  errors.New("open /media/movies/foo.mkv: permission denied"),
+			want: true,
+		},
+		{
+			name: "invalid argument — FFmpeg malformed input",
+			err:  errors.New("ffmpeg: invalid argument: could not decode stream"),
+			want: true,
+		},
+		{
+			name: "read-only file system — EROFS",
+			err:  errors.New("write /media/movies/foo.mkv: read-only file system"),
+			want: true,
+		},
+		{
+			name: "errTranscodeTimeout sentinel — bare",
+			err:  errTranscodeTimeout,
+			want: true,
+		},
+		{
+			name: "errTranscodeTimeout sentinel — wrapped",
+			err:  fmt.Errorf("ffmpeg killed after deadline: %w", errTranscodeTimeout),
+			want: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsPermanentError(tc.err)
+			if got != tc.want {
+				t.Errorf("IsPermanentError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsTransientError_NewEntriesAreNotTransient(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "permission denied",
+			err:  errors.New("open /output/movie.mkv: permission denied"),
+		},
+		{
+			name: "invalid argument",
+			err:  errors.New("invalid argument"),
+		},
+		{
+			name: "read-only file system",
+			err:  errors.New("write /media/foo.mkv: read-only file system"),
+		},
+		{
+			name: "errTranscodeTimeout sentinel",
+			err:  errTranscodeTimeout,
+		},
+		{
+			name: "errTranscodeTimeout wrapped",
+			err:  fmt.Errorf("ffmpeg killed after deadline: %w", errTranscodeTimeout),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if IsTransientError(tc.err) {
+				t.Errorf("IsTransientError(%v) = true — permanent errors must not be classified as transient", tc.err)
+			}
+		})
 	}
 }

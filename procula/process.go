@@ -3,6 +3,7 @@ package procula
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,7 +21,29 @@ var (
 	reTime     = regexp.MustCompile(`time=\s*(\d+):(\d+):([\d.]+)`)
 	// ffmpegCommand is set at startup; overridden in tests to inject a mock binary.
 	ffmpegCommand = "ffmpeg"
+	// transcodeTimeoutFn computes the wall-clock deadline for a transcode subprocess.
+	// Overridden in tests to inject short timeouts without spawning real media.
+	transcodeTimeoutFn = transcodeTimeout
 )
+
+// transcodeTimeout returns a generous wall-clock budget for a single FFmpeg
+// transcode. The 6× factor covers software encodes on slow CPUs (Synology,
+// Pi-class) where libx265 at slower presets can run well below real-time.
+func transcodeTimeout(expectedRuntimeMinutes int) time.Duration {
+	const floor = 60 * time.Minute
+	const cap = 24 * time.Hour
+	if expectedRuntimeMinutes <= 0 {
+		return floor
+	}
+	d := time.Duration(expectedRuntimeMinutes) * 6 * time.Minute
+	if d < floor {
+		d = floor
+	}
+	if d > cap {
+		d = cap
+	}
+	return d
+}
 
 // Process runs FFmpeg to transcode the job's source file using the given profile.
 // The transcoded file is written as a sidecar alongside the source (same directory)
@@ -52,6 +75,12 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 		}
 	}()
 
+	// Apply a hard wall-clock deadline. ctx is the parent cancellable context
+	// (from q.registerCancel). We derive a child timeout here so we can
+	// distinguish our timeout from a user-initiated cancel after cmd.Wait().
+	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, transcodeTimeoutFn(job.Source.ExpectedRuntimeMinutes))
+	defer timeoutCancel()
+
 	var codecs *CodecInfo
 	if job.Validation != nil {
 		codecs = job.Validation.Checks.Codecs
@@ -59,7 +88,7 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 	args := buildFFmpegArgs(input, partialPath, profile, codecs)
 	slog.Info("starting FFmpeg transcode", "component", "process", "input", input, "output", finalPath, "profile", profile.Name)
 
-	cmd := exec.CommandContext(ctx, ffmpegCommand, args...)
+	cmd := exec.CommandContext(timeoutCtx, ffmpegCommand, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	stderr, err := cmd.StderrPipe()
@@ -106,6 +135,15 @@ func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, pr
 	}
 
 	if err := cmd.Wait(); err != nil {
+		// Check for our hard timeout before the raw error. When the timeout
+		// fires, exec.CommandContext kills ffmpeg with SIGKILL, so cmd.Wait()
+		// returns "signal: killed" — which is in the transient list. We must
+		// intercept the deadline here and return the permanent sentinel instead.
+		// We also verify the parent ctx is still live to avoid mis-classifying
+		// a user-initiated cancel (which also sends SIGKILL) as a timeout.
+		if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			return "", fmt.Errorf("ffmpeg killed after deadline: %w", errTranscodeTimeout)
+		}
 		return "", fmt.Errorf("FFmpeg exited with error: %w", err)
 	}
 
