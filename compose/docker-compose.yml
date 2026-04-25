@@ -135,7 +135,8 @@ services:
   # Media Server
   # ═══════════════════════════════════════════════════
   jellyfin:
-    image: lscr.io/linuxserver/jellyfin:latest
+    # Pinned: bump deliberately, not on every `pelicula update` (mirrors gluetun policy).
+    image: lscr.io/linuxserver/jellyfin:10.11.8
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -150,7 +151,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      # First-boot DB migrations + plugin scan can run 40-90s on slow hardware (Synology).
+      start_period: 120s
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
