@@ -271,10 +271,55 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 	}
 
 	for _, c := range clients {
-		if impl, _ := c["implementation"].(string); impl == "QBittorrent" {
+		if impl, _ := c["implementation"].(string); impl != "QBittorrent" {
+			continue
+		}
+		idVal, ok := c["id"].(float64)
+		if !ok {
+			slog.Warn("unexpected id type in qBittorrent client", "component", "autowire", "service", name)
+			return true
+		}
+		id := int(idVal)
+
+		fields, _ := c["fields"].([]any)
+		want := map[string]any{
+			"host":     "gluetun",
+			"port":     float64(8080),
+			"category": category,
+			"useSsl":   false,
+		}
+		drift := false
+		for _, fRaw := range fields {
+			f, ok := fRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			fname, _ := f["name"].(string)
+			desired, tracked := want[fname]
+			if !tracked {
+				continue
+			}
+			// useSsl may be absent; absence means false, which equals desired false.
+			got := f["value"]
+			if got == nil {
+				got = false
+			}
+			if got != desired {
+				drift = true
+				f["value"] = desired
+			}
+		}
+		if !drift {
 			slog.Info("qBittorrent already configured, skipping", "component", "autowire", "service", name)
 			return true
 		}
+		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/downloadclient/%d", apiPath, id), c)
+		if err != nil {
+			slog.Error("failed to update qBittorrent download client", "component", "autowire", "service", name, "error", err)
+			return false
+		}
+		slog.Info("updated qBittorrent download client (drift corrected)", "component", "autowire", "service", name)
+		return true
 	}
 
 	payload := map[string]any{
@@ -334,7 +379,7 @@ func (a *Autowirer) wireRootFolder(name, baseURL, apiKey, apiPath, folderPath st
 }
 
 // wireImportWebhook adds a Procula import webhook notification to a *arr app.
-// It is idempotent — won't add a second "Procula" webhook if one already exists.
+// It is idempotent and corrects stale URL or webhook-secret drift via PUT.
 func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/notification")
 	if err != nil {
@@ -348,14 +393,95 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 		return
 	}
 
+	hookURL := a.urls.PeliculaAPI + "/api/pelicula/hooks/import"
+
 	for _, n := range existing {
-		if n, _ := n["name"].(string); n == "Procula" {
+		if nname, _ := n["name"].(string); nname != "Procula" {
+			continue
+		}
+		idVal, ok := n["id"].(float64)
+		if !ok {
+			slog.Warn("unexpected id type in Procula notification", "component", "autowire", "service", name)
+			return
+		}
+		id := int(idVal)
+
+		fields, _ := n["fields"].([]any)
+		drift := false
+
+		// Check URL and secret fields; patch in-place if stale.
+		for _, fRaw := range fields {
+			f, ok := fRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch f["name"] {
+			case "url":
+				if v, _ := f["value"].(string); v != hookURL {
+					f["value"] = hookURL
+					drift = true
+				}
+			case "headers":
+				// headers value is []any of {"key":..., "value":...} maps.
+				gotSecret := ""
+				if vals, ok := f["value"].([]any); ok {
+					for _, hRaw := range vals {
+						h, ok := hRaw.(map[string]any)
+						if !ok {
+							continue
+						}
+						if k, _ := h["key"].(string); k == "X-Webhook-Secret" {
+							gotSecret, _ = h["value"].(string)
+						}
+					}
+				}
+				if gotSecret != a.webhookSecret {
+					if a.webhookSecret != "" {
+						f["value"] = []map[string]any{{"key": "X-Webhook-Secret", "value": a.webhookSecret}}
+					} else {
+						f["value"] = []map[string]any{}
+					}
+					drift = true
+				}
+			}
+		}
+
+		// If secret is non-empty and no headers field exists at all, add it.
+		if a.webhookSecret != "" {
+			hasHeaders := false
+			for _, fRaw := range fields {
+				f, ok := fRaw.(map[string]any)
+				if !ok {
+					continue
+				}
+				if fname, _ := f["name"].(string); fname == "headers" {
+					hasHeaders = true
+					break
+				}
+			}
+			if !hasHeaders {
+				headerField := map[string]any{
+					"name":  "headers",
+					"value": []map[string]any{{"key": "X-Webhook-Secret", "value": a.webhookSecret}},
+				}
+				n["fields"] = append(fields, headerField)
+				drift = true
+			}
+		}
+
+		if !drift {
 			slog.Info("Procula webhook already configured, skipping", "component", "autowire", "service", name)
 			return
 		}
+		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/notification/%d", apiPath, id), n)
+		if err != nil {
+			slog.Error("failed to update Procula webhook", "component", "autowire", "service", name, "error", err)
+			return
+		}
+		slog.Info("updated Procula import webhook (drift corrected)", "component", "autowire", "service", name, "url", hookURL)
+		return
 	}
 
-	hookURL := a.urls.PeliculaAPI + "/api/pelicula/hooks/import"
 	fields := []map[string]any{
 		{"name": "url", "value": hookURL},
 		{"name": "method", "value": 1}, // 1 = POST
@@ -540,7 +666,7 @@ func (a *Autowirer) wireBazarr() {
 		return
 	}
 
-	if bazarrAlreadyWired(bzClient, sonarrKey, radarrKey) {
+	if bazarrAlreadyWired(bzClient, sonarrKey, radarrKey, subLangs) {
 		slog.Info("Bazarr already wired, skipping", "component", "autowire")
 		return
 	}
@@ -646,7 +772,7 @@ func buildPeliculaProfile(langs []string) map[string]any {
 	}
 }
 
-func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey string) bool {
+func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey string, subLangs []string) bool {
 	data, err := bzClient.RawGet(context.Background(), "/api/system/settings")
 	if err != nil {
 		return false
@@ -658,10 +784,16 @@ func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey stri
 			EnabledProviders []string `json:"enabled_providers"`
 		} `json:"general"`
 		Sonarr struct {
-			Apikey string `json:"apikey"`
+			Apikey  string `json:"apikey"`
+			IP      string `json:"ip"`
+			Port    int    `json:"port"`
+			BaseURL string `json:"base_url"`
 		} `json:"sonarr"`
 		Radarr struct {
-			Apikey string `json:"apikey"`
+			Apikey  string `json:"apikey"`
+			IP      string `json:"ip"`
+			Port    int    `json:"port"`
+			BaseURL string `json:"base_url"`
 		} `json:"radarr"`
 	}
 	if json.Unmarshal(data, &cur) != nil {
@@ -681,6 +813,16 @@ func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey stri
 	if len(cur.General.EnabledProviders) == 0 {
 		return false
 	}
+	// Only check sonarr/radarr URL drift when the API keys match (already
+	// verified above). If the user changed IPs/ports manually but the keys
+	// still match, that's config drift we should correct.
+	if cur.Sonarr.IP != "sonarr" || cur.Sonarr.Port != 8989 || cur.Sonarr.BaseURL != "/sonarr" {
+		return false
+	}
+	if cur.Radarr.IP != "radarr" || cur.Radarr.Port != 7878 || cur.Radarr.BaseURL != "/radarr" {
+		return false
+	}
+
 	pdata, err := bzClient.RawGet(context.Background(), "/api/system/languages/profiles")
 	if err != nil {
 		return false
@@ -688,6 +830,7 @@ func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey stri
 	var profiles []struct {
 		Name  string `json:"name"`
 		Items []struct {
+			Language         string `json:"language"`
 			AudioOnlyInclude string `json:"audio_only_include"`
 		} `json:"items"`
 	}
@@ -704,6 +847,19 @@ func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey stri
 		// that as "not wired" so we overwrite the broken profile.
 		for _, it := range p.Items {
 			if it.AudioOnlyInclude == "" {
+				return false
+			}
+		}
+		// Verify the profile language set matches current PELICULA_SUB_LANGS.
+		if len(p.Items) != len(subLangs) {
+			return false
+		}
+		wantSet := make(map[string]struct{}, len(subLangs))
+		for _, l := range subLangs {
+			wantSet[l] = struct{}{}
+		}
+		for _, it := range p.Items {
+			if _, ok := wantSet[it.Language]; !ok {
 				return false
 			}
 		}
