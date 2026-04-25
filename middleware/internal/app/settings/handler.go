@@ -18,11 +18,30 @@ import (
 
 const maskedValue = "••••••••"
 
+// Applier is the optional set of in-process callbacks the settings handler
+// uses to apply changes that don't require `pelicula up`. Wired in bootstrap
+// from concrete dependencies (docker client, remoteconfig package). Nil-safe:
+// if Applier or any callback is nil, the corresponding change is reported as
+// pending instead of applied.
+type Applier struct {
+	// SeedJellyfinNetworkXML rewrites Jellyfin's network.xml so the LAN
+	// PublishedServerUrl matches the new value. The caller-side function
+	// should write the file; RestartJellyfin then reloads it.
+	SeedJellyfinNetworkXML func(publishedURL string) error
+	// RestartJellyfin restarts the Jellyfin container so it re-reads
+	// network.xml.
+	RestartJellyfin func() error
+}
+
 // Handler handles settings GET/POST and reset endpoints.
 type Handler struct {
 	EnvPath        string
 	GenerateAPIKey func() string
-	mu             sync.Mutex
+	// Apply, when non-nil, lets the handler apply some changes in-place
+	// (Jellyfin published URL re-seed + restart). Other changes (compose-level
+	// — port mappings, sidecar add/remove) are always returned as pending.
+	Apply *Applier
+	mu    sync.Mutex
 }
 
 // New constructs a Handler with the given .env path and API key generator.
@@ -204,6 +223,10 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Snapshot pre-merge values so we can diff at the end and decide what
+	// can be applied in-place vs what genuinely needs `pelicula up`.
+	prev := snapshotApplyKeys(vars)
+
 	// Merge changed fields; skip masked/empty values
 	if req.WireguardKey != "" && req.WireguardKey != maskedValue {
 		vars["WIREGUARD_PRIVATE_KEY"] = req.WireguardKey
@@ -323,8 +346,123 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("settings updated via browser wizard", "component", "settings")
+
+	// Compute applied/pending. .env is already on disk so the user sees their
+	// values persist on reload regardless of which bucket each change lands in.
+	applied, pending := h.applyChanges(prev, snapshotApplyKeys(vars))
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "restart_required": true}) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		"status":               "ok",
+		"applied":              applied,
+		"pending":              pending,
+		"requires_pelicula_up": len(pending) > 0,
+		// Backwards compatibility with older settings.js builds: a true value
+		// here triggers their "saved — restart needed" toast. New builds
+		// prefer applied/pending and ignore this.
+		"restart_required": len(pending) > 0,
+	})
+}
+
+// applyKeys is the subset of .env keys that the handler diffs and acts on.
+type applyKeys struct {
+	JellyfinPublishedURL string
+	RemoteAccessEnabled  string
+	RemoteHostname       string
+	RemoteHTTPPort       string
+	RemoteHTTPSPort      string
+	RemoteCertMode       string
+	RemoteLEEmail        string
+	RemoteLEStaging      string
+}
+
+func snapshotApplyKeys(vars map[string]string) applyKeys {
+	return applyKeys{
+		JellyfinPublishedURL: vars["JELLYFIN_PUBLISHED_URL"],
+		RemoteAccessEnabled:  vars["REMOTE_ACCESS_ENABLED"],
+		RemoteHostname:       vars["REMOTE_HOSTNAME"],
+		RemoteHTTPPort:       vars["REMOTE_HTTP_PORT"],
+		RemoteHTTPSPort:      vars["REMOTE_HTTPS_PORT"],
+		RemoteCertMode:       vars["REMOTE_CERT_MODE"],
+		RemoteLEEmail:        vars["REMOTE_LE_EMAIL"],
+		RemoteLEStaging:      vars["REMOTE_LE_STAGING"],
+	}
+}
+
+// applyChanges diffs old vs new applyKeys and dispatches the changes the
+// handler can do in-place. Returns (applied, pending) human-readable lists
+// suitable for the dashboard banner.
+//
+// In-place:
+//   - JELLYFIN_PUBLISHED_URL → re-seed network.xml + restart Jellyfin
+//
+// Pending (compose-level — needs `pelicula up` to recreate containers with
+// new ports / new sidecars):
+//   - any REMOTE_* change
+//
+// applied is "" if nothing applicable changed; pending is "" if nothing
+// compose-level changed.
+func (h *Handler) applyChanges(prev, next applyKeys) (applied, pending []string) {
+	applied = []string{}
+	pending = []string{}
+
+	if prev.JellyfinPublishedURL != next.JellyfinPublishedURL {
+		if h.Apply != nil && h.Apply.SeedJellyfinNetworkXML != nil {
+			if err := h.Apply.SeedJellyfinNetworkXML(next.JellyfinPublishedURL); err != nil {
+				slog.Error("failed to re-seed Jellyfin network.xml", "component", "settings", "error", err)
+				pending = append(pending, "Jellyfin published URL (network.xml write failed: "+err.Error()+")")
+			} else if h.Apply.RestartJellyfin != nil {
+				if err := h.Apply.RestartJellyfin(); err != nil {
+					slog.Warn("failed to restart Jellyfin after URL change", "component", "settings", "error", err)
+					pending = append(pending, "Jellyfin restart (run `pelicula restart jellyfin` to apply published URL)")
+				} else {
+					applied = append(applied, "Jellyfin published URL")
+				}
+			} else {
+				pending = append(pending, "Jellyfin restart")
+			}
+		} else {
+			pending = append(pending, "Jellyfin published URL")
+		}
+	}
+
+	// Remote-access changes are compose-level (port mapping, sidecar add/remove,
+	// nginx vhost generation). Middleware can't run `docker compose up -d`, so
+	// they are always pending until the user runs `pelicula up`.
+	if prev.RemoteAccessEnabled != next.RemoteAccessEnabled {
+		pending = append(pending, "Remote access "+enabledLabel(next.RemoteAccessEnabled))
+	}
+	if prev.RemoteHostname != next.RemoteHostname {
+		pending = append(pending, "Remote hostname")
+	}
+	if prev.RemoteHTTPPort != next.RemoteHTTPPort {
+		pending = append(pending, "Remote HTTP port → "+next.RemoteHTTPPort)
+	}
+	if prev.RemoteHTTPSPort != next.RemoteHTTPSPort {
+		pending = append(pending, "Remote HTTPS port → "+next.RemoteHTTPSPort)
+	}
+	if prev.RemoteCertMode != next.RemoteCertMode {
+		pending = append(pending, "Remote cert mode → "+next.RemoteCertMode)
+	}
+	if prev.RemoteLEEmail != next.RemoteLEEmail {
+		pending = append(pending, "Let's Encrypt email")
+	}
+	if prev.RemoteLEStaging != next.RemoteLEStaging {
+		pending = append(pending, "Let's Encrypt staging toggle")
+	}
+
+	return applied, pending
+}
+
+func enabledLabel(s string) string {
+	switch s {
+	case "true":
+		return "enabled"
+	case "false":
+		return "disabled"
+	default:
+		return "changed"
+	}
 }
 
 // HandleReset handles POST /api/pelicula/settings/reset — resets .env to defaults

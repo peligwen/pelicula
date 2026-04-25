@@ -1838,3 +1838,32 @@ body.side-collapsed.panel-alert .side-toggle {
         color: #7a5a00;
     }
 }
+
+
+/* Settings: pending-changes banner — surfaces compose-level diffs that need
+   `pelicula up` to apply. Persistent (per-page-load) until dismissed. */
+.settings-pending-banner {
+    position: fixed; bottom: 1rem; right: 1rem;
+    max-width: 420px; min-width: 280px;
+    padding: 0.85rem 1rem 0.75rem;
+    background: var(--bg-elev, #1d1730);
+    border: 1px solid var(--border2, rgba(255,255,255,0.08));
+    border-left: 3px solid var(--peach, #ffb878);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    z-index: 60;
+}
+.settings-pending-title {
+    font-family: var(--font-display, 'Nunito', sans-serif);
+    font-size: 0.82rem; font-weight: 800;
+    color: var(--peach, #ffb878);
+    margin-bottom: 0.5rem;
+}
+.settings-pending-list { margin: 0 0 0.6rem 1.1rem; padding: 0; font-size: 0.78rem; color: var(--muted, #d8c8e8); line-height: 1.55; }
+.settings-pending-list li { margin: 0; padding: 0; }
+.settings-pending-copy { font-size: 0.74rem; padding: 0.35rem 0.7rem; }
+.settings-pending-dismiss {
+    position: absolute; top: 0.4rem; right: 0.55rem;
+    background: none; border: none; color: var(--faint, #c8b8d8);
+    cursor: pointer; font-size: 1rem; line-height: 1;
+}

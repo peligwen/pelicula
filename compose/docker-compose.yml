@@ -261,6 +261,9 @@ services:
       - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${CONFIG_DIR}/pelicula:/config/pelicula
+      # Writable mount so settings auto-apply can re-seed network.xml when the
+      # Jellyfin published URL changes (then restart Jellyfin via docker-proxy).
+      - ${CONFIG_DIR}/jellyfin:/config/jellyfin
       - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
     networks:

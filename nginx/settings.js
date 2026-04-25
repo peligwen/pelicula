@@ -216,7 +216,8 @@ async function saveRemoteAccess() {
             if (statusEl) statusEl.textContent = 'Save failed: session expired \u2014 please reload';
             return;
         }
-        if (statusEl) { statusEl.textContent = 'Saved \u2713 \u2014 run pelicula up to apply'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000); }
+        applySaveFeedback(statusEl, result);
+        renderPendingBanner(result);
         _settingsLoaded = false;
         await loadSettingsTab();
         closeSettingsDrawer('remote');
@@ -224,6 +225,75 @@ async function saveRemoteAccess() {
         const errMsg = (e.body && e.body.error) || e.message || 'unknown';
         if (statusEl) statusEl.textContent = 'Save failed: ' + errMsg;
     }
+}
+
+// applySaveFeedback renders the inline status text from a settings POST
+// response. The handler returns `{applied: [...], pending: [...],
+// requires_pelicula_up}` so the toast is precise about what landed where.
+function applySaveFeedback(statusEl, result) {
+    if (!statusEl) return;
+    const applied = (result && result.applied) || [];
+    const pending = (result && result.pending) || [];
+    let text;
+    if (applied.length === 0 && pending.length === 0) {
+        text = 'Saved \u2713';
+    } else if (applied.length > 0 && pending.length === 0) {
+        text = 'Saved \u2713 \u2014 applied: ' + applied.join(', ');
+    } else if (applied.length === 0 && pending.length > 0) {
+        text = 'Saved \u2713 \u2014 run `pelicula up` to apply: ' + pending.join(', ');
+    } else {
+        text = 'Saved \u2713 \u2014 applied: ' + applied.join(', ') + ' \u00b7 pending: ' + pending.join(', ');
+    }
+    statusEl.textContent = text;
+    setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 8000);
+}
+
+// renderPendingBanner shows a persistent dashboard banner naming exactly
+// which compose-level changes still need `pelicula up`. The banner has a
+// copy-button so the user can paste the command into their terminal. When
+// pending is empty, the banner is removed.
+function renderPendingBanner(result) {
+    const requires = !!(result && result.requires_pelicula_up);
+    let banner = document.getElementById('settings-pending-banner');
+    if (!requires) {
+        if (banner) banner.remove();
+        return;
+    }
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'settings-pending-banner';
+        banner.className = 'settings-pending-banner';
+        document.body.appendChild(banner);
+    }
+    const pending = (result && result.pending) || [];
+    banner.replaceChildren();
+    const title = document.createElement('div');
+    title.className = 'settings-pending-title';
+    title.textContent = 'Restart needed: run `pelicula up` to apply';
+    const list = document.createElement('ul');
+    list.className = 'settings-pending-list';
+    pending.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        list.appendChild(li);
+    });
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn-secondary settings-pending-copy';
+    copyBtn.textContent = 'Copy `pelicula up`';
+    copyBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText('pelicula up');
+            const orig = copyBtn.textContent;
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+        } catch (_) {}
+    });
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'settings-pending-dismiss';
+    dismissBtn.setAttribute('aria-label', 'Dismiss');
+    dismissBtn.textContent = '\u00d7';
+    dismissBtn.addEventListener('click', () => banner.remove());
+    banner.append(title, list, copyBtn, dismissBtn);
 }
 
 // ── Transcoding profiles ──────────────────────────────────────────────────

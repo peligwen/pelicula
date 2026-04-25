@@ -40,6 +40,7 @@ import (
 	"pelicula-api/internal/config"
 	"pelicula-api/internal/cryptogen"
 	"pelicula-api/internal/peligrosa"
+	"pelicula-api/internal/remoteconfig"
 	"pelicula-api/internal/repo/migratejson"
 	"pelicula-api/internal/repo/peliculadb"
 	reporeqs "pelicula-api/internal/repo/requests"
@@ -273,7 +274,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			Cache:      arrCatalogCache,
 		},
 		SearchHandler:   searchHandler,
-		SettingsHandler: settings.New(envPath, cryptogen.GenerateAPIKey),
+		SettingsHandler: newSettingsHandler(envPath, dockerCli),
 		ActionsHandler:  actions.New(svc.HTTPClient(), urls.Procula, strings.TrimSpace(cfg.ProculaAPIKey)),
 		AdminHandler: adminops.New(dockerCli, func(r *http.Request) (string, bool) {
 			username, _, ok := auth.SessionFor(r)
@@ -343,4 +344,26 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 	a.SSEPoller.SetStatusCache(&a.StatusTTL)
 
 	return a, nil
+}
+
+// jellyfinConfigDir is the path inside the pelicula-api container where the
+// host's ${CONFIG_DIR}/jellyfin is bind-mounted. Settings auto-apply rewrites
+// network.xml here when JELLYFIN_PUBLISHED_URL changes.
+const jellyfinConfigDir = "/config/jellyfin"
+
+// newSettingsHandler constructs the settings handler with the in-process
+// applier wired up. The applier handles the changes the dashboard can make
+// without `pelicula up`: re-seed Jellyfin's network.xml + restart the
+// Jellyfin container via the docker socket proxy.
+func newSettingsHandler(envPath string, dockerCli *docker.Client) *settings.Handler {
+	h := settings.New(envPath, cryptogen.GenerateAPIKey)
+	h.Apply = &settings.Applier{
+		SeedJellyfinNetworkXML: func(publishedURL string) error {
+			return remoteconfig.WriteJellyfinNetworkXML(jellyfinConfigDir, publishedURL)
+		},
+		RestartJellyfin: func() error {
+			return dockerCli.Restart("jellyfin")
+		},
+	}
+	return h
 }
