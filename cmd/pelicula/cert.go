@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -107,14 +108,32 @@ func SetupCert(configDir string) error {
 }
 
 // SetupRemoteSelfSignedCert generates a self-signed TLS cert for the remote
-// Peligrosa vhost if one does not already exist.
+// Peligrosa vhost. Always includes the host's RFC1918 LAN IPv4 addresses and
+// 127.0.0.1 as Subject Alternative Names so native Jellyfin clients (iOS,
+// Apple TV, Android TV, Roku) can connect to https://<lan-ip>:8920/ without
+// silent TLS rejection.
+//
+// Idempotent: if a cert already exists at certDir/fullchain.pem, it is parsed
+// and regenerated only when the SAN set drifts from the current host's LAN
+// IPs (interface change, DHCP rebind, new VLAN). Operators don't need to
+// hand-delete certs after a network change.
 func SetupRemoteSelfSignedCert(certDir, hostname string) error {
 	certFile := filepath.Join(certDir, "fullchain.pem")
 	keyFile := filepath.Join(certDir, "privkey.pem")
 
+	dnsNames, ipAddrs := remoteCertSANs(hostname)
+
 	if _, err := os.Stat(certFile); err == nil {
-		pass("Remote certificate exists")
-		return nil
+		fresh, reason := certSANsCurrent(certFile, dnsNames, ipAddrs)
+		if fresh {
+			pass("Remote certificate exists")
+			return nil
+		}
+		// Stale — fall through to regenerate. Remove key as well so the
+		// new cert/key pair stays consistent.
+		_ = os.Remove(certFile)
+		_ = os.Remove(keyFile)
+		pass("Remote certificate SANs out of date (" + reason + ") — regenerating")
 	}
 
 	if err := os.MkdirAll(certDir, 0755); err != nil {
@@ -122,14 +141,71 @@ func SetupRemoteSelfSignedCert(certDir, hostname string) error {
 	}
 
 	if err := generateSelfSignedCert(certSpec{
-		cn:       hostname,
-		dnsNames: []string{hostname},
-		certFile: certFile,
-		keyFile:  keyFile,
+		cn:          hostname,
+		dnsNames:    dnsNames,
+		ipAddresses: ipAddrs,
+		certFile:    certFile,
+		keyFile:     keyFile,
 	}); err != nil {
 		return err
 	}
 
 	pass("Generated self-signed remote certificate (" + hostname + ")")
 	return nil
+}
+
+// remoteCertSANs returns the DNS names and IP SANs that the remote self-signed
+// cert should include for the given hostname. Always adds 127.0.0.1 and
+// every detected RFC1918 LAN IPv4 so native Jellyfin apps can reach the
+// server via either localhost or its LAN IP.
+func remoteCertSANs(hostname string) ([]string, []net.IP) {
+	dnsNames := []string{hostname}
+	if hostname != "localhost" {
+		dnsNames = append(dnsNames, "localhost")
+	}
+	ips := []net.IP{net.ParseIP("127.0.0.1").To4()}
+	for _, ip := range detectLANIPs() {
+		ips = append(ips, ip)
+	}
+	return dnsNames, ips
+}
+
+// certSANsCurrent reports whether the cert at path covers every DNS name and
+// IP in the wanted lists. Returns (true, "") if covered; (false, reason)
+// otherwise. Read failures are treated as "not current" so the caller
+// regenerates rather than silently keeping a broken cert.
+func certSANsCurrent(path string, wantDNS []string, wantIPs []net.IP) (bool, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, "read failed"
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return false, "pem decode failed"
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false, "x509 parse failed"
+	}
+
+	have := make(map[string]struct{}, len(cert.DNSNames))
+	for _, n := range cert.DNSNames {
+		have[strings.ToLower(n)] = struct{}{}
+	}
+	for _, n := range wantDNS {
+		if _, ok := have[strings.ToLower(n)]; !ok {
+			return false, "missing DNS " + n
+		}
+	}
+
+	haveIP := make(map[string]struct{}, len(cert.IPAddresses))
+	for _, ip := range cert.IPAddresses {
+		haveIP[ip.String()] = struct{}{}
+	}
+	for _, ip := range wantIPs {
+		if _, ok := haveIP[ip.String()]; !ok {
+			return false, "missing IP " + ip.String()
+		}
+	}
+	return true, ""
 }

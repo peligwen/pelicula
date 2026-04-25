@@ -129,19 +129,17 @@ func detectTZ() string {
 	return "UTC"
 }
 
-// detectLANURL walks host interfaces and returns an http URL of the first
-// non-loopback IPv4 address in an RFC1918 range, formatted for the nginx
-// dashboard port. Returns empty string if no suitable interface is found
-// (no network, all loopback, or all public/APIPA addresses).
+// detectLANIPs walks host interfaces and returns every non-loopback IPv4
+// address in an RFC1918 range. Order follows the OS interface enumeration.
+// Returns an empty slice if no suitable interface is found.
 //
-// Used to populate HOST_LAN_URL so the setup wizard can prefill a Jellyfin
-// PublishedServerUrl — what clients on the LAN should see when they discover
-// the server over UDP 7359 broadcast.
-func detectLANURL() string {
+// detectLANIPsFn is overridable for tests.
+var detectLANIPsFn = func() []net.IP {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return ""
+		return nil
 	}
+	var ips []net.IP
 	for _, a := range addrs {
 		ipnet, ok := a.(*net.IPNet)
 		if !ok {
@@ -156,10 +154,27 @@ func detectLANURL() string {
 			continue
 		}
 		if isRFC1918(ip4) {
-			return fmt.Sprintf("http://%s:7354/jellyfin", ip4.String())
+			ips = append(ips, ip4)
 		}
 	}
-	return ""
+	return ips
+}
+
+func detectLANIPs() []net.IP { return detectLANIPsFn() }
+
+// detectLANURL returns an http URL of the first RFC1918 IPv4 address discovered
+// on host interfaces, formatted for the nginx dashboard port. Returns empty
+// string when no suitable interface is found (CI sandboxes, all-loopback, etc.).
+//
+// Used to populate HOST_LAN_URL so the setup wizard can prefill a Jellyfin
+// PublishedServerUrl — what clients on the LAN should see when they discover
+// the server over UDP 7359 broadcast.
+func detectLANURL() string {
+	ips := detectLANIPs()
+	if len(ips) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("http://%s:7354/jellyfin", ips[0].String())
 }
 
 // isRFC1918 reports whether ip is in 10.0.0.0/8, 172.16.0.0/12, or
