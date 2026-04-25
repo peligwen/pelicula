@@ -46,6 +46,7 @@ func (s *stubSvc) SonarrRadarrKeys() (string, string) {
 func (s *stubSvc) GetProwlarrKey() string { return s.prowlarrKey }
 func (s *stubSvc) SetWired(v bool)        { s.wired = v }
 func (s *stubSvc) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+	s.captured = append(s.captured, capturedCall{"GET", baseURL + path, nil})
 	return s.lookup("GET", baseURL+path)
 }
 func (s *stubSvc) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
@@ -420,5 +421,235 @@ func TestWireImportWebhookSecretDrift(t *testing.T) {
 	}
 	if gotSecret != newSecret {
 		t.Errorf("X-Webhook-Secret not corrected: got %q, want %q", gotSecret, newSecret)
+	}
+}
+
+// newReleaseProfileSvc builds a stubSvc wired for release-profile-only tests.
+// It answers readiness pings via the test server and stubs out the other
+// endpoints so Run() doesn't fail before reaching wireReleaseProfile.
+func newReleaseProfileSvc(t *testing.T, srv *httptest.Server, profileJSON []byte) *stubSvc {
+	t.Helper()
+	empty := []byte("[]")
+	return &stubSvc{
+		sonarrKey:  "sonarr-key",
+		radarrKey:  "radarr-key",
+		configDir:  t.TempDir(),
+		httpClient: srv.Client(),
+		responses: map[string]stubResp{
+			"GET " + srv.URL + "/api/v3/releaseprofile": {body: profileJSON},
+			"GET " + srv.URL + "/api/v3/downloadclient": {body: empty},
+			"GET " + srv.URL + "/api/v3/rootfolder":     {body: empty},
+			"GET " + srv.URL + "/api/v3/notification":   {body: empty},
+		},
+	}
+}
+
+func runReleaseProfileTest(t *testing.T, svc *stubSvc, srv *httptest.Server) {
+	t.Helper()
+	urls := autowire.URLs{
+		Sonarr:      srv.URL,
+		Radarr:      srv.URL,
+		Bazarr:      srv.URL,
+		Jellyfin:    srv.URL,
+		PeliculaAPI: "http://pelicula-api:8181",
+	}
+	a, _ := autowire.NewAutowirer(autowire.Config{
+		Svc:           svc,
+		URLs:          urls,
+		VPNConfigured: false,
+		GetLibraries:  func() []autowire.Library { return nil },
+		WireJellyfin:  func() {},
+	})
+	if err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+}
+
+// TestWireReleaseProfileCreate verifies that when no release profile exists,
+// wireReleaseProfile POSTs a new profile with the desired ignored list.
+func TestWireReleaseProfileCreate(t *testing.T) {
+	srv := newDriftTestSrv(t)
+	defer srv.Close()
+
+	empty, _ := json.Marshal([]any{})
+	svc := newReleaseProfileSvc(t, srv, empty)
+
+	runReleaseProfileTest(t, svc, srv)
+
+	var found *capturedCall
+	for i := range svc.captured {
+		c := &svc.captured[i]
+		if c.method == "POST" && len(c.path) > 0 &&
+			c.path[len(c.path)-len("/api/v3/releaseprofile"):] == "/api/v3/releaseprofile" {
+			found = c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected POST to /api/v3/releaseprofile, none issued")
+	}
+
+	payload, ok := found.payload.(arrclient.ReleaseProfileResource)
+	if !ok {
+		t.Fatalf("POST payload is not arrclient.ReleaseProfileResource, got %T", found.payload)
+	}
+	if payload.Name != "Pelicula" {
+		t.Errorf("name = %q, want Pelicula", payload.Name)
+	}
+	if !payload.Enabled {
+		t.Error("expected enabled=true")
+	}
+	wantSet := map[string]struct{}{
+		"REMUX": {}, "BluRay-2160p": {}, "WEB-2160p": {}, "WEBDL-2160p": {}, "HDR10+": {}, "DV ": {},
+	}
+	gotSet := make(map[string]struct{}, len(payload.Ignored))
+	for _, v := range payload.Ignored {
+		gotSet[v] = struct{}{}
+	}
+	for k := range wantSet {
+		if _, ok := gotSet[k]; !ok {
+			t.Errorf("ignored missing %q", k)
+		}
+	}
+}
+
+// TestWireReleaseProfileDriftCorrected verifies that when an existing profile
+// has a stale ignored list, wireReleaseProfile PUTs with the corrected list,
+// preserving id and enabled.
+func TestWireReleaseProfileDriftCorrected(t *testing.T) {
+	srv := newDriftTestSrv(t)
+	defer srv.Close()
+
+	existing := []map[string]any{
+		{
+			"id":        float64(42),
+			"name":      "Pelicula",
+			"enabled":   true,
+			"required":  []any{},
+			"ignored":   []any{"WEB-2160p"}, // stale — missing REMUX and others
+			"indexerId": float64(0),
+			"tags":      []any{},
+		},
+	}
+	existingJSON, _ := json.Marshal(existing)
+	svc := newReleaseProfileSvc(t, srv, existingJSON)
+
+	runReleaseProfileTest(t, svc, srv)
+
+	put := svc.findPut("/api/v3/releaseprofile/42")
+	if put == nil {
+		t.Fatal("expected PUT to /api/v3/releaseprofile/42, none issued")
+	}
+
+	payload, ok := put.payload.(*arrclient.ReleaseProfileResource)
+	if !ok {
+		t.Fatalf("PUT payload is not *arrclient.ReleaseProfileResource, got %T", put.payload)
+	}
+	if payload.ID != 42 {
+		t.Errorf("id not preserved: got %d, want 42", payload.ID)
+	}
+	if !payload.Enabled {
+		t.Error("enabled not preserved: want true")
+	}
+	wantSet := map[string]struct{}{
+		"REMUX": {}, "BluRay-2160p": {}, "WEB-2160p": {}, "WEBDL-2160p": {}, "HDR10+": {}, "DV ": {},
+	}
+	gotSet := make(map[string]struct{}, len(payload.Ignored))
+	for _, v := range payload.Ignored {
+		gotSet[v] = struct{}{}
+	}
+	for k := range wantSet {
+		if _, ok := gotSet[k]; !ok {
+			t.Errorf("corrected ignored missing %q", k)
+		}
+	}
+}
+
+// TestWireReleaseProfileNoChange verifies that when the existing profile
+// already matches, no PUT or POST is issued.
+func TestWireReleaseProfileNoChange(t *testing.T) {
+	srv := newDriftTestSrv(t)
+	defer srv.Close()
+
+	existing := []map[string]any{
+		{
+			"id":        float64(5),
+			"name":      "Pelicula",
+			"enabled":   true,
+			"required":  []any{},
+			"ignored":   []any{"REMUX", "BluRay-2160p", "WEB-2160p", "WEBDL-2160p", "HDR10+", "DV "},
+			"indexerId": float64(0),
+			"tags":      []any{},
+		},
+	}
+	existingJSON, _ := json.Marshal(existing)
+	svc := newReleaseProfileSvc(t, srv, existingJSON)
+
+	runReleaseProfileTest(t, svc, srv)
+
+	for _, c := range svc.captured {
+		if (c.method == "PUT" || c.method == "POST") &&
+			len(c.path) >= len("/api/v3/releaseprofile") &&
+			c.path[len(c.path)-len("/api/v3/releaseprofile"):] == "/api/v3/releaseprofile" {
+			t.Errorf("unexpected %s to %s when profile already correct", c.method, c.path)
+		}
+	}
+}
+
+// TestWireReleaseProfileOptOut verifies that when PELICULA_DEFAULT_RELEASE_PROFILE=false,
+// no API calls to /releaseprofile are made.
+func TestWireReleaseProfileOptOut(t *testing.T) {
+	t.Setenv("PELICULA_DEFAULT_RELEASE_PROFILE", "false")
+
+	srv := newDriftTestSrv(t)
+	defer srv.Close()
+
+	empty, _ := json.Marshal([]any{})
+	svc := newReleaseProfileSvc(t, srv, empty)
+
+	runReleaseProfileTest(t, svc, srv)
+
+	for _, c := range svc.captured {
+		if len(c.path) >= len("/api/v3/releaseprofile") &&
+			c.path[len(c.path)-len("/api/v3/releaseprofile"):] == "/api/v3/releaseprofile" {
+			t.Errorf("unexpected %s to %s when PELICULA_DEFAULT_RELEASE_PROFILE=false", c.method, c.path)
+		}
+	}
+}
+
+// TestWireReleaseProfileUserEditedTagsPreserved verifies that when an existing
+// profile has user-added tags and a stale ignored list, the PUT preserves the
+// tags while correcting ignored.
+func TestWireReleaseProfileUserEditedTagsPreserved(t *testing.T) {
+	srv := newDriftTestSrv(t)
+	defer srv.Close()
+
+	existing := []map[string]any{
+		{
+			"id":        float64(7),
+			"name":      "Pelicula",
+			"enabled":   true,
+			"required":  []any{},
+			"ignored":   []any{"WEB-2160p"}, // stale
+			"indexerId": float64(0),
+			"tags":      []any{float64(3)},
+		},
+	}
+	existingJSON, _ := json.Marshal(existing)
+	svc := newReleaseProfileSvc(t, srv, existingJSON)
+
+	runReleaseProfileTest(t, svc, srv)
+
+	put := svc.findPut("/api/v3/releaseprofile/7")
+	if put == nil {
+		t.Fatal("expected PUT to /api/v3/releaseprofile/7, none issued")
+	}
+
+	payload, ok := put.payload.(*arrclient.ReleaseProfileResource)
+	if !ok {
+		t.Fatalf("PUT payload is not *arrclient.ReleaseProfileResource, got %T", put.payload)
+	}
+	if len(payload.Tags) != 1 || payload.Tags[0] != 3 {
+		t.Errorf("tags not preserved: got %v, want [3]", payload.Tags)
 	}
 }

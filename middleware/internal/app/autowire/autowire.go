@@ -184,6 +184,12 @@ func (a *Autowirer) Run(ctx context.Context) error {
 		}
 	}
 
+	// Wire default release profile (demotes REMUX/4K releases) unless opted out.
+	if os.Getenv("PELICULA_DEFAULT_RELEASE_PROFILE") != "false" {
+		a.wireReleaseProfile("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
+		a.wireReleaseProfile("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+	}
+
 	// Wire Procula import webhooks (useful even without VPN, for manual imports).
 	a.wireImportWebhook("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
 	a.wireImportWebhook("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
@@ -362,6 +368,78 @@ func (a *Autowirer) wireRootFolder(name, baseURL, apiKey, apiPath, folderPath st
 
 	slog.Info("added root folder", "component", "autowire", "service", name, "path", folderPath)
 	return true
+}
+
+var desiredReleaseProfileIgnored = []string{
+	"REMUX", "BluRay-2160p", "WEB-2160p", "WEBDL-2160p", "HDR10+", "DV ",
+}
+
+func (a *Autowirer) wireReleaseProfile(name, baseURL, apiKey, apiPath string) {
+	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/releaseprofile")
+	if err != nil {
+		slog.Error("failed to check release profiles", "component", "autowire", "service", name, "error", err)
+		return
+	}
+
+	var profiles []arrclient.ReleaseProfileResource
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		slog.Error("failed to parse release profiles response", "component", "autowire", "service", name, "error", err)
+		return
+	}
+
+	desired := make(map[string]struct{}, len(desiredReleaseProfileIgnored))
+	for _, v := range desiredReleaseProfileIgnored {
+		desired[v] = struct{}{}
+	}
+
+	for i := range profiles {
+		p := &profiles[i]
+		if p.Name != "Pelicula" {
+			continue
+		}
+
+		if len(p.Ignored) == len(desiredReleaseProfileIgnored) {
+			got := make(map[string]struct{}, len(p.Ignored))
+			for _, v := range p.Ignored {
+				got[v] = struct{}{}
+			}
+			drift := false
+			for k := range desired {
+				if _, ok := got[k]; !ok {
+					drift = true
+					break
+				}
+			}
+			if !drift {
+				slog.Info("release profile already configured, skipping", "component", "autowire", "service", name)
+				return
+			}
+		}
+
+		p.Ignored = desiredReleaseProfileIgnored
+		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/releaseprofile/%d", apiPath, p.ID), p)
+		if err != nil {
+			slog.Error("failed to update release profile", "component", "autowire", "service", name, "error", err)
+			return
+		}
+		slog.Info("updated release profile (drift corrected)", "component", "autowire", "service", name)
+		return
+	}
+
+	payload := arrclient.ReleaseProfileResource{
+		Name:      "Pelicula",
+		Enabled:   true,
+		Required:  []string{},
+		Ignored:   desiredReleaseProfileIgnored,
+		IndexerID: 0,
+		Tags:      []int{},
+	}
+	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/releaseprofile", payload)
+	if err != nil {
+		slog.Error("failed to add release profile", "component", "autowire", "service", name, "error", err)
+		return
+	}
+	slog.Info("added release profile", "component", "autowire", "service", name)
 }
 
 // wireImportWebhook adds a Procula import webhook notification to a *arr app.

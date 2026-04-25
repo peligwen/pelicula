@@ -75,3 +75,14 @@ type ApplicationResource struct {
 	SyncLevel      string `json:"syncLevel"`
 	Fields         Fields `json:"fields"`
 }
+
+// ReleaseProfileResource matches /api/v3/releaseprofile on Sonarr/Radarr.
+type ReleaseProfileResource struct {
+	ID        int      `json:"id,omitempty"`
+	Name      string   `json:"name"`
+	Enabled   bool     `json:"enabled"`
+	Required  []string `json:"required"`
+	Ignored   []string `json:"ignored"`
+	IndexerID int      `json:"indexerId"`
+	Tags      []int    `json:"tags"`
+}
