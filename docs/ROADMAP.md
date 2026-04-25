@@ -41,7 +41,7 @@ _Nothing in active development — v0.1 scope is complete._
 
 **Phase D — Request Queue:** First-party viewer request queue built into the dashboard. Viewers request from search; admins approve/deny with configurable Radarr/Sonarr quality profiles. Apprise notifies on state change. Import webhook auto-transitions requests to "available".
 
-**Phase E — Transcoding:** `procula/process.go` with FFmpeg progress tracking (parses `time=` from stderr), profile matching on codec or resolution, two default profiles shipped disabled (`compatibility-h264.json`, `mobile-1080p.json`).
+**Phase E — Transcoding:** `procula/process.go` with FFmpeg progress tracking (parses `time=` from stderr) and profile matching on codec or resolution. Three default profiles ship enabled (Compatibility 1080p, Compatibility 720p, Downscale 4K to 1080p) — they remain inert until the user opts into transcoding via `TRANSCODING_ENABLED=true`.
 
 **Phase F — External Notifications (Apprise):** Apprise container (opt-in Docker Compose profile), `direct` mode for single-webhook setups (ntfy, Gotify, any webhook URL), config at `/config/procula/notifications.json`. Discord is not a supported provider.
 

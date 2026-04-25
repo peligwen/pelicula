@@ -222,6 +222,67 @@ func TestShouldPassthrough(t *testing.T) {
 	}
 }
 
+func TestSeededProfileDefaults(t *testing.T) {
+	dir := t.TempDir()
+
+	SeedDefaultProfiles(dir)
+
+	profiles, err := LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("LoadProfiles: %v", err)
+	}
+	if len(profiles) != 3 {
+		t.Fatalf("expected 3 profiles, got %d", len(profiles))
+	}
+
+	byName := make(map[string]TranscodeProfile, len(profiles))
+	for _, p := range profiles {
+		byName[p.Name] = p
+	}
+
+	wantNames := []string{"Compatibility 1080p", "Compatibility 720p", "Downscale 4K to 1080p"}
+	for _, name := range wantNames {
+		p, ok := byName[name]
+		if !ok {
+			t.Errorf("missing profile %q", name)
+			continue
+		}
+		if !p.Enabled {
+			t.Errorf("profile %q: want Enabled=true, got false", name)
+		}
+	}
+
+	if p, ok := byName["Compatibility 1080p"]; ok {
+		if p.Output.MaxHeight != 1080 {
+			t.Errorf("Compatibility 1080p: MaxHeight=%d, want 1080", p.Output.MaxHeight)
+		}
+	}
+	if p, ok := byName["Downscale 4K to 1080p"]; ok {
+		if p.Conditions.MinHeight != 2160 {
+			t.Errorf("Downscale 4K to 1080p: MinHeight=%d, want 2160", p.Conditions.MinHeight)
+		}
+	}
+
+	// Idempotency: seeding again must not duplicate profiles.
+	SeedDefaultProfiles(dir)
+	profiles2, err := LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("LoadProfiles (second seed): %v", err)
+	}
+	if len(profiles2) != 3 {
+		t.Fatalf("after second seed: expected 3 profiles, got %d", len(profiles2))
+	}
+	byName2 := make(map[string]TranscodeProfile, len(profiles2))
+	for _, p := range profiles2 {
+		byName2[p.Name] = p
+	}
+	for _, name := range wantNames {
+		if _, ok := byName2[name]; !ok {
+			t.Errorf("after second seed: missing profile %q", name)
+		}
+	}
+}
+
 func TestLoadProfiles(t *testing.T) {
 	t.Run("missing directory returns nil", func(t *testing.T) {
 		dir := t.TempDir()
