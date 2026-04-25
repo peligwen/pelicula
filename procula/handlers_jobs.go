@@ -45,6 +45,17 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
+	if storageStateFn() == StorageStateCritical {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "300")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error":   "storage_critical",
+			"message": "Procula has paused new job admission until storage usage drops below the warning threshold.",
+		})
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
 	var source JobSource
 	if err := json.NewDecoder(r.Body).Decode(&source); err != nil {

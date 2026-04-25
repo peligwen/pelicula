@@ -31,6 +31,8 @@ Radarr and Sonarr fire **Connect** webhooks on import. The middleware receives t
 
 **Webhook authentication:** The import hook is protected by a shared secret (`WEBHOOK_SECRET` in `.env`). The autowired Sonarr/Radarr webhook URL does not embed the secret; instead, it is delivered via the `X-Webhook-Secret` request header. The nginx config also restricts the route to the Docker internal network (172.16.0.0/12). Existing installs without `WEBHOOK_SECRET` in `.env` continue to work (the check is skipped when the env var is unset).
 
+**Storage back-pressure:** When the storage monitor (runs every 5 minutes) determines that any monitored filesystem has crossed the critical threshold (default 95%), `POST /api/procula/jobs` returns `HTTP 503 Service Unavailable` with `Retry-After: 300` and a JSON body `{"error":"storage_critical","message":"..."}`. New job admission is paused until usage drops back below the *warning* threshold (default 85%), not merely the critical threshold — this hysteresis prevents rapid flip-flopping when usage hovers near 95%. Warning state (85–95%) is notification-only and does not pause admission. The middleware webhook handler already retries on 5xx, so the *arr import flow naturally backs off without any additional configuration.
+
 ### Service layout
 
 | Service | Port | Role |

@@ -251,6 +251,82 @@ func TestHandleCancelJob_NotFound(t *testing.T) {
 	}
 }
 
+func testJobBody() []byte {
+	src := JobSource{
+		Type:    "movie",
+		Title:   "Alien",
+		Year:    1979,
+		Path:    "/media/movies/Alien (1979)/alien.mkv",
+		Size:    5_000_000_000,
+		ArrType: "radarr",
+	}
+	b, _ := json.Marshal(src)
+	return b
+}
+
+func TestPostJobsReturns503WhenCritical(t *testing.T) {
+	srv := newTestServer(t)
+
+	// Inject critical state; restore on cleanup.
+	setStorageState(StorageStateCritical)
+	t.Cleanup(func() { setStorageState(StorageStateOk) })
+
+	req := httptest.NewRequest("POST", "/api/procula/jobs", bytes.NewReader(testJobBody()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleCreateJob(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
+	}
+	if ra := w.Header().Get("Retry-After"); ra != "300" {
+		t.Errorf("Retry-After = %q, want %q", ra, "300")
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if body["error"] != "storage_critical" {
+		t.Errorf("error = %q, want storage_critical", body["error"])
+	}
+	if body["message"] == "" {
+		t.Error("message must not be empty")
+	}
+}
+
+func TestPostJobsAcceptedWhenOk(t *testing.T) {
+	srv := newTestServer(t)
+
+	setStorageState(StorageStateOk)
+	t.Cleanup(func() { setStorageState(StorageStateOk) })
+
+	req := httptest.NewRequest("POST", "/api/procula/jobs", bytes.NewReader(testJobBody()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleCreateJob(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPostJobsAcceptedWhenWarning(t *testing.T) {
+	srv := newTestServer(t)
+
+	// Warning is notification-only — must NOT pause admission.
+	setStorageState(StorageStateWarning)
+	t.Cleanup(func() { setStorageState(StorageStateOk) })
+
+	req := httptest.NewRequest("POST", "/api/procula/jobs", bytes.NewReader(testJobBody()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleCreateJob(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want 201 (warning should not block); body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleCatalogFlagsReturnsAll(t *testing.T) {
 	tmp := t.TempDir()
 	db, err := OpenDB(filepath.Join(tmp, "test.db"))

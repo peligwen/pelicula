@@ -8,9 +8,64 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
+
+// Storage admission state consts — used by the storage monitor and job admission gate.
+const (
+	StorageStateOk       = "ok"
+	StorageStateWarning  = "warning"
+	StorageStateCritical = "critical"
+)
+
+// storageState holds the overall admission state as an atomic.Value of string.
+// Initialized to ok; updated by RunStorageMonitor on every tick.
+var storageState atomic.Value
+
+func init() {
+	storageState.Store(StorageStateOk)
+}
+
+// setStorageState writes the overall state (package-private; tests use this directly).
+func setStorageState(s string) { storageState.Store(s) }
+
+// storageStateFn is the getter for the current storage state.
+// Tests may replace it to inject a fixed state without running the monitor.
+var storageStateFn = defaultStorageState
+
+func defaultStorageState() string {
+	v := storageState.Load()
+	if v == nil {
+		return StorageStateOk
+	}
+	return v.(string)
+}
+
+// worstFsStatus returns the worst status among the given filesystems.
+func worstFsStatus(filesystems []FilesystemInfo) string {
+	worst := StorageStateOk
+	for _, fsi := range filesystems {
+		switch fsi.Status {
+		case StorageStateCritical:
+			return StorageStateCritical
+		case StorageStateWarning:
+			worst = StorageStateWarning
+		}
+	}
+	return worst
+}
+
+// nextOverallState applies hysteresis to the storage state transition.
+// Once critical, we stay critical until the computed state is ok (not merely warning).
+// On the way up (ok→warning→critical) we follow computed directly.
+func nextOverallState(prev, computed string) string {
+	if prev == StorageStateCritical && computed == StorageStateWarning {
+		return StorageStateCritical
+	}
+	return computed
+}
 
 // systemDirs lists top-level directory names under /media that should never be
 // surfaced as unregistered library candidates. These are OS/NAS artifacts that
@@ -355,6 +410,9 @@ func buildStorageReport() StorageReport {
 // RunStorageMonitor computes folder sizes and checks disk thresholds every
 // 5 minutes, emitting notification events when filesystems cross thresholds.
 // It only re-alerts when the status changes or an hour has elapsed.
+// It also maintains the package-level storageState atomic with hysteresis:
+// once critical, the state stays critical until usage drops below the warning
+// threshold (not just the critical threshold).
 func RunStorageMonitor(configDir string) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -365,15 +423,29 @@ func RunStorageMonitor(configDir string) {
 	check := func() {
 		computeFolderSizes()
 		report := buildStorageReport()
+
+		// Update overall admission state with hysteresis.
+		computed := worstFsStatus(report.Filesystems)
+		prev := storageStateFn()
+		next := nextOverallState(prev, computed)
+		if next != prev {
+			setStorageState(next)
+			slog.Info("storage state changed",
+				"component", "storage",
+				"from", prev,
+				"to", next,
+			)
+		}
+
 		for _, fsi := range report.Filesystems {
 			if fsi.Status == "ok" {
 				lastStatus[fsi.FsID] = "ok"
 				continue
 			}
-			prev := lastStatus[fsi.FsID]
+			prevFS := lastStatus[fsi.FsID]
 			since := time.Since(lastAlertTime[fsi.FsID])
 
-			if fsi.Status != prev || (prev != "" && since >= time.Hour) {
+			if fsi.Status != prevFS || (prevFS != "" && since >= time.Hour) {
 				labels := make([]string, len(fsi.Folders))
 				for i, f := range fsi.Folders {
 					labels[i] = f.Label

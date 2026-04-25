@@ -241,6 +241,62 @@ func TestAppendToFeed_PrunesEventsOlderThan7Days(t *testing.T) {
 	}
 }
 
+func TestStorageStateHysteresis(t *testing.T) {
+	cases := []struct {
+		name     string
+		prev     string
+		computed string
+		want     string
+	}{
+		// ok → critical (one fs goes from 80% to 96%)
+		{"ok_to_critical", StorageStateOk, StorageStateCritical, StorageStateCritical},
+		// critical while one fs at warning (90%): stays critical
+		{"critical_stays_on_warning", StorageStateCritical, StorageStateWarning, StorageStateCritical},
+		// critical → ok (all fs back below 85%)
+		{"critical_to_ok", StorageStateCritical, StorageStateOk, StorageStateOk},
+		// ok → warning (one fs at 88%): no hysteresis on up-path
+		{"ok_to_warning", StorageStateOk, StorageStateWarning, StorageStateWarning},
+		// warning → critical: follow computed
+		{"warning_to_critical", StorageStateWarning, StorageStateCritical, StorageStateCritical},
+		// warning → ok
+		{"warning_to_ok", StorageStateWarning, StorageStateOk, StorageStateOk},
+		// ok stays ok
+		{"ok_stays_ok", StorageStateOk, StorageStateOk, StorageStateOk},
+		// critical stays critical
+		{"critical_stays_critical", StorageStateCritical, StorageStateCritical, StorageStateCritical},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := nextOverallState(c.prev, c.computed)
+			if got != c.want {
+				t.Errorf("nextOverallState(%q, %q) = %q, want %q", c.prev, c.computed, got, c.want)
+			}
+		})
+	}
+}
+
+func TestWorstFsStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		fss  []FilesystemInfo
+		want string
+	}{
+		{"empty", nil, StorageStateOk},
+		{"all_ok", []FilesystemInfo{{Status: "ok"}, {Status: "ok"}}, StorageStateOk},
+		{"one_warning", []FilesystemInfo{{Status: "ok"}, {Status: "warning"}}, StorageStateWarning},
+		{"one_critical", []FilesystemInfo{{Status: "ok"}, {Status: "warning"}, {Status: "critical"}}, StorageStateCritical},
+		{"critical_short_circuits", []FilesystemInfo{{Status: "critical"}, {Status: "warning"}}, StorageStateCritical},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := worstFsStatus(c.fss)
+			if got != c.want {
+				t.Errorf("worstFsStatus = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
 	job := &Job{
 		ID: "abc12345",
