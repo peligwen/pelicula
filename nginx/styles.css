@@ -87,6 +87,55 @@ body {
 }
 .watch-btn:hover { opacity: 0.9; transform: translateY(-1px); }
 
+/* Native-apps popover (next to Watch button). */
+.watch-group { position: relative; display: inline-flex; align-items: center; gap: 0.25rem; }
+.watch-apps-btn {
+    background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8));
+    color: #fff;
+    border: none; border-radius: 50px;
+    padding: 0.5rem 0.6rem;
+    font-size: 0.7rem; font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 3px 12px rgba(240,96,168,0.35);
+    transition: opacity 0.15s, transform 0.1s;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.watch-apps-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+.watch-apps-btn[aria-expanded="true"] { opacity: 0.85; }
+
+.watch-apps-popover {
+    position: absolute; top: calc(100% + 0.5rem); right: 0;
+    min-width: 280px; max-width: 360px;
+    padding: 0.85rem 1rem;
+    background: var(--bg-elev, #1d1730);
+    border: 1px solid var(--border2, rgba(255,255,255,0.08));
+    border-radius: 12px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+    z-index: 50;
+    text-align: left;
+}
+.watch-apps-title {
+    font-family: var(--font-display, 'Nunito', sans-serif);
+    font-size: 0.78rem; font-weight: 800;
+    color: var(--mint, #40c8a8);
+    margin-bottom: 0.35rem;
+}
+.watch-apps-hint {
+    font-size: 0.74rem; color: var(--faint, #c8b8d8); line-height: 1.45;
+    margin-bottom: 0.55rem;
+}
+.watch-apps-url-row { display: flex; align-items: center; gap: 0.5rem; }
+.watch-apps-url {
+    flex: 1; font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.72rem; color: var(--muted, #d8c8e8);
+    background: rgba(0,0,0,0.25);
+    padding: 0.4rem 0.55rem; border-radius: 6px;
+    word-break: break-all;
+}
+.watch-apps-copy { font-size: 0.72rem; padding: 0.4rem 0.7rem; }
+.watch-apps-empty { font-size: 0.74rem; color: var(--faint, #c8b8d8); margin-top: 0.5rem; }
+
 .theme-toggle {
     font-size: 1rem; line-height: 1;
     padding: 0.15rem 0.45rem;

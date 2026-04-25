@@ -36,6 +36,7 @@ type Config struct {
 	Hooks         *hooks.Handler
 	Backup        *backup.Handler
 	JF            *jfapp.Handler
+	JFInfo        *jfapp.InfoHandler
 	Library       *library.Handler
 	Catalog       *catalog.Handler
 	Search        *search.Handler
@@ -61,6 +62,13 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.HandleFunc("/api/pelicula/hooks/import", cfg.Hooks.HandleImportHook)
 	// Jellyfin refresh — called by Procula internally
 	mux.HandleFunc("/api/pelicula/jellyfin/refresh", cfg.Hooks.HandleJellyfinRefresh)
+
+	// public: Jellyfin discovery info (web URL + LAN URL for native apps).
+	// Non-secret; used by /register and the dashboard to point users at
+	// Jellyfin without surfacing the API key.
+	if cfg.JFInfo != nil {
+		mux.Handle("GET /api/pelicula/jellyfin/info", cfg.JFInfo)
+	}
 
 	// viewer+: SSE stream
 	mux.Handle("/api/pelicula/sse", auth.Guard(http.HandlerFunc(cfg.SSE.HandleSSE)))

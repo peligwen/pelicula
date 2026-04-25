@@ -324,6 +324,7 @@ services:
       - ./nginx/settings.js:/usr/share/nginx/html/settings.js:ro
       - ./nginx/users.js:/usr/share/nginx/html/users.js:ro
       - ./nginx/services.js:/usr/share/nginx/html/services.js:ro
+      - ./nginx/native_apps.js:/usr/share/nginx/html/native_apps.js:ro
       - ./nginx/register.html:/usr/share/nginx/html/register.html:ro
       - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
       - ./nginx/register.css:/usr/share/nginx/html/register.css:ro

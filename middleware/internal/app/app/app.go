@@ -56,6 +56,7 @@ type App struct {
 	LibHandler      *library.Handler
 	CatalogHandler  *catalog.Handler
 	JFHandler       *jfapp.Handler
+	JFInfoHandler   *jfapp.InfoHandler
 	SearchHandler   *search.Handler
 	SettingsHandler *settings.Handler
 	ActionsHandler  *actions.Handler

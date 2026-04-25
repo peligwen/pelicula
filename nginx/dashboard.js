@@ -12,6 +12,7 @@ import './services.js';
 import './notifications.js';
 import './sse.js';
 import './network.js';
+import './native_apps.js';
 
 // ── App store ────────────────────────────
 // Initialised here; framework.js must be loaded first.

@@ -67,6 +67,7 @@ func main() {
 		Hooks:         a.HooksHandler,
 		Backup:        a.BackupHandler,
 		JF:            a.JFHandler,
+		JFInfo:        a.JFInfoHandler,
 		Library:       a.LibHandler,
 		Catalog:       a.CatalogHandler,
 		Search:        a.SearchHandler,

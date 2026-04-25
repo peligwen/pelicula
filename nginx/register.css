@@ -81,6 +81,15 @@ body {
     box-shadow: 0 3px 12px rgba(240,96,168,0.3); transition: opacity 0.15s;
 }
 .reg-open-btn:hover { opacity: 0.9; }
+.reg-success-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-bottom: 1rem; }
+.reg-open-btn--primary { background: var(--gradient-cta, linear-gradient(135deg, #f060a8, #7080e8)); }
+
+.reg-native-app { margin-top: 1.25rem; padding: 0.85rem 1rem; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; text-align: left; }
+.reg-native-title { font-family: var(--font-display, 'Nunito', sans-serif); font-size: 0.78rem; font-weight: 800; color: var(--mint, #40c8a8); margin-bottom: 0.35rem; }
+.reg-native-hint { font-size: 0.74rem; color: var(--faint, #c8b8d8); line-height: 1.45; margin-bottom: 0.55rem; }
+.reg-native-url-row { display: flex; align-items: center; gap: 0.5rem; }
+.reg-native-url { flex: 1; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.72rem; color: var(--muted, #d8c8e8); background: rgba(0,0,0,0.25); padding: 0.4rem 0.55rem; border-radius: 6px; word-break: break-all; }
+.reg-native-copy { font-size: 0.72rem; padding: 0.4rem 0.7rem; }
 .reg-qr { margin: 1.25rem auto 0; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
 .reg-qr-label { font-size: 0.68rem; color: var(--faint, #c8b8d8); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; }
 

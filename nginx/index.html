@@ -72,7 +72,19 @@
                 <span class="titlebar-chip titlebar-chip-warn hidden" id="chip-health-warn"><span class="pip"></span><span id="chip-health-warn-text"></span></span>
                 <span class="titlebar-chip titlebar-chip-err hidden" id="chip-health-err"><span class="pip"></span><span id="chip-health-err-text"></span></span>
                 <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
-                <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin">&#9654; Watch</a>
+                <div class="watch-group" id="watch-group">
+                    <a href="/jellyfin/" target="_blank" class="watch-btn" title="Open Jellyfin in browser">&#9654; Watch</a>
+                    <button type="button" class="watch-apps-btn" id="watch-apps-btn" aria-haspopup="true" aria-expanded="false" aria-controls="watch-apps-popover" title="Native apps (TV, mobile)">&#9662;</button>
+                    <div class="watch-apps-popover hidden" id="watch-apps-popover" role="dialog" aria-labelledby="watch-apps-title">
+                        <div class="watch-apps-title" id="watch-apps-title">On a TV / phone? Use the Jellyfin app.</div>
+                        <div class="watch-apps-hint">Install Jellyfin from your app store, choose <em>Add server</em>, and paste this URL:</div>
+                        <div class="watch-apps-url-row">
+                            <code id="watch-apps-url" class="watch-apps-url"></code>
+                            <button type="button" id="watch-apps-copy" class="btn-secondary watch-apps-copy">Copy</button>
+                        </div>
+                        <div class="watch-apps-empty hidden" id="watch-apps-empty">No LAN URL configured yet — set one in <a href="#" data-open-settings="true">Settings &rarr; Jellyfin</a>.</div>
+                    </div>
+                </div>
                 <a href="/register" class="register-btn" title="Register a new user">+ Register</a>
                 <button class="user-badge hidden" id="user-badge" title="Logged in — click to manage users"></button>
                 <div class="bell-wrap" id="bell-wrap">

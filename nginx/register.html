@@ -58,8 +58,21 @@
             <div class="reg-success" id="reg-success">
                 <div class="reg-success-icon">&#10003;</div>
                 <div class="reg-success-title">You're all set!</div>
-                <div class="reg-success-text">Your account has been created. Head to the dashboard to log in and start requesting movies and TV shows.</div>
-                <a href="/" class="reg-open-btn">Open dashboard</a>
+                <div class="reg-success-text">Your account is ready. You can watch right away in your browser, or sign in from the Jellyfin app on your TV / phone.</div>
+
+                <div class="reg-success-actions">
+                    <a href="/jellyfin/" target="_blank" rel="noopener" class="reg-open-btn reg-open-btn--primary">&#9654; Watch (browser)</a>
+                    <a href="/" class="reg-open-btn">Open dashboard</a>
+                </div>
+
+                <div class="reg-native-app" id="reg-native-app" style="display:none">
+                    <div class="reg-native-title">On a TV / phone? Use the Jellyfin app.</div>
+                    <div class="reg-native-hint">Install Jellyfin from your app store, choose <em>Add server</em>, and paste this URL:</div>
+                    <div class="reg-native-url-row">
+                        <code id="reg-native-url" class="reg-native-url"></code>
+                        <button type="button" id="reg-copy-url" class="btn-secondary reg-native-copy" title="Copy server URL">Copy</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

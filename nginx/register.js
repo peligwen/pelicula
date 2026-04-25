@@ -206,6 +206,39 @@
   function showSuccess() {
     document.getElementById('reg-form-wrap').style.display = 'none';
     document.getElementById('reg-success').style.display = 'block';
+    populateNativeAppHint();
+  }
+
+  // Fetch the LAN URL for the native-app hint. Public, non-secret endpoint.
+  async function populateNativeAppHint() {
+    try {
+      const resp = await fetch('/api/pelicula/jellyfin/info');
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => ({}));
+      const lanUrl = (data && data.lan_url) || '';
+      if (!lanUrl) return; // no LAN URL configured — leave hint hidden
+      const wrap = document.getElementById('reg-native-app');
+      const code = document.getElementById('reg-native-url');
+      const btn = document.getElementById('reg-copy-url');
+      if (!wrap || !code || !btn) return;
+      code.textContent = lanUrl;
+      wrap.style.display = '';
+      btn.addEventListener('click', async function () {
+        try {
+          await navigator.clipboard.writeText(lanUrl);
+          const orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function () { btn.textContent = orig; }, 1500);
+        } catch (_) {
+          // Fallback: select the text so the user can copy manually
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      });
+    } catch (_) {}
   }
 
   // ── Password visibility toggle ────────────────────────────────────────────

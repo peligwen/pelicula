@@ -260,6 +260,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 		},
 		LibHandler:      libHandler,
 		JFHandler:       jfHandler,
+		JFInfoHandler:   jfapp.NewInfoHandler(envPath, settings.ParseEnvFile),
 		ArrCatalogCache: arrCatalogCache,
 		CatalogHandler: &catalog.Handler{
 			DB:         cdb,
