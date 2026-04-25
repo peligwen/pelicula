@@ -359,6 +359,10 @@ func SeedAllConfigs(configDir string) error {
 		return fmt.Errorf("seed qBittorrent categories.json: %w", err)
 	}
 
+	if err := enforceQBittorrentConf(filepath.Join(qbtConfigDir, "qBittorrent.conf")); err != nil {
+		return fmt.Errorf("enforceQBittorrentConf: %w", err)
+	}
+
 	return nil
 }
 
@@ -418,11 +422,126 @@ var qbtConf = "[Preferences]\n" +
 	`WebUI\AuthSubnetWhitelist=172.16.0.0/12` + "\n" +
 	`WebUI\LocalHostAuth=false` + "\n" +
 	`WebUI\CSRFProtection=false` + "\n" +
+	`Queueing\QueueingEnabled=true` + "\n" +
+	`Queueing\MaxActiveDownloads=3` + "\n" +
+	`Queueing\MaxActiveTorrents=8` + "\n" +
+	`Queueing\MaxActiveUploads=3` + "\n" +
+	`Queueing\IgnoreSlowTorrentsForQueueing=true` + "\n" +
+	`Bittorrent\DHT=false` + "\n" +
+	`Bittorrent\PeX=false` + "\n" +
+	`Bittorrent\LSD=false` + "\n" +
+	`RSS\AutoDownloader\enabled=false` + "\n" +
+	`RSS\Session\Enabled=false` + "\n" +
 	"\n" +
 	"[BitTorrent]\n" +
 	`Session\DefaultSavePath=/downloads/` + "\n" +
 	`Session\TempPathEnabled=true` + "\n" +
 	`Session\TempPath=/downloads/incomplete/`
+
+// patchINIKey replaces or inserts a key=value line in an INI file content blob.
+// When the key is already present (any value), it is replaced with key=value.
+// When absent, the line is inserted at the end of the named section block
+// (just before the next section header or end of file).
+// The section parameter must be the bare header name without brackets, e.g. "Preferences".
+// Uses regexp.QuoteMeta on key to correctly handle backslash-delimited Qt key paths.
+func patchINIKey(content []byte, section, key, value string) []byte {
+	line := key + "=" + value
+
+	// Replace in-place if key already exists anywhere in the file.
+	keyRe := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `=.*$`)
+	if keyRe.Match(content) {
+		return keyRe.ReplaceAll(content, []byte(line))
+	}
+
+	// Key absent — insert at end of [section] block.
+	// Walk through lines, find [section] header, then find end of that block.
+	text := string(content)
+	sectionHeader := "[" + section + "]"
+	lines := strings.Split(text, "\n")
+
+	inSection := false
+	insertBefore := -1
+	for i, l := range lines {
+		stripped := strings.TrimSpace(l)
+		if stripped == sectionHeader {
+			inSection = true
+			continue
+		}
+		if inSection && strings.HasPrefix(stripped, "[") {
+			insertBefore = i
+			break
+		}
+	}
+
+	if !inSection {
+		// Section not found — append section and key.
+		if len(text) > 0 && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += "\n" + sectionHeader + "\n" + line + "\n"
+		return []byte(text)
+	}
+
+	if insertBefore == -1 {
+		// Section runs to EOF — append before trailing empty lines.
+		// Find last non-empty line index within the section, insert after it.
+		lastContent := len(lines) - 1
+		for lastContent > 0 && strings.TrimSpace(lines[lastContent]) == "" {
+			lastContent--
+		}
+		result := make([]string, 0, len(lines)+1)
+		result = append(result, lines[:lastContent+1]...)
+		result = append(result, line)
+		result = append(result, lines[lastContent+1:]...)
+		return []byte(strings.Join(result, "\n"))
+	}
+
+	// Insert before the next section header.
+	// Place on its own line just before insertBefore.
+	result := make([]string, 0, len(lines)+1)
+	result = append(result, lines[:insertBefore]...)
+	result = append(result, line)
+	result = append(result, lines[insertBefore:]...)
+	return []byte(strings.Join(result, "\n"))
+}
+
+// enforceQBittorrentConf re-asserts security-sensitive keys in qBittorrent.conf
+// on every boot. It is idempotent and safe to call repeatedly.
+//
+// Always enforced:
+//   - RSS\AutoDownloader\enabled=false
+//   - RSS\Session\Enabled=false
+//
+// Enforced unless PELICULA_QBIT_PRIVATE_PEERS=false (user opts into peer discovery):
+//   - Bittorrent\DHT=false
+//   - Bittorrent\PeX=false
+//   - Bittorrent\LSD=false
+func enforceQBittorrentConf(configPath string) error {
+	if _, err := os.Stat(configPath); err != nil {
+		return nil // file doesn't exist yet — nothing to enforce
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	original := data
+
+	// RSS keys: always enforced.
+	data = patchINIKey(data, "Preferences", `RSS\AutoDownloader\enabled`, "false")
+	data = patchINIKey(data, "Preferences", `RSS\Session\Enabled`, "false")
+
+	// Peer discovery keys: enforced unless user has opted out of the default-off posture.
+	if os.Getenv("PELICULA_QBIT_PRIVATE_PEERS") != "false" {
+		data = patchINIKey(data, "Preferences", `Bittorrent\DHT`, "false")
+		data = patchINIKey(data, "Preferences", `Bittorrent\PeX`, "false")
+		data = patchINIKey(data, "Preferences", `Bittorrent\LSD`, "false")
+	}
+
+	if bytes.Equal(data, original) {
+		return nil
+	}
+	return os.WriteFile(configPath, data, 0644)
+}
 
 // resetProwlarr resets Prowlarr's config.xml, preserving the API key and
 // the indexer database. The database is left in place; only config.xml is
@@ -482,7 +601,11 @@ func resetQBittorrent(configDir string) error {
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(subDir, "qBittorrent.conf"), []byte(qbtConf), 0644); err != nil {
+	confPath := filepath.Join(subDir, "qBittorrent.conf")
+	if err := os.WriteFile(confPath, []byte(qbtConf), 0644); err != nil {
+		return err
+	}
+	if err := enforceQBittorrentConf(confPath); err != nil {
 		return err
 	}
 	return os.WriteFile(

@@ -896,3 +896,203 @@ func TestPatchXMLFile_CondGuard(t *testing.T) {
 		t.Error("Foo should retain original value when guard condition does not match")
 	}
 }
+
+// ── qBittorrent enforcement tests ─────────────────────────────────────────────
+
+// TestQbtConf_QueueingKeysPresent verifies that fresh seeded conf includes
+// all five Queueing keys in the [Preferences] section.
+func TestQbtConf_QueueingKeysPresent(t *testing.T) {
+	dir := t.TempDir()
+	if err := SeedAllConfigs(dir); err != nil {
+		t.Fatalf("SeedAllConfigs: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "qbittorrent", "qBittorrent", "qBittorrent.conf"))
+	got := string(data)
+
+	for _, key := range []string{
+		`Queueing\QueueingEnabled=true`,
+		`Queueing\MaxActiveDownloads=3`,
+		`Queueing\MaxActiveTorrents=8`,
+		`Queueing\MaxActiveUploads=3`,
+		`Queueing\IgnoreSlowTorrentsForQueueing=true`,
+	} {
+		if !strings.Contains(got, key) {
+			t.Errorf("qBittorrent.conf missing key %q", key)
+		}
+	}
+}
+
+// TestEnforceQBittorrentConf_RSSReassertedAlways verifies that RSS keys are
+// forced to false even when the file has them set to true.
+func TestEnforceQBittorrentConf_RSSReassertedAlways(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "qBittorrent.conf")
+
+	content := "[Preferences]\n" +
+		`RSS\AutoDownloader\enabled=true` + "\n" +
+		`RSS\Session\Enabled=true` + "\n"
+	if err := os.WriteFile(confPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_QBIT_PRIVATE_PEERS", "")
+	if err := enforceQBittorrentConf(confPath); err != nil {
+		t.Fatalf("enforceQBittorrentConf: %v", err)
+	}
+
+	data, _ := os.ReadFile(confPath)
+	got := string(data)
+
+	if !strings.Contains(got, `RSS\AutoDownloader\enabled=false`) {
+		t.Error("expected RSS\\AutoDownloader\\enabled=false")
+	}
+	if !strings.Contains(got, `RSS\Session\Enabled=false`) {
+		t.Error("expected RSS\\Session\\Enabled=false")
+	}
+	if strings.Contains(got, `RSS\AutoDownloader\enabled=true`) {
+		t.Error("RSS\\AutoDownloader\\enabled=true should have been replaced")
+	}
+	if strings.Contains(got, `RSS\Session\Enabled=true`) {
+		t.Error("RSS\\Session\\Enabled=true should have been replaced")
+	}
+}
+
+// TestEnforceQBittorrentConf_DHTReassertedWhenEnvUnset verifies that
+// DHT/PeX/LSD are set to false when PELICULA_QBIT_PRIVATE_PEERS is unset.
+func TestEnforceQBittorrentConf_DHTReassertedWhenEnvUnset(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "qBittorrent.conf")
+
+	content := "[Preferences]\n" +
+		`Bittorrent\DHT=true` + "\n" +
+		`Bittorrent\PeX=true` + "\n" +
+		`Bittorrent\LSD=true` + "\n"
+	if err := os.WriteFile(confPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_QBIT_PRIVATE_PEERS", "")
+	if err := enforceQBittorrentConf(confPath); err != nil {
+		t.Fatalf("enforceQBittorrentConf: %v", err)
+	}
+
+	data, _ := os.ReadFile(confPath)
+	got := string(data)
+
+	for _, key := range []string{`Bittorrent\DHT`, `Bittorrent\PeX`, `Bittorrent\LSD`} {
+		if !strings.Contains(got, key+"=false") {
+			t.Errorf("expected %s=false", key)
+		}
+		if strings.Contains(got, key+"=true") {
+			t.Errorf("%s=true should have been replaced", key)
+		}
+	}
+}
+
+// TestEnforceQBittorrentConf_DHTLeftAloneWhenOptOut verifies that DHT/PeX/LSD
+// are NOT modified when PELICULA_QBIT_PRIVATE_PEERS=false (user opt-out).
+func TestEnforceQBittorrentConf_DHTLeftAloneWhenOptOut(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "qBittorrent.conf")
+
+	content := "[Preferences]\n" +
+		`RSS\AutoDownloader\enabled=false` + "\n" +
+		`RSS\Session\Enabled=false` + "\n" +
+		`Bittorrent\DHT=true` + "\n" +
+		`Bittorrent\PeX=true` + "\n" +
+		`Bittorrent\LSD=true` + "\n"
+	if err := os.WriteFile(confPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_QBIT_PRIVATE_PEERS", "false")
+	if err := enforceQBittorrentConf(confPath); err != nil {
+		t.Fatalf("enforceQBittorrentConf: %v", err)
+	}
+
+	data, _ := os.ReadFile(confPath)
+	got := string(data)
+
+	// Peer discovery keys must remain as-is (true).
+	for _, key := range []string{`Bittorrent\DHT`, `Bittorrent\PeX`, `Bittorrent\LSD`} {
+		if !strings.Contains(got, key+"=true") {
+			t.Errorf("%s should remain true when PELICULA_QBIT_PRIVATE_PEERS=false", key)
+		}
+	}
+}
+
+// TestEnforceQBittorrentConf_Idempotent verifies that running enforceQBittorrentConf
+// twice yields the same content as running it once.
+func TestEnforceQBittorrentConf_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "qBittorrent.conf")
+
+	content := "[Preferences]\n" +
+		`RSS\AutoDownloader\enabled=true` + "\n" +
+		`RSS\Session\Enabled=true` + "\n" +
+		`Bittorrent\DHT=true` + "\n" +
+		`Bittorrent\PeX=true` + "\n" +
+		`Bittorrent\LSD=true` + "\n"
+	if err := os.WriteFile(confPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_QBIT_PRIVATE_PEERS", "")
+	if err := enforceQBittorrentConf(confPath); err != nil {
+		t.Fatalf("first enforceQBittorrentConf: %v", err)
+	}
+	after1, _ := os.ReadFile(confPath)
+
+	if err := enforceQBittorrentConf(confPath); err != nil {
+		t.Fatalf("second enforceQBittorrentConf: %v", err)
+	}
+	after2, _ := os.ReadFile(confPath)
+
+	if string(after1) != string(after2) {
+		t.Errorf("enforceQBittorrentConf is not idempotent\nafter 1: %q\nafter 2: %q", string(after1), string(after2))
+	}
+}
+
+// TestEnforceQBittorrentConf_InsertsIntoCorrectSection verifies that absent keys
+// are inserted into [Preferences], not appended after [BitTorrent].
+func TestEnforceQBittorrentConf_InsertsIntoCorrectSection(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "qBittorrent.conf")
+
+	// File has both sections but none of the enforced keys.
+	content := "[Preferences]\n" +
+		`WebUI\LocalHostAuth=false` + "\n" +
+		"\n" +
+		"[BitTorrent]\n" +
+		`Session\DefaultSavePath=/downloads/` + "\n"
+	if err := os.WriteFile(confPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_QBIT_PRIVATE_PEERS", "")
+	if err := enforceQBittorrentConf(confPath); err != nil {
+		t.Fatalf("enforceQBittorrentConf: %v", err)
+	}
+
+	data, _ := os.ReadFile(confPath)
+	got := string(data)
+
+	// All inserted keys must appear before [BitTorrent] header.
+	btIdx := strings.Index(got, "[BitTorrent]")
+	for _, key := range []string{
+		`RSS\AutoDownloader\enabled=false`,
+		`RSS\Session\Enabled=false`,
+		`Bittorrent\DHT=false`,
+		`Bittorrent\PeX=false`,
+		`Bittorrent\LSD=false`,
+	} {
+		idx := strings.Index(got, key)
+		if idx < 0 {
+			t.Errorf("key %q not found in output", key)
+			continue
+		}
+		if idx > btIdx {
+			t.Errorf("key %q was inserted after [BitTorrent] section (idx %d > %d)", key, idx, btIdx)
+		}
+	}
+}
