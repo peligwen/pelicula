@@ -288,9 +288,12 @@ func TestEnforceJellyfinSystem_Idempotent(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
 		t.Fatal(err)
 	}
+	hostname, _ := os.Hostname()
 	content := `<?xml version="1.0" encoding="utf-8"?>
 <ServerConfiguration>
   <AllowClientLogUpload>false</AllowClientLogUpload>
+  <QuickConnectAvailable>false</QuickConnectAvailable>
+  <ServerName>` + hostname + `</ServerName>
 </ServerConfiguration>`
 	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -302,7 +305,7 @@ func TestEnforceJellyfinSystem_Idempotent(t *testing.T) {
 
 	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
 	if string(data) != content {
-		t.Error("enforceJellyfinSystem modified already-correct system.xml")
+		t.Errorf("enforceJellyfinSystem modified already-correct system.xml\ngot: %q\nwant: %q", string(data), content)
 	}
 }
 
@@ -377,6 +380,7 @@ func TestSeedAllConfigs(t *testing.T) {
 		"prowlarr/config.xml",
 		"jellyfin/network.xml",
 		"jellyfin/config/branding.xml",
+		"jellyfin/config/dlna.xml",
 		"bazarr/config/config.ini",
 		"qbittorrent/qBittorrent/qBittorrent.conf",
 		"qbittorrent/qBittorrent/categories.json",
@@ -410,6 +414,12 @@ func TestSeedAllConfigs(t *testing.T) {
 	qbt, _ := os.ReadFile(filepath.Join(dir, "qbittorrent", "qBittorrent", "qBittorrent.conf"))
 	if !strings.Contains(string(qbt), "172.16.0.0/12") {
 		t.Error("qBittorrent.conf missing subnet whitelist")
+	}
+
+	// Verify network.xml includes KnownProxies with default subnet
+	network, _ := os.ReadFile(filepath.Join(dir, "jellyfin", "network.xml"))
+	if !strings.Contains(string(network), "172.16.0.0/12") {
+		t.Error("network.xml missing default KnownProxies subnet")
 	}
 }
 
@@ -616,6 +626,245 @@ func TestPatchXMLFile_InsertFallback(t *testing.T) {
 		t.Error("</Config> must remain present after insert")
 	}
 }
+
+// ── enforceJellyfinSystem: new-feature tests ─────────────────────────────────
+
+// TestEnforceJellyfinSystem_QuickConnectReasserted verifies that QuickConnect
+// is set to false even when the input has true.
+func TestEnforceJellyfinSystem_QuickConnectReasserted(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `<?xml version="1.0" encoding="utf-8"?>
+<ServerConfiguration>
+  <QuickConnectAvailable>true</QuickConnectAvailable>
+  <AllowClientLogUpload>false</AllowClientLogUpload>
+</ServerConfiguration>`
+	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceJellyfinSystem(dir); err != nil {
+		t.Fatalf("enforceJellyfinSystem error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
+	patched := string(data)
+
+	if !strings.Contains(patched, "<QuickConnectAvailable>false</QuickConnectAvailable>") {
+		t.Error("expected QuickConnectAvailable to be set to false")
+	}
+	if strings.Contains(patched, "<QuickConnectAvailable>true</QuickConnectAvailable>") {
+		t.Error("QuickConnectAvailable true should have been replaced")
+	}
+}
+
+// TestEnforceJellyfinSystem_ServerNamePopulatedWhenEmpty verifies that an empty
+// ServerName is populated on first boot.
+func TestEnforceJellyfinSystem_ServerNamePopulatedWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `<?xml version="1.0" encoding="utf-8"?>
+<ServerConfiguration>
+  <ServerName />
+  <AllowClientLogUpload>false</AllowClientLogUpload>
+  <QuickConnectAvailable>false</QuickConnectAvailable>
+</ServerConfiguration>`
+	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_DASHBOARD_NAME", "MyPelicula")
+	if err := enforceJellyfinSystem(dir); err != nil {
+		t.Fatalf("enforceJellyfinSystem error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
+	patched := string(data)
+
+	if !strings.Contains(patched, "<ServerName>MyPelicula</ServerName>") {
+		t.Errorf("expected ServerName to be populated with env value, got:\n%s", patched)
+	}
+}
+
+// TestEnforceJellyfinSystem_ServerNameLeftAloneWhenSet verifies that a
+// non-empty ServerName is never overwritten.
+func TestEnforceJellyfinSystem_ServerNameLeftAloneWhenSet(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `<?xml version="1.0" encoding="utf-8"?>
+<ServerConfiguration>
+  <ServerName>UserChosenName</ServerName>
+  <AllowClientLogUpload>false</AllowClientLogUpload>
+  <QuickConnectAvailable>false</QuickConnectAvailable>
+</ServerConfiguration>`
+	if err := os.WriteFile(filepath.Join(cfgDir, "system.xml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_DASHBOARD_NAME", "SomethingElse")
+	if err := enforceJellyfinSystem(dir); err != nil {
+		t.Fatalf("enforceJellyfinSystem error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfgDir, "system.xml"))
+	if string(data) != content {
+		t.Errorf("enforceJellyfinSystem must not overwrite non-empty ServerName\ngot: %s", string(data))
+	}
+}
+
+// ── DLNA tests ────────────────────────────────────────────────────────────────
+
+// TestSeedAllConfigs_DlnaSeededWhenMissing verifies that dlna.xml is created on
+// first boot with EnableServer and EnablePlayTo both false.
+func TestSeedAllConfigs_DlnaSeededWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := SeedAllConfigs(dir); err != nil {
+		t.Fatalf("SeedAllConfigs error: %v", err)
+	}
+
+	dlnaPath := filepath.Join(dir, "jellyfin", "config", "dlna.xml")
+	data, err := os.ReadFile(dlnaPath)
+	if err != nil {
+		t.Fatalf("dlna.xml not created: %v", err)
+	}
+	got := string(data)
+
+	if !strings.Contains(got, "<EnableServer>false</EnableServer>") {
+		t.Error("expected EnableServer=false in dlna.xml")
+	}
+	if !strings.Contains(got, "<EnablePlayTo>false</EnablePlayTo>") {
+		t.Error("expected EnablePlayTo=false in dlna.xml")
+	}
+}
+
+// TestSeedAllConfigs_DlnaNotOverwrittenWhenPresent verifies that seedConfig
+// does not clobber a user-modified dlna.xml.
+func TestSeedAllConfigs_DlnaNotOverwrittenWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+
+	cfgDir := filepath.Join(dir, "jellyfin", "config")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	customContent := `<DlnaOptions><EnableServer>true</EnableServer></DlnaOptions>`
+	dlnaPath := filepath.Join(cfgDir, "dlna.xml")
+	if err := os.WriteFile(dlnaPath, []byte(customContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SeedAllConfigs(dir); err != nil {
+		t.Fatalf("SeedAllConfigs error: %v", err)
+	}
+
+	data, _ := os.ReadFile(dlnaPath)
+	if string(data) != customContent {
+		t.Error("SeedAllConfigs must not overwrite existing dlna.xml")
+	}
+}
+
+// ── network.xml / KnownProxies tests ─────────────────────────────────────────
+
+// TestJellyfinNetworkXML_DefaultKnownProxies verifies that the seeded
+// network.xml includes the default Docker bridge subnet when no env is set.
+func TestJellyfinNetworkXML_DefaultKnownProxies(t *testing.T) {
+	t.Setenv("PELICULA_KNOWN_PROXIES", "")
+	t.Setenv("JELLYFIN_PUBLISHED_URL", "")
+
+	got := jellyfinNetworkXML()
+
+	if !strings.Contains(got, "<KnownProxies>") {
+		t.Error("network.xml must include KnownProxies element")
+	}
+	if !strings.Contains(got, "172.16.0.0/12") {
+		t.Errorf("expected default subnet 172.16.0.0/12 in KnownProxies, got: %s", got)
+	}
+}
+
+// TestJellyfinNetworkXML_EnvKnownProxies verifies that PELICULA_KNOWN_PROXIES
+// overrides the default.
+func TestJellyfinNetworkXML_EnvKnownProxies(t *testing.T) {
+	t.Setenv("PELICULA_KNOWN_PROXIES", "10.0.0.1,10.0.0.2")
+	t.Setenv("JELLYFIN_PUBLISHED_URL", "")
+
+	got := jellyfinNetworkXML()
+
+	if !strings.Contains(got, "<string>10.0.0.1</string>") {
+		t.Errorf("expected 10.0.0.1 in KnownProxies, got: %s", got)
+	}
+	if !strings.Contains(got, "<string>10.0.0.2</string>") {
+		t.Errorf("expected 10.0.0.2 in KnownProxies, got: %s", got)
+	}
+	if strings.Contains(got, "172.16.0.0/12") {
+		t.Error("default subnet should not appear when env override is set")
+	}
+}
+
+// TestEnforceJellyfinNetwork_ReassertWhenEnvSet verifies that enforceJellyfinNetwork
+// updates an existing network.xml when PELICULA_KNOWN_PROXIES is set.
+func TestEnforceJellyfinNetwork_ReassertWhenEnvSet(t *testing.T) {
+	dir := t.TempDir()
+	jellyfinDir := filepath.Join(dir, "jellyfin")
+	if err := os.MkdirAll(jellyfinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initial := `<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl><KnownProxies><string>172.16.0.0/12</string></KnownProxies></NetworkConfiguration>`
+	networkPath := filepath.Join(jellyfinDir, "network.xml")
+	if err := os.WriteFile(networkPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_KNOWN_PROXIES", "192.168.1.1")
+	if err := enforceJellyfinNetwork(dir); err != nil {
+		t.Fatalf("enforceJellyfinNetwork error: %v", err)
+	}
+
+	data, _ := os.ReadFile(networkPath)
+	got := string(data)
+
+	if !strings.Contains(got, "<string>192.168.1.1</string>") {
+		t.Errorf("expected env-overridden IP in KnownProxies, got: %s", got)
+	}
+	if strings.Contains(got, "172.16.0.0/12") {
+		t.Error("old default subnet should have been replaced")
+	}
+}
+
+// TestEnforceJellyfinNetwork_NoOpWhenEnvUnset verifies that enforceJellyfinNetwork
+// is a no-op when PELICULA_KNOWN_PROXIES is not set.
+func TestEnforceJellyfinNetwork_NoOpWhenEnvUnset(t *testing.T) {
+	dir := t.TempDir()
+	jellyfinDir := filepath.Join(dir, "jellyfin")
+	if err := os.MkdirAll(jellyfinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initial := `<NetworkConfiguration><BaseUrl>/jellyfin</BaseUrl><KnownProxies><string>172.16.0.0/12</string></KnownProxies></NetworkConfiguration>`
+	networkPath := filepath.Join(jellyfinDir, "network.xml")
+	if err := os.WriteFile(networkPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PELICULA_KNOWN_PROXIES", "")
+	if err := enforceJellyfinNetwork(dir); err != nil {
+		t.Fatalf("enforceJellyfinNetwork error: %v", err)
+	}
+
+	data, _ := os.ReadFile(networkPath)
+	if string(data) != initial {
+		t.Error("enforceJellyfinNetwork must not modify network.xml when env is unset")
+	}
+}
+
+// ── patchXMLFile unit tests ──────────────────────────────────────────────────
 
 // TestPatchXMLFile_CondGuard verifies that a patch with condRe is skipped when
 // the guard condition does not match.

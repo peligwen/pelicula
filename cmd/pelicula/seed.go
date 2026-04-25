@@ -27,13 +27,61 @@ func xmlEscape(s string) string {
 // internal IP. When unset, the element is omitted — Jellyfin falls back to its
 // default advertising behavior, and the file stays byte-identical to prior
 // versions (backwards compatible for existing installs).
+//
+// KnownProxies is included so nginx's Docker-network IP is trusted for
+// X-Forwarded-For (required for remote-access auth to log real client IPs).
+// PELICULA_KNOWN_PROXIES overrides the default Docker subnet CIDR.
 func jellyfinNetworkXML() string {
 	const header = `<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl>`
 	const footer = `</NetworkConfiguration>`
+
+	knownProxies := jellyfinKnownProxiesXML()
+
+	var middle string
 	if url := os.Getenv("JELLYFIN_PUBLISHED_URL"); url != "" {
-		return header + "<PublishedServerUrl>" + xmlEscape(url) + "</PublishedServerUrl>" + footer
+		middle = "<PublishedServerUrl>" + xmlEscape(url) + "</PublishedServerUrl>"
 	}
-	return header + footer
+	return header + middle + knownProxies + footer
+}
+
+// jellyfinKnownProxiesXML returns the <KnownProxies> XML fragment.
+// Uses PELICULA_KNOWN_PROXIES (comma-separated) when set; otherwise defaults
+// to the Docker bridge subnet 172.16.0.0/12 (matches qBittorrent auth whitelist).
+func jellyfinKnownProxiesXML() string {
+	raw := os.Getenv("PELICULA_KNOWN_PROXIES")
+	var entries []string
+	if raw != "" {
+		for _, e := range strings.Split(raw, ",") {
+			e = strings.TrimSpace(e)
+			if e != "" {
+				entries = append(entries, "<string>"+xmlEscape(e)+"</string>")
+			}
+		}
+	}
+	if len(entries) == 0 {
+		entries = []string{"<string>172.16.0.0/12</string>"}
+	}
+	return "<KnownProxies>" + strings.Join(entries, "") + "</KnownProxies>"
+}
+
+// enforceJellyfinNetwork patches Jellyfin's network.xml to re-assert
+// KnownProxies when PELICULA_KNOWN_PROXIES is set in the environment.
+// When the env var is unset, the function is a no-op — the seeded default
+// is left in place and the user can modify it freely.
+func enforceJellyfinNetwork(configDir string) error {
+	if os.Getenv("PELICULA_KNOWN_PROXIES") == "" {
+		return nil
+	}
+	path := filepath.Join(configDir, "jellyfin", "network.xml")
+	knownProxies := jellyfinKnownProxiesXML()
+	return patchXMLFile(path, []xmlPatch{
+		{
+			matchRe:        regexp.MustCompile(`<KnownProxies>.*?</KnownProxies>`),
+			replacement:    knownProxies,
+			insertBeforeRe: regexp.MustCompile(`</NetworkConfiguration>`),
+			insertText:     knownProxies + "</NetworkConfiguration>",
+		},
+	})
 }
 
 // seedConfig writes content to file only if the file does not already exist.
@@ -143,18 +191,54 @@ func purgeSentryDirs(configDir string) {
 	}
 }
 
-// enforceJellyfinSystem patches Jellyfin's system.xml to disable client log
-// uploads. The file lives inside the config subdirectory (linuxserver image
-// maps CONFIG_DIR/jellyfin → /config; system.xml is at /config/config/).
+// enforceJellyfinSystem patches Jellyfin's system.xml on every startup to:
+//   - Disable client log uploads.
+//   - Disable QuickConnect (6-digit-code auth bypass; unwanted for remote installs).
+//   - Populate an empty ServerName from PELICULA_DASHBOARD_NAME or os.Hostname
+//     on first boot (seed-only: regex only matches the empty element, so it's
+//     a no-op once a non-empty value is present).
+//
+// The file lives inside the config subdirectory (linuxserver image maps
+// CONFIG_DIR/jellyfin → /config; system.xml is at /config/config/).
 // This is idempotent and safe to call on every startup.
 func enforceJellyfinSystem(configDir string) error {
 	path := filepath.Join(configDir, "jellyfin", "config", "system.xml")
+
+	serverName := os.Getenv("PELICULA_DASHBOARD_NAME")
+	if serverName == "" {
+		if h, err := os.Hostname(); err == nil {
+			serverName = h
+		} else {
+			serverName = "Pelicula"
+		}
+	}
+
 	return patchXMLFile(path, []xmlPatch{
+		// Disable client log uploads.
 		{
 			matchRe:        regexp.MustCompile(`<AllowClientLogUpload>[^<]*</AllowClientLogUpload>`),
 			replacement:    "<AllowClientLogUpload>false</AllowClientLogUpload>",
 			insertBeforeRe: regexp.MustCompile(`</ServerConfiguration>`),
 			insertText:     "  <AllowClientLogUpload>false</AllowClientLogUpload>\n</ServerConfiguration>",
+		},
+		// Disable QuickConnect (present in Jellyfin 10.8+).
+		{
+			matchRe:        regexp.MustCompile(`<QuickConnectAvailable>[^<]*</QuickConnectAvailable>`),
+			replacement:    "<QuickConnectAvailable>false</QuickConnectAvailable>",
+			insertBeforeRe: regexp.MustCompile(`</ServerConfiguration>`),
+			insertText:     "  <QuickConnectAvailable>false</QuickConnectAvailable>\n</ServerConfiguration>",
+		},
+		// Some older Jellyfin versions use EnableQuickConnect — patch if present,
+		// do not insert (avoid duplicating the element across versions).
+		{
+			matchRe:     regexp.MustCompile(`<EnableQuickConnect>[^<]*</EnableQuickConnect>`),
+			replacement: "<EnableQuickConnect>false</EnableQuickConnect>",
+		},
+		// Seed ServerName on first boot only — regex matches the empty self-closing
+		// or empty-body forms; once set, the regex no longer matches.
+		{
+			matchRe:     regexp.MustCompile(`<ServerName\s*/>|<ServerName>\s*</ServerName>`),
+			replacement: "<ServerName>" + xmlEscape(serverName) + "</ServerName>",
 		},
 	})
 }
@@ -221,6 +305,11 @@ func SeedAllConfigs(configDir string) error {
 		return fmt.Errorf("seed jellyfin network.xml: %w", err)
 	}
 
+	// Re-assert env-driven KnownProxies every boot when env is set.
+	if err := enforceJellyfinNetwork(configDir); err != nil {
+		return fmt.Errorf("enforceJellyfinNetwork: %w", err)
+	}
+
 	// Jellyfin branding.xml (Cotton Candy CSS theme)
 	jellyfinConfigDir := filepath.Join(configDir, "jellyfin", "config")
 	if err := os.MkdirAll(jellyfinConfigDir, 0755); err != nil {
@@ -231,6 +320,13 @@ func SeedAllConfigs(configDir string) error {
 		jellyfinBrandingXML,
 	); err != nil {
 		return fmt.Errorf("seed jellyfin branding.xml: %w", err)
+	}
+
+	if err := seedConfig(
+		filepath.Join(jellyfinConfigDir, "dlna.xml"),
+		jellyfinDlnaXML,
+	); err != nil {
+		return fmt.Errorf("seed jellyfin dlna.xml: %w", err)
 	}
 
 	// Bazarr config.ini
@@ -313,6 +409,8 @@ var jellyfinBrandingXML = strings.Join([]string{
 	`</BrandingOptions>`,
 }, "\n")
 
+var jellyfinDlnaXML = `<DlnaOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><EnableServer>false</EnableServer><EnablePlayTo>false</EnablePlayTo></DlnaOptions>`
+
 var bazarrConfigIni = "[general]\nbase_url=/bazarr\n"
 
 var qbtConf = "[Preferences]\n" +
@@ -359,9 +457,16 @@ func resetJellyfin(configDir string) error {
 	); err != nil {
 		return err
 	}
-	return os.WriteFile(
+	if err := os.WriteFile(
 		filepath.Join(jellyfinDir, "config", "branding.xml"),
 		[]byte(jellyfinBrandingXML),
+		0644,
+	); err != nil {
+		return err
+	}
+	return os.WriteFile(
+		filepath.Join(jellyfinDir, "config", "dlna.xml"),
+		[]byte(jellyfinDlnaXML),
 		0644,
 	)
 }
