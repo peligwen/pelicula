@@ -46,8 +46,22 @@ Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no C
    - Complete Jellyfin setup wizard
    - Add Movies + TV libraries to Jellyfin
    - Wire import webhooks into Radarr + Sonarr (`wireImportWebhook()`)
+   - Probe and apply Jellyfin hardware acceleration (see below)
 5. Start the missing content watcher (10-minute interval) — auto-searches monitored items with no files
 6. Serve the HTTP API
+
+## Jellyfin Hardware Acceleration
+
+At first wire, `pelicula-api` probes for the best `HardwareAccelerationType` and POSTs it to Jellyfin's `/System/Configuration/encoding` (GET-merge-POST, preserving all other encoding settings). The probe only runs when the current value is `"none"`; user-set values are never overridden.
+
+Probe order:
+
+1. `PELICULA_JELLYFIN_HWACCEL` env var wins. Accepted values: `vaapi`, `qsv`, `videotoolbox`, `none`. Unknown values log a warning and fall through to auto-probe.
+2. Stat `/dev/dri/renderD128` → `vaapi` (with `VaapiDevice=/dev/dri/renderD128`). This fires if the device is visible inside the `pelicula-api` container. The compose file does **not** mount `/dev/dri` into `pelicula-api` by default (adding device mounts expands the attack surface), so the stat probe is a no-op on most deployments — the env override is the supported path for VAAPI.
+3. `GOOS == "darwin" && GOARCH == "arm64"` → `videotoolbox`.
+4. Leave `none`.
+
+To opt into VAAPI on a Linux host with GPU passthrough, set `PELICULA_JELLYFIN_HWACCEL=vaapi` in `.env`.
 
 ## Config Seeding and Auth Enforcement
 

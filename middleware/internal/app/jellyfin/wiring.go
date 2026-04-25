@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"runtime"
 	"sync"
 
 	"pelicula-api/clients"
@@ -223,6 +225,48 @@ func (w *Wirer) Wire(lh *library.Handler) {
 	} else if svcUserID != "" {
 		SetAudioPref(jfc, token, svcUserID)
 	}
+
+	hwType, hwDevice := HwAccelProbe(
+		os.Getenv("PELICULA_JELLYFIN_HWACCEL"),
+		func(p string) error { _, err := os.Stat(p); return err },
+		runtime.GOOS,
+		runtime.GOARCH,
+	)
+	if hwType != HwAccelNone {
+		wireHwAccel(jfc, token, hwType, hwDevice)
+	}
+}
+
+// wireHwAccel applies hwType (and optionally vaapiDevice) to Jellyfin's
+// /System/Configuration/encoding endpoint, using GET-merge-POST so that
+// all other encoding settings are preserved. It is a no-op when the current
+// HardwareAccelerationType is already non-"none" (respects user-set config).
+func wireHwAccel(client *jfclient.Client, token string, hwType HwAccelType, vaapiDevice string) {
+	data, err := client.Get("/System/Configuration/encoding", token)
+	if err != nil {
+		slog.Warn("could not read Jellyfin encoding config", "component", "autowire", "error", err)
+		return
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		slog.Warn("could not parse Jellyfin encoding config", "component", "autowire", "error", err)
+		return
+	}
+	if current, _ := cfg["HardwareAccelerationType"].(string); current != "none" && current != "" {
+		slog.Info("Jellyfin hardware acceleration already configured, skipping probe result",
+			"component", "autowire", "current", current)
+		return
+	}
+	cfg["HardwareAccelerationType"] = string(hwType)
+	if vaapiDevice != "" {
+		cfg["VaapiDevice"] = vaapiDevice
+	}
+	if _, err := client.Post("/System/Configuration/encoding", token, cfg); err != nil {
+		slog.Warn("could not apply Jellyfin hardware acceleration config", "component", "autowire",
+			"type", hwType, "error", err)
+		return
+	}
+	slog.Info("Jellyfin hardware acceleration configured", "component", "autowire", "type", hwType)
 }
 
 // TriggerRefresh asks Jellyfin to scan all libraries.
