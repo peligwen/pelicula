@@ -73,6 +73,13 @@ func Run() {
 	// One-shot: import any existing JSONL notifications feed into SQLite.
 	migrateNotificationsFeedToDB(db, configDir)
 
+	// Prune notifications table at startup so long-stopped instances don't carry debt.
+	if pn, err := pruneNotifications(db); err != nil {
+		slog.Warn("startup prune notifications failed", "component", "main", "error", err)
+	} else if pn > 0 {
+		slog.Info("startup: pruned notifications", "component", "main", "count", pn)
+	}
+
 	q, err := NewQueue(db)
 	if err != nil {
 		slog.Error("queue initialization failed", "component", "main", "error", err)
@@ -197,7 +204,8 @@ func env(key, fallback string) string {
 	return fallback
 }
 
-// runArchiveLoop deletes terminal jobs older than 30 days every 24 hours.
+// runArchiveLoop deletes terminal jobs older than 30 days and prunes the
+// notifications table every 24 hours.
 // Runs as a background goroutine; exits when the process is killed.
 func runArchiveLoop(q *Queue) {
 	const retention = 30 * 24 * time.Hour
@@ -207,10 +215,17 @@ func runArchiveLoop(q *Queue) {
 		n, err := q.ArchiveOldJobs(retention)
 		if err != nil {
 			slog.Warn("archive: failed to delete old jobs", "component", "archive", "error", err)
-			continue
-		}
-		if n > 0 {
+		} else if n > 0 {
 			slog.Info("archive: deleted old terminal jobs", "component", "archive", "count", n)
+		}
+
+		if appDB != nil {
+			pn, err := pruneNotifications(appDB)
+			if err != nil {
+				slog.Warn("archive: failed to prune notifications", "component", "archive", "error", err)
+			} else if pn > 0 {
+				slog.Info("archive: pruned notifications", "component", "archive", "count", pn)
+			}
 		}
 	}
 }

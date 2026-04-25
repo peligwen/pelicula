@@ -122,6 +122,41 @@ func buildEvent(job *Job, eventType, message, detail string) NotificationEvent {
 	}
 }
 
+// pruneNotifications deletes notifications that exceed retention bounds: rows
+// older than 90 days, and any rows beyond the newest 1000. Both deletes run in
+// a single transaction; the combined affected-row count is returned.
+func pruneNotifications(db *sql.DB) (int64, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("pruneNotifications: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var total int64
+
+	// Age cap: drop rows older than 90 days.
+	cutoff := time.Now().UTC().Add(-90 * 24 * time.Hour).Format(time.RFC3339Nano)
+	res, err := tx.Exec(`DELETE FROM notifications WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("pruneNotifications: age delete: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	total += n
+
+	// Row cap: keep only the newest 1000 rows.
+	res, err = tx.Exec(`DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY timestamp DESC LIMIT 1000)`)
+	if err != nil {
+		return 0, fmt.Errorf("pruneNotifications: cap delete: %w", err)
+	}
+	n, _ = res.RowsAffected()
+	total += n
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("pruneNotifications: commit: %w", err)
+	}
+	return total, nil
+}
+
 // appendToFeed writes a notification event to the SQLite notifications table.
 // If appDB is nil (e.g. in unit tests) it falls back to the JSONL file so
 // existing tests that don't initialise the DB continue to work.
