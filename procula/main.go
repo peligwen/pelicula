@@ -158,6 +158,9 @@ func serveWithShutdown(addr string, handler http.Handler) {
 
 	<-ctx.Done()
 	slog.Info("shutdown signal received", "component", "main")
+	// Force any pending debounced Jellyfin refresh to fire so a final import
+	// burst isn't lost on shutdown.
+	FlushJellyfinRefresh()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

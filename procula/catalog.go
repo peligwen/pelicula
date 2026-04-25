@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,8 +43,10 @@ type NotificationConfig struct {
 func CatalogEarly(job *Job, configDir, peliculaAPI string) {
 	slog.Info("cataloging job (early)", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
 
-	// Trigger Jellyfin library refresh via pelicula-api
-	if err := triggerJellyfinRefresh(peliculaAPI); err != nil {
+	// Schedule a (debounced) Jellyfin library refresh via pelicula-api. A
+	// download burst → one library scan instead of N. Disable by setting
+	// JELLYFIN_REFRESH_DEBOUNCE_MS=0.
+	if err := scheduleJellyfinRefresh(peliculaAPI); err != nil {
 		slog.Warn("Jellyfin refresh failed (non-fatal)", "component", "catalog", "error", err)
 	}
 
@@ -73,7 +74,7 @@ func CatalogEarly(job *Job, configDir, peliculaAPI string) {
 // version appears in the version picker. No duplicate notification is emitted.
 func CatalogLate(job *Job, peliculaAPI string) {
 	slog.Info("cataloging job (late refresh for sidecar)", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
-	if err := triggerJellyfinRefresh(peliculaAPI); err != nil {
+	if err := scheduleJellyfinRefresh(peliculaAPI); err != nil {
 		slog.Warn("late Jellyfin refresh failed (non-fatal)", "component", "catalog", "error", err)
 	}
 }
@@ -440,28 +441,4 @@ func sendDirect(webhookURL string, event NotificationEvent) {
 	}
 	resp.Body.Close()
 	slog.Info("direct notification sent", "component", "catalog")
-}
-
-func triggerJellyfinRefresh(peliculaAPI string) error {
-	target := peliculaAPI + "/api/pelicula/jellyfin/refresh"
-	client := newProculaClient(10 * time.Second)
-	req, err := http.NewRequest(http.MethodPost, target, nil)
-	if err != nil {
-		return err
-	}
-	// Authenticate with the shared Procula API key so the middleware can verify
-	// the caller is Procula and not an external request.
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		req.Header.Set("X-API-Key", key)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	slog.Info("triggered Jellyfin library refresh", "component", "catalog")
-	return nil
 }
