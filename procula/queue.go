@@ -77,18 +77,19 @@ type ValidationResult struct {
 }
 
 type Job struct {
-	ID           string            `json:"id"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
-	State        JobState          `json:"state"`
-	Stage        JobStage          `json:"stage"`
-	Progress     float64           `json:"progress"`
-	Source       JobSource         `json:"source"`
-	Validation   *ValidationResult `json:"validation,omitempty"`
-	MissingSubs  []string          `json:"missing_subs,omitempty"`
-	SubsAcquired []string          `json:"subs_acquired,omitempty"` // NEW: langs Bazarr has delivered
-	Error        string            `json:"error,omitempty"`
-	RetryCount   int               `json:"retry_count"`
+	ID             string            `json:"id"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	State          JobState          `json:"state"`
+	Stage          JobStage          `json:"stage"`
+	Progress       float64           `json:"progress"`
+	Source         JobSource         `json:"source"`
+	Validation     *ValidationResult `json:"validation,omitempty"`
+	MissingSubs    []string          `json:"missing_subs,omitempty"`
+	SubsAcquired   []string          `json:"subs_acquired,omitempty"` // NEW: langs Bazarr has delivered
+	Error          string            `json:"error,omitempty"`
+	RetryCount     int               `json:"retry_count"`
+	InterruptCount int               `json:"interrupt_count"`
 
 	// ManualProfile, when non-empty, causes the pipeline to skip Validate and
 	// CatalogEarly and run a targeted transcode using the named profile.
@@ -177,45 +178,64 @@ func (q *Queue) loadExisting() error {
 		return fmt.Errorf("loadExisting rows: %w", err)
 	}
 
+	// maxConsecutiveInterrupts is the number of consecutive process-kill
+	// interruptions tolerated before the event is treated as a real failure
+	// and promoted into retry_count.
+	const maxConsecutiveInterrupts = 3
+	// interruptBackoff is the short delay before re-queuing a job that was
+	// killed mid-run (e.g. container restart). Much shorter than the transient
+	// failure backoff because restarts are almost always transient infra events.
+	const interruptBackoff = 30 * time.Second
+
 	for _, r := range toProcess {
 		if r.state == StateProcessing {
-			// The job was mid-flight when the process died. Increment retry_count;
-			// if it has now exceeded the poison-pill threshold mark it failed,
-			// otherwise re-queue it with a backoff delay.
-			var retryCount int
-			err := q.db.QueryRow(`SELECT retry_count FROM jobs WHERE id=?`, r.id).Scan(&retryCount)
+			// The job was mid-flight when the process died.
+			var retryCount, interruptCount int
+			err := q.db.QueryRow(`SELECT retry_count, interrupt_count FROM jobs WHERE id=?`, r.id).
+				Scan(&retryCount, &interruptCount)
 			if err != nil {
-				slog.Warn("could not read retry_count for interrupted job", "component", "queue", "job_id", r.id, "error", err)
+				slog.Warn("could not read counters for interrupted job", "component", "queue", "job_id", r.id, "error", err)
 				continue
 			}
-			retryCount++
-			const interruptCap = 5
-			if retryCount > interruptCap {
-				_, err = q.db.Exec(
-					`UPDATE jobs SET state=?, error=?, retry_count=?, next_attempt_at=NULL, updated_at=? WHERE id=?`,
-					string(StateFailed), "interrupted repeatedly",
-					retryCount, time.Now().UTC().Format(time.RFC3339Nano), r.id,
-				)
-				if err != nil {
-					slog.Warn("could not mark interrupted job as failed", "component", "queue", "job_id", r.id, "error", err)
-				} else {
-					slog.Warn("job marked failed: interrupted too many times", "component", "queue", "job_id", r.id, "retry_count", retryCount)
+			interruptCount++
+
+			var next time.Time
+			if interruptCount > maxConsecutiveInterrupts {
+				// Consecutive-interrupt threshold exceeded: promote to a real retry.
+				retryCount++
+				interruptCount = 0
+				if retryCount > maxTransientRetries {
+					_, err = q.db.Exec(
+						`UPDATE jobs SET state=?, error=?, retry_count=?, interrupt_count=0, next_attempt_at=NULL, updated_at=? WHERE id=?`,
+						string(StateFailed), "interrupted repeatedly",
+						retryCount, time.Now().UTC().Format(time.RFC3339Nano), r.id,
+					)
+					if err != nil {
+						slog.Warn("could not mark interrupted job as failed", "component", "queue", "job_id", r.id, "error", err)
+					} else {
+						slog.Warn("job marked failed: interrupted too many times", "component", "queue", "job_id", r.id, "retry_count", retryCount)
+					}
+					continue
 				}
-				continue
+				next = time.Now().UTC().Add(backoffDuration(retryCount))
+				slog.Info("interrupt promoted to retry", "component", "queue", "job_id", r.id,
+					"retry_count", retryCount, "next_attempt_at", next.Format(time.RFC3339))
+			} else {
+				next = time.Now().UTC().Add(interruptBackoff)
+				slog.Info("interrupted job re-queued with short backoff", "component", "queue", "job_id", r.id,
+					"interrupt_count", interruptCount, "next_attempt_at", next.Format(time.RFC3339))
 			}
-			next := time.Now().UTC().Add(backoffDuration(retryCount))
+
 			_, err = q.db.Exec(
-				`UPDATE jobs SET state=?, stage=?, progress=0, error=?, retry_count=?, next_attempt_at=?, updated_at=? WHERE id=?`,
+				`UPDATE jobs SET state=?, stage=?, progress=0, error=?, retry_count=?, interrupt_count=?, next_attempt_at=?, updated_at=? WHERE id=?`,
 				string(StateQueued), string(StageValidate), "interrupted: restarted",
-				retryCount, next.Format(time.RFC3339Nano),
+				retryCount, interruptCount, next.Format(time.RFC3339Nano),
 				time.Now().UTC().Format(time.RFC3339Nano), r.id,
 			)
 			if err != nil {
 				slog.Warn("could not reset interrupted job", "component", "queue", "job_id", r.id, "error", err)
 				continue
 			}
-			slog.Info("interrupted job re-queued with backoff", "component", "queue", "job_id", r.id,
-				"retry_count", retryCount, "next_attempt_at", next.Format(time.RFC3339))
 		}
 		select {
 		case q.pending <- struct{}{}:
@@ -244,10 +264,10 @@ func (q *Queue) insertJobRow(j *Job) error {
 		nextAttemptAt = &s
 	}
 	_, err = q.db.Exec(
-		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count,
+		`INSERT INTO jobs (id, created_at, updated_at, state, stage, progress, source, error, retry_count, interrupt_count,
 		                   manual_profile, dualsub_error, transcode_profile, transcode_decision, transcode_error, transcode_eta,
 		                   action_type, params, result, flags, next_attempt_at)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '', '', '', '', 0, ?, ?, NULL, NULL, ?)`,
+		 VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, 0, '', '', '', '', '', 0, ?, ?, NULL, NULL, ?)`,
 		j.ID,
 		j.CreatedAt.Format(time.RFC3339Nano),
 		j.UpdatedAt.Format(time.RFC3339Nano),
@@ -334,7 +354,7 @@ func (q *Queue) Get(id string) (*Job, bool) {
 	row := q.db.QueryRow(
 		`SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
 		        subs_acquired,
-		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
+		        error, retry_count, interrupt_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
 		        action_type, params, result, catalog, flags, next_attempt_at
 		 FROM jobs WHERE id=?`, id,
@@ -368,7 +388,7 @@ func (q *Queue) List(f ListFilter) []Job {
 
 	query := `SELECT id, created_at, updated_at, state, stage, progress, source, validation, missing_subs,
 		        subs_acquired,
-		        error, retry_count, manual_profile, dualsub_outputs, dualsub_error,
+		        error, retry_count, interrupt_count, manual_profile, dualsub_outputs, dualsub_error,
 		        transcode_profile, transcode_decision, transcode_outputs, transcode_error, transcode_eta,
 		        action_type, params, result, catalog, flags, next_attempt_at
 		 FROM jobs WHERE 1=1`
@@ -505,7 +525,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		`UPDATE jobs SET
 			updated_at=?, state=?, stage=?, progress=?, source=?, validation=?, missing_subs=?,
 			subs_acquired=?,
-			error=?, retry_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
+			error=?, retry_count=?, interrupt_count=?, manual_profile=?, dualsub_outputs=?, dualsub_error=?,
 			transcode_profile=?, transcode_decision=?, transcode_outputs=?, transcode_error=?, transcode_eta=?,
 			action_type=?, params=?, result=?, catalog=?, flags=?, next_attempt_at=?
 		 WHERE id=?`,
@@ -513,7 +533,7 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 		string(job.State), string(job.Stage), job.Progress,
 		string(sourceJSON), validationJSON, missingSubsJSON,
 		subsAcquiredJSON,
-		job.Error, job.RetryCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
+		job.Error, job.RetryCount, job.InterruptCount, job.ManualProfile, dualSubOutputsJSON, job.DualSubError,
 		job.TranscodeProfile, job.TranscodeDecision, transcodeOutputsJSON, job.TranscodeError, job.TranscodeETA,
 		job.ActionType, paramsJSON, resultJSON, catalogJSON, flagsJSON, nextAttemptAtStr,
 		id,
@@ -701,7 +721,7 @@ func scanJob(s scanner) (*Job, error) {
 		&job.State, &job.Stage, &job.Progress,
 		&sourceJSON, &validationJSON, &missingSubsJSON,
 		&subsAcquiredJSON,
-		&job.Error, &job.RetryCount, &job.ManualProfile,
+		&job.Error, &job.RetryCount, &job.InterruptCount, &job.ManualProfile,
 		&dualSubOutputsJSON, &job.DualSubError,
 		&job.TranscodeProfile, &job.TranscodeDecision,
 		&transcodeOutputsJSON, &job.TranscodeError, &job.TranscodeETA,

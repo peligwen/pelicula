@@ -334,10 +334,13 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
+	// consecutive-interrupt streak only counts pre-process; clearing it after a
+	// successful transcode means restarts during a long-running new transcode get a fresh budget.
 	_ = q.Update(id, func(j *Job) {
 		j.State = StateCompleted
 		j.Stage = StageDone
 		j.Progress = 1.0
+		j.InterruptCount = 0
 	})
 	persistFlags(q, id)
 
@@ -579,10 +582,13 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 		CatalogLate(job, peliculaAPI)
 	}
 
+	// consecutive-interrupt streak only counts pre-process; clearing it after a
+	// successful transcode means restarts during a long-running new transcode get a fresh budget.
 	_ = q.Update(id, func(j *Job) {
 		j.State = StateCompleted
 		j.Stage = StageDone
 		j.Progress = 1.0
+		j.InterruptCount = 0
 	})
 	slog.Info("manual transcode completed", "component", "pipeline", "job_id", id, "title", job.Source.Title, "output", outputPath)
 }

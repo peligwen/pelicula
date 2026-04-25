@@ -1,6 +1,7 @@
 package procula
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -479,5 +480,208 @@ func TestJobPersistsFlags(t *testing.T) {
 	got, ok := q.Get(job.ID)
 	if !ok || len(got.Flags) != 1 || got.Flags[0].Code != "validation_failed" {
 		t.Fatalf("flags round-trip failed: %+v", got)
+	}
+}
+
+// simulateInterrupt puts the job into state=processing then runs loadExisting
+// recovery by constructing a fresh Queue on the same DB.
+func simulateInterrupt(t *testing.T, db *sql.DB, jobID string) *Queue {
+	t.Helper()
+	_, err := db.Exec(
+		`UPDATE jobs SET state='processing', stage='process', progress=0.6, updated_at=? WHERE id=?`,
+		time.Now().UTC().Format(time.RFC3339Nano), jobID,
+	)
+	if err != nil {
+		t.Fatalf("simulateInterrupt: set processing: %v", err)
+	}
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("simulateInterrupt: NewQueue: %v", err)
+	}
+	return q
+}
+
+// TestInterruptCountIncrementsWithoutRetry verifies that up to
+// maxConsecutiveInterrupts consecutive interruptions increment interrupt_count
+// only — retry_count must stay 0 and next_attempt_at must be ~30s out.
+func TestInterruptCountIncrementsWithoutRetry(t *testing.T) {
+	db := testDB(t)
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+	job, err := q.Create(testSource("/downloads/interrupt_test.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	for i := 1; i <= 3; i++ {
+		before := time.Now().UTC()
+		q = simulateInterrupt(t, db, job.ID)
+
+		got, ok := q.Get(job.ID)
+		if !ok {
+			t.Fatalf("interrupt %d: job not found", i)
+		}
+		if got.State != StateQueued {
+			t.Errorf("interrupt %d: State = %q, want %q", i, got.State, StateQueued)
+		}
+		if got.Stage != StageValidate {
+			t.Errorf("interrupt %d: Stage = %q, want %q", i, got.Stage, StageValidate)
+		}
+		if got.RetryCount != 0 {
+			t.Errorf("interrupt %d: RetryCount = %d, want 0", i, got.RetryCount)
+		}
+		if got.InterruptCount != i {
+			t.Errorf("interrupt %d: InterruptCount = %d, want %d", i, got.InterruptCount, i)
+		}
+		if got.NextAttemptAt == nil {
+			t.Errorf("interrupt %d: NextAttemptAt is nil", i)
+		} else {
+			delay := got.NextAttemptAt.Sub(before)
+			if delay < 20*time.Second || delay > 45*time.Second {
+				t.Errorf("interrupt %d: next_attempt_at delay = %v, want ~30s", i, delay)
+			}
+		}
+	}
+}
+
+// TestInterruptPromotesToRetryAfterThreshold verifies that a 4th consecutive
+// interruption promotes to retry_count and resets interrupt_count.
+func TestInterruptPromotesToRetryAfterThreshold(t *testing.T) {
+	db := testDB(t)
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+	job, err := q.Create(testSource("/downloads/promote_test.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Simulate 3 interruptions to reach the threshold boundary.
+	for i := 0; i < 3; i++ {
+		q = simulateInterrupt(t, db, job.ID)
+	}
+	got, _ := q.Get(job.ID)
+	if got.InterruptCount != 3 || got.RetryCount != 0 {
+		t.Fatalf("pre-condition: want interrupt_count=3, retry_count=0; got %d, %d",
+			got.InterruptCount, got.RetryCount)
+	}
+
+	// 4th interruption must promote.
+	before := time.Now().UTC()
+	q = simulateInterrupt(t, db, job.ID)
+	got, ok := q.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found after 4th interrupt")
+	}
+	if got.RetryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1", got.RetryCount)
+	}
+	if got.InterruptCount != 0 {
+		t.Errorf("InterruptCount = %d, want 0 (reset after promotion)", got.InterruptCount)
+	}
+	if got.State != StateQueued {
+		t.Errorf("State = %q, want %q", got.State, StateQueued)
+	}
+	// next_attempt_at must follow backoffDuration(1) ≈ 1 minute
+	if got.NextAttemptAt == nil {
+		t.Fatal("NextAttemptAt is nil after promotion")
+	}
+	delay := got.NextAttemptAt.Sub(before)
+	if delay < 50*time.Second || delay > 90*time.Second {
+		t.Errorf("next_attempt_at delay = %v, want ~1m (backoffDuration(1))", delay)
+	}
+}
+
+// TestInterruptCountResetsOnPastProcessSuccess verifies that a successful
+// completion after the process stage resets interrupt_count to 0.
+func TestInterruptCountResetsOnPastProcessSuccess(t *testing.T) {
+	db := testDB(t)
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+	job, err := q.Create(testSource("/downloads/reset_test.mkv"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Simulate 2 interruptions so interrupt_count=2.
+	for i := 0; i < 2; i++ {
+		q = simulateInterrupt(t, db, job.ID)
+	}
+	got, _ := q.Get(job.ID)
+	if got.InterruptCount != 2 {
+		t.Fatalf("pre-condition: interrupt_count = %d, want 2", got.InterruptCount)
+	}
+
+	// Simulate a successful past-process stage advance (what the pipeline does at Done).
+	if err := q.Update(job.ID, func(j *Job) {
+		j.State = StateCompleted
+		j.Stage = StageDone
+		j.Progress = 1.0
+		j.InterruptCount = 0
+	}); err != nil {
+		t.Fatalf("Update (done): %v", err)
+	}
+
+	got, ok := q.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found after done update")
+	}
+	if got.InterruptCount != 0 {
+		t.Errorf("InterruptCount = %d after done, want 0", got.InterruptCount)
+	}
+	if got.State != StateCompleted {
+		t.Errorf("State = %q, want %q", got.State, StateCompleted)
+	}
+}
+
+// TestMigrationIdempotent opens the same DB path twice and verifies that
+// running migrations twice produces no error and the correct user_version.
+func TestMigrationIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "idempotent10.db")
+
+	db1, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	db1.Close()
+
+	db2, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	defer db2.Close()
+
+	ver, err := currentVersion(db2)
+	if err != nil {
+		t.Fatalf("currentVersion: %v", err)
+	}
+	if ver != schemaVersion {
+		t.Errorf("user_version = %d, want %d", ver, schemaVersion)
+	}
+
+	// interrupt_count column must exist.
+	cols := map[string]bool{}
+	rows, err := db2.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols[name] = true
+	}
+	if !cols["interrupt_count"] {
+		t.Error("interrupt_count column missing after idempotent migration")
 	}
 }

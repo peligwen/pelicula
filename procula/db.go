@@ -56,7 +56,7 @@ type migration struct {
 }
 
 // schemaVersion is the current schema version. Bump this when adding new migrations.
-const schemaVersion = 9
+const schemaVersion = 10
 
 // DDL shared between migrateBaseline and the corresponding incremental migrations.
 // Keeping them as named constants ensures the two paths stay in sync.
@@ -128,6 +128,7 @@ var migrations = []migration{
 	{version: 7, up: migrate7},
 	{version: 8, up: migrate8},
 	{version: 9, up: migrate9},
+	{version: 10, up: migrate10},
 }
 
 // runMigrations reads the current schema version and applies all pending migrations.
@@ -220,7 +221,8 @@ func migrateBaseline(tx *sql.Tx) error {
 			result             TEXT,
 			catalog            TEXT,
 			flags              TEXT,
-			next_attempt_at    TEXT    DEFAULT NULL
+			next_attempt_at    TEXT    DEFAULT NULL,
+			interrupt_count    INTEGER NOT NULL DEFAULT 0
 		)`,
 		ddlSettings,
 		ddlCatalogFlags,
@@ -324,6 +326,13 @@ func migrate9(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// migrate10 adds interrupt_count to separate process-kill interruptions from
+// transient job-level failures, so restarts don't consume retry_count budget.
+func migrate10(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN interrupt_count INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 // migrate1 creates the initial schema (version 1).
