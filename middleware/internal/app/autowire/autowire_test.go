@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"pelicula-api/internal/app/autowire"
+	arrclient "pelicula-api/internal/clients/arr"
 	bazarrclient "pelicula-api/internal/clients/bazarr"
 )
 
@@ -242,18 +243,13 @@ func TestWireDownloadClientDrift(t *testing.T) {
 		t.Fatal("expected PUT to /api/v3/downloadclient/7 to correct drift, but none was issued")
 	}
 
-	payload, ok := put.payload.(map[string]any)
+	payload, ok := put.payload.(*arrclient.DownloadClientResource)
 	if !ok {
-		t.Fatal("PUT payload is not map[string]any")
+		t.Fatalf("PUT payload is not *arr.DownloadClientResource, got %T", put.payload)
 	}
-	fields, _ := payload["fields"].([]any)
 	got := map[string]any{}
-	for _, fRaw := range fields {
-		f, ok := fRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-		got[f["name"].(string)] = f["value"]
+	for _, f := range payload.Fields {
+		got[f.Name] = f.Value
 	}
 	if got["host"] != "gluetun" {
 		t.Errorf("host not corrected: got %v", got["host"])
@@ -322,19 +318,14 @@ func TestWireImportWebhookURLDrift(t *testing.T) {
 		t.Fatal("expected PUT to /api/v3/notification/3 to correct URL drift, but none was issued")
 	}
 
-	payload, ok := put.payload.(map[string]any)
+	payload, ok := put.payload.(*arrclient.NotificationResource)
 	if !ok {
-		t.Fatal("PUT payload is not map[string]any")
+		t.Fatalf("PUT payload is not *arr.NotificationResource, got %T", put.payload)
 	}
-	fields, _ := payload["fields"].([]any)
 	var gotURL string
-	for _, fRaw := range fields {
-		f, ok := fRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if f["name"] == "url" {
-			gotURL, _ = f["value"].(string)
+	for _, f := range payload.Fields {
+		if f.Name == "url" {
+			gotURL, _ = f.Value.(string)
 		}
 	}
 	wantURL := correctAPI + "/api/pelicula/hooks/import"
@@ -410,24 +401,19 @@ func TestWireImportWebhookSecretDrift(t *testing.T) {
 		t.Fatal("expected PUT to /api/v3/notification/5 to correct secret drift, but none was issued")
 	}
 
-	payload, ok := put.payload.(map[string]any)
+	payload, ok := put.payload.(*arrclient.NotificationResource)
 	if !ok {
-		t.Fatal("PUT payload is not map[string]any")
+		t.Fatalf("PUT payload is not *arr.NotificationResource, got %T", put.payload)
 	}
-	fields, _ := payload["fields"].([]any)
 	var gotSecret string
-	for _, fRaw := range fields {
-		f, ok := fRaw.(map[string]any)
-		if !ok {
+	for _, f := range payload.Fields {
+		if f.Name != "headers" {
 			continue
 		}
-		if f["name"] != "headers" {
-			continue
-		}
-		if vals, ok := f["value"].([]map[string]any); ok {
-			for _, h := range vals {
-				if h["key"] == "X-Webhook-Secret" {
-					gotSecret, _ = h["value"].(string)
+		if hdrs, ok := f.Value.([]arrclient.HeaderField); ok {
+			for _, h := range hdrs {
+				if h.Key == "X-Webhook-Secret" {
+					gotSecret = h.Value
 				}
 			}
 		}

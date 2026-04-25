@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	arrclient "pelicula-api/internal/clients/arr"
 	bazarrclient "pelicula-api/internal/clients/bazarr"
 )
 
@@ -264,24 +265,18 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 		return false
 	}
 
-	var clients []map[string]any
+	var clients []arrclient.DownloadClientResource
 	if err := json.Unmarshal(data, &clients); err != nil {
 		slog.Error("failed to parse download clients response", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
-	for _, c := range clients {
-		if impl, _ := c["implementation"].(string); impl != "QBittorrent" {
+	for i := range clients {
+		c := &clients[i]
+		if c.Implementation != "QBittorrent" {
 			continue
 		}
-		idVal, ok := c["id"].(float64)
-		if !ok {
-			slog.Warn("unexpected id type in qBittorrent client", "component", "autowire", "service", name)
-			return true
-		}
-		id := int(idVal)
 
-		fields, _ := c["fields"].([]any)
 		want := map[string]any{
 			"host":     "gluetun",
 			"port":     float64(8080),
@@ -289,31 +284,22 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 			"useSsl":   false,
 		}
 		drift := false
-		for _, fRaw := range fields {
-			f, ok := fRaw.(map[string]any)
+		for fname, desired := range want {
+			got, ok := c.Fields.Get(fname)
 			if !ok {
-				continue
-			}
-			fname, _ := f["name"].(string)
-			desired, tracked := want[fname]
-			if !tracked {
-				continue
-			}
-			// useSsl may be absent; absence means false, which equals desired false.
-			got := f["value"]
-			if got == nil {
+				// useSsl may be absent; absence means false, which equals desired false.
 				got = false
 			}
 			if got != desired {
+				c.Fields.Set(fname, desired)
 				drift = true
-				f["value"] = desired
 			}
 		}
 		if !drift {
 			slog.Info("qBittorrent already configured, skipping", "component", "autowire", "service", name)
 			return true
 		}
-		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/downloadclient/%d", apiPath, id), c)
+		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/downloadclient/%d", apiPath, c.ID), c)
 		if err != nil {
 			slog.Error("failed to update qBittorrent download client", "component", "autowire", "service", name, "error", err)
 			return false
@@ -322,19 +308,19 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 		return true
 	}
 
-	payload := map[string]any{
-		"name":           "qBittorrent",
-		"implementation": "QBittorrent",
-		"configContract": "QBittorrentSettings",
-		"protocol":       "torrent",
-		"enable":         true,
-		"priority":       1,
-		"fields": []map[string]any{
-			{"name": "host", "value": "gluetun"},
-			{"name": "port", "value": 8080},
-			{"name": "username", "value": ""},
-			{"name": "password", "value": ""},
-			{"name": "category", "value": category},
+	payload := arrclient.DownloadClientResource{
+		Name:           "qBittorrent",
+		Implementation: "QBittorrent",
+		ConfigContract: "QBittorrentSettings",
+		Protocol:       "torrent",
+		Enable:         true,
+		Priority:       1,
+		Fields: arrclient.Fields{
+			{Name: "host", Value: "gluetun"},
+			{Name: "port", Value: 8080},
+			{Name: "username", Value: ""},
+			{Name: "password", Value: ""},
+			{Name: "category", Value: category},
 		},
 	}
 
@@ -387,7 +373,7 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 		return
 	}
 
-	var existing []map[string]any
+	var existing []arrclient.NotificationResource
 	if err := json.Unmarshal(data, &existing); err != nil {
 		slog.Error("failed to parse notifications response", "component", "autowire", "service", name, "error", err)
 		return
@@ -395,85 +381,58 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 
 	hookURL := a.urls.PeliculaAPI + "/api/pelicula/hooks/import"
 
-	for _, n := range existing {
-		if nname, _ := n["name"].(string); nname != "Procula" {
+	for i := range existing {
+		n := &existing[i]
+		if n.Name != "Procula" {
 			continue
 		}
-		idVal, ok := n["id"].(float64)
-		if !ok {
-			slog.Warn("unexpected id type in Procula notification", "component", "autowire", "service", name)
-			return
-		}
-		id := int(idVal)
 
-		fields, _ := n["fields"].([]any)
 		drift := false
 
-		// Check URL and secret fields; patch in-place if stale.
-		for _, fRaw := range fields {
-			f, ok := fRaw.(map[string]any)
-			if !ok {
-				continue
-			}
-			switch f["name"] {
-			case "url":
-				if v, _ := f["value"].(string); v != hookURL {
-					f["value"] = hookURL
-					drift = true
-				}
-			case "headers":
-				// headers value is []any of {"key":..., "value":...} maps.
-				gotSecret := ""
-				if vals, ok := f["value"].([]any); ok {
-					for _, hRaw := range vals {
-						h, ok := hRaw.(map[string]any)
-						if !ok {
-							continue
-						}
-						if k, _ := h["key"].(string); k == "X-Webhook-Secret" {
-							gotSecret, _ = h["value"].(string)
-						}
-					}
-				}
-				if gotSecret != a.webhookSecret {
-					if a.webhookSecret != "" {
-						f["value"] = []map[string]any{{"key": "X-Webhook-Secret", "value": a.webhookSecret}}
-					} else {
-						f["value"] = []map[string]any{}
-					}
-					drift = true
-				}
+		// Check URL field; patch in-place if stale.
+		if v, ok := n.Fields.Get("url"); ok {
+			if s, _ := v.(string); s != hookURL {
+				n.Fields.Set("url", hookURL)
+				drift = true
 			}
 		}
 
-		// If secret is non-empty and no headers field exists at all, add it.
-		if a.webhookSecret != "" {
-			hasHeaders := false
-			for _, fRaw := range fields {
-				f, ok := fRaw.(map[string]any)
-				if !ok {
-					continue
-				}
-				if fname, _ := f["name"].(string); fname == "headers" {
-					hasHeaders = true
-					break
+		// Check headers field for webhook secret drift.
+		if v, ok := n.Fields.Get("headers"); ok {
+			gotSecret := ""
+			if vals, ok := v.([]any); ok {
+				for _, hRaw := range vals {
+					h, ok := hRaw.(map[string]any)
+					if !ok {
+						continue
+					}
+					if k, _ := h["key"].(string); k == "X-Webhook-Secret" {
+						gotSecret, _ = h["value"].(string)
+					}
 				}
 			}
-			if !hasHeaders {
-				headerField := map[string]any{
-					"name":  "headers",
-					"value": []map[string]any{{"key": "X-Webhook-Secret", "value": a.webhookSecret}},
+			if gotSecret != a.webhookSecret {
+				if a.webhookSecret != "" {
+					n.Fields.Set("headers", []arrclient.HeaderField{{Key: "X-Webhook-Secret", Value: a.webhookSecret}})
+				} else {
+					n.Fields.Set("headers", []arrclient.HeaderField{})
 				}
-				n["fields"] = append(fields, headerField)
 				drift = true
 			}
+		} else if a.webhookSecret != "" {
+			// No headers field exists at all — add it.
+			n.Fields = append(n.Fields, arrclient.Field{
+				Name:  "headers",
+				Value: []arrclient.HeaderField{{Key: "X-Webhook-Secret", Value: a.webhookSecret}},
+			})
+			drift = true
 		}
 
 		if !drift {
 			slog.Info("Procula webhook already configured, skipping", "component", "autowire", "service", name)
 			return
 		}
-		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/notification/%d", apiPath, id), n)
+		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/notification/%d", apiPath, n.ID), n)
 		if err != nil {
 			slog.Error("failed to update Procula webhook", "component", "autowire", "service", name, "error", err)
 			return
@@ -482,30 +441,30 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 		return
 	}
 
-	fields := []map[string]any{
-		{"name": "url", "value": hookURL},
-		{"name": "method", "value": 1}, // 1 = POST
-		{"name": "username", "value": ""},
-		{"name": "password", "value": ""},
+	fields := arrclient.Fields{
+		{Name: "url", Value: hookURL},
+		{Name: "method", Value: 1}, // 1 = POST
+		{Name: "username", Value: ""},
+		{Name: "password", Value: ""},
 	}
 	if a.webhookSecret != "" {
 		// Pass the secret via a custom HTTP header rather than a URL query param
 		// so it does not appear in *arr log entries or access logs.
-		fields = append(fields, map[string]any{
-			"name":  "headers",
-			"value": []map[string]any{{"key": "X-Webhook-Secret", "value": a.webhookSecret}},
+		fields = append(fields, arrclient.Field{
+			Name:  "headers",
+			Value: []arrclient.HeaderField{{Key: "X-Webhook-Secret", Value: a.webhookSecret}},
 		})
 	}
-	payload := map[string]any{
-		"name":                "Procula",
-		"implementation":      "Webhook",
-		"configContract":      "WebhookSettings",
-		"fields":              fields,
-		"onGrab":              false,
-		"onDownload":          true,
-		"onUpgrade":           true,
-		"onHealthIssue":       false,
-		"onApplicationUpdate": false,
+	payload := arrclient.NotificationResource{
+		Name:                "Procula",
+		Implementation:      "Webhook",
+		ConfigContract:      "WebhookSettings",
+		Fields:              fields,
+		OnGrab:              false,
+		OnDownload:          true,
+		OnUpgrade:           true,
+		OnHealthIssue:       false,
+		OnApplicationUpdate: false,
 	}
 
 	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
@@ -523,7 +482,7 @@ func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
 		return false
 	}
 
-	var apps []map[string]any
+	var apps []arrclient.ApplicationResource
 	if err := json.Unmarshal(data, &apps); err != nil {
 		slog.Error("failed to parse Prowlarr applications response", "component", "autowire", "error", err)
 		return false
@@ -531,34 +490,24 @@ func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
 
 	prowlarrKey := a.svc.GetProwlarrKey()
 
-	for _, app := range apps {
-		if n, _ := app["name"].(string); n != appName {
+	for i := range apps {
+		app := &apps[i]
+		if app.Name != appName {
 			continue
 		}
 
 		// App exists — check if prowlarrUrl or apiKey are stale and update if so.
-		fields, ok := app["fields"].([]any)
-		if !ok {
-			slog.Warn("unexpected fields type in Prowlarr app", "component", "autowire", "app", appName)
-			return false
-		}
 		needsUpdate := false
-		for _, f := range fields {
-			field, ok := f.(map[string]any)
-			if !ok {
-				continue
+		if v, ok := app.Fields.Get("prowlarrUrl"); ok {
+			if s, _ := v.(string); normalizeURL(s) != normalizeURL(a.urls.Prowlarr) {
+				slog.Debug("prowlarr app URL mismatch", "component", "autowire", "app", appName, "have", s, "want", a.urls.Prowlarr)
+				needsUpdate = true
 			}
-			switch field["name"] {
-			case "prowlarrUrl":
-				if v, _ := field["value"].(string); normalizeURL(v) != normalizeURL(a.urls.Prowlarr) {
-					slog.Debug("prowlarr app URL mismatch", "component", "autowire", "app", appName, "have", v, "want", a.urls.Prowlarr)
-					needsUpdate = true
-				}
-			case "apiKey":
-				if v, _ := field["value"].(string); v != appAPIKey {
-					slog.Debug("prowlarr app key mismatch", "component", "autowire", "app", appName)
-					needsUpdate = true
-				}
+		}
+		if v, ok := app.Fields.Get("apiKey"); ok {
+			if s, _ := v.(string); s != appAPIKey {
+				slog.Debug("prowlarr app key mismatch", "component", "autowire", "app", appName)
+				needsUpdate = true
 			}
 		}
 		if !needsUpdate {
@@ -566,26 +515,9 @@ func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
 			return true
 		}
 
-		// Patch the fields in the existing payload and PUT.
-		for _, fRaw := range fields {
-			f, ok := fRaw.(map[string]any)
-			if !ok {
-				continue
-			}
-			switch f["name"] {
-			case "prowlarrUrl":
-				f["value"] = a.urls.Prowlarr
-			case "apiKey":
-				f["value"] = appAPIKey
-			}
-		}
-		idVal, ok := app["id"].(float64)
-		if !ok {
-			slog.Error("unexpected id type in Prowlarr app", "component", "autowire", "app", appName)
-			return false
-		}
-		id := int(idVal)
-		_, err = a.svc.ArrPut(a.urls.Prowlarr, prowlarrKey, fmt.Sprintf("/api/v1/applications/%d", id), app)
+		app.Fields.Set("prowlarrUrl", a.urls.Prowlarr)
+		app.Fields.Set("apiKey", appAPIKey)
+		_, err = a.svc.ArrPut(a.urls.Prowlarr, prowlarrKey, fmt.Sprintf("/api/v1/applications/%d", app.ID), app)
 		if err != nil {
 			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
 			return false
@@ -594,15 +526,15 @@ func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
 		return true
 	}
 
-	payload := map[string]any{
-		"name":           appName,
-		"implementation": appName,
-		"configContract": appName + "Settings",
-		"syncLevel":      "fullSync",
-		"fields": []map[string]any{
-			{"name": "prowlarrUrl", "value": a.urls.Prowlarr},
-			{"name": "baseUrl", "value": appURL},
-			{"name": "apiKey", "value": appAPIKey},
+	payload := arrclient.ApplicationResource{
+		Name:           appName,
+		Implementation: appName,
+		ConfigContract: appName + "Settings",
+		SyncLevel:      "fullSync",
+		Fields: arrclient.Fields{
+			{Name: "prowlarrUrl", Value: a.urls.Prowlarr},
+			{Name: "baseUrl", Value: appURL},
+			{Name: "apiKey", Value: appAPIKey},
 		},
 	}
 
