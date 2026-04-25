@@ -60,7 +60,13 @@ func (w *Wirer) Auth() (string, error) {
 		return apiKey, nil
 	}
 
+	// Hold EnvMu while reading .env so we don't race against Wire()'s
+	// concurrent rewrites (handover from password-based auth to API-key
+	// auth on the first wizard run, or any other env mutation). Without
+	// this, a concurrent caller could see a torn read mid-rewrite.
+	w.EnvMu.Lock()
 	vars, err := w.ParseEnvFile(w.EnvPath)
+	w.EnvMu.Unlock()
 	if err != nil {
 		return "", fmt.Errorf("no API key and cannot read .env: %w", err)
 	}
