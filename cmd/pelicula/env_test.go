@@ -292,3 +292,112 @@ NOTIFICATIONS_MODE=internal
 		t.Errorf("JELLYFIN_ADMIN_USER: got %q, want %q", got, "admin")
 	}
 }
+
+// TestMigrateEnv_RemoteAccessEnabledToRemoteMode covers Migration 5:
+// REMOTE_ACCESS_ENABLED is replaced by REMOTE_MODE and removed from the env file.
+func TestMigrateEnv_RemoteAccessEnabledToRemoteMode(t *testing.T) {
+	// baseContent is a fully-migrated env minus Migration 5 keys.
+	const baseContent = `CONFIG_DIR="/config"
+LIBRARY_DIR="/media"
+WORK_DIR="/media"
+PUID="1000"
+PGID="1000"
+TZ="UTC"
+GLUETUN_HTTP_USER="pelicula"
+GLUETUN_HTTP_PASS="somepassword"
+PELICULA_PORT="7354"
+JELLYFIN_ADMIN_USER="admin"
+TRANSCODING_ENABLED="false"
+NOTIFICATIONS_ENABLED="false"
+NOTIFICATIONS_MODE="internal"
+PELICULA_PROJECT_NAME="pelicula"
+`
+
+	cases := []struct {
+		name             string
+		extra            string // additional lines appended to baseContent
+		wantChanged      bool
+		wantRemoteMode   string
+		wantOldKeyAbsent bool
+	}{
+		{
+			name:             "old key true migrates to portforward and is removed",
+			extra:            "REMOTE_ACCESS_ENABLED=\"true\"\n",
+			wantChanged:      true,
+			wantRemoteMode:   "portforward",
+			wantOldKeyAbsent: true,
+		},
+		{
+			name:             "old key false migrates to disabled and is removed",
+			extra:            "REMOTE_ACCESS_ENABLED=\"false\"\n",
+			wantChanged:      true,
+			wantRemoteMode:   "disabled",
+			wantOldKeyAbsent: true,
+		},
+		{
+			name:           "only new key present — no change",
+			extra:          "REMOTE_MODE=\"portforward\"\n",
+			wantChanged:    false,
+			wantRemoteMode: "portforward",
+		},
+		{
+			name:        "both absent — no change to remote keys",
+			extra:       "",
+			wantChanged: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".env")
+			if err := os.WriteFile(path, []byte(baseContent+tc.extra), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			changed, err := MigrateEnv(path)
+			if err != nil {
+				t.Fatalf("MigrateEnv error: %v", err)
+			}
+			if changed != tc.wantChanged {
+				t.Errorf("changed=%v, want %v", changed, tc.wantChanged)
+			}
+
+			m, err := ParseEnv(path)
+			if err != nil {
+				t.Fatalf("ParseEnv error: %v", err)
+			}
+
+			if tc.wantRemoteMode != "" {
+				if got := m["REMOTE_MODE"]; got != tc.wantRemoteMode {
+					t.Errorf("REMOTE_MODE=%q, want %q", got, tc.wantRemoteMode)
+				}
+			}
+			if tc.wantOldKeyAbsent {
+				if _, ok := m["REMOTE_ACCESS_ENABLED"]; ok {
+					t.Error("REMOTE_ACCESS_ENABLED should be absent after migration but was found")
+				}
+			}
+		})
+	}
+}
+
+// TestIsRemoteEnabled verifies the isRemoteEnabled helper.
+func TestIsRemoteEnabled(t *testing.T) {
+	cases := []struct {
+		mode string
+		want bool
+	}{
+		{"portforward", true},
+		{"cloudflared", true},
+		{"tailscale", true},
+		{"disabled", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		env := EnvMap{"REMOTE_MODE": c.mode}
+		if got := isRemoteEnabled(env); got != c.want {
+			t.Errorf("isRemoteEnabled(REMOTE_MODE=%q) = %v, want %v", c.mode, got, c.want)
+		}
+	}
+}

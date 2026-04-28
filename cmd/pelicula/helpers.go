@@ -11,6 +11,24 @@ import (
 	"runtime"
 )
 
+// walkUpForMarker walks up the directory tree from start, returning the first
+// directory that contains marker (a relative path). Returns start unchanged
+// if the marker is not found anywhere in the ancestor chain.
+func walkUpForMarker(start, marker string) string {
+	dir := start
+	for {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return start
+}
+
 // getScriptDir returns the pelicula project root directory.
 // It walks up from the binary's location looking for compose/docker-compose.yml.
 // Falls back to the binary's directory if not found.
@@ -30,20 +48,7 @@ func getScriptDir() string {
 		start, _ = os.Getwd()
 	}
 
-	// Walk up looking for compose/docker-compose.yml (the project root marker)
-	dir := start
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "compose", "docker-compose.yml")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return start
+	return walkUpForMarker(start, filepath.Join("compose", "docker-compose.yml"))
 }
 
 // openBrowser opens url in the default browser.
