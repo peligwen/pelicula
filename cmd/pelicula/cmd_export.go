@@ -10,7 +10,6 @@ import (
 
 func cmdExport(ctx *Context, args []string) {
 	ctx.LoadEnv()
-	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	// Default output filename: pelicula-backup-YYYY-MM-DD.json
 	date := time.Now().Format("2006-01-02")
@@ -21,7 +20,7 @@ func cmdExport(ctx *Context, args []string) {
 
 	info("Exporting library metadata...")
 
-	url := fmt.Sprintf("http://localhost:%s/api/pelicula/export", port)
+	url := peliculaBaseURL(ctx.Env) + "/api/pelicula/export"
 	client := newHTTPClient(60 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
@@ -31,10 +30,7 @@ func cmdExport(ctx *Context, args []string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		fail("Authentication required — use the dashboard to export when auth is enabled")
-		os.Exit(1)
-	}
+	checkAuthError(resp)
 	if resp.StatusCode != 200 {
 		fail(fmt.Sprintf("Export failed (HTTP %d): %s", resp.StatusCode, string(body)))
 		os.Exit(1)

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -274,7 +273,7 @@ func cmdUp(ctx *Context, _ []string) {
 
 	// Check if any admin has registered yet. The middleware may still be
 	// starting, so poll for up to 15 seconds before giving up quietly.
-	regURL := fmt.Sprintf("http://localhost:%s/api/pelicula/register/check", port)
+	regURL := peliculaBaseURL(env) + "/api/pelicula/register/check"
 	if needsAdmin := checkNeedsAdmin(regURL); needsAdmin {
 		fmt.Printf("  %s%s No admin account yet — register now:%s\n", colorYellow, colorBold, colorReset)
 		dashURL := fmt.Sprintf("http://%s:%s/register", host, port)
@@ -311,32 +310,13 @@ func checkNeedsAdmin(url string) bool {
 	return false
 }
 
-// lanIP returns the first non-loopback IPv4 address, or "localhost" if none found.
+// lanIP returns the first RFC1918 IPv4 address found on host interfaces,
+// or "localhost" if none found. Delegates to detectLANIPs so the RFC1918
+// filter is applied (avoids returning a public IP on multi-homed hosts).
 func lanIP() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
+	ips := detectLANIPs()
+	if len(ips) == 0 {
 		return "localhost"
 	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip != nil && ip.To4() != nil {
-				return ip.String()
-			}
-		}
-	}
-	return "localhost"
+	return ips[0].String()
 }

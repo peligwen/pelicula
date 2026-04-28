@@ -8,9 +8,8 @@ import (
 
 func cmdStatus(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
-	url := fmt.Sprintf("http://localhost:%s/api/pelicula/health", port)
+	url := peliculaBaseURL(ctx.Env) + "/api/pelicula/health"
 
 	client := newHTTPClient(10 * time.Second)
 	resp, err := client.Get(url)

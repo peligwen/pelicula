@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"math/big"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,4 +104,21 @@ func loadEnvOrFatal(envFile string) EnvMap {
 		fatal("Failed to read .env: " + err.Error())
 	}
 	return env
+}
+
+// peliculaBaseURL returns the base URL for the pelicula-api on localhost using
+// the PELICULA_PORT from env, defaulting to 7354 if the key is absent or empty.
+// Callers append the path, e.g. peliculaBaseURL(env) + "/api/pelicula/health".
+func peliculaBaseURL(env EnvMap) string {
+	port := envDefault(env, "PELICULA_PORT", "7354")
+	return "http://localhost:" + port
+}
+
+// checkAuthError exits with an actionable message when resp indicates
+// authentication is required (HTTP 401 or 403).
+func checkAuthError(resp *http.Response) {
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		fail("Authentication required — run: pelicula up")
+		os.Exit(1)
+	}
 }

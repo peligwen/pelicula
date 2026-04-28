@@ -10,12 +10,11 @@ import (
 
 func cmdCheckVPN(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	fmt.Printf("%sVPN & Service Health Check%s\n", colorBold, colorReset)
 	fmt.Println()
 
-	url := fmt.Sprintf("http://localhost:%s/api/pelicula/health", port)
+	url := peliculaBaseURL(ctx.Env) + "/api/pelicula/health"
 	client := newHTTPClient(10 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {

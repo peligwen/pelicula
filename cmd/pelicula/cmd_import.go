@@ -12,9 +12,8 @@ import (
 // cmdImport opens the browser to the import wizard.
 func cmdImport(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
-	url := fmt.Sprintf("http://localhost:%s/import", port)
+	url := peliculaBaseURL(ctx.Env) + "/import"
 	info("Opening import wizard: " + url)
 	openBrowser(url)
 }
@@ -22,7 +21,6 @@ func cmdImport(ctx *Context, _ []string) {
 // cmdImportBackup restores a backup via the middleware API.
 func cmdImportBackup(ctx *Context, args []string) {
 	ctx.LoadEnv()
-	port := envDefault(ctx.Env, "PELICULA_PORT", "7354")
 
 	if len(args) == 0 || args[0] == "" {
 		fail("Usage: pelicula import-backup <backup-file.json>")
@@ -42,7 +40,7 @@ func cmdImportBackup(ctx *Context, args []string) {
 
 	info("Importing backup from " + backupFile + "...")
 
-	url := fmt.Sprintf("http://localhost:%s/api/pelicula/import-backup", port)
+	url := peliculaBaseURL(ctx.Env) + "/api/pelicula/import-backup"
 	client := newHTTPClient(120 * time.Second)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
@@ -52,10 +50,7 @@ func cmdImportBackup(ctx *Context, args []string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		fail("Authentication required — use the dashboard to import backups when auth is enabled")
-		os.Exit(1)
-	}
+	checkAuthError(resp)
 	if resp.StatusCode != 200 {
 		fail(fmt.Sprintf("Import failed (HTTP %d): %s", resp.StatusCode, string(body)))
 		os.Exit(1)
