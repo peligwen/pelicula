@@ -69,9 +69,9 @@ func TestRenderRemoteConfigs_SimpleMode(t *testing.T) {
 	scriptDir := setupRemoteScriptDir(t)
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "true",
-		"REMOTE_HOSTNAME":       "",
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE":     "portforward",
+		"REMOTE_HOSTNAME": "",
+		"CONFIG_DIR":      configDir,
 	}
 
 	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
@@ -136,10 +136,10 @@ func TestRenderRemoteConfigs_FullMode(t *testing.T) {
 	scriptDir := setupRemoteScriptDir(t)
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "true",
-		"REMOTE_HOSTNAME":       "test.example.com",
-		"REMOTE_CERT_MODE":      "self-signed",
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE":      "portforward",
+		"REMOTE_HOSTNAME":  "test.example.com",
+		"REMOTE_CERT_MODE": "self-signed",
+		"CONFIG_DIR":       configDir,
 	}
 
 	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
@@ -199,16 +199,16 @@ func TestRenderRemoteConfigs_FullMode(t *testing.T) {
 	}
 }
 
-// TestRenderRemoteConfigs_Disabled verifies that when REMOTE_ACCESS_ENABLED is
-// not "true", RenderRemoteConfigs writes a placeholder comment to remote.conf
+// TestRenderRemoteConfigs_Disabled verifies that when REMOTE_MODE is "disabled"
+// (or absent), RenderRemoteConfigs writes a placeholder comment to remote.conf
 // and removes any existing docker-compose.remote.yml.
 func TestRenderRemoteConfigs_Disabled(t *testing.T) {
 	configDir := t.TempDir()
 	scriptDir := setupRemoteScriptDir(t)
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "false",
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE": "disabled",
+		"CONFIG_DIR":  configDir,
 	}
 
 	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
@@ -240,11 +240,11 @@ func TestRenderRemoteConfigs_LetsEncrypt(t *testing.T) {
 	scriptDir := setupRemoteScriptDir(t)
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "true",
-		"REMOTE_HOSTNAME":       "example.pelicula.io",
-		"REMOTE_CERT_MODE":      "letsencrypt",
-		"REMOTE_LE_EMAIL":       "admin@example.com",
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE":      "portforward",
+		"REMOTE_HOSTNAME":  "example.pelicula.io",
+		"REMOTE_CERT_MODE": "letsencrypt",
+		"REMOTE_LE_EMAIL":  "admin@example.com",
+		"CONFIG_DIR":       configDir,
 	}
 
 	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
@@ -300,10 +300,10 @@ func TestRenderRemoteConfigs_BYO(t *testing.T) {
 	}
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "true",
-		"REMOTE_HOSTNAME":       "byo.example.com",
-		"REMOTE_CERT_MODE":      "byo",
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE":      "portforward",
+		"REMOTE_HOSTNAME":  "byo.example.com",
+		"REMOTE_CERT_MODE": "byo",
+		"CONFIG_DIR":       configDir,
 	}
 
 	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
@@ -332,10 +332,10 @@ func TestRenderRemoteConfigs_InvalidHostname(t *testing.T) {
 	scriptDir := setupRemoteScriptDir(t)
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "true",
-		"REMOTE_HOSTNAME":       "bad hostname with spaces",
-		"REMOTE_CERT_MODE":      "self-signed",
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE":      "portforward",
+		"REMOTE_HOSTNAME":  "bad hostname with spaces",
+		"REMOTE_CERT_MODE": "self-signed",
+		"CONFIG_DIR":       configDir,
 	}
 
 	err := RenderRemoteConfigs(scriptDir, env)
@@ -354,11 +354,11 @@ func TestRenderRemoteConfigs_EmptyEmail(t *testing.T) {
 	scriptDir := setupRemoteScriptDir(t)
 
 	env := EnvMap{
-		"REMOTE_ACCESS_ENABLED": "true",
-		"REMOTE_HOSTNAME":       "example.pelicula.io",
-		"REMOTE_CERT_MODE":      "letsencrypt",
-		"REMOTE_LE_EMAIL":       "", // intentionally empty
-		"CONFIG_DIR":            configDir,
+		"REMOTE_MODE":      "portforward",
+		"REMOTE_HOSTNAME":  "example.pelicula.io",
+		"REMOTE_CERT_MODE": "letsencrypt",
+		"REMOTE_LE_EMAIL":  "", // intentionally empty
+		"CONFIG_DIR":       configDir,
 	}
 
 	err := RenderRemoteConfigs(scriptDir, env)

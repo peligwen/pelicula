@@ -191,6 +191,13 @@ func (c *Compose) runSetupDown(setupCompose string) error {
 	return c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "down").Run()
 }
 
+// DockerRaw runs docker (not docker compose) with the given args and returns
+// the combined output. Sudo is applied when c.needsSudo is set, so this is
+// safe to use on Synology and other sudo-required hosts.
+func (c *Compose) DockerRaw(args ...string) ([]byte, error) {
+	return c.dockerCmd(args...).Output()
+}
+
 // DockerInspect runs docker inspect --format=... on a container.
 func (c *Compose) DockerInspect(format, container string) (string, error) {
 	cmd := c.dockerCmd("inspect", "--format="+format, container)

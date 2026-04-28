@@ -233,7 +233,7 @@ func cmdUp(ctx *Context, _ []string) {
 	fmt.Printf("%s%sStack is running!%s\n", colorGreen, colorBold, colorReset)
 
 	host := lanIP()
-	remoteEnabled := env["REMOTE_ACCESS_ENABLED"] == "true"
+	remoteEnabled := isRemoteEnabled(env)
 
 	fmt.Println()
 	if remoteEnabled {

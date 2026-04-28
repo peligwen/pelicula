@@ -14,12 +14,12 @@ func cmdRedeploy(ctx *Context, args []string) {
 		targets = []string{"pelicula-api", "procula"}
 	}
 
-	for _, svc := range targets {
+	for i, svc := range targets {
 		switch svc {
 		case "pelicula-api", "middleware", "procula":
-			// normalise middleware alias
+			// normalise middleware alias so docker compose build receives the real service name
 			if svc == "middleware" {
-				svc = "pelicula-api"
+				targets[i] = "pelicula-api"
 			}
 		default:
 			warn("Unknown service '" + svc + "'. Known targets: pelicula-api, procula")

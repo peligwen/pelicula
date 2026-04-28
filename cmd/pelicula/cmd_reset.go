@@ -61,8 +61,7 @@ func resetConfigSoft(ctx *Context) {
 		return
 	}
 
-	c := composeInvocation(ctx)
-	ensureStackDown(c)
+	ensureStackDown(ctx)
 
 	// Extract API keys before wiping
 	sonarrKey := extractAPIKey(filepath.Join(configDir, "sonarr", "config.xml"))
@@ -94,8 +93,7 @@ func resetConfigService(ctx *Context, svc string) {
 	env := ctx.Env
 	configDir := env["CONFIG_DIR"]
 
-	c := composeInvocation(ctx)
-	ensureStackDown(c)
+	ensureStackDown(ctx)
 
 	switch svc {
 	case "sonarr":
@@ -172,8 +170,7 @@ func resetConfigAll(ctx *Context) {
 		return
 	}
 
-	c := composeInvocation(ctx)
-	ensureStackDown(c)
+	ensureStackDown(ctx)
 
 	// Stash values to preserve
 	savedWGKey := env["WIREGUARD_PRIVATE_KEY"]
@@ -249,10 +246,15 @@ func resetConfigAll(ctx *Context) {
 }
 
 // ensureStackDown stops the stack if any services are running.
-func ensureStackDown(c *Compose) {
+// It unconditionally activates all known profiles (vpn, apprise) so that
+// containers started with any profile are torn down, regardless of the
+// current env state (mirrors cmd_down.go's explicit profile list).
+func ensureStackDown(ctx *Context) {
+	c := composeInvocation(ctx)
+	c.profiles = []string{"vpn", "apprise"}
 	if isStackRunning(c) {
 		warn("Stack is running — stopping it first...")
-		_ = c.Run("down")
+		_ = c.Run("down", "--remove-orphans")
 	}
 }
 

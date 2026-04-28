@@ -190,17 +190,33 @@ func MigrateEnv(path string) (bool, error) {
 		changed = true
 	}
 
-	// Migration 5: REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward
-	if m["REMOTE_ACCESS_ENABLED"] == "true" && m["REMOTE_MODE"] == "" {
-		m["REMOTE_MODE"] = "portforward"
+	// Migration 5: REMOTE_ACCESS_ENABLED → REMOTE_MODE
+	// Migrate both true and false values; delete the old key so downstream
+	// readers only need to consult REMOTE_MODE.
+	if oldVal, hasOld := m["REMOTE_ACCESS_ENABLED"]; hasOld && m["REMOTE_MODE"] == "" {
+		if oldVal == "true" {
+			m["REMOTE_MODE"] = "portforward"
+			info("Migrated REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward")
+		} else {
+			m["REMOTE_MODE"] = "disabled"
+			info("Migrated REMOTE_ACCESS_ENABLED=false → REMOTE_MODE=disabled")
+		}
+		delete(m, "REMOTE_ACCESS_ENABLED")
 		changed = true
-		info("Migrated REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward")
 	}
 
 	if changed {
 		return true, WriteEnv(path, m)
 	}
 	return false, nil
+}
+
+// isRemoteEnabled reports whether remote access is enabled in the given env.
+// It checks REMOTE_MODE (the current key) — remote is enabled when the value
+// is non-empty and is not "disabled". Returns false for an unset or empty key.
+func isRemoteEnabled(env EnvMap) bool {
+	mode := env["REMOTE_MODE"]
+	return mode != "" && mode != "disabled"
 }
 
 // sanitizeEnvValue strips characters that would break the KEY="value" .env format:

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"time"
 )
@@ -33,12 +32,12 @@ func cmdDoctor(ctx *Context, _ []string) {
 	fmt.Println("=== pelicula doctor ===")
 	fmt.Println("Timestamp :", time.Now().Format(time.RFC3339))
 	fmt.Println("Version   :", version)
-	if out, err := exec.Command("docker", "version", "--format", "{{.Client.Version}} (client) / {{.Server.Version}} (server)").Output(); err == nil {
+	if out, err := c.DockerRaw("version", "--format", "{{.Client.Version}} (client) / {{.Server.Version}} (server)"); err == nil {
 		fmt.Print("Docker    : ", string(bytes.TrimSpace(out)), "\n")
 	} else {
 		fmt.Println("Docker    : unavailable")
 	}
-	if out, err := exec.Command("docker", "compose", "version", "--short").Output(); err == nil {
+	if out, err := c.DockerRaw("compose", "version", "--short"); err == nil {
 		fmt.Print("Compose   : ", string(bytes.TrimSpace(out)), "\n")
 	} else {
 		fmt.Println("Compose   : unavailable")

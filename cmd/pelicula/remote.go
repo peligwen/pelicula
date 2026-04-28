@@ -24,7 +24,6 @@ var (
 // the remote compose file.
 func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 	configDir := env["CONFIG_DIR"]
-	remoteEnabled := env["REMOTE_ACCESS_ENABLED"]
 
 	remoteConf := filepath.Join(configDir, "nginx", "remote.conf")
 	remoteCompose := filepath.Join(scriptDir, "compose", "docker-compose.remote.yml")
@@ -34,7 +33,7 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 		return err
 	}
 
-	if remoteEnabled != "true" {
+	if !isRemoteEnabled(env) {
 		// Write empty placeholder so nginx bind-mount succeeds
 		if err := os.WriteFile(remoteConf, []byte("# Remote access disabled\n"), 0644); err != nil {
 			return err

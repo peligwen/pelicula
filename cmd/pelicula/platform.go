@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -70,9 +71,9 @@ func Detect(scriptDir string) Platform {
 		p.DefaultWorkDir = "/volume1/media"
 	} else {
 		home, _ := os.UserHomeDir()
-		p.DefaultConfigDir = scriptDir + "/config"
-		p.DefaultLibraryDir = home + "/media"
-		p.DefaultWorkDir = home + "/media"
+		p.DefaultConfigDir = filepath.Join(scriptDir, "config")
+		p.DefaultLibraryDir = filepath.Join(home, "media")
+		p.DefaultWorkDir = filepath.Join(home, "media")
 	}
 
 	return p
