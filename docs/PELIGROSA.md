@@ -14,7 +14,7 @@ Pelicula is **LAN-first**. The design baseline assumes:
 - Service-to-service communication between containers relies on Docker's private networks and an IP-based auth bypass inside each *arr app (`AuthenticationRequired=DisabledForLocalAddresses`). This is intentional — ``pelicula up`` enforces it on every start.
 - Auth is always on. The only unauthenticated path is the loopback auto-session for requests from the host machine — not a defense against a determined network attacker, but not an open door either.
 
-**Peligrosa remote vhost (opt-in):** When `REMOTE_ACCESS_ENABLED=true`, a second nginx vhost exposes **only Jellyfin** on a separate hardened port. No admin routes (`/sonarr`, `/radarr`, `/api/pelicula`, etc.) are reachable from the remote vhost. The admin port 7354 is never exposed.
+**Peligrosa remote vhost (opt-in):** When `REMOTE_MODE=portforward`, a second nginx vhost exposes **only Jellyfin** on a separate hardened port. No admin routes (`/sonarr`, `/radarr`, `/api/pelicula`, etc.) are reachable from the remote vhost. The admin port 7354 is never exposed.
 
 **Invariant — remote vhost must never proxy `/api/pelicula/`:** Neither `nginx/remote.conf.template` nor `nginx/remote-simple.conf.template` contains a `/api/pelicula/` location block. This must remain true. The middleware's `effectiveRole()` caps remote-session roles to `viewer` when `X-Pelicula-Remote: true` is present, but this is defense-in-depth only — it does not block viewer-gated endpoints. Endpoint exposure is the primary gate and it lives at nginx, not in the middleware. Adding a `/api/pelicula/` block to either remote template would expose admin and manager endpoints to the internet.
 
@@ -105,7 +105,7 @@ Path allowlist (`isUnderPrefixes` / `isAllowedWebhookPath`): validates that repo
 
 ### Remote Jellyfin Vhost
 
-`nginx/remote.conf.template` is rendered to `${CONFIG_DIR}/nginx/remote.conf` on every ``pelicula up`` when `REMOTE_ACCESS_ENABLED=true`.
+`nginx/remote.conf.template` is rendered to `${CONFIG_DIR}/nginx/remote.conf` on every ``pelicula up`` when `REMOTE_MODE=portforward`.
 
 **Hardening:**
 - `return 444` catch-all on both ports drops requests with unknown Host headers (prevents IP scanning)
@@ -116,7 +116,7 @@ Path allowlist (`isUnderPrefixes` / `isAllowedWebhookPath`): validates that repo
 - `Content-Security-Policy` header restricts script/style/media sources on both full and simple mode
 - No admin paths (`/sonarr`, `/radarr`, `/api/pelicula`, etc.) are proxied — Jellyfin only
 
-**Simple mode** (no hostname): When `REMOTE_ACCESS_ENABLED=true` and `REMOTE_HOSTNAME` is not set, Peligrosa enters simple mode. A self-signed cert is auto-generated (`CN=pelicula-remote`). nginx listens on `REMOTE_HTTPS_PORT` (default 8920) with `server_name _` — no HTTP port, no ACME, no certbot. Clients connect via the host's LAN IP (or port-forwarded external IP) at `https://<ip>:8920/`. TV apps and native Jellyfin clients accept self-signed certs; browsers will show a certificate warning.
+**Simple mode** (no hostname): When `REMOTE_MODE=portforward` and `REMOTE_HOSTNAME` is not set, Peligrosa enters simple mode. A self-signed cert is auto-generated (`CN=pelicula-remote`). nginx listens on `REMOTE_HTTPS_PORT` (default 8920) with `server_name _` — no HTTP port, no ACME, no certbot. Clients connect via the host's LAN IP (or port-forwarded external IP) at `https://<ip>:8920/`. TV apps and native Jellyfin clients accept self-signed certs; browsers will show a certificate warning.
 
 Security isolation is identical to full mode: Jellyfin-only proxy, rate-limited auth, `/System/Logs` and `/System/Info` hard-denied, `X-Pelicula-Remote: true` injected (role capping applies). Only difference: no HSTS (requires a real hostname).
 
@@ -137,7 +137,7 @@ Enable via Settings UI → Remote access. Leave the hostname field blank.
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `REMOTE_ACCESS_ENABLED` | `false` | Master switch |
+| `REMOTE_MODE` | `disabled` | `disabled` \| `portforward` \| `cloudflared` \| `tailscale`. The settings UI toggle controls the `portforward` value; `cloudflared` and `tailscale` are configured manually (see [Alternative Remote Access Modes](#alternative-remote-access-modes)). |
 | `REMOTE_HOSTNAME` | — | Optional. Blank = simple mode (self-signed cert, LAN-IP access, no DNS needed). Set for full mode (Let's Encrypt / BYO cert). |
 | `REMOTE_HTTP_PORT` | `80` | HTTP port for ACME challenge + redirect |
 | `REMOTE_HTTPS_PORT` | `8920` | HTTPS port for Jellyfin |
@@ -155,7 +155,7 @@ The port-forward remote vhost (above) is one option. Two additional tunnel-based
 
 | `REMOTE_MODE` | Mechanism | Required env vars |
 |---------------|-----------|-------------------|
-| `portforward` (or unset) | nginx remote vhost on a published port; `REMOTE_ACCESS_ENABLED=true` required | See "Remote Jellyfin Vhost" above |
+| `portforward` | nginx remote vhost on a published port (settings UI toggle writes this value) | See "Remote Jellyfin Vhost" above |
 | `cloudflared` | Cloudflare Tunnel — no open ports required | `CLOUDFLARE_TUNNEL_TOKEN` |
 | `tailscale` | Tailscale sidecar — devices on the tailnet reach nginx directly | `TAILSCALE_AUTH_KEY`, optionally `TAILSCALE_HOSTNAME` |
 

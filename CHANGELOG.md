@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Remote vhost CSP** — both `nginx/remote.conf.template` (full mode) and `nginx/remote-simple.conf.template` (simple mode) now emit a `Content-Security-Policy` header on all responses.
 
 ### Added
-- **Simple mode remote vhost** (`nginx/remote-simple.conf.template`) — static nginx config for `REMOTE_ACCESS_ENABLED=true` without a hostname. Self-signed cert, `server_name _`, no ACME/certbot, no HSTS. TV apps and native Jellyfin clients accept self-signed certs. Enable via Settings UI → Remote access, leave hostname blank.
+- **Simple mode remote vhost** (`nginx/remote-simple.conf.template`) — static nginx config for `REMOTE_MODE=portforward` without a hostname. Self-signed cert, `server_name _`, no ACME/certbot, no HSTS. TV apps and native Jellyfin clients accept self-signed certs. Enable via Settings UI → Remote access, leave hostname blank.
 - **Cloudflare Tunnel remote access** (closes #7) — new `REMOTE_MODE=cloudflared` option adds a `cloudflare/cloudflared` sidecar that tunnels nginx traffic without open ports. Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`.
 - **Tailscale remote access** (closes #7) — new `REMOTE_MODE=tailscale` option adds a Tailscale sidecar for mesh-VPN access. Set `TAILSCALE_AUTH_KEY` (and optionally `TAILSCALE_HOSTNAME`) in `.env`.
 
