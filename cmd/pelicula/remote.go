@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -46,7 +47,13 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 	// Validate required vars
 	hostname := env["REMOTE_HOSTNAME"]
 	httpsPort := envDefault(env, "REMOTE_HTTPS_PORT", "8920")
+	httpPort := envDefault(env, "REMOTE_HTTP_PORT", "80")
+	peliculaPort := envDefault(env, "PELICULA_PORT", "7354")
 	simpleMode := hostname == ""
+
+	if err := validateRemotePorts(peliculaPort, httpPort, httpsPort, simpleMode); err != nil {
+		return err
+	}
 
 	if simpleMode {
 		certDir := filepath.Join(configDir, "certs", "remote")
@@ -68,7 +75,6 @@ func RenderRemoteConfigs(scriptDir string, env EnvMap) error {
 		return writeSimpleRemoteCompose(remoteCompose, httpsPort, certDir)
 	}
 
-	httpPort := envDefault(env, "REMOTE_HTTP_PORT", "80")
 	certMode := envDefault(env, "REMOTE_CERT_MODE", "self-signed")
 	leEmail := env["REMOTE_LE_EMAIL"]
 	leStaging := env["REMOTE_LE_STAGING"]
@@ -218,4 +224,44 @@ func envDefault(env EnvMap, key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// validateRemotePorts rejects port-number shapes that compose would fail
+// to bind: out-of-range values and host-port collisions between the main
+// nginx listener (PELICULA_PORT) and the remote vhost. In simple mode the
+// HTTP port is unused (no ACME, no redirect), so it isn't checked. Mirrors
+// the validation in middleware/internal/app/settings/handler.go so both
+// surfaces reject the same way.
+func validateRemotePorts(peliculaPort, httpPort, httpsPort string, simpleMode bool) error {
+	for _, p := range []struct{ name, val string }{
+		{"PELICULA_PORT", peliculaPort},
+		{"REMOTE_HTTPS_PORT", httpsPort},
+	} {
+		if err := checkPortRange(p.val); err != nil {
+			return fmt.Errorf("%s %s", p.name, err)
+		}
+	}
+	if !simpleMode {
+		if err := checkPortRange(httpPort); err != nil {
+			return fmt.Errorf("REMOTE_HTTP_PORT %s", err)
+		}
+		if httpPort == peliculaPort {
+			return fmt.Errorf("REMOTE_HTTP_PORT must differ from PELICULA_PORT (%s)", peliculaPort)
+		}
+		if httpPort == httpsPort {
+			return fmt.Errorf("REMOTE_HTTP_PORT and REMOTE_HTTPS_PORT must differ")
+		}
+	}
+	if httpsPort == peliculaPort {
+		return fmt.Errorf("REMOTE_HTTPS_PORT must differ from PELICULA_PORT (%s)", peliculaPort)
+	}
+	return nil
+}
+
+func checkPortRange(s string) error {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%q must be a valid port number (1-65535)", s)
+	}
+	return nil
 }

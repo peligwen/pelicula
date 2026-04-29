@@ -444,6 +444,73 @@ func TestRenderRemoteConfigs_SystemInfoPublicAllowed(t *testing.T) {
 	})
 }
 
+// TestRenderRemoteConfigs_PortCollision verifies that port shape and collision
+// errors surface before cert/template work, so users get an actionable error
+// instead of an opaque compose-time bind failure.
+func TestRenderRemoteConfigs_PortCollision(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     EnvMap
+		wantSub string
+	}{
+		{
+			name: "remote https collides with dashboard port",
+			env: EnvMap{
+				"REMOTE_MODE":       "portforward",
+				"REMOTE_HOSTNAME":   "",
+				"REMOTE_HTTPS_PORT": "7354",
+				"PELICULA_PORT":     "7354",
+			},
+			wantSub: "REMOTE_HTTPS_PORT must differ from PELICULA_PORT",
+		},
+		{
+			name: "remote http collides with dashboard port (full mode)",
+			env: EnvMap{
+				"REMOTE_MODE":       "portforward",
+				"REMOTE_HOSTNAME":   "host.example.com",
+				"REMOTE_CERT_MODE":  "self-signed",
+				"REMOTE_HTTP_PORT":  "7354",
+				"REMOTE_HTTPS_PORT": "8920",
+				"PELICULA_PORT":     "7354",
+			},
+			wantSub: "REMOTE_HTTP_PORT must differ from PELICULA_PORT",
+		},
+		{
+			name: "out-of-range remote https port",
+			env: EnvMap{
+				"REMOTE_MODE":       "portforward",
+				"REMOTE_HOSTNAME":   "",
+				"REMOTE_HTTPS_PORT": "70000",
+			},
+			wantSub: "REMOTE_HTTPS_PORT",
+		},
+		{
+			name: "non-numeric remote https port",
+			env: EnvMap{
+				"REMOTE_MODE":       "portforward",
+				"REMOTE_HOSTNAME":   "",
+				"REMOTE_HTTPS_PORT": "abc",
+			},
+			wantSub: "REMOTE_HTTPS_PORT",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			scriptDir := setupRemoteScriptDir(t)
+			tc.env["CONFIG_DIR"] = configDir
+			err := RenderRemoteConfigs(scriptDir, tc.env)
+			if err == nil {
+				t.Fatalf("expected an error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("error %q should contain %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
 // TestRenderRemoteConfigs_EmptyEmail verifies that Let's Encrypt mode with an
 // empty REMOTE_LE_EMAIL returns a validation error before any cert provisioning.
 func TestRenderRemoteConfigs_EmptyEmail(t *testing.T) {

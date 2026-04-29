@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -205,6 +206,16 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "remote_le_email must be a valid email address", http.StatusBadRequest)
 		return
 	}
+	for _, p := range []struct{ name, val string }{
+		{"port", req.Port},
+		{"remote_http_port", req.RemoteHTTPPort},
+		{"remote_https_port", req.RemoteHTTPSPort},
+	} {
+		if err := validatePort(p.val); err != nil {
+			httputil.WriteError(w, p.name+" "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 
 	// Validate WireGuard key only if being changed
 	if req.WireguardKey != "" && req.WireguardKey != maskedValue {
@@ -223,6 +234,25 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("failed to read .env for update", "error", err)
 		httputil.WriteError(w, "failed to read config", http.StatusInternalServerError)
+		return
+	}
+
+	// Reject port collisions before persisting. The dashboard listener and the
+	// remote vhost share the same nginx instance; binding the same host port
+	// twice fails opaquely at compose time.
+	effPelicula := orDefault(req.Port, vars["PELICULA_PORT"])
+	effRemoteHTTPS := orDefault(req.RemoteHTTPSPort, vars["REMOTE_HTTPS_PORT"])
+	effRemoteHTTP := orDefault(req.RemoteHTTPPort, vars["REMOTE_HTTP_PORT"])
+	if effPelicula != "" && effRemoteHTTPS == effPelicula {
+		httputil.WriteError(w, "remote_https_port must differ from the dashboard port ("+effPelicula+")", http.StatusBadRequest)
+		return
+	}
+	if effPelicula != "" && effRemoteHTTP == effPelicula {
+		httputil.WriteError(w, "remote_http_port must differ from the dashboard port ("+effPelicula+")", http.StatusBadRequest)
+		return
+	}
+	if effRemoteHTTPS != "" && effRemoteHTTP != "" && effRemoteHTTPS == effRemoteHTTP {
+		httputil.WriteError(w, "remote_https_port and remote_http_port must differ", http.StatusBadRequest)
 		return
 	}
 
@@ -458,6 +488,20 @@ func (h *Handler) applyChanges(prev, next applyKeys) (applied, pending []string)
 	}
 
 	return applied, pending
+}
+
+// validatePort reports whether s parses as a valid TCP port number (1..65535).
+// Empty input is valid (no change requested). Mirror this rule in the CLI's
+// RenderRemoteConfigs so both surfaces reject the same way.
+func validatePort(s string) error {
+	if s == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("must be a valid port number (1-65535)")
+	}
+	return nil
 }
 
 // remoteAccessEnabledFromMode translates the REMOTE_MODE .env value into the
