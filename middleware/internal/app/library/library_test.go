@@ -375,6 +375,49 @@ func TestWalkVideoFilesCap(t *testing.T) {
 	}
 }
 
+// ── resolveProfileID ──────────────────────────────────────────────────────────
+
+func TestResolveProfileID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("name found returns exact id", func(t *testing.T) {
+		t.Parallel()
+		got := resolveProfileID("HD-1080p", map[string]int{"HD-1080p": 3, "Any": 1})
+		if got != 3 {
+			t.Errorf("got %d, want 3", got)
+		}
+	})
+
+	t.Run("empty name picks lowest id deterministically", func(t *testing.T) {
+		t.Parallel()
+		// Run several times — map iteration order is randomized, so a
+		// non-deterministic implementation will eventually return a non-min id.
+		m := map[string]int{"HD-1080p": 3, "Any": 1, "Bluray": 5}
+		for i := 0; i < 20; i++ {
+			if got := resolveProfileID("", m); got != 1 {
+				t.Fatalf("iter %d: got %d, want 1 (lowest id)", i, got)
+			}
+		}
+	})
+
+	t.Run("missing name falls back to lowest id", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]int{"HD-1080p": 3, "Any": 1}
+		for i := 0; i < 20; i++ {
+			if got := resolveProfileID("Missing", m); got != 1 {
+				t.Fatalf("iter %d: got %d, want 1", i, got)
+			}
+		}
+	})
+
+	t.Run("empty map returns 1", func(t *testing.T) {
+		t.Parallel()
+		if got := resolveProfileID("", map[string]int{}); got != 1 {
+			t.Errorf("got %d, want 1", got)
+		}
+	})
+}
+
 // ── applyFSOps ────────────────────────────────────────────────────────────────
 
 func newApplyFSOpsRoots(t *testing.T) (srcRoot, dstRoot string) {

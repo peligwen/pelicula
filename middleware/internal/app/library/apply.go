@@ -342,19 +342,30 @@ func (h *Handler) applySeries(apiKey string, item ApplyItem, profMap map[string]
 	return nil
 }
 
-// resolveProfileID looks up profile ID by name, falling back to first available.
+// resolveProfileID looks up profile ID by name. When name is empty (the wizard
+// has no profile picker today), it returns the lowest profile ID for a
+// deterministic default — Radarr/Sonarr's onboarding-default profile is
+// typically the lowest-numbered one. When a non-empty name is requested but
+// not found, we still fall back deterministically and log a warning so the
+// mismatch is visible.
 func resolveProfileID(name string, nameMap map[string]int) int {
 	if id, ok := nameMap[name]; ok {
 		return id
 	}
+	fallback := 0
 	for _, id := range nameMap {
-		slog.Warn("quality profile not found, using fallback",
-			"component", "library", "requested", name, "fallback_id", id)
-		return id
+		if fallback == 0 || id < fallback {
+			fallback = id
+		}
 	}
-	slog.Warn("quality profile not found and no profiles available, using id=1",
-		"component", "library", "requested", name)
-	return 1
+	if fallback == 0 {
+		fallback = 1
+	}
+	if name != "" {
+		slog.Warn("quality profile not found, using fallback",
+			"component", "library", "requested", name, "fallback_id", fallback)
+	}
+	return fallback
 }
 
 func itoa(i int) string {
