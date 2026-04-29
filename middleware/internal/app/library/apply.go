@@ -420,6 +420,21 @@ func moveFile(src, dst string) error {
 	return os.Remove(src)
 }
 
+// resolveRoots returns each input root with symlinks resolved. Non-existent or
+// otherwise unresolvable roots are passed through unchanged so callers can
+// keep using them for the textual prefix check on the unresolved source path.
+func resolveRoots(roots []string) []string {
+	out := make([]string, len(roots))
+	for i, r := range roots {
+		if rr, err := filepath.EvalSymlinks(r); err == nil {
+			out[i] = rr
+		} else {
+			out[i] = r
+		}
+	}
+	return out
+}
+
 // applyFSOps iterates items and performs the filesystem operation dictated by
 // strategy for each item that has a SourcePath. allowedSrcRoots defaults to
 // the production browse roots when nil; allowedDstRoots defaults to empty.
@@ -449,6 +464,11 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 	if allowedDstRoots == nil {
 		allowedDstRoots = []string{}
 	}
+	// Resolve symlinks in the allowed source roots once. The post-EvalSymlinks
+	// comparison below would otherwise fail when a root itself contains symlink
+	// components (e.g. macOS /var → /private/var, or LIBRARY_DIR being a
+	// Synology shared-folder symlink).
+	resolvedSrcRoots := resolveRoots(allowedSrcRoots)
 
 	for i := range items {
 		item := &items[i]
@@ -460,6 +480,21 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 			results[i] = fsOpResult{op: "skipped", err: "path not allowed"}
 			continue
 		}
+		// Resolve symlinks and re-validate. A symlink planted under an allowed
+		// root (e.g. /downloads/sneaky → /etc) would pass the textual prefix
+		// check but redirect the rename/link to anywhere on disk. HandleBrowse
+		// already resolves on listing; mirror that here so the apply path
+		// can't be tricked by something the browse view would have hidden.
+		resolved, err := filepath.EvalSymlinks(src)
+		if err != nil {
+			results[i] = fsOpResult{op: "skipped", err: "source not readable: " + err.Error()}
+			continue
+		}
+		if !IsUnderPrefixes(resolved, resolvedSrcRoots) {
+			results[i] = fsOpResult{op: "skipped", err: "path not allowed"}
+			continue
+		}
+		src = resolved
 
 		dst := item.DestPath
 		if dst == "" {

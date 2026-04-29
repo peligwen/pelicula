@@ -519,8 +519,15 @@ func TestApplyFSOps_SymlinkIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Readlink: %v", err)
 	}
-	if target != src {
-		t.Errorf("symlink target = %q, want %q", target, src)
+	// applyFSOps resolves symlinks on the source before operating, so the
+	// emitted symlink points at the canonical path (e.g. /private/var/...
+	// rather than /var/... on macOS). Compare against the resolved src.
+	wantTarget, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(src): %v", err)
+	}
+	if target != wantTarget {
+		t.Errorf("symlink target = %q, want %q", target, wantTarget)
 	}
 }
 
@@ -562,6 +569,68 @@ func TestApplyFSOps_RejectEscapingPath(t *testing.T) {
 	}
 	if _, err := os.Stat(escapeSrc); os.IsNotExist(err) {
 		t.Error("escapeSrc should be untouched")
+	}
+}
+
+// TestApplyFSOps_RejectSymlinkEscape covers the case where a symlink under an
+// allowed source root resolves to a path outside any allowed root. The textual
+// prefix check passes; only EvalSymlinks catches it.
+func TestApplyFSOps_RejectSymlinkEscape(t *testing.T) {
+	t.Parallel()
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+	base := filepath.Dir(dstRoot)
+
+	// Real file lives outside the allowed src root.
+	outside := filepath.Join(base, "secrets.mkv")
+	if err := os.WriteFile(outside, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a symlink inside srcRoot pointing at the outside file.
+	sneaky := filepath.Join(srcRoot, "sneaky.mkv")
+	if err := os.Symlink(outside, sneaky); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dstRoot, "Movie (2020)", "sneaky.mkv")
+	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: sneaky, DestPath: dst}}
+	applyFSOps(items, "migrate", []string{srcRoot}, []string{dstRoot}, "", "")
+
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("symlink escaping allowedSrcRoots must not produce a dst")
+	}
+	if _, err := os.Lstat(outside); err != nil {
+		t.Errorf("outside target must remain untouched: %v", err)
+	}
+}
+
+// TestApplyFSOps_FollowSymlinkInsideRoot confirms that a symlink whose target
+// stays under an allowed root is honoured: the migrate operation moves the
+// underlying file to the destination, and the original symlink path is gone.
+func TestApplyFSOps_FollowSymlinkInsideRoot(t *testing.T) {
+	t.Parallel()
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+
+	// Real file inside srcRoot.
+	real := filepath.Join(srcRoot, "actual.mkv")
+	if err := os.WriteFile(real, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink inside srcRoot pointing at the real file (also inside srcRoot).
+	link := filepath.Join(srcRoot, "alias.mkv")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dstRoot, "Movie (2020)", "actual.mkv")
+	items := []ApplyItem{{Type: "movie", Title: "Movie", Year: 2020, SourcePath: link, DestPath: dst}}
+	applyFSOps(items, "migrate", []string{srcRoot}, []string{dstRoot}, "", "")
+
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("dst should exist after migrate via in-root symlink: %v", err)
+	}
+	// The real file got renamed; both link and real should now be gone.
+	if _, err := os.Stat(real); !os.IsNotExist(err) {
+		t.Error("real file should have moved to dst")
 	}
 }
 
