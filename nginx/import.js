@@ -1072,19 +1072,57 @@ function openChangeMatchPopover(item, rowEl) {
     }, 0);
 }
 
+// computeGroupKey mirrors the server-side matchItemGroupKey so the wizard can
+// regroup items after the user overrides a match. Keeping the formats in sync
+// with middleware/internal/app/library/match.go is required: the apply handler
+// rejects batches whose client-side group keys disagree with its own.
+function computeGroupKey(scanItem) {
+    const m = scanItem.match;
+    if (!m) return 'unmatched:' + scanItem.file;
+    if (m.type === 'movie' && m.tmdbId > 0) return 'movie:' + m.tmdbId;
+    if (m.type === 'series' && m.tvdbId > 0) {
+        return 'series:' + m.tvdbId + ':s' + (m.season || 0) + 'e' + (m.episode || 0);
+    }
+    return 'unmatched:' + scanItem.file;
+}
+
+// extractSeasonEpisode mirrors server-side extractSeason/extractEpisode in
+// match.go. Used when overriding a series match — the new match returned by
+// /search has no per-episode info, so we re-derive S/E from the filename.
+function extractSeasonEpisode(filename) {
+    const m = filename.match(/\bS(\d{1,2})E(\d{1,2})\b/i);
+    if (!m) return { season: 0, episode: 0 };
+    return { season: parseInt(m[1], 10), episode: parseInt(m[2], 10) };
+}
+
 // applyOverride updates the match for an item to the operator-selected result.
 async function applyOverride(item, searchResult) {
     const scanItem = state.scanResults[item.idx];
-    // Mutate the canonical scan result
+    // For series, re-derive season/episode from the filename — the search
+    // result is series-level and carries no per-episode info, but the original
+    // file's S/E is what actually goes to Sonarr.
+    let season = 0, episode = 0;
+    if (searchResult.type === 'series') {
+        const ext = extractSeasonEpisode(scanItem.file.split('/').pop());
+        season = ext.season;
+        episode = ext.episode;
+    }
     scanItem.match = {
         tmdbId: searchResult.tmdbId || 0,
         tvdbId: searchResult.tvdbId || 0,
         title: searchResult.title,
         year: searchResult.year || 0,
         type: searchResult.type,
+        season,
+        episode,
         confidence: 'overridden',
     };
     scanItem.overridden = true;
+    // Recompute groupKey from the new match so two items overridden to the same
+    // title collapse into one duplicate group instead of slipping through as
+    // confident singletons and getting rejected by the apply handler's
+    // duplicate-key guard.
+    scanItem.groupKey = computeGroupKey(scanItem);
     // If the item was unmatched, give it status 'new' so doApply picks it up
     if (scanItem.status === 'unmatched') {
         scanItem.status = 'new';
