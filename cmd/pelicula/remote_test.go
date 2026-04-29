@@ -430,6 +430,141 @@ func assertRegexDenyAllow(t *testing.T, pattern string, mustDeny, mustAllow []st
 	}
 }
 
+// TestRenderRemoteConfigs_HTTPSPortSubstitution checks that the rendered
+// remote.conf actually substitutes the configured REMOTE_HTTPS_PORT into the
+// HTTP→HTTPS redirect target, instead of leaving the literal placeholder
+// behind. Regression value: an envsubst-style template with the wrong
+// quoting can pass through as text and produce a redirect to
+// `https://host:${REMOTE_HTTPS_PORT}/...` that browsers cannot resolve.
+func TestRenderRemoteConfigs_HTTPSPortSubstitution(t *testing.T) {
+	configDir := t.TempDir()
+	scriptDir := setupRemoteScriptDir(t)
+	env := EnvMap{
+		"REMOTE_MODE":       "portforward",
+		"REMOTE_HOSTNAME":   "test.example.com",
+		"REMOTE_CERT_MODE":  "self-signed",
+		"REMOTE_HTTPS_PORT": "9443",
+		"CONFIG_DIR":        configDir,
+	}
+	if err := RenderRemoteConfigs(scriptDir, env); err != nil {
+		t.Fatalf("RenderRemoteConfigs: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(configDir, "nginx", "remote.conf"))
+	if err != nil {
+		t.Fatalf("read remote.conf: %v", err)
+	}
+	conf := string(data)
+	if strings.Contains(conf, "${REMOTE_HTTPS_PORT}") {
+		t.Errorf("remote.conf still contains literal ${REMOTE_HTTPS_PORT} placeholder:\n%s", conf)
+	}
+	if !strings.Contains(conf, "https://$host:9443") {
+		t.Errorf("remote.conf should redirect to https://$host:9443; got:\n%s", conf)
+	}
+}
+
+// TestRenderRemoteConfigs_NoAdminPaths verifies the load-bearing Peligrosa
+// invariant: neither remote vhost template proxies any admin route (sonarr,
+// radarr, prowlarr, qbt, bazarr, /api/pelicula, /api/procula, /api/vpn). The
+// remote vhost is Jellyfin-only by design — adding any of these would expose
+// admin endpoints to the internet (docs/PELIGROSA.md).
+func TestRenderRemoteConfigs_NoAdminPaths(t *testing.T) {
+	cases := []struct {
+		mode string
+		env  EnvMap
+	}{
+		{"simple", EnvMap{
+			"REMOTE_MODE":     "portforward",
+			"REMOTE_HOSTNAME": "",
+		}},
+		{"full", EnvMap{
+			"REMOTE_MODE":      "portforward",
+			"REMOTE_HOSTNAME":  "test.example.com",
+			"REMOTE_CERT_MODE": "self-signed",
+		}},
+	}
+	forbidden := []string{
+		"/sonarr",
+		"/radarr",
+		"/prowlarr",
+		"/qbt",
+		"/bazarr",
+		"/api/pelicula",
+		"/api/procula",
+		"/api/vpn",
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			configDir := t.TempDir()
+			scriptDir := setupRemoteScriptDir(t)
+			tc.env["CONFIG_DIR"] = configDir
+			if err := RenderRemoteConfigs(scriptDir, tc.env); err != nil {
+				t.Fatalf("RenderRemoteConfigs: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(configDir, "nginx", "remote.conf"))
+			if err != nil {
+				t.Fatalf("read remote.conf: %v", err)
+			}
+			conf := string(data)
+			for _, p := range forbidden {
+				if strings.Contains(conf, "location "+p) {
+					t.Errorf("remote vhost (%s) must not expose admin path %q", tc.mode, p)
+				}
+				if strings.Contains(conf, "proxy_pass http://"+strings.TrimPrefix(p, "/")) {
+					t.Errorf("remote vhost (%s) must not proxy admin host %q", tc.mode, p)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderRemoteConfigs_AuthRateLimited verifies that the bundled jellyfin
+// proxy snippet attaches the `jf_auth` rate-limit zone to the AuthenticateByName
+// endpoint. Without the snippet inclusion, password brute-forcing through the
+// remote vhost has no rate cap.
+func TestRenderRemoteConfigs_AuthRateLimited(t *testing.T) {
+	cases := []struct {
+		mode string
+		env  EnvMap
+	}{
+		{"simple", EnvMap{
+			"REMOTE_MODE":     "portforward",
+			"REMOTE_HOSTNAME": "",
+		}},
+		{"full", EnvMap{
+			"REMOTE_MODE":      "portforward",
+			"REMOTE_HOSTNAME":  "test.example.com",
+			"REMOTE_CERT_MODE": "self-signed",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			configDir := t.TempDir()
+			scriptDir := setupRemoteScriptDir(t)
+			tc.env["CONFIG_DIR"] = configDir
+			if err := RenderRemoteConfigs(scriptDir, tc.env); err != nil {
+				t.Fatalf("RenderRemoteConfigs: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(configDir, "nginx", "remote.conf"))
+			if err != nil {
+				t.Fatalf("read remote.conf: %v", err)
+			}
+			conf := string(data)
+			if !strings.Contains(conf, "include /etc/nginx/snippets/jellyfin-proxy.conf;") {
+				t.Errorf("remote.conf (%s) must include jellyfin-proxy snippet:\n%s", tc.mode, conf)
+			}
+		})
+	}
+	// Belt-and-suspenders: the snippet itself must reference the zone. Run
+	// once on the bundled file rather than per case (the snippet is shared).
+	snippet, err := os.ReadFile("../../nginx/snippets/jellyfin-proxy.conf")
+	if err != nil {
+		t.Fatalf("read jellyfin-proxy.conf: %v", err)
+	}
+	if !strings.Contains(string(snippet), "limit_req zone=jf_auth") {
+		t.Errorf("jellyfin-proxy.conf must apply limit_req zone=jf_auth to AuthenticateByName")
+	}
+}
+
 // TestRenderRemoteConfigs_DenyRegexAnchoring verifies that the rendered
 // remote vhost (both simple and full modes) anchors its /System/Info and
 // /System/Logs deny rules with /?$. Two regression vectors:
