@@ -7,6 +7,7 @@ import (
 )
 
 func TestDetectLANURL_FormatAndRange(t *testing.T) {
+	t.Setenv("PELICULA_PORT", "")
 	got := detectLANURL()
 	if got == "" {
 		// Acceptable on hosts with no RFC1918 address (CI sandboxes, etc.).
@@ -33,6 +34,20 @@ func TestDetectLANURL_FormatAndRange(t *testing.T) {
 	}
 	if ip.IsLoopback() {
 		t.Fatalf("detectLANURL() returned loopback address %s", ipStr)
+	}
+}
+
+// TestDetectLANURL_HonorsPort confirms a host-side PELICULA_PORT override
+// shows up in the suggested URL — without this, hosts that swap the default
+// port get a wrong URL baked into JELLYFIN_PUBLISHED_URL via the wizard.
+func TestDetectLANURL_HonorsPort(t *testing.T) {
+	t.Setenv("PELICULA_PORT", "9090")
+	got := detectLANURL()
+	if got == "" {
+		return // host has no RFC1918 address — covered by sibling test
+	}
+	if !strings.HasSuffix(got, ":9090/jellyfin") {
+		t.Errorf("detectLANURL() = %q, want suffix :9090/jellyfin", got)
 	}
 }
 

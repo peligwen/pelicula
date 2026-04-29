@@ -170,12 +170,21 @@ func detectLANIPs() []net.IP { return detectLANIPsFn() }
 // Used to populate HOST_LAN_URL so the setup wizard can prefill a Jellyfin
 // PublishedServerUrl — what clients on the LAN should see when they discover
 // the server over UDP 7359 broadcast.
+//
+// Honors PELICULA_PORT from the environment so a host that pre-sets a custom
+// port (e.g. to avoid a 7354 collision) gets a correctly-suggested URL in
+// the wizard, instead of one that bakes the default in for the lifetime of
+// the install.
 func detectLANURL() string {
 	ips := detectLANIPs()
 	if len(ips) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("http://%s:7354/jellyfin", ips[0].String())
+	port := os.Getenv("PELICULA_PORT")
+	if port == "" {
+		port = "7354"
+	}
+	return fmt.Sprintf("http://%s:%s/jellyfin", ips[0].String(), port)
 }
 
 // isRFC1918 reports whether ip is in 10.0.0.0/8, 172.16.0.0/12, or
