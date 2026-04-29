@@ -122,10 +122,13 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("PUT /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(cfg.Library.HandleUpdateLibrary))))
 	mux.Handle("DELETE /api/pelicula/libraries/{slug}", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(cfg.Library.HandleDeleteLibrary))))
 
-	// admin only: library import scan + apply + browse
+	// admin only: library import scan + apply + browse.
+	// scan and apply mutate state (apply moves files on disk) so they get the
+	// strict CSRF guard, matching the rest of the admin-write surface. Browse
+	// is a GET, so the middleware short-circuits and the wrap is a no-op there.
 	mux.Handle("/api/pelicula/browse", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleBrowse)))
-	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleLibraryScan)))
-	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleLibraryApply)))
+	mux.Handle("/api/pelicula/library/scan", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(cfg.Library.HandleLibraryScan))))
+	mux.Handle("/api/pelicula/library/apply", auth.GuardAdmin(httputil.RequireLocalOriginStrict(http.HandlerFunc(cfg.Library.HandleLibraryApply))))
 	// manager+: suggest a library path for a given title/year (used by import wizard)
 	mux.Handle("GET /api/pelicula/library/suggest-path", auth.GuardManager(http.HandlerFunc(cfg.Library.HandleSuggestPath)))
 
