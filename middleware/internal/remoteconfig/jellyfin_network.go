@@ -40,15 +40,42 @@ func WriteJellyfinNetworkXML(jellyfinConfigDir, publishedURL string) error {
 
 	const header = `<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl>`
 	const footer = `</NetworkConfiguration>`
-	var content string
+
+	var middle string
 	if publishedURL != "" {
-		content = header + "<PublishedServerUrl>" + xmlEscape(publishedURL) + "</PublishedServerUrl>" + footer
-	} else {
-		content = header + footer
+		middle = "<PublishedServerUrl>" + xmlEscape(publishedURL) + "</PublishedServerUrl>"
 	}
+	// KnownProxies is required for nginx → Jellyfin X-Forwarded-For trust;
+	// without it, remote-vhost role capping and per-IP auth rate limiting
+	// see every request as coming from nginx itself. Must mirror the seed
+	// in cmd/pelicula/seed.go (jellyfinKnownProxiesXML).
+	knownProxies := jellyfinKnownProxiesXML()
+
+	content := header + middle + knownProxies + footer
 
 	path := filepath.Join(jellyfinConfigDir, "network.xml")
 	return os.WriteFile(path, []byte(content), 0644)
+}
+
+// jellyfinKnownProxiesXML returns the <KnownProxies> XML fragment.
+// Uses PELICULA_KNOWN_PROXIES (comma-separated CIDRs) when set; otherwise
+// defaults to the Docker bridge subnet 172.16.0.0/12. Mirrors the canonical
+// helper in cmd/pelicula/seed.go.
+func jellyfinKnownProxiesXML() string {
+	raw := os.Getenv("PELICULA_KNOWN_PROXIES")
+	var entries []string
+	if raw != "" {
+		for _, e := range strings.Split(raw, ",") {
+			e = strings.TrimSpace(e)
+			if e != "" {
+				entries = append(entries, "<string>"+xmlEscape(e)+"</string>")
+			}
+		}
+	}
+	if len(entries) == 0 {
+		entries = []string{"<string>172.16.0.0/12</string>"}
+	}
+	return "<KnownProxies>" + strings.Join(entries, "") + "</KnownProxies>"
 }
 
 func xmlEscape(s string) string {

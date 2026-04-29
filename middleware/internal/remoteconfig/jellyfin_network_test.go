@@ -79,3 +79,41 @@ func TestWriteJellyfinNetworkXML_RejectsEmptyDir(t *testing.T) {
 		t.Error("expected error for empty config dir")
 	}
 }
+
+// TestWriteJellyfinNetworkXML_IncludesKnownProxies verifies the rewriter
+// preserves the KnownProxies element. Without this, nginx → Jellyfin
+// X-Forwarded-For trust breaks after any LAN-URL save, defeating per-IP
+// auth rate limiting and Peligrosa's remote role capping.
+func TestWriteJellyfinNetworkXML_IncludesKnownProxies(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteJellyfinNetworkXML(dir, "http://192.168.1.42:7354/jellyfin"); err != nil {
+		t.Fatalf("WriteJellyfinNetworkXML: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "network.xml"))
+	got := string(data)
+	if !strings.Contains(got, "<KnownProxies>") {
+		t.Errorf("network.xml must contain <KnownProxies> for nginx X-Forwarded-For trust:\n%s", got)
+	}
+	if !strings.Contains(got, "<string>172.16.0.0/12</string>") {
+		t.Errorf("network.xml must default KnownProxies to the Docker bridge subnet:\n%s", got)
+	}
+}
+
+func TestWriteJellyfinNetworkXML_HonorsKnownProxiesEnv(t *testing.T) {
+	t.Setenv("PELICULA_KNOWN_PROXIES", "10.0.0.0/8, 192.168.5.0/24")
+	dir := t.TempDir()
+	if err := WriteJellyfinNetworkXML(dir, ""); err != nil {
+		t.Fatalf("WriteJellyfinNetworkXML: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "network.xml"))
+	got := string(data)
+	if !strings.Contains(got, "<string>10.0.0.0/8</string>") {
+		t.Errorf("network.xml KnownProxies should include 10.0.0.0/8:\n%s", got)
+	}
+	if !strings.Contains(got, "<string>192.168.5.0/24</string>") {
+		t.Errorf("network.xml KnownProxies should include 192.168.5.0/24:\n%s", got)
+	}
+	if strings.Contains(got, "<string>172.16.0.0/12</string>") {
+		t.Errorf("network.xml KnownProxies should not fall back to default when env is set:\n%s", got)
+	}
+}
