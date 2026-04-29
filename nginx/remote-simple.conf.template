@@ -33,10 +33,13 @@ server {
     client_max_body_size 1m;
 
     # ── Hard deny: sensitive Jellyfin system endpoints ───────────────────
+    # /System/Info is anchored with /?$ so it does NOT match /System/Info/Public,
+    # which is the unauthenticated server-info endpoint clients (web + native)
+    # GET to verify a Jellyfin URL during discovery / "Connect to Server".
     location ~* ^/(jellyfin/)?[Ss]ystem/[Ll]ogs {
         return 403;
     }
-    location ~* ^/(jellyfin/)?[Ss]ystem/[Ii]nfo {
+    location ~* ^/(jellyfin/)?[Ss]ystem/[Ii]nfo/?$ {
         return 403;
     }
 
