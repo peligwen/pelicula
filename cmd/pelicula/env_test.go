@@ -341,6 +341,17 @@ PELICULA_PROJECT_NAME="pelicula"
 			wantRemoteMode: "portforward",
 		},
 		{
+			// A stale REMOTE_ACCESS_ENABLED rewritten by an older middleware
+			// alongside an existing REMOTE_MODE: the migration must drop the
+			// legacy key, leaving REMOTE_MODE authoritative. Without this, the
+			// CLI and middleware can disagree about the remote-access state.
+			name:             "both keys present — legacy dropped, REMOTE_MODE wins",
+			extra:            "REMOTE_MODE=\"portforward\"\nREMOTE_ACCESS_ENABLED=\"false\"\n",
+			wantChanged:      true,
+			wantRemoteMode:   "portforward",
+			wantOldKeyAbsent: true,
+		},
+		{
 			name:        "both absent — no change to remote keys",
 			extra:       "",
 			wantChanged: false,

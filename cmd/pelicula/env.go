@@ -191,15 +191,19 @@ func MigrateEnv(path string) (bool, error) {
 	}
 
 	// Migration 5: REMOTE_ACCESS_ENABLED → REMOTE_MODE
-	// Migrate both true and false values; delete the old key so downstream
-	// readers only need to consult REMOTE_MODE.
-	if oldVal, hasOld := m["REMOTE_ACCESS_ENABLED"]; hasOld && m["REMOTE_MODE"] == "" {
-		if oldVal == "true" {
-			m["REMOTE_MODE"] = "portforward"
-			info("Migrated REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward")
-		} else {
-			m["REMOTE_MODE"] = "disabled"
-			info("Migrated REMOTE_ACCESS_ENABLED=false → REMOTE_MODE=disabled")
+	// Always drop the legacy key when present. If REMOTE_MODE is unset, seed
+	// it from the legacy value; otherwise REMOTE_MODE is already authoritative
+	// (e.g. cloudflared/tailscale, or a stale REMOTE_ACCESS_ENABLED rewritten
+	// by an older middleware that didn't know about REMOTE_MODE).
+	if oldVal, hasOld := m["REMOTE_ACCESS_ENABLED"]; hasOld {
+		if m["REMOTE_MODE"] == "" {
+			if oldVal == "true" {
+				m["REMOTE_MODE"] = "portforward"
+				info("Migrated REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward")
+			} else {
+				m["REMOTE_MODE"] = "disabled"
+				info("Migrated REMOTE_ACCESS_ENABLED=false → REMOTE_MODE=disabled")
+			}
 		}
 		delete(m, "REMOTE_ACCESS_ENABLED")
 		changed = true

@@ -69,7 +69,10 @@ type settingsResponse struct {
 	TZ                   string `json:"tz"`
 	PUID                 string `json:"puid"`
 	PGID                 string `json:"pgid"`
-	// Peligrosa remote access
+	// Peligrosa remote access. The wire field stays a "true"/"false" string —
+	// the dashboard toggle controls the hardened nginx port-forward vhost. The
+	// .env stores it as REMOTE_MODE ("portforward" / "disabled" / alternative
+	// modes like "cloudflared" or "tailscale"); this handler is the translator.
 	RemoteAccessEnabled string `json:"remote_access_enabled"`
 	RemoteHostname      string `json:"remote_hostname"`
 	RemoteHTTPPort      string `json:"remote_http_port"`
@@ -137,7 +140,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		TZ:                      vars["TZ"],
 		PUID:                    vars["PUID"],
 		PGID:                    vars["PGID"],
-		RemoteAccessEnabled:     vars["REMOTE_ACCESS_ENABLED"],
+		RemoteAccessEnabled:     remoteAccessEnabledFromMode(vars["REMOTE_MODE"]),
 		RemoteHostname:          vars["REMOTE_HOSTNAME"],
 		RemoteHTTPPort:          vars["REMOTE_HTTP_PORT"],
 		RemoteHTTPSPort:         vars["REMOTE_HTTPS_PORT"],
@@ -277,8 +280,11 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		vars["PELICULA_SUB_LANGS"] = req.SubLangs
 	}
 	if req.RemoteAccessEnabled != "" {
-		vars["REMOTE_ACCESS_ENABLED"] = req.RemoteAccessEnabled
+		applyRemoteModeChange(vars, req.RemoteAccessEnabled)
 	}
+	// Drop the legacy key on every write so old .env files converge to the
+	// REMOTE_MODE schema even when the user isn't toggling remote access.
+	delete(vars, "REMOTE_ACCESS_ENABLED")
 	// RemoteHostname is always written when RemoteAccessEnabled is present in
 	// the payload — an empty hostname is valid (simple mode: self-signed, no DNS).
 	if req.RemoteAccessEnabled != "" {
@@ -367,7 +373,7 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 // applyKeys is the subset of .env keys that the handler diffs and acts on.
 type applyKeys struct {
 	JellyfinPublishedURL string
-	RemoteAccessEnabled  string
+	RemoteMode           string
 	RemoteHostname       string
 	RemoteHTTPPort       string
 	RemoteHTTPSPort      string
@@ -379,7 +385,7 @@ type applyKeys struct {
 func snapshotApplyKeys(vars map[string]string) applyKeys {
 	return applyKeys{
 		JellyfinPublishedURL: vars["JELLYFIN_PUBLISHED_URL"],
-		RemoteAccessEnabled:  vars["REMOTE_ACCESS_ENABLED"],
+		RemoteMode:           vars["REMOTE_MODE"],
 		RemoteHostname:       vars["REMOTE_HOSTNAME"],
 		RemoteHTTPPort:       vars["REMOTE_HTTP_PORT"],
 		RemoteHTTPSPort:      vars["REMOTE_HTTPS_PORT"],
@@ -429,8 +435,8 @@ func (h *Handler) applyChanges(prev, next applyKeys) (applied, pending []string)
 	// Remote-access changes are compose-level (port mapping, sidecar add/remove,
 	// nginx vhost generation). Middleware can't run `docker compose up -d`, so
 	// they are always pending until the user runs `pelicula up`.
-	if prev.RemoteAccessEnabled != next.RemoteAccessEnabled {
-		pending = append(pending, "Remote access "+enabledLabel(next.RemoteAccessEnabled))
+	if prev.RemoteMode != next.RemoteMode {
+		pending = append(pending, "Remote access "+remoteModeLabel(next.RemoteMode))
 	}
 	if prev.RemoteHostname != next.RemoteHostname {
 		pending = append(pending, "Remote hostname")
@@ -454,14 +460,42 @@ func (h *Handler) applyChanges(prev, next applyKeys) (applied, pending []string)
 	return applied, pending
 }
 
-func enabledLabel(s string) string {
-	switch s {
+// remoteAccessEnabledFromMode translates the REMOTE_MODE .env value into the
+// boolean wire field "remote_access_enabled" the dashboard toggle reads. The
+// toggle is specifically about the hardened nginx port-forward vhost; the
+// alternative modes (cloudflared, tailscale) report as "false" so the toggle
+// reflects "port-forward not active" — they are configured manually via .env.
+func remoteAccessEnabledFromMode(mode string) string {
+	if mode == "portforward" {
+		return "true"
+	}
+	return "false"
+}
+
+// applyRemoteModeChange writes REMOTE_MODE based on the boolean wire field
+// from the dashboard. Toggling OFF when the user is on an alternative mode
+// (cloudflared / tailscale) is a no-op — the toggle does not own those modes,
+// so we don't clobber them. Toggling ON always switches to portforward.
+func applyRemoteModeChange(vars map[string]string, remoteAccessEnabled string) {
+	switch remoteAccessEnabled {
 	case "true":
-		return "enabled"
+		vars["REMOTE_MODE"] = "portforward"
 	case "false":
+		if vars["REMOTE_MODE"] == "portforward" || vars["REMOTE_MODE"] == "" {
+			vars["REMOTE_MODE"] = "disabled"
+		}
+	}
+}
+
+// remoteModeLabel renders REMOTE_MODE for the dashboard's pending banner.
+func remoteModeLabel(mode string) string {
+	switch mode {
+	case "portforward":
+		return "enabled"
+	case "disabled", "":
 		return "disabled"
 	default:
-		return "changed"
+		return "→ " + mode
 	}
 }
 
@@ -562,7 +596,7 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 		"NOTIFICATIONS_ENABLED":      "false",
 		"NOTIFICATIONS_MODE":         "internal",
 		"PELICULA_SUB_LANGS":         "en",
-		"REMOTE_ACCESS_ENABLED":      "false",
+		"REMOTE_MODE":                "disabled",
 		"REMOTE_HOSTNAME":            "",
 		"REMOTE_HTTP_PORT":           "80",
 		"REMOTE_HTTPS_PORT":          "8920",
@@ -646,7 +680,7 @@ func WriteEnvFile(path string, vars map[string]string) error {
 		"PELICULA_SUB_LANGS",
 		"REQUESTS_RADARR_PROFILE_ID", "REQUESTS_RADARR_ROOT",
 		"REQUESTS_SONARR_PROFILE_ID", "REQUESTS_SONARR_ROOT",
-		"REMOTE_ACCESS_ENABLED", "REMOTE_HOSTNAME",
+		"REMOTE_MODE", "REMOTE_HOSTNAME",
 		"REMOTE_HTTP_PORT", "REMOTE_HTTPS_PORT",
 		"REMOTE_CERT_MODE", "REMOTE_LE_EMAIL", "REMOTE_LE_STAGING",
 		"SEEDING_REMOVE_ON_COMPLETE",

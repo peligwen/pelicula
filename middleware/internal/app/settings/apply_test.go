@@ -100,7 +100,7 @@ func TestApply_RemoteHostnameChange_Pending(t *testing.T) {
 		t.Error("requires_pelicula_up should be true for remote hostname change")
 	}
 	if !contains(resp.Pending, "Remote hostname") || !contains(resp.Pending, "Remote access enabled") {
-		t.Errorf("Pending = %v, want includes hostname + access toggle", resp.Pending)
+		t.Errorf("Pending = %v, want includes hostname + access toggle (REMOTE_MODE → enabled)", resp.Pending)
 	}
 	if restart.Load() != 0 {
 		t.Errorf("Jellyfin restart should NOT fire for remote-only changes (got %d calls)", restart.Load())
