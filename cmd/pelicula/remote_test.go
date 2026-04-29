@@ -355,21 +355,7 @@ func TestRenderRemoteConfigs_InvalidHostname(t *testing.T) {
 // access on the remote vhost with "no servers available".
 func assertSystemInfoRegexAllowsPublic(t *testing.T, conf string) {
 	t.Helper()
-
-	// Pull the deny regex out of the rendered config. The location pattern
-	// looks like:  location ~* ^/(jellyfin/)?[Ss]ystem/[Ii]nfo/?$ {
-	loc := regexp.MustCompile(`location\s+~\*\s+(\^[^\s{]+\[Ii\]nfo[^\s{]*)`)
-	m := loc.FindStringSubmatch(conf)
-	if m == nil {
-		t.Fatalf("could not find /System/Info location regex in rendered conf:\n%s", conf)
-	}
-	pattern := m[1]
-
-	// The nginx ~* modifier means case-insensitive — Go's regexp uses (?i).
-	re, err := regexp.Compile("(?i)" + pattern)
-	if err != nil {
-		t.Fatalf("regex %q failed to compile: %v", pattern, err)
-	}
+	pattern := extractDenyRegex(t, conf, "Info")
 
 	// Must deny: bare /System/Info (and /jellyfin/ prefixed variant).
 	mustDeny := []string{
@@ -379,69 +365,111 @@ func assertSystemInfoRegexAllowsPublic(t *testing.T, conf string) {
 		"/jellyfin/System/Info/",
 		"/system/info", // case-insensitive
 	}
-	for _, p := range mustDeny {
-		if !re.MatchString(p) {
-			t.Errorf("System/Info deny regex %q failed to match %q (should be denied)", pattern, p)
-		}
-	}
-
-	// Must NOT deny: /System/Info/Public is the unauthenticated discovery
-	// endpoint clients require. Blocking it produces the exact failure mode
-	// "Safari shows Jellyfin web client but says no servers available".
 	mustAllow := []string{
 		"/System/Info/Public",
 		"/jellyfin/System/Info/Public",
 		"/system/info/public",
 	}
+	assertRegexDenyAllow(t, pattern, mustDeny, mustAllow)
+}
+
+// assertSystemLogsRegexAnchored asserts the /System/Logs deny regex catches
+// only the bare path and its trailing-slash form. An unanchored regex has
+// nothing concrete to break in current Jellyfin, but it would silently swallow
+// any future legitimate /System/Logs/<sub> endpoint Jellyfin adds.
+func assertSystemLogsRegexAnchored(t *testing.T, conf string) {
+	t.Helper()
+	pattern := extractDenyRegex(t, conf, "Logs")
+
+	mustDeny := []string{
+		"/System/Logs",
+		"/System/Logs/",
+		"/jellyfin/System/Logs",
+		"/jellyfin/System/Logs/",
+		"/system/logs",
+	}
+	mustAllow := []string{
+		"/System/Logs/Anything",
+		"/jellyfin/System/Logs/Foo",
+	}
+	assertRegexDenyAllow(t, pattern, mustDeny, mustAllow)
+}
+
+// extractDenyRegex pulls a /System/<token> location pattern out of a rendered
+// nginx config. Returns the inner regex string (without the ~* modifier).
+// token is the canonical-case Jellyfin path component (e.g. "Info", "Logs");
+// the matching nginx regex uses [Aa]-style case-permissive groups, so we
+// build a search regex that matches that exact form.
+func extractDenyRegex(t *testing.T, conf, token string) string {
+	t.Helper()
+	upper, lower := strings.ToUpper(token[:1]), strings.ToLower(token[:1])
+	caseGroup := regexp.QuoteMeta("[" + upper + lower + "]")
+	loc := regexp.MustCompile(`location\s+~\*\s+(\^[^\s{]+` + caseGroup + token[1:] + `[^\s{]*)`)
+	m := loc.FindStringSubmatch(conf)
+	if m == nil {
+		t.Fatalf("could not find /System/%s location regex in rendered conf:\n%s", token, conf)
+	}
+	return m[1]
+}
+
+func assertRegexDenyAllow(t *testing.T, pattern string, mustDeny, mustAllow []string) {
+	t.Helper()
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		t.Fatalf("regex %q failed to compile: %v", pattern, err)
+	}
+	for _, p := range mustDeny {
+		if !re.MatchString(p) {
+			t.Errorf("regex %q failed to match %q (should be denied)", pattern, p)
+		}
+	}
 	for _, p := range mustAllow {
 		if re.MatchString(p) {
-			t.Errorf("System/Info deny regex %q must NOT match %q — that endpoint is required for client discovery", pattern, p)
+			t.Errorf("regex %q must NOT match %q (should fall through to Jellyfin's auth)", pattern, p)
 		}
 	}
 }
 
-// TestRenderRemoteConfigs_SystemInfoPublicAllowed verifies that the rendered
-// remote vhost (both simple and full modes) does not block /System/Info/Public.
-// Regression: the original regex `^/(jellyfin/)?[Ss]ystem/[Ii]nfo` matched
-// /System/Info/Public, breaking Jellyfin client discovery and connection
-// verification on the 8920 vhost.
-func TestRenderRemoteConfigs_SystemInfoPublicAllowed(t *testing.T) {
-	t.Run("simple", func(t *testing.T) {
-		configDir := t.TempDir()
-		scriptDir := setupRemoteScriptDir(t)
-		env := EnvMap{
+// TestRenderRemoteConfigs_DenyRegexAnchoring verifies that the rendered
+// remote vhost (both simple and full modes) anchors its /System/Info and
+// /System/Logs deny rules with /?$. Two regression vectors:
+//
+//   - /System/Info anchoring keeps /System/Info/Public reachable for client
+//     discovery (the "Safari: no servers available" bug — see commit 1112dbf).
+//   - /System/Logs anchoring keeps any future Jellyfin sub-paths reachable
+//     instead of silently 403'ing every nested log endpoint.
+func TestRenderRemoteConfigs_DenyRegexAnchoring(t *testing.T) {
+	cases := []struct {
+		mode string
+		env  EnvMap
+	}{
+		{"simple", EnvMap{
 			"REMOTE_MODE":     "portforward",
 			"REMOTE_HOSTNAME": "",
-			"CONFIG_DIR":      configDir,
-		}
-		if err := RenderRemoteConfigs(scriptDir, env); err != nil {
-			t.Fatalf("RenderRemoteConfigs: %v", err)
-		}
-		data, err := os.ReadFile(filepath.Join(configDir, "nginx", "remote.conf"))
-		if err != nil {
-			t.Fatalf("read remote.conf: %v", err)
-		}
-		assertSystemInfoRegexAllowsPublic(t, string(data))
-	})
-
-	t.Run("full", func(t *testing.T) {
-		configDir := t.TempDir()
-		scriptDir := setupRemoteScriptDir(t)
-		env := EnvMap{
+		}},
+		{"full", EnvMap{
 			"REMOTE_MODE":      "portforward",
 			"REMOTE_HOSTNAME":  "test.example.com",
 			"REMOTE_CERT_MODE": "self-signed",
-			"CONFIG_DIR":       configDir,
-		}
-		if err := RenderRemoteConfigs(scriptDir, env); err != nil {
-			t.Fatalf("RenderRemoteConfigs: %v", err)
-		}
-		data, err := os.ReadFile(filepath.Join(configDir, "nginx", "remote.conf"))
-		if err != nil {
-			t.Fatalf("read remote.conf: %v", err)
-		}
-		assertSystemInfoRegexAllowsPublic(t, string(data))
-	})
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			configDir := t.TempDir()
+			scriptDir := setupRemoteScriptDir(t)
+			tc.env["CONFIG_DIR"] = configDir
+			if err := RenderRemoteConfigs(scriptDir, tc.env); err != nil {
+				t.Fatalf("RenderRemoteConfigs: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(configDir, "nginx", "remote.conf"))
+			if err != nil {
+				t.Fatalf("read remote.conf: %v", err)
+			}
+			conf := string(data)
+			assertSystemInfoRegexAllowsPublic(t, conf)
+			assertSystemLogsRegexAnchored(t, conf)
+		})
+	}
 }
 
 // TestRenderRemoteConfigs_PortCollision verifies that port shape and collision
