@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -574,5 +575,75 @@ func TestInviteRedeem_InfraError_DoesNotCount(t *testing.T) {
 		if code != http.StatusBadGateway {
 			t.Errorf("attempt %d: expected 502, got %d", i+1, code)
 		}
+	}
+}
+
+// ── Log-redaction tests ───────────────────────────────────────────────────────
+
+// TestInviteLogs_DoNotContainTokenPrefix verifies that invite log lines never
+// emit the first 8 characters of a token. This covers three sites in invites.go:
+//   - HandleInvites POST (invite created)
+//   - HandleInviteRevoke (invite revoked)
+//   - Redeem ReleaseSlot failure (warn after Jellyfin error)
+func TestInviteLogs_DoNotContainTokenPrefix(t *testing.T) {
+	// Capture slog output to a buffer for the duration of this test.
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Set up a fake Jellyfin that fails on CreateUser so we can exercise the
+	// ReleaseSlot warn path in Redeem.
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			// Return 502 — causes Redeem to call ReleaseSlot, which logs the warn.
+			w.WriteHeader(http.StatusBadGateway)
+		})
+	})
+	s := newTestInviteStoreWithClient(t, jc)
+
+	a := newTestAuth()
+	adminTok := insertSession(a, "admin", RoleAdmin, time.Now().Add(time.Hour))
+	deps := newTestDeps(a, s)
+
+	// ── Step 1: create an invite via the HTTP handler ──────────────────────────
+	body, _ := json.Marshal(map[string]any{"label": "redact-test", "max_uses": 2})
+	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	addSessionCookie(r, adminTok)
+	w := httptest.NewRecorder()
+	deps.HandleInvites(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create invite: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created Invite
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("parse created invite: %v", err)
+	}
+	invToken := created.Token
+
+	// ── Step 2: trigger the Redeem ReleaseSlot warn path ─────────────────────
+	// Redeem calls CreateUser which returns 502, so Redeem calls ReleaseSlot and
+	// logs a Warn. That log must not contain the token prefix.
+	_ = s.Redeem(invToken, "alice", "hunter12")
+
+	// ── Step 3: revoke the invite via the HTTP handler ────────────────────────
+	r2 := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+invToken+"/revoke", nil)
+	addSessionCookie(r2, adminTok)
+	w2 := httptest.NewRecorder()
+	deps.HandleInviteOp(w2, r2)
+	if w2.Code != http.StatusNoContent {
+		t.Fatalf("revoke invite: expected 204, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// ── Assert: no 8-char prefix of any token appears in captured log output ──
+	logged := buf.Bytes()
+	if len(invToken) < 8 {
+		t.Fatalf("token too short for prefix check: %q", invToken)
+	}
+	prefix := invToken[:8]
+	if bytes.Contains(logged, []byte(prefix)) {
+		t.Errorf("log output contains token prefix %q — token material must not appear in logs\nlog output:\n%s",
+			prefix, logged)
 	}
 }

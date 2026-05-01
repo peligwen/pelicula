@@ -240,6 +240,40 @@ func (s *Store) InsertEvent(ctx context.Context, ev Event) error {
 	return err
 }
 
+// UpdateAndInsertEvent atomically updates the mutable fields of a request and
+// records a state-transition event in a single SQL transaction. Either both
+// writes land or neither does. Returns ErrNotFound if the request does not
+// exist (matches Update's contract).
+func (s *Store) UpdateAndInsertEvent(ctx context.Context, req *Request, ev Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck — no-op if Commit succeeds
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE requests SET state=?, reason=?, arr_id=?, updated_at=? WHERE id=?`,
+		string(req.State), req.Reason, req.ArrID,
+		dbutil.FormatTime(req.UpdatedAt), req.ID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO request_events (request_id, at, state, actor, note) VALUES (?, ?, ?, ?, ?)`,
+		ev.RequestID, dbutil.FormatTime(ev.At), string(ev.State), ev.Actor, ev.Note,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 // Update updates the mutable fields (state, reason, arr_id, updated_at) on an
 // existing request row.
 func (s *Store) Update(ctx context.Context, req *Request) error {

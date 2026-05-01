@@ -258,7 +258,7 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 		// Release the slot so the invite can be reused.
 		if rollErr := s.repo.ReleaseSlot(ctx, token); rollErr != nil {
 			slog.Warn("failed to release invite slot after Jellyfin error",
-				"component", "invites", "token", token[:8]+"…", "error", rollErr)
+				"component", "invites", "username", username, "error", rollErr)
 		}
 		return err
 	}
@@ -342,7 +342,11 @@ func (p *Deps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, "could not create invite", http.StatusInternalServerError)
 			return
 		}
-		slog.Info("invite created", "component", "invites", "token", inv.Token[:8]+"…", "createdBy", createdBy)
+		if inv.Label != "" {
+			slog.Info("invite created", "component", "invites", "label", inv.Label, "createdBy", createdBy)
+		} else {
+			slog.Info("invite created", "component", "invites", "createdAt", inv.CreatedAt.Unix(), "createdBy", createdBy)
+		}
 		w.WriteHeader(http.StatusCreated)
 		httputil.WriteJSON(w, inv)
 
@@ -525,7 +529,7 @@ func (s *InviteStore) HandleInviteRevoke(w http.ResponseWriter, r *http.Request,
 		httputil.WriteError(w, "could not revoke invite", http.StatusInternalServerError)
 		return
 	}
-	slog.Info("invite revoked", "component", "invites", "token", token[:8]+"…")
+	slog.Info("invite revoked", "component", "invites")
 	w.WriteHeader(http.StatusNoContent)
 }
 

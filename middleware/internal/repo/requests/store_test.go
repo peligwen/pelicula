@@ -563,3 +563,113 @@ func TestMarkGrabbedIfPending_MissingID(t *testing.T) {
 		t.Fatal("expected ok=false for non-existent request id")
 	}
 }
+
+// ── UpdateAndInsertEvent ─────────────────────────────────────────────────────
+
+// TestUpdateAndInsertEvent_HappyPath verifies that a single call atomically
+// updates the request row and inserts a matching event row.
+func TestUpdateAndInsertEvent_HappyPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_uaie_001", "movie", "Atomic Film", requests.StatePending)
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	req.State = requests.StateDenied
+	req.Reason = "not interested"
+	req.UpdatedAt = now
+
+	ev := requests.Event{
+		RequestID: req.ID,
+		At:        now,
+		State:     requests.StateDenied,
+		Actor:     "admin",
+		Note:      "test denial",
+	}
+
+	if err := s.UpdateAndInsertEvent(ctx, req, ev); err != nil {
+		t.Fatalf("UpdateAndInsertEvent: %v", err)
+	}
+
+	// Assert the request row reflects the update.
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get after UpdateAndInsertEvent: %v", err)
+	}
+	if got.State != requests.StateDenied {
+		t.Errorf("State: got %q, want denied", got.State)
+	}
+	if got.Reason != "not interested" {
+		t.Errorf("Reason: got %q, want 'not interested'", got.Reason)
+	}
+
+	// Assert the event row was inserted.
+	if len(got.History) != 1 {
+		t.Fatalf("expected 1 history event, got %d", len(got.History))
+	}
+	if got.History[0].Actor != "admin" {
+		t.Errorf("Actor: got %q, want admin", got.History[0].Actor)
+	}
+	if got.History[0].State != requests.StateDenied {
+		t.Errorf("Event State: got %q, want denied", got.History[0].State)
+	}
+	if got.History[0].Note != "test denial" {
+		t.Errorf("Note: got %q, want 'test denial'", got.History[0].Note)
+	}
+}
+
+// TestUpdateAndInsertEvent_RollbackOnEventFailure verifies that when the event
+// insert fails (FK violation: RequestID references a non-existent request row),
+// the whole transaction rolls back and the original request row is unchanged.
+//
+// This relies on PRAGMA foreign_keys=ON being set in newTestDB, which it is.
+func TestUpdateAndInsertEvent_RollbackOnEventFailure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_uaie_rollback_001", "movie", "Rollback Film", requests.StatePending)
+	origUpdatedAt := req.UpdatedAt
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	req.State = requests.StateDenied
+	req.Reason = "should not persist"
+	req.UpdatedAt = now
+
+	// Use a RequestID that does not exist in the requests table — this triggers
+	// the FK constraint on request_events.request_id and causes the INSERT to fail.
+	ev := requests.Event{
+		RequestID: "nonexistent_request_id",
+		At:        now,
+		State:     requests.StateDenied,
+		Actor:     "admin",
+		Note:      "this event should roll back",
+	}
+
+	err := s.UpdateAndInsertEvent(ctx, req, ev)
+	if err == nil {
+		t.Fatal("expected error from FK violation, got nil")
+	}
+
+	// Assert the request row was NOT updated (original state and updated_at remain).
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get after rollback: %v", err)
+	}
+	if got.State != requests.StatePending {
+		t.Errorf("State: got %q, want pending (should be rolled back)", got.State)
+	}
+	if !got.UpdatedAt.Equal(origUpdatedAt) {
+		t.Errorf("UpdatedAt: got %v, want %v (should be rolled back)", got.UpdatedAt, origUpdatedAt)
+	}
+	if len(got.History) != 0 {
+		t.Errorf("expected 0 history events after rollback, got %d", len(got.History))
+	}
+}

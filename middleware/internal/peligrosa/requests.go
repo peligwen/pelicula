@@ -292,17 +292,20 @@ func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title s
 	requester := matched.RequestedBy
 	matched.State = RequestAvailable
 	matched.UpdatedAt = time.Now().UTC()
-	if err := s.updateRequest(matched); err != nil {
-		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
-		return err
-	}
 	ev := RequestEvent{
 		At:    matched.UpdatedAt,
 		State: RequestAvailable,
 		Note:  "content imported",
 	}
-	if err := s.insertEvent(matched.ID, ev); err != nil {
-		slog.Warn("failed to insert available event", "component", "requests", "error", err)
+	repoEv := reporeqs.Event{
+		RequestID: matched.ID,
+		At:        ev.At,
+		State:     reporeqs.State(ev.State),
+		Note:      ev.Note,
+	}
+	if err := s.repo.UpdateAndInsertEvent(context.Background(), toRepoRequest(matched), repoEv); err != nil {
+		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
+		return err
 	}
 
 	slog.Info("request marked available", "component", "requests", "id", matched.ID, "title", title)
@@ -593,19 +596,23 @@ func (p *Deps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id stri
 	req.State = RequestDenied
 	req.Reason = body.Reason
 	req.UpdatedAt = time.Now().UTC()
-	if err := p.Requests.updateRequest(req); err != nil {
-		slog.Error("failed to save request after deny", "component", "requests", "error", err)
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
-		return
-	}
 	ev := RequestEvent{
 		At:    req.UpdatedAt,
 		State: RequestDenied,
 		Actor: actorUsername,
 		Note:  body.Reason,
 	}
-	if err := p.Requests.insertEvent(req.ID, ev); err != nil {
-		slog.Warn("failed to insert deny event", "component", "requests", "error", err)
+	repoEv := reporeqs.Event{
+		RequestID: req.ID,
+		At:        ev.At,
+		State:     reporeqs.State(ev.State),
+		Actor:     ev.Actor,
+		Note:      ev.Note,
+	}
+	if err := p.Requests.repo.UpdateAndInsertEvent(context.Background(), toRepoRequest(req), repoEv); err != nil {
+		slog.Error("failed to save request after deny", "component", "requests", "error", err)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 	req.History = append(req.History, ev)
 
