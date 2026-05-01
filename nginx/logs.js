@@ -125,7 +125,7 @@ function renderFilters() {
     wrap.replaceChildren(frag);
 }
 
-document.getElementById('log-refresh-btn').addEventListener('click', function() {
+document.getElementById('logs-sheet-refresh-btn').addEventListener('click', function() {
     logsState.userScrolled = false;
     loadLogs();
 });

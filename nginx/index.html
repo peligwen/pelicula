@@ -1109,6 +1109,7 @@
         <div class="logs-sheet-handle-row"><div class="logs-sheet-handle"></div></div>
         <div class="logs-sheet-header">
             <span class="logs-sheet-title">&#128220; Service Logs</span>
+            <button class="logs-sheet-close" id="logs-sheet-refresh-btn" aria-label="Refresh logs" title="Refresh">&#8635;</button>
             <button class="logs-sheet-close" id="logs-sheet-close-btn" aria-label="Close">&#x2715;</button>
         </div>
         <div class="logs-filters" id="logs-filters"></div>
@@ -1288,6 +1289,7 @@
     <!-- Transient toast notifications (framework toast()) -->
     <div class="notify-toast" id="notify-toast" role="status" aria-live="polite"></div>
 
+    <script src="/format.js"></script>
     <script type="module" src="/dashboard.js"></script>
 </body>
 </html>

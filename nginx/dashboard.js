@@ -59,21 +59,34 @@ async function doLogin() {
     const username = document.getElementById('login-username').value;
     const pw = document.getElementById('login-password').value;
     const errEl = document.getElementById('login-error');
+    const loginForm = document.getElementById('login-form');
+    const submitBtn = loginForm ? loginForm.querySelector('button[type=submit]') : null;
+    if (submitBtn) submitBtn.disabled = true;
+    errEl.style.display = 'none';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
         const res = await fetch('/api/pelicula/auth/login', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({username, password: pw})
+            body: JSON.stringify({username, password: pw}),
+            signal: ctrl.signal,
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => null);
         if (res.ok) {
             document.getElementById('login-overlay').classList.add('hidden');
-            errEl.style.display = 'none';
-            applyRole(data.role || 'admin', data.username || '');
+            applyRole((data && data.role) || 'admin', (data && data.username) || '');
             refresh();
         } else {
+            errEl.textContent = (data && data.error) || 'Login failed';
             errEl.style.display = 'block';
         }
-    } catch { errEl.style.display = 'block'; }
+    } catch (e) {
+        errEl.textContent = e.name === 'AbortError' ? 'Request timed out' : (e.message || 'Login failed');
+        errEl.style.display = 'block';
+    } finally {
+        clearTimeout(timer);
+        if (submitBtn) submitBtn.disabled = false;
+    }
 }
 
 // Apply role-based visibility to UI elements.
@@ -175,9 +188,10 @@ async function checkStatus() {
 // data-* bridge helpers for download action buttons — keep user-controlled strings out of JS string literals in onclick
 // dlPauseFromBtn, dlCancelFromBtn, openBlocklistFromBtn are defined in downloads.js.
 function retryFromBtn(btn) { retryJob(btn.dataset.jobId); }
-function formatSpeed(bps) { if (bps > 1048576) return (bps/1048576).toFixed(1)+' MB/s'; if (bps > 1024) return (bps/1024).toFixed(0)+' KB/s'; if (bps > 0) return bps+' B/s'; return 'idle'; }
-function formatSize(b) { if (!b) return '0 B'; const u=['B','KB','MB','GB','TB']; let i=0,n=b; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(1)+' '+u[i]; }
-function formatETA(s) { if (s > 86400) return Math.floor(s/86400)+'d'; if (s > 3600) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m'; if (s > 60) return Math.floor(s/60)+'m'; return s+'s'; }
+// formatSpeed, formatSize, formatETA are defined in format.js (loaded before this module).
+const formatSpeed = window.formatSpeed;
+const formatSize  = window.formatSize;
+const formatETA   = window.formatETA;
 
 // updatePanelAlert(), _panelVPNDegraded — moved to services.js.
 

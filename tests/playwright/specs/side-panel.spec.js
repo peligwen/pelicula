@@ -160,6 +160,16 @@ test.describe('Collapsible side panel', () => {
         expect(animName).toBe('none');
     });
 
+    test('#s-space host-disk readout is non-empty after sidebar loads', async ({ page }) => {
+        await mockStatus(page, {});
+        await page.setViewportSize(DESKTOP_VIEWPORT);
+        await ensureLoggedIn(page);
+        // checkHost populates #s-space during the initial refresh() call.
+        await expect(page.locator('#s-space')).not.toBeEmpty({ timeout: 15_000 });
+        const text = await page.locator('#s-space').innerText();
+        expect(text.length).toBeGreaterThan(0);
+    });
+
     test('alert glow: respects prefers-reduced-motion', async ({ browser }) => {
         const context = await browser.newContext({ reducedMotion: 'reduce' });
         const page = await context.newPage();

@@ -430,4 +430,5 @@ window.checkVPN               = checkVPN;
 window.checkHost              = checkHost;
 window.updateTimestamp        = updateTimestamp;
 
-function formatSize(b) { return window.formatSize ? window.formatSize(b) : ''; }
+// formatSize is provided by format.js (loaded before any module).
+const formatSize = window.formatSize;

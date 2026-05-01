@@ -128,7 +128,7 @@ document.getElementById('blocklist-confirm-btn').addEventListener('click', confi
 // checkDownloads is called by sse.js and dashboard.js refresh cycle.
 window.checkDownloads = checkDownloads;
 
-// formatSpeed, formatSize, formatETA are defined in dashboard.js and available on window.
-function formatSpeed(bps) { return window.formatSpeed ? window.formatSpeed(bps) : ''; }
-function formatSize(b)    { return window.formatSize  ? window.formatSize(b)    : ''; }
-function formatETA(s)     { return window.formatETA   ? window.formatETA(s)     : ''; }
+// formatSpeed, formatSize, formatETA are provided by format.js (loaded before any module).
+const formatSpeed = window.formatSpeed;
+const formatSize  = window.formatSize;
+const formatETA   = window.formatETA;

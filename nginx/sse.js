@@ -13,6 +13,7 @@ if (typeof EventSource === 'undefined') {
     let retryCount = 0;
     let sseActive = false;
     let _started = false;
+    let _pollersEnabled = false;
     // Set true before disconnecting due to tab visibility; prevents the
     // polling fallback from starting while the tab is hidden.
     let _hiddenByVisibility = false;
@@ -31,7 +32,7 @@ if (typeof EventSource === 'undefined') {
         source.onerror = function() {
             retryCount++;
             sseActive = false;
-            if (retryCount === 3) {
+            if (retryCount >= 3) {
                 enablePollers();
                 // EventSource auto-reconnects; don't close it
             }
@@ -79,6 +80,7 @@ if (typeof EventSource === 'undefined') {
     }
 
     function disablePollers() {
+        _pollersEnabled = false;
         if (window.svcPoller && window.svcPoller.stop) window.svcPoller.stop();
         if (window._refreshInterval) {
             clearInterval(window._refreshInterval);
@@ -87,6 +89,8 @@ if (typeof EventSource === 'undefined') {
     }
 
     function enablePollers() {
+        if (_pollersEnabled) return;
+        _pollersEnabled = true;
         if (window.svcPoller && window.svcPoller.start) window.svcPoller.start();
         if (!window._refreshInterval && window.refresh) {
             window._refreshInterval = setInterval(window.refresh, 15000);
