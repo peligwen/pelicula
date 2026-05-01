@@ -445,3 +445,134 @@ func TestHandleInviteRedeem(t *testing.T) {
 		t.Errorf("expected 2 uses, got %d", list[0].Uses)
 	}
 }
+
+// ── Rate-limit tests ─────────────────────────────────────────────────────────
+
+// newTestAuthWithRateLimit creates an Auth backed by a real sessionsStore so
+// that isRateLimited / recordFailure work in tests.
+func newTestAuthWithRateLimit(t *testing.T) *Auth {
+	t.Helper()
+	return newTestJellyfinAuth(t, nil, nil)
+}
+
+// setRemoteIP configures a request so that httputil.ClientIP returns ip.
+// It places ip in X-Real-IP and sets RemoteAddr to a docker-bridge address
+// that falls within the default TrustedUpstreamCIDR (172.16.0.0/12).
+func setRemoteIP(r *http.Request, ip string) {
+	r.RemoteAddr = "172.17.0.1:12345"
+	r.Header.Set("X-Real-IP", ip)
+}
+
+// TestInviteCheck_RateLimit verifies that /check returns 429 after
+// rateLimitThreshold probes with non-existent tokens from the same IP.
+func TestInviteCheck_RateLimit(t *testing.T) {
+	a := newTestAuthWithRateLimit(t)
+	s := newTestInviteStore(t)
+	deps := newTestDeps(a, s)
+
+	clientIP := "9.8.7.6"
+
+	// Issue rateLimitThreshold+1 GET /check requests with random tokens that
+	// are absent from the DB. Each one should record a failure.
+	// The (threshold+1)th request must be rate-limited.
+	var lastCode int
+	for i := 0; i < rateLimitThreshold+1; i++ {
+		tok := generateInviteToken()
+		r := httptest.NewRequest(http.MethodGet, "/api/pelicula/invites/"+tok+"/check", nil)
+		setRemoteIP(r, clientIP)
+		w := httptest.NewRecorder()
+		deps.HandleInviteOp(w, r)
+		lastCode = w.Code
+	}
+
+	if lastCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after %d not-found probes, got %d", rateLimitThreshold+1, lastCode)
+	}
+}
+
+// TestInviteRedeem_NotFound_Counts verifies that POST /redeem against
+// non-existent tokens increments the rate-limit counter, and that the
+// (threshold+1)th attempt from the same IP returns 429.
+func TestInviteRedeem_NotFound_Counts(t *testing.T) {
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		// This Jellyfin won't be reached — the token is not found before CreateUser.
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"Id":"00000000-0000-0000-0000-000000000001"}`)
+		})
+	})
+
+	a := newTestAuthWithRateLimit(t)
+	s := newTestInviteStoreWithClient(t, jc)
+	deps := newTestDeps(a, s)
+
+	clientIP := "5.5.5.5"
+
+	doRedeem := func(token string) int {
+		body := map[string]string{"username": "alice", "password": "hunter12"}
+		b, _ := json.Marshal(body)
+		r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+token+"/redeem", bytes.NewReader(b))
+		r.Header.Set("Content-Type", "application/json")
+		setRemoteIP(r, clientIP)
+		w := httptest.NewRecorder()
+		deps.HandleInviteOp(w, r)
+		return w.Code
+	}
+
+	var lastCode int
+	for i := 0; i < rateLimitThreshold+1; i++ {
+		lastCode = doRedeem(generateInviteToken())
+	}
+
+	if lastCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after %d not-found redeem attempts, got %d", rateLimitThreshold+1, lastCode)
+	}
+}
+
+// TestInviteRedeem_InfraError_DoesNotCount verifies that Jellyfin infrastructure
+// errors (5xx / network errors from CreateUser) do NOT increment the rate-limit
+// counter, so a flapping backend cannot lock legitimate viewers off the
+// redemption page.
+func TestInviteRedeem_InfraError_DoesNotCount(t *testing.T) {
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		// Return 502 Bad Gateway — triggers the catch-all branch in HandleInviteRedeem.
+		// 400 would be mistaken for username-taken; 502 is unambiguously infra.
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		})
+	})
+
+	a := newTestAuthWithRateLimit(t)
+	s := newTestInviteStoreWithClient(t, jc)
+	deps := newTestDeps(a, s)
+
+	// Create a valid active invite with unlimited uses so it stays redeemable.
+	inv, err := s.CreateInvite("admin", "", nil, nil)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+
+	clientIP := "3.3.3.3"
+
+	doRedeem := func() int {
+		body := map[string]string{"username": "alice", "password": "hunter12"}
+		b, _ := json.Marshal(body)
+		r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+inv.Token+"/redeem", bytes.NewReader(b))
+		r.Header.Set("Content-Type", "application/json")
+		setRemoteIP(r, clientIP)
+		w := httptest.NewRecorder()
+		deps.HandleInviteOp(w, r)
+		return w.Code
+	}
+
+	// Issue 2*rateLimitThreshold attempts — all should return 502, never 429.
+	for i := 0; i < 2*rateLimitThreshold; i++ {
+		code := doRedeem()
+		if code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d: got 429 — infra errors must not trip the rate limiter", i+1)
+		}
+		if code != http.StatusBadGateway {
+			t.Errorf("attempt %d: expected 502, got %d", i+1, code)
+		}
+	}
+}

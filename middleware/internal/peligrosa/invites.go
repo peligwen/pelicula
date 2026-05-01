@@ -370,7 +370,7 @@ func (p *Deps) HandleInviteOp(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case op == "check" && r.Method == http.MethodGet:
 		// check and redeem are intentionally public — the token IS the credential.
-		p.Invites.HandleInviteCheck(w, r, token)
+		p.HandleInviteCheck(w, r, token)
 	case op == "redeem" && r.Method == http.MethodPost:
 		p.HandleInviteRedeem(w, r, token)
 	case op == "revoke" && r.Method == http.MethodPost:
@@ -409,9 +409,22 @@ func (p *Deps) checkInviteAdmin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // HandleInviteCheck checks the state of an invite token without consuming it.
-func (s *InviteStore) HandleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
-	state, found := s.CheckInvite(token)
+// It is rate-limited per IP: a token probe is brute-force evidence when the
+// token is not found, so recordFailure is called on the not-found path only.
+// A token that exists but is revoked/expired is a legitimate single lookup —
+// it does NOT count as a failure.
+func (p *Deps) HandleInviteCheck(w http.ResponseWriter, r *http.Request, token string) {
+	ip := httputil.ClientIP(r)
+	if p.Auth != nil && p.Auth.isRateLimited(r.Context(), ip) {
+		httputil.WriteError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		return
+	}
+
+	state, found := p.Invites.CheckInvite(token)
 	if !found {
+		if p.Auth != nil {
+			p.Auth.recordFailure(r.Context(), ip)
+		}
 		httputil.WriteError(w, "invite not found", http.StatusNotFound)
 		return
 	}
@@ -458,10 +471,18 @@ func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token 
 	err := p.Invites.Redeem(token, req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
+			// A probe against a non-existent token is brute-force evidence.
+			if p.Auth != nil {
+				p.Auth.recordFailure(r.Context(), ip)
+			}
 			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
 		}
 		if errors.Is(err, ErrInviteNotActive) {
+			// Redeeming a revoked/exhausted token is also brute-force-revealing.
+			if p.Auth != nil {
+				p.Auth.recordFailure(r.Context(), ip)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusGone)
 			json.NewEncoder(w).Encode(map[string]string{"error": "this invite is no longer active"})
@@ -482,9 +503,8 @@ func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token 
 			})
 			return
 		}
-		if p.Auth != nil {
-			p.Auth.recordFailure(r.Context(), ip)
-		}
+		// Infrastructure / Jellyfin error — do not penalise the limiter.
+		// A flapping backend must not lock out legitimate viewers.
 		slog.Error("invite redemption failed", "component", "invites", "username", req.Username, "error", err)
 		httputil.WriteError(w, "could not create account", http.StatusBadGateway)
 		return
