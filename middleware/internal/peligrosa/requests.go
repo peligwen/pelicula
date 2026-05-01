@@ -527,34 +527,44 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	}
 	if !ok {
 		// The request was concurrently modified out of pending state (denied, deleted, etc.)
+		// NOTE: The *arr AddMovie/AddSeries call above already SUCCEEDED, so the media
+		// has been added to the downstream service but the requests row was not transitioned
+		// to grabbed. This is an orphan condition that requires manual reconciliation.
+		slog.Warn("approve: request left pending between gate and update; *arr add succeeded but row not transitioned",
+			"component", "requests", "id", id, "arr_id", arrID)
 		httputil.WriteError(w, "request was modified concurrently", http.StatusConflict)
 		return
 	}
 
-	// Re-fetch the updated row so the JSON response reflects the new state.
-	req = rs.get(id)
-	if req == nil {
-		httputil.WriteError(w, "request not found", http.StatusNotFound)
-		return
-	}
-
+	// Persist the audit event BEFORE attempting the re-fetch — the history record
+	// must be durable regardless of whether we can build a rich response body.
 	ev := RequestEvent{
 		At:    now,
 		State: RequestGrabbed,
 		Actor: actorUsername,
 		Note:  "approved and added to *arr",
 	}
-	if err := rs.insertEvent(req.ID, ev); err != nil {
+	if err := rs.insertEvent(id, ev); err != nil {
 		slog.Warn("failed to insert approve event", "component", "requests", "error", err)
 	}
-	req.History = append(req.History, ev)
 
 	slog.Info("request approved", "component", "requests", "id", id, "title", title, "arr_id", arrID)
 	if notify != nil {
 		go notify("Request approved: "+title, fmt.Sprintf("%s requested %q — it's been added to the download queue.", requester, title))
 	}
 
-	httputil.WriteJSON(w, req)
+	// Re-fetch the updated row for a rich response body. The state transition has
+	// already succeeded at this point; a re-fetch failure must NOT surface as an error
+	// to the caller (a retry would hit the 409 path and confuse the dashboard UI).
+	refreshed := rs.get(id)
+	if refreshed == nil {
+		slog.Warn("approve: state transition succeeded but row could not be re-fetched for response",
+			"component", "requests", "id", id, "arr_id", arrID)
+		httputil.WriteJSON(w, map[string]any{"id": id, "state": string(RequestGrabbed), "arr_id": arrID})
+		return
+	}
+
+	httputil.WriteJSON(w, refreshed)
 }
 
 // HandleRequestDeny denies a pending media request.
