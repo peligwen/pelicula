@@ -542,7 +542,7 @@ function renderBlockedReleases(rows) {
     container.replaceChildren();
     for (const row of rows) {
         const div = document.createElement('div');
-        div.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)';
+        div.style.cssText = 'display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)';
 
         const info = document.createElement('div');
         info.style.cssText = 'flex:1;min-width:0';
@@ -572,13 +572,22 @@ function renderBlockedReleases(rows) {
 async function unblockRelease(id, btn) {
     btn.disabled = true;
     btn.textContent = 'Unblocking\u2026';
+    // Clear any prior inline error from a previous failed attempt.
+    const row = btn.closest('div');
+    const existing = row && row.querySelector('.unblock-error');
+    if (existing) existing.remove();
     try {
         await del('/api/procula/blocked-releases/' + id);
         await loadBlockedReleases();
     } catch (e) {
         btn.disabled = false;
         btn.textContent = 'Unblock';
-        alert('Unblock failed: ' + e.message);
+        if (row) {
+            const errSpan = document.createElement('span');
+            errSpan.className = 'unblock-error';
+            errSpan.textContent = 'Unblock failed: ' + (e.message || 'error');
+            row.appendChild(errSpan);
+        }
     }
 }
 

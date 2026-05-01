@@ -231,8 +231,16 @@ function renderRequests(requests) {
                 </div>
                 <div class="request-actions">
                     <button class="request-btn request-btn-approve" data-action="approve-request">Approve</button>
-                    <button class="request-btn request-btn-deny" data-action="deny-request">Deny</button>
+                    <button class="request-btn request-btn-deny" data-action="start-deny-request">Deny</button>
                 </div>
+                <form class="request-deny-form hidden">
+                    <textarea class="request-deny-input" rows="2" placeholder="Reason for denial (optional)"></textarea>
+                    <div class="request-deny-btns">
+                        <button type="submit" class="request-btn request-btn-deny">Submit</button>
+                        <button type="button" class="request-btn" data-action="cancel-deny-request">Cancel</button>
+                    </div>
+                </form>
+                <span class="users-error hidden"></span>
             </li>`.str;
         }).join('');
         if (pendingEmpty) pendingEmpty.classList.toggle('hidden', pending.length > 0);
@@ -273,13 +281,41 @@ async function approveRequest(id) {
     }
 }
 
-async function denyRequest(id) {
-    const reason = prompt('Reason for denial (optional):') ?? null;
-    if (reason === null) return; // cancelled
+function startDenyRequest(btn) {
+    const li = btn.closest('li');
+    li.querySelector('.request-actions').classList.add('hidden');
+    const form = li.querySelector('.request-deny-form');
+    form.classList.remove('hidden');
+    form.querySelector('.request-deny-input').focus();
+}
+
+function cancelDenyRequest(btn) {
+    const li = btn.closest('li');
+    li.querySelector('.request-deny-form').classList.add('hidden');
+    li.querySelector('.request-deny-input').value = '';
+    li.querySelector('.request-actions').classList.remove('hidden');
+    const errEl = li.querySelector('.users-error');
+    if (errEl) errEl.classList.add('hidden');
+}
+
+async function submitDenyRequest(form) {
+    const li = form.closest('li');
+    const id = li.dataset.id;
+    const reason = li.querySelector('.request-deny-input').value || null;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    const errEl = li.querySelector('.users-error');
+    if (errEl) errEl.classList.add('hidden');
     try {
         await post('/api/pelicula/requests/' + id + '/deny', {reason});
         await loadRequests();
-    } catch (e) { alert('Deny failed: ' + ((e.body && e.body.error) || e.status || 'error')); }
+    } catch (e) {
+        if (errEl) {
+            errEl.textContent = 'Deny failed: ' + ((e.body && e.body.error) || e.status || 'error');
+            errEl.classList.remove('hidden');
+        }
+        submitBtn.disabled = false;
+    }
 }
 
 // ── Arr-meta for admin request settings dropdowns ──────────────────────────
@@ -675,10 +711,20 @@ document.getElementById('users-list').addEventListener('submit', e => {
 document.getElementById('requests-pending-list').addEventListener('click', e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
-    const id = btn.closest('li')?.dataset.id;
-    if (!id) return;
-    if (btn.dataset.action === 'approve-request') approveRequest(id);
-    else if (btn.dataset.action === 'deny-request') denyRequest(id);
+    const action = btn.dataset.action;
+    if (action === 'approve-request') {
+        const id = btn.closest('li')?.dataset.id;
+        if (id) approveRequest(id);
+    } else if (action === 'start-deny-request') {
+        startDenyRequest(btn);
+    } else if (action === 'cancel-deny-request') {
+        cancelDenyRequest(btn);
+    }
+});
+
+document.getElementById('requests-pending-list').addEventListener('submit', e => {
+    e.preventDefault();
+    submitDenyRequest(e.target);
 });
 
 document.getElementById('invites-list').addEventListener('click', e => {

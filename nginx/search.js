@@ -3,7 +3,7 @@
 
 'use strict';
 
-import { component, html, raw } from '/framework.js';
+import { component, html, raw, toast } from '/framework.js';
 import { get, post } from '/api.js';
 
 // ── Module-level state ────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ async function submitRequest(type, tmdbId, tvdbId, title, year, poster) {
         else body.tvdb_id = tvdbId;
         const data = await post('/api/pelicula/requests', body);
         if (!data) {
-            alert('Request failed: not authorized');
+            toast('Request failed: not authorized', {error: true});
             return;
         }
         if (window._users_setRequestsLoaded) window._users_setRequestsLoaded(false);
@@ -205,7 +205,7 @@ async function submitRequest(type, tmdbId, tvdbId, title, year, poster) {
         const requestsSection = document.getElementById('requests-section');
         if (requestsSection) requestsSection.scrollIntoView({behavior: 'smooth'});
     } catch (e) {
-        alert('Request failed: ' + (e.body && e.body.error ? e.body.error : 'Network error'));
+        toast('Request failed: ' + (e.body && e.body.error ? e.body.error : e.message || 'Network error'), {error: true});
     }
 }
 

@@ -1205,6 +1205,8 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 }
 .add-user-form button:hover { background: var(--mint-l); border-color: rgba(64,200,168,0.4); color: var(--mint); }
 .users-error { font-size: 0.78rem; color: var(--pink); margin: 0.4rem 0 0; }
+.request-item .users-error { flex-basis: 100%; margin: 0; }
+.unblock-error { display: block; font-size: 0.75rem; color: var(--pink); margin-top: 0.25rem; flex-basis: 100%; }
 .share-url-input {
     flex: 1; min-width: 0; padding: 0.45rem 0.9rem; margin-top: 0.4rem;
     background: var(--panel2); border: 1.5px solid var(--border2); border-radius: 50px;
@@ -1422,9 +1424,18 @@ details[open] .add-user-summary::before { content: '− '; }
 .requests-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
 .requests-empty { font-size: 0.8rem; color: var(--faint); padding: 0.4rem 0; }
 .request-item {
-    display: flex; align-items: flex-start; gap: 0.75rem;
+    display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap;
     padding: 0.65rem 0.85rem; background: var(--panel); border: 1.5px solid var(--border); border-radius: 16px;
 }
+.request-deny-form { flex-basis: 100%; display: flex; flex-direction: column; gap: 0.35rem; }
+.request-deny-input {
+    width: 100%; padding: 0.4rem 0.75rem; resize: vertical;
+    background: var(--panel2); border: 1.5px solid var(--border2); border-radius: 8px;
+    color: var(--ink); font-size: 0.78rem; outline: none; box-sizing: border-box;
+    font-family: var(--font-body, 'Nunito Sans', sans-serif);
+}
+.request-deny-input:focus { border-color: var(--pink); }
+.request-deny-btns { display: flex; gap: 0.3rem; }
 .request-item-pending   { border-left: 3px solid rgba(248,208,64,0.6); }
 .request-item-grabbed   { border-left: 3px solid rgba(112,128,232,0.5); }
 .request-item-available { border-left: 3px solid rgba(64,200,168,0.5); }

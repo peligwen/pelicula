@@ -20,6 +20,9 @@ const { ensureLoggedIn } = require('../helpers/api');
 
 test.describe('Remote access settings (Peligrosa)', () => {
     test.beforeEach(async ({ page }) => {
+        // Fail the test if any unexpected browser dialog (alert/prompt/confirm) fires.
+        page.on('dialog', d => { throw new Error('Unexpected browser dialog: ' + d.message()); });
+
         // Mock the settings read endpoint so the drawer renders without a live
         // middleware that has remote access configured.
         await page.route('**/api/pelicula/settings**', async (route) => {
