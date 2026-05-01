@@ -5,21 +5,16 @@
 import { component, html, raw, toast } from '/framework.js';
 import { get, del } from '/api.js';
 
+// notif-helpers.js is a classic script loaded before this module; pull its
+// exports into module scope so bare identifiers resolve without relying on
+// the global object (ES modules do NOT fall through to window).
+const notifIcon  = window.notifIcon;
+const notifClass = window.notifClass;
+
 // ── Module-level state ────────────────────────────────────────────────────
 let lastSeenTs = localStorage.getItem('peliculaLastSeen') || '1970-01-01T00:00:00Z';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-function notifIcon(type) {
-    if (type === 'content_ready') return '&#10003;';
-    if (type === 'storage_warning' || type === 'storage_critical') return '&#9632;';
-    return '&#9888;';
-}
-
-function notifClass(type) {
-    if (type === 'content_ready') return 'notif-ready';
-    if (type === 'storage_warning' || type === 'storage_critical') return 'notif-storage';
-    return 'notif-failed';
-}
 
 function formatNotifTime(ts) {
     try {

@@ -22,7 +22,7 @@ async function loadUsers() {
         const countEl = document.getElementById('users-count');
         const metricEl = document.getElementById('um-metric-accounts');
         if (!users || users.length === 0) {
-            list.innerHTML = '<li style="color:var(--muted,#9080a8);font-size:0.8rem;padding:0.5rem 1rem;background:var(--panel2,#fdf5ff);border:1.5px solid var(--border2,rgba(180,140,220,0.4));border-radius:16px;">No users yet.</li>';
+            list.innerHTML = '<li class="users-list-empty">No users yet.</li>';
             if (countEl) countEl.textContent = '';
             if (metricEl) metricEl.textContent = '0';
             return;
@@ -533,7 +533,7 @@ component('users', function (el, storeProxy) {
                     document.getElementById('new-password').value = '';
                     const successEl = document.getElementById('add-user-success');
                     if (successEl) {
-                        successEl.innerHTML = html`User <strong>${createdUsername}</strong> created. <a href="/jellyfin/" target="_blank" style="color:#7dda93">Open Jellyfin &rarr;</a>`.str;
+                        successEl.innerHTML = html`User <strong>${createdUsername}</strong> created. <a href="/jellyfin/" target="_blank" class="open-jellyfin-link">Open Jellyfin &rarr;</a>`.str;
                         successEl.classList.remove('hidden');
                         setTimeout(() => successEl.classList.add('hidden'), 8000);
                     }

@@ -56,6 +56,8 @@
 .match-item.dismissed { opacity: 0.35; }
 .match-info { flex: 1; min-width: 0; }
 .match-title { font-size: 0.88rem; font-weight: 700; font-family: var(--font-display, 'Nunito', sans-serif); color: var(--ink, #2a1f35); }
+.match-title-unmatched { color: var(--muted, #9080a8); }
+.match-year { color: var(--muted, #9080a8); }
 .match-meta  { font-size: 0.75rem; color: var(--muted, #9080a8); margin-top: 0.1rem; }
 .match-file  { font-size: 0.72rem; color: var(--faint, #c8b8d8); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .match-badge {
@@ -292,6 +294,7 @@ details[open] .confident-chevron { transform: rotate(90deg); }
     border: 1.5px solid rgba(64,200,168,0.35); border-radius: 12px;
     font-size: 0.82rem; color: var(--mint, #40c8a8);
 }
+.apply-success-link { color: var(--mint, #40c8a8); }
 
 /* Match dest preview */
 .match-dest { font-size: 0.7rem; color: var(--mint, #40c8a8); margin-top: 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

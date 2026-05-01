@@ -824,14 +824,14 @@ function createMatchItem(item) {
             : '';
         info.innerHTML =
             '<div class="match-title">' + escHtml(item.match.title) +
-            (item.match.year ? ' <span style="color:#666">(' + item.match.year + ')</span>' : '') +
+            (item.match.year ? ' <span class="match-year">(' + item.match.year + ')</span>' : '') +
             '</div>' +
             '<div class="match-meta">' + escHtml(item.match.type) + '</div>' +
             '<div class="match-file" title="' + escHtml(item.file) + '">' + escHtml(item.file) + '</div>' +
             destHtml;
     } else {
         info.innerHTML =
-            '<div class="match-title" style="color:#666">' + escHtml(item.file.split('/').pop()) + '</div>' +
+            '<div class="match-title match-title-unmatched">' + escHtml(item.file.split('/').pop()) + '</div>' +
             '<div class="match-file" title="' + escHtml(item.file) + '">' + escHtml(item.file) + '</div>';
     }
     row.appendChild(info);
@@ -1282,7 +1282,7 @@ function renderApplyResult(result, validate) {
 
     if (result.added > 0) {
         if (validate) {
-            html += '<div class="apply-success">Import complete. Files queued for Procula validation &mdash; check the <a href="/" style="color:#7dda93">dashboard</a> Processing section for progress.</div>';
+            html += '<div class="apply-success">Import complete. Files queued for Procula validation &mdash; check the <a href="/" class="apply-success-link">dashboard</a> Processing section for progress.</div>';
         } else {
             html += '<div class="apply-success">Import complete. Items registered in your library.</div>';
         }
