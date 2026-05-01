@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"pelicula-api/clients"
@@ -95,10 +96,13 @@ type RequestExport struct {
 }
 
 // RequestStore persists media requests in SQLite.
-// SQLite handles concurrency; no additional mutex is needed.
+// approveMu serializes concurrent approval attempts so that exactly one
+// caller can pass the pending-state gate and call the *arr fulfiller.
+// The SQL-level MarkGrabbedIfPending provides a second line of defense.
 type RequestStore struct {
 	repo      *reporeqs.Store
 	fulfiller clients.Fulfiller
+	approveMu sync.Mutex
 }
 
 func NewRequestStore(repo *reporeqs.Store, fulfiller clients.Fulfiller) *RequestStore {
@@ -463,6 +467,13 @@ func (p *Deps) HandleRequestOp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Request, id, actorUsername string, notify func(string, string)) {
+	// Layer 1: per-handler serialization mutex.
+	// Approvals are admin-only and infrequent; global serialization is simpler
+	// and safer than per-id sharding. This prevents two concurrent admins from
+	// both passing the pending-state gate and both calling the *arr fulfiller.
+	rs.approveMu.Lock()
+	defer rs.approveMu.Unlock()
+
 	// Read profile/root from settings env vars (set at container start from .env)
 	radarrProfileID := config.IntOr("REQUESTS_RADARR_PROFILE_ID", 0)
 	radarrRoot := os.Getenv("REQUESTS_RADARR_ROOT")
@@ -486,7 +497,7 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	title := req.Title
 	requester := req.RequestedBy
 
-	// Add to *arr (outside lock — network call)
+	// Add to *arr (while holding the mutex — serializes fulfiller calls)
 	var arrID int
 	var addErr error
 	switch reqType {
@@ -504,22 +515,31 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Re-fetch to ensure it still exists, then update state.
+	// Layer 2: atomic conditional UPDATE — only transitions pending → grabbed.
+	// This is a second-line defense: if the mutex ever fails to serialize (e.g.
+	// separate process instances), the SQL WHERE state=? ensures only one writer wins.
+	now := time.Now().UTC()
+	ok, err := rs.repo.MarkGrabbedIfPending(r.Context(), id, arrID, now)
+	if err != nil {
+		slog.Error("failed to save request after approve", "component", "requests", "error", err)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		// The request was concurrently modified out of pending state (denied, deleted, etc.)
+		httputil.WriteError(w, "request was modified concurrently", http.StatusConflict)
+		return
+	}
+
+	// Re-fetch the updated row so the JSON response reflects the new state.
 	req = rs.get(id)
 	if req == nil {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	}
-	req.State = RequestGrabbed
-	req.ArrID = arrID
-	req.UpdatedAt = time.Now().UTC()
-	if err := rs.updateRequest(req); err != nil {
-		slog.Error("failed to save request after approve", "component", "requests", "error", err)
-		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
-		return
-	}
+
 	ev := RequestEvent{
-		At:    req.UpdatedAt,
+		At:    now,
 		State: RequestGrabbed,
 		Actor: actorUsername,
 		Note:  "approved and added to *arr",

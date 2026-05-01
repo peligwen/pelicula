@@ -486,3 +486,80 @@ func TestClaim_CAS(t *testing.T) {
 		t.Errorf("State: got %q, want grabbed", got.State)
 	}
 }
+
+// ── MarkGrabbedIfPending ─────────────────────────────────────────────────────
+
+func TestMarkGrabbedIfPending_PendingTransitions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_mgip_001", "movie", "Transition Film", requests.StatePending)
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 42, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("MarkGrabbedIfPending: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for pending request")
+	}
+
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.State != requests.StateGrabbed {
+		t.Errorf("State: got %q, want grabbed", got.State)
+	}
+	if got.ArrID != 42 {
+		t.Errorf("ArrID: got %d, want 42", got.ArrID)
+	}
+}
+
+func TestMarkGrabbedIfPending_AlreadyGrabbed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_mgip_002", "movie", "Already Grabbed", requests.StateGrabbed)
+	req.ArrID = 10
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	// Attempting to mark an already-grabbed request should return ok=false.
+	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 99, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("MarkGrabbedIfPending: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false for already-grabbed request")
+	}
+
+	// Original ArrID must be unchanged.
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ArrID != 10 {
+		t.Errorf("ArrID: got %d, want 10 (original)", got.ArrID)
+	}
+}
+
+func TestMarkGrabbedIfPending_MissingID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	// Non-existent id — should return ok=false, not error.
+	ok, err := s.MarkGrabbedIfPending(ctx, "does-not-exist", 1, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("MarkGrabbedIfPending: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false for non-existent request id")
+	}
+}

@@ -258,6 +258,22 @@ func (s *Store) Update(ctx context.Context, req *Request) error {
 	return nil
 }
 
+// MarkGrabbedIfPending atomically transitions a request from pending → grabbed.
+// Returns (true, nil) if the row was updated, (false, nil) if no row matched
+// (the request was already approved/denied/deleted by another caller),
+// (false, err) on SQL error.
+func (s *Store) MarkGrabbedIfPending(ctx context.Context, id string, arrID int, updatedAt time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE requests SET state=?, arr_id=?, updated_at=? WHERE id=? AND state=?`,
+		string(StateGrabbed), arrID, dbutil.FormatTime(updatedAt), id, string(StatePending),
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // Delete hard-deletes a request row and cascades to request_events.
 // Returns ErrNotFound if the id does not exist.
 func (s *Store) Delete(ctx context.Context, id string) error {

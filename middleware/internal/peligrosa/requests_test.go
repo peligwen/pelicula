@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -435,5 +437,97 @@ func TestHandleRequestList_ViewerSeesOnlyOwn(t *testing.T) {
 	}
 	if len(adminList) != 2 {
 		t.Errorf("admin sees %d requests, want 2", len(adminList))
+	}
+}
+
+// TestApprove_ConcurrentRace verifies that two concurrent approve requests for
+// the same pending request result in exactly one successful 200 response and
+// one 409 Conflict, and that the *arr fulfiller is called exactly once.
+func TestApprove_ConcurrentRace(t *testing.T) {
+	// Not parallel — this test exercises a global mutex; parallelism at the
+	// test level would interfere with other tests using the same fulfiller type.
+
+	var addMovieCalls atomic.Int32
+	// fakeFulfiller with an atomic counter and a brief sleep to widen the race window.
+	ff := &fakeFulfiller{
+		addMovieFn: func(tmdbID, profileID int, rootPath string) (int, error) {
+			addMovieCalls.Add(1)
+			time.Sleep(5 * time.Millisecond) // widen race window
+			return 7, nil                    // fixed arr_id
+		},
+	}
+
+	db := testDB(t)
+	rs := NewRequestStore(reporeqs.New(db), ff)
+
+	// Insert one pending movie request.
+	pending := &MediaRequest{
+		ID:          "req_race_001",
+		Type:        "movie",
+		TmdbID:      100,
+		Title:       "Race Film",
+		State:       RequestPending,
+		RequestedBy: "viewer",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	insertRequest(t, rs, pending)
+
+	type result struct {
+		status int
+		body   string
+	}
+
+	results := make([]result, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/req_race_001/approve", nil)
+			w := httptest.NewRecorder()
+			rs.handleRequestApprove(w, req, "req_race_001", "admin", nil)
+			results[idx] = result{status: w.Code, body: w.Body.String()}
+		}(i)
+	}
+	wg.Wait()
+
+	// Exactly one 200 and one 409.
+	ok200, ok409 := 0, 0
+	for _, r := range results {
+		switch r.status {
+		case http.StatusOK:
+			ok200++
+		case http.StatusConflict:
+			ok409++
+		default:
+			t.Errorf("unexpected status %d: %s", r.status, r.body)
+		}
+	}
+	if ok200 != 1 {
+		t.Errorf("expected exactly 1 success (200), got %d", ok200)
+	}
+	if ok409 != 1 {
+		t.Errorf("expected exactly 1 conflict (409), got %d", ok409)
+	}
+
+	// The fulfiller must have been called exactly once — no duplicate *arr entries.
+	if n := addMovieCalls.Load(); n != 1 {
+		t.Errorf("AddMovie called %d times, want exactly 1", n)
+	}
+
+	// The audit history must contain exactly one grabbed event.
+	got, err := rs.repo.Get(t.Context(), "req_race_001")
+	if err != nil {
+		t.Fatalf("Get after race: %v", err)
+	}
+	grabbedCount := 0
+	for _, ev := range got.History {
+		if ev.State == reporeqs.StateGrabbed {
+			grabbedCount++
+		}
+	}
+	if grabbedCount != 1 {
+		t.Errorf("grabbed events in history: got %d, want 1", grabbedCount)
 	}
 }
