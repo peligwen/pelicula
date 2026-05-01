@@ -1,6 +1,7 @@
 package peligrosa
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -1073,6 +1074,38 @@ func TestRolesStore_RoundTrip(t *testing.T) {
 	// Unknown ID
 	if _, ok := rs2.Lookup("unknown"); ok {
 		t.Error("Lookup of unknown ID should return false")
+	}
+}
+
+// ── Rate-limit persistence across instances ──────────────────────────────────
+
+// TestRateLimit_PersistsAcrossAuthInstances verifies that failed-login counts
+// written to the SQLite rate_limits table by one Auth instance are visible to a
+// second Auth instance on the same DB, simulating a middleware restart.
+// This pins the invariant that a brute-forcer cannot reset the counter by
+// waiting for a redeploy.
+func TestRateLimit_PersistsAcrossAuthInstances(t *testing.T) {
+	ctx := context.Background()
+	db := testDB(t)
+
+	// Auth1: record rateLimitThreshold failures for one IP.
+	a1 := NewAuth(AuthConfig{DB: db})
+	for i := 0; i < rateLimitThreshold; i++ {
+		a1.recordFailure(ctx, "1.2.3.4")
+	}
+	if !a1.isRateLimited(ctx, "1.2.3.4") {
+		t.Fatal("sanity check: expected 1.2.3.4 to be rate-limited after threshold failures on Auth1")
+	}
+
+	// Auth2: new instance on the same DB (simulates a middleware restart).
+	// The in-memory map starts empty; counts must come from SQLite.
+	a2 := NewAuth(AuthConfig{DB: db})
+
+	if !a2.isRateLimited(ctx, "1.2.3.4") {
+		t.Error("rate-limit count did not survive restart: 1.2.3.4 should still be limited on Auth2")
+	}
+	if a2.isRateLimited(ctx, "5.6.7.8") {
+		t.Error("unrelated IP 5.6.7.8 should not be rate-limited")
 	}
 }
 

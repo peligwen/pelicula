@@ -31,9 +31,9 @@ Pelicula is **LAN-first**. The design baseline assumes:
 
 Auth is always on. Credentials are verified against Jellyfin's `/Users/AuthenticateByName`. Roles stored in `pelicula.db` (SQLite, `roles` table). Jellyfin admins automatically get `admin` role. No passwords stored by Pelicula — Jellyfin is the authority. (On first startup after upgrade, existing `roles.json` is auto-migrated into SQLite and renamed to `roles.json.migrated`.)
 
-**Sessions:** In-memory `map[token]session`, `pelicula_session` HttpOnly cookie, `SameSite=Lax`. 24-hour session lifetime; 10-minute cleanup goroutine removes expired sessions and stale rate-limit entries.
+**Sessions:** Hybrid: in-memory `map[token]session` for fast lookup, backed by a `sessions` row in `pelicula.db`. On startup, `loadSessionsFromDB` restores active sessions from disk so existing logins survive a middleware restart. `pelicula_session` HttpOnly cookie, `SameSite=Strict` (safe because the dashboard has no top-level navigation links from third-party sites — every entry point is same-origin). 24-hour session lifetime; 10-minute cleanup goroutine prunes expired rows from both layers.
 
-**Login rate limiter:** 5 failed attempts per IP in a 5-minute sliding window → HTTP 429. In-memory; resets on restart.
+**Login rate limiter:** 5 failed attempts per IP in a 5-minute sliding window → HTTP 429. DB-backed (SQLite `rate_limits` table), per-IP. Persists across middleware restarts — a brute-forcer cannot reset the count by waiting for a redeploy.
 
 **Guards:** `Guard` (viewer+), `GuardManager` (manager+), `GuardAdmin` (admin). Wired per-route in `main.go`.
 
@@ -208,7 +208,7 @@ if the stack is exposed to the public internet.
 ## Known Limitations
 
 - **WireGuard private key** and API keys are stored in `.env` in plaintext on the host. ``pelicula up` (first-run setup)` sets `chmod 600`, but anyone with host access can read it.
-- **Auth rate limiter** is in-memory, per-IP, and resets on middleware restart. Protects against online brute force.
+- **Auth rate limiter** is DB-backed (SQLite `rate_limits` table), per-IP. Persists across middleware restarts — a brute-forcer cannot reset the count by waiting for a redeploy. Protects against online brute force.
 - **Invite tokens** are random (32 bytes, 256-bit entropy) — token validity requires a database lookup. This is intentional: brute-force enumeration is infeasible, and revocation/exhaustion cannot be made stateless without a blocklist anyway.
 - **Self-signed HTTPS** breaks Chrome on the LAN (Chrome blocks JS). Default LAN setup uses HTTP; use Peligrosa remote vhost for TLS.
 - **`WEBHOOK_SECRET`** is optional for backward compatibility. Fresh installs get a random secret from setup; it is delivered via the `X-Webhook-Secret` request header (not a URL query parameter). nginx additionally restricts the endpoint to Docker-internal networks.
