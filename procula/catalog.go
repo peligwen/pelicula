@@ -3,10 +3,13 @@ package procula
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +43,7 @@ type NotificationConfig struct {
 // file so it becomes watchable right away, writes the "content ready"
 // notification, and sends any configured external notification.
 // The file is already in the library (hardlinked by *arr) before this runs.
-func CatalogEarly(job *Job, configDir, peliculaAPI string) {
+func CatalogEarly(ctx context.Context, job *Job, configDir, peliculaAPI string) {
 	slog.Info("cataloging job (early)", "component", "catalog", "job_id", job.ID, "title", job.Source.Title)
 
 	// Schedule a (debounced) Jellyfin library refresh via pelicula-api. A
@@ -66,7 +69,7 @@ func CatalogEarly(job *Job, configDir, peliculaAPI string) {
 
 	// Send external notification if configured
 	cfg := loadNotificationConfig(configDir)
-	sendExternalNotification(cfg, event)
+	sendExternalNotification(ctx, cfg, event)
 }
 
 // CatalogLate runs after a transcoded sidecar has been written alongside the
@@ -424,24 +427,24 @@ func loadNotificationConfig(configDir string) *NotificationConfig {
 	return &cfg
 }
 
-func sendExternalNotification(cfg *NotificationConfig, event NotificationEvent) {
+func sendExternalNotification(ctx context.Context, cfg *NotificationConfig, event NotificationEvent) {
 	switch cfg.Mode {
 	case "apprise":
 		if len(cfg.AppriseURLs) == 0 {
 			return
 		}
-		sendApprise(cfg.AppriseURLs, event)
+		sendApprise(ctx, cfg.AppriseURLs, event)
 	case "direct":
 		if cfg.DirectURL == "" {
 			return
 		}
-		sendDirect(cfg.DirectURL, event)
+		sendDirect(ctx, cfg.DirectURL, event)
 	}
 }
 
 // sendApprise sends a notification via the Apprise container at http://apprise:8000.
 // AppriseURLs are provider URLs like "ntfy://topic", "gotify://host/token", etc.
-func sendApprise(urls []string, event NotificationEvent) {
+func sendApprise(ctx context.Context, urls []string, event NotificationEvent) {
 	payload := map[string]any{
 		"title": event.Title,
 		"body":  event.Message,
@@ -450,18 +453,25 @@ func sendApprise(urls []string, event NotificationEvent) {
 	}
 	data, _ := json.Marshal(payload)
 	client := newProculaClient(10 * time.Second)
-	resp, err := client.Post("http://apprise:8000/notify", "application/json", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://apprise:8000/notify", bytes.NewReader(data))
 	if err != nil {
 		slog.Error("Apprise notification failed", "component", "catalog", "error", err)
 		return
 	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Error("Apprise notification failed", "component", "catalog", "error", err)
+		return
+	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
 	resp.Body.Close()
 	slog.Info("Apprise notification sent", "component", "catalog", "url_count", len(urls))
 }
 
 // sendDirect sends a notification as a JSON HTTP POST to an arbitrary webhook URL.
 // Compatible with ntfy HTTP API, Gotify, and generic webhook receivers.
-func sendDirect(webhookURL string, event NotificationEvent) {
+func sendDirect(ctx context.Context, webhookURL string, event NotificationEvent) {
 	payload := map[string]any{
 		"title":   event.Title,
 		"message": event.Message,
@@ -469,11 +479,18 @@ func sendDirect(webhookURL string, event NotificationEvent) {
 	}
 	data, _ := json.Marshal(payload)
 	client := newProculaClient(10 * time.Second)
-	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(data))
 	if err != nil {
 		slog.Error("direct notification failed", "component", "catalog", "error", err)
 		return
 	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Error("direct notification failed", "component", "catalog", "error", err)
+		return
+	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
 	resp.Body.Close()
 	slog.Info("direct notification sent", "component", "catalog")
 }

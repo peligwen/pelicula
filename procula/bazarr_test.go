@@ -369,3 +369,33 @@ func writeTestAPIKey(t *testing.T, configDir, apiKey string) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 }
+
+// TestBazarrSearch_HasUserAgent verifies that bazarrSearchSubtitlesWithOpts sends
+// the Pelicula User-Agent header, confirming newProculaClient is used instead of
+// http.DefaultClient.
+func TestBazarrSearch_HasUserAgent(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	orig := bazarrURL
+	bazarrURL = srv.URL
+	t.Cleanup(func() { bazarrURL = orig })
+
+	dir := t.TempDir()
+	writeTestAPIKey(t, dir, "ua-test-key")
+
+	job := &Job{
+		ID:     "ua-test",
+		Source: JobSource{ArrType: "radarr", ArrID: 1},
+	}
+	bazarrSearchSubtitlesWithOpts(context.Background(), dir, job, BazarrSearchOpts{Languages: []string{"en"}})
+
+	wantPrefix := "Pelicula/"
+	if len(gotUA) < len(wantPrefix) || gotUA[:len(wantPrefix)] != wantPrefix {
+		t.Errorf("User-Agent = %q, want prefix %q — newProculaClient not used", gotUA, wantPrefix)
+	}
+}

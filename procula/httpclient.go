@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -38,8 +39,10 @@ func newProculaClient(timeout time.Duration) *http.Client {
 }
 
 // retryHTTPPost POSTs body (as JSON) to url using client, retrying up to
-// maxAttempts times on network errors or 4xx/5xx responses. Each retry waits
-// attempt*2 seconds, or returns early if ctx is cancelled.
+// maxAttempts times on network errors or 408/429/5xx responses. 4xx responses
+// other than 408 and 429 are permanent failures and return immediately without
+// retrying — retrying a 401 or 403 caused by a misconfigured key wastes the
+// full retry ladder and delays surfacing the real problem.
 //
 // body is re-read from the supplied []byte on every attempt so the caller
 // does not need to manage io.Reader state.
@@ -56,9 +59,17 @@ func retryHTTPPost(ctx context.Context, client *http.Client, url string, body []
 		if err != nil {
 			lastErr = err
 		} else {
+			io.Copy(io.Discard, resp.Body) //nolint:errcheck
 			resp.Body.Close()
 			if resp.StatusCode < 400 {
 				return nil
+			}
+			// 4xx other than 408 (Request Timeout) and 429 (Too Many Requests)
+			// are permanent — retrying will not change the outcome.
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 &&
+				resp.StatusCode != http.StatusRequestTimeout &&
+				resp.StatusCode != http.StatusTooManyRequests {
+				return fmt.Errorf("retryHTTPPost: permanent failure: HTTP %d", resp.StatusCode)
 			}
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 		}

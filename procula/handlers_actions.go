@@ -146,7 +146,7 @@ func (s *Server) handleDeleteBlockedRelease(w http.ResponseWriter, r *http.Reque
 
 	if blocklistID > 0 {
 		// Best-effort: remove from *arr blocklist via middleware.
-		req, _ := http.NewRequest(http.MethodDelete,
+		req, _ := http.NewRequestWithContext(r.Context(), http.MethodDelete,
 			fmt.Sprintf("%s/api/pelicula/catalog/blocklist/%d", s.peliculaAPI, blocklistID),
 			nil)
 		client := newProculaClient(10 * time.Second)

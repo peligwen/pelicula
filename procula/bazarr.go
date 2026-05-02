@@ -105,6 +105,8 @@ func bazarrSearchSubtitlesWithOpts(ctx context.Context, configDir string, job *J
 		forcedBool = "True"
 	}
 
+	client := newProculaClient(10 * time.Second)
+
 	for _, code := range opts.Languages {
 		form := url.Values{}
 		for k, v := range base {
@@ -124,7 +126,7 @@ func bazarrSearchSubtitlesWithOpts(ctx context.Context, configDir string, job *J
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("X-API-KEY", apiKey)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		cancel()
 		if err != nil {
 			slog.Warn("bazarr: request failed", "component", "bazarr", "lang", code, "error", err)

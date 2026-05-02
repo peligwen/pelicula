@@ -1,7 +1,10 @@
 package procula
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -129,5 +132,42 @@ func TestPruneNotificationsIdempotent(t *testing.T) {
 	}
 	if deleted != 0 {
 		t.Errorf("deleted = %d on already-pruned table, want 0", deleted)
+	}
+}
+
+// TestSendApprise_RespectsCtxCancel verifies that sendDirect (and by the same
+// code path, sendApprise) returns promptly when the context is cancelled,
+// rather than blocking until the client timeout.
+func TestSendApprise_RespectsCtxCancel(t *testing.T) {
+	// released is closed by the test after sendDirect returns so the blocking
+	// server handler can exit and httptest.Server.Close() does not hang.
+	released := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Block until the client gives up OR the test signals cleanup.
+		select {
+		case <-r.Context().Done():
+		case <-released:
+		}
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	event := NotificationEvent{Title: "Test", Message: "hello", Type: "content_ready"}
+
+	start := time.Now()
+	sendDirect(ctx, srv.URL, event)
+	elapsed := time.Since(start)
+
+	// Unblock the server handler so the connection drains and srv.Close() returns.
+	close(released)
+	srv.Close()
+
+	if elapsed > 2*time.Second {
+		t.Errorf("sendDirect took %v after ctx cancel, want < 2s — ctx not respected", elapsed)
 	}
 }
