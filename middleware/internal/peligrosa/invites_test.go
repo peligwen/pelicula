@@ -65,7 +65,7 @@ func TestValidInviteToken(t *testing.T) {
 
 func TestCreateAndList(t *testing.T) {
 	s := newTestInviteStore(t)
-	if got := s.ListInvites(); len(got) != 0 {
+	if got := s.ListInvites(context.Background()); len(got) != 0 {
 		t.Fatalf("expected empty list, got %d", len(got))
 	}
 
@@ -82,7 +82,7 @@ func TestCreateAndList(t *testing.T) {
 		t.Errorf("unexpected invite: %+v", inv)
 	}
 
-	list := s.ListInvites()
+	list := s.ListInvites(context.Background())
 	if len(list) != 1 {
 		t.Fatalf("expected 1 invite, got %d", len(list))
 	}
@@ -103,7 +103,7 @@ func TestPersistence(t *testing.T) {
 	}
 	// Second store reading same DB
 	s2 := NewInviteStore(db, nil)
-	list := s2.ListInvites()
+	list := s2.ListInvites(context.Background())
 	if len(list) != 1 {
 		t.Fatalf("invite not persisted: got %d", len(list))
 	}
@@ -230,7 +230,7 @@ func TestRedeemRace(t *testing.T) {
 	}
 
 	// Invite must show exactly 1 use and exactly 1 audit record.
-	list := s.ListInvites()
+	list := s.ListInvites(context.Background())
 	if len(list) == 0 {
 		t.Fatal("invite disappeared")
 	}
@@ -442,7 +442,7 @@ func TestHandleInviteRedeem(t *testing.T) {
 	}
 
 	// Validate uses count
-	list := s.ListInvites()
+	list := s.ListInvites(context.Background())
 	if list[0].Uses != 2 {
 		t.Errorf("expected 2 uses, got %d", list[0].Uses)
 	}

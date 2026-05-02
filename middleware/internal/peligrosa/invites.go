@@ -187,8 +187,7 @@ func (s *InviteStore) InsertFull(ctx context.Context, inv InviteExport) error {
 }
 
 // ListInvites returns all invites with their derived states.
-func (s *InviteStore) ListInvites() []InviteWithState {
-	ctx := context.Background()
+func (s *InviteStore) ListInvites(ctx context.Context) []InviteWithState {
 	tokens, err := s.repo.ListTokens(ctx)
 	if err != nil {
 		slog.Warn("invites: ListInvites failed to load tokens", "component", "invites", "error", err)
@@ -295,7 +294,7 @@ func (s *InviteStore) Delete(ctx context.Context, token string) error {
 func (p *Deps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		httputil.WriteJSON(w, p.Invites.ListInvites())
+		httputil.WriteJSON(w, p.Invites.ListInvites(r.Context()))
 
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)

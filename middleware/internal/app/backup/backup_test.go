@@ -378,7 +378,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 	}
 
 	// Verify it's in the store.
-	list := store.ListInvites()
+	list := store.ListInvites(context.Background())
 	if len(list) != 1 {
 		t.Fatalf("expected 1 invite, got %d", len(list))
 	}
@@ -399,7 +399,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 		if err := store.InsertFull(context.Background(), inv); err != nil {
 			t.Errorf("second InsertFull: %v", err)
 		}
-		if len(store.ListInvites()) != 1 {
+		if len(store.ListInvites(context.Background())) != 1 {
 			t.Error("expected still 1 invite after duplicate insert")
 		}
 	})

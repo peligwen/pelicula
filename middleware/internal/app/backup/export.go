@@ -76,7 +76,7 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	// Export invites
 	var invites []peligrosa.InviteExport
 	if h.Invites != nil {
-		for _, iws := range h.Invites.ListInvites() {
+		for _, iws := range h.Invites.ListInvites(r.Context()) {
 			invites = append(invites, peligrosa.InviteExport{
 				Token:     iws.Token,
 				Label:     iws.Label,
