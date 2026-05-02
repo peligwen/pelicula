@@ -15,13 +15,19 @@ import (
 
 	"pelicula-api/httputil"
 	"pelicula-api/internal/app/library"
-	services "pelicula-api/internal/app/services"
 	"pelicula-api/internal/config"
 )
 
+// ArrClient is the subset of services.Clients that the search package needs.
+type ArrClient interface {
+	Keys() (sonarr, radarr, prowlarr string)
+	ArrGet(baseURL, apiKey, path string) ([]byte, error)
+	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+}
+
 // Handler holds all dependencies for the unified search endpoints.
 type Handler struct {
-	Services    *services.Clients
+	Services    ArrClient
 	SonarrURL   string
 	RadarrURL   string
 	ProwlarrURL string
@@ -29,15 +35,27 @@ type Handler struct {
 	// TODO: wire tmdbKey into direct TMDB API calls when they are added
 	searchMode string // "" or "tmdb" for TMDB/TVDB; "indexer" for Prowlarr filtering
 
+	// now is injectable for tests; production code leaves it nil (falls back to time.Now).
+	now func() time.Time
+
 	cache struct {
 		mu      sync.Mutex
 		entries map[string]indexerSearchEntry
 	}
 }
 
+// timeNow returns the current time using the injectable clock (for tests) or
+// time.Now in production.
+func (h *Handler) timeNow() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
+}
+
 // New constructs a Handler. tmdbKey and searchMode are resolved at construction
 // from the parsed .env; no per-request .env reads occur.
-func New(svc *services.Clients, sonarrURL, radarrURL, prowlarrURL string, libHandler *library.Handler, tmdbKey, searchMode string) *Handler {
+func New(svc ArrClient, sonarrURL, radarrURL, prowlarrURL string, libHandler *library.Handler, tmdbKey, searchMode string) *Handler {
 	h := &Handler{
 		Services:    svc,
 		SonarrURL:   sonarrURL,
@@ -64,7 +82,7 @@ func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
 	key := strings.ToLower(strings.TrimSpace(query))
 
 	h.cache.mu.Lock()
-	if e, ok := h.cache.entries[key]; ok && time.Since(e.fetchedAt) < indexerSearchTTL {
+	if e, ok := h.cache.entries[key]; ok && h.timeNow().Sub(e.fetchedAt) < indexerSearchTTL {
 		h.cache.mu.Unlock()
 		return e.data, nil
 	}
@@ -78,12 +96,13 @@ func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
 
 	h.cache.mu.Lock()
 	// Evict stale entries (lazy eviction — avoid unbounded growth)
+	now := h.timeNow()
 	for k, e := range h.cache.entries {
-		if time.Since(e.fetchedAt) >= indexerSearchTTL {
+		if now.Sub(e.fetchedAt) >= indexerSearchTTL {
 			delete(h.cache.entries, k)
 		}
 	}
-	h.cache.entries[key] = indexerSearchEntry{data: data, fetchedAt: time.Now()}
+	h.cache.entries[key] = indexerSearchEntry{data: data, fetchedAt: now}
 	h.cache.mu.Unlock()
 
 	return data, nil
