@@ -19,6 +19,12 @@ services:
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status --json || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - pelicula
     depends_on:
