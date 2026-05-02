@@ -168,8 +168,8 @@ func toRepoRequest(m *MediaRequest) *reporeqs.Request {
 	}
 }
 
-func (s *RequestStore) All() []*MediaRequest {
-	all, err := s.repo.All(context.Background())
+func (s *RequestStore) All(ctx context.Context) []*MediaRequest {
+	all, err := s.repo.All(ctx)
 	if err != nil {
 		slog.Warn("requests: All query error", "component", "requests", "error", err)
 		return []*MediaRequest{}
@@ -182,8 +182,8 @@ func (s *RequestStore) All() []*MediaRequest {
 }
 
 // findActive returns the first non-terminal request matching type + tmdbID or tvdbID.
-func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequest {
-	all := s.All()
+func (s *RequestStore) findActive(ctx context.Context, reqType string, tmdbID, tvdbID int) *MediaRequest {
+	all := s.All(ctx)
 	for _, r := range all {
 		if r.Type != reqType || r.isTerminal() {
 			continue
@@ -198,8 +198,8 @@ func (s *RequestStore) findActive(reqType string, tmdbID, tvdbID int) *MediaRequ
 	return nil
 }
 
-func (s *RequestStore) get(id string) *MediaRequest {
-	r, err := s.repo.Get(context.Background(), id)
+func (s *RequestStore) get(ctx context.Context, id string) *MediaRequest {
+	r, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil
 	}
@@ -207,8 +207,8 @@ func (s *RequestStore) get(id string) *MediaRequest {
 }
 
 // insertEvent appends a state-transition event to request_events.
-func (s *RequestStore) insertEvent(id string, ev RequestEvent) error {
-	return s.repo.InsertEvent(context.Background(), reporeqs.Event{
+func (s *RequestStore) insertEvent(ctx context.Context, id string, ev RequestEvent) error {
+	return s.repo.InsertEvent(ctx, reporeqs.Event{
 		RequestID: id,
 		At:        ev.At,
 		State:     reporeqs.State(ev.State),
@@ -218,8 +218,8 @@ func (s *RequestStore) insertEvent(id string, ev RequestEvent) error {
 }
 
 // updateRequest updates mutable fields on an existing request row.
-func (s *RequestStore) updateRequest(req *MediaRequest) error {
-	return s.repo.Update(context.Background(), toRepoRequest(req))
+func (s *RequestStore) updateRequest(ctx context.Context, req *MediaRequest) error {
+	return s.repo.Update(ctx, toRepoRequest(req))
 }
 
 func generateRequestID() string {
@@ -235,7 +235,7 @@ func generateRequestID() string {
 // InsertFull inserts a media request from a backup export, preserving all
 // fields including the ID, timestamps, and event history. Silently succeeds
 // if the ID already exists (idempotent restore).
-func (s *RequestStore) InsertFull(req RequestExport) error {
+func (s *RequestStore) InsertFull(ctx context.Context, req RequestExport) error {
 	history := make([]reporeqs.Event, len(req.History))
 	for i, ev := range req.History {
 		history[i] = reporeqs.Event{
@@ -262,15 +262,15 @@ func (s *RequestStore) InsertFull(req RequestExport) error {
 		UpdatedAt:   req.UpdatedAt,
 		History:     history,
 	}
-	return s.repo.InsertFull(context.Background(), r)
+	return s.repo.InsertFull(ctx, r)
 }
 
 // MarkAvailable transitions a request to "available" when its content has been imported.
 // Matched by tmdbID (movies) or tvdbID (series). Non-fatal if no matching request exists.
 // If notify is non-nil, it's invoked after the state transition to dispatch a notification.
 // Returns a non-nil error only if the DB update fails; notify errors are logged but not returned.
-func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title string, notify func(subject, body string) error) error {
-	all := s.All()
+func (s *RequestStore) MarkAvailable(ctx context.Context, reqType string, tmdbID, tvdbID int, title string, notify func(subject, body string) error) error {
+	all := s.All(ctx)
 	var matched *MediaRequest
 	for _, req := range all {
 		if req.isTerminal() || req.State == RequestAvailable {
@@ -303,7 +303,7 @@ func (s *RequestStore) MarkAvailable(reqType string, tmdbID, tvdbID int, title s
 		State:     reporeqs.State(ev.State),
 		Note:      ev.Note,
 	}
-	if err := s.repo.UpdateAndInsertEvent(context.Background(), toRepoRequest(matched), repoEv); err != nil {
+	if err := s.repo.UpdateAndInsertEvent(ctx, toRepoRequest(matched), repoEv); err != nil {
 		slog.Error("failed to save request after availability update", "component", "requests", "error", err)
 		return err
 	}
@@ -335,7 +335,7 @@ func (p *Deps) HandleRequests(w http.ResponseWriter, r *http.Request) {
 func (p *Deps) HandleRequestList(w http.ResponseWriter, r *http.Request) {
 	username, role, _ := p.Auth.SessionFor(r)
 
-	all := p.Requests.All()
+	all := p.Requests.All(r.Context())
 	var out []*MediaRequest
 	for _, req := range all {
 		if role.atLeast(RoleAdmin) || req.RequestedBy == username {
@@ -388,7 +388,7 @@ func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Deduplicate: return existing non-terminal request for the same content.
-	existing := p.Requests.findActive(body.Type, body.TmdbID, body.TvdbID)
+	existing := p.Requests.findActive(r.Context(), body.Type, body.TmdbID, body.TvdbID)
 	if existing != nil {
 		httputil.WriteJSON(w, existing)
 		return
@@ -409,14 +409,14 @@ func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   now,
 	}
 
-	if err := p.Requests.repo.Insert(context.Background(), toRepoRequest(req)); err != nil {
+	if err := p.Requests.repo.Insert(r.Context(), toRepoRequest(req)); err != nil {
 		slog.Error("failed to save request", "component", "requests", "error", err)
 		httputil.WriteError(w, "failed to save request", http.StatusInternalServerError)
 		return
 	}
 
 	ev := RequestEvent{At: now, State: RequestPending, Actor: username}
-	if err := p.Requests.insertEvent(req.ID, ev); err != nil {
+	if err := p.Requests.insertEvent(r.Context(), req.ID, ev); err != nil {
 		slog.Warn("failed to insert initial request event", "component", "requests", "error", err)
 	}
 	req.History = []RequestEvent{ev}
@@ -483,7 +483,7 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	sonarrProfileID := config.IntOr("REQUESTS_SONARR_PROFILE_ID", 0)
 	sonarrRoot := os.Getenv("REQUESTS_SONARR_ROOT")
 
-	req := rs.get(id)
+	req := rs.get(r.Context(), id)
 	if req == nil {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
@@ -547,7 +547,7 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 		Actor: actorUsername,
 		Note:  "approved and added to *arr",
 	}
-	if err := rs.insertEvent(id, ev); err != nil {
+	if err := rs.insertEvent(r.Context(), id, ev); err != nil {
 		slog.Warn("failed to insert approve event", "component", "requests", "error", err)
 	}
 
@@ -559,7 +559,7 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	// Re-fetch the updated row for a rich response body. The state transition has
 	// already succeeded at this point; a re-fetch failure must NOT surface as an error
 	// to the caller (a retry would hit the 409 path and confuse the dashboard UI).
-	refreshed := rs.get(id)
+	refreshed := rs.get(r.Context(), id)
 	if refreshed == nil {
 		slog.Warn("approve: state transition succeeded but row could not be re-fetched for response",
 			"component", "requests", "id", id, "arr_id", arrID)
@@ -580,7 +580,7 @@ func (p *Deps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id stri
 	}
 	json.NewDecoder(r.Body).Decode(&body) // best-effort; reason is optional
 
-	req := p.Requests.get(id)
+	req := p.Requests.get(r.Context(), id)
 	if req == nil {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
@@ -609,7 +609,7 @@ func (p *Deps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id stri
 		Actor:     ev.Actor,
 		Note:      ev.Note,
 	}
-	if err := p.Requests.repo.UpdateAndInsertEvent(context.Background(), toRepoRequest(req), repoEv); err != nil {
+	if err := p.Requests.repo.UpdateAndInsertEvent(r.Context(), toRepoRequest(req), repoEv); err != nil {
 		slog.Error("failed to save request after deny", "component", "requests", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -630,7 +630,7 @@ func (p *Deps) HandleRequestDeny(w http.ResponseWriter, r *http.Request, id stri
 
 // HandleRequestDelete hard-deletes a media request record.
 func (rs *RequestStore) HandleRequestDelete(w http.ResponseWriter, r *http.Request, id string) {
-	if err := rs.repo.Delete(context.Background(), id); err == reporeqs.ErrNotFound {
+	if err := rs.repo.Delete(r.Context(), id); err == reporeqs.ErrNotFound {
 		httputil.WriteError(w, "request not found", http.StatusNotFound)
 		return
 	} else if err != nil {

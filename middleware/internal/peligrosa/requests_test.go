@@ -2,6 +2,7 @@ package peligrosa
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,7 @@ func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
 		t.Fatalf("insertRequest: %v", err)
 	}
 	for _, ev := range req.History {
-		s.insertEvent(req.ID, ev)
+		s.insertEvent(context.Background(), req.ID, ev)
 	}
 }
 
@@ -51,7 +52,7 @@ func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
 
 func TestNewRequestStore_Empty(t *testing.T) {
 	s := newRequestStore(t)
-	if got := s.All(); len(got) != 0 {
+	if got := s.All(context.Background()); len(got) != 0 {
 		t.Errorf("expected empty store, got %d requests", len(got))
 	}
 }
@@ -73,7 +74,7 @@ func TestNewRequestStore_LoadsExistingData(t *testing.T) {
 	insertRequest(t, s1, req)
 
 	s2 := NewRequestStore(reporeqs.New(db), &fakeFulfiller{})
-	all := s2.All()
+	all := s2.All(context.Background())
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request after load, got %d", len(all))
 	}
@@ -97,7 +98,7 @@ func TestRequestStore_CreateAssignsID(t *testing.T) {
 	}
 	insertRequest(t, s, req)
 
-	all := s.All()
+	all := s.All(context.Background())
 	if len(all) != 1 {
 		t.Fatalf("want 1 request, got %d", len(all))
 	}
@@ -119,7 +120,7 @@ func TestRequestStore_DeduplicatesActiveRequests(t *testing.T) {
 	insertRequest(t, s, existing)
 
 	// findActive should find the existing request.
-	found := s.findActive("movie", 55, 0)
+	found := s.findActive(context.Background(), "movie", 55, 0)
 	if found == nil {
 		t.Fatal("findActive returned nil for existing active request")
 	}
@@ -139,7 +140,7 @@ func TestRequestStore_DeduplicateSkipsTerminal(t *testing.T) {
 		State:  RequestDenied, // terminal
 	})
 
-	found := s.findActive("movie", 77, 0)
+	found := s.findActive(context.Background(), "movie", 77, 0)
 	if found != nil {
 		t.Error("findActive should return nil for terminal requests")
 	}
@@ -158,14 +159,14 @@ func TestRequestStore_DenyTransition(t *testing.T) {
 	insertRequest(t, s, req)
 
 	// Simulate deny logic.
-	r := s.get("req_deny_test")
+	r := s.get(context.Background(), "req_deny_test")
 	if r == nil {
 		t.Fatal("request not found")
 	}
 	r.State = RequestDenied
 	r.Reason = "wrong quality"
 	r.UpdatedAt = time.Now()
-	if err := s.updateRequest(r); err != nil {
+	if err := s.updateRequest(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
 	ev := RequestEvent{
@@ -174,11 +175,11 @@ func TestRequestStore_DenyTransition(t *testing.T) {
 		Actor: "admin",
 		Note:  "wrong quality",
 	}
-	if err := s.insertEvent(r.ID, ev); err != nil {
+	if err := s.insertEvent(context.Background(), r.ID, ev); err != nil {
 		t.Fatal(err)
 	}
 
-	all := s.All()
+	all := s.All(context.Background())
 	if all[0].State != RequestDenied {
 		t.Errorf("State = %q, want denied", all[0].State)
 	}
@@ -201,9 +202,9 @@ func TestMarkRequestAvailable_FlipsGrabbedByTmdb(t *testing.T) {
 		State:  RequestGrabbed,
 	})
 
-	s.MarkAvailable("movie", 999, 0, "Ready Film", nil)
+	s.MarkAvailable(context.Background(), "movie", 999, 0, "Ready Film", nil)
 
-	all := s.All()
+	all := s.All(context.Background())
 	if all[0].State != RequestAvailable {
 		t.Errorf("State = %q after MarkAvailable, want available", all[0].State)
 	}
@@ -213,9 +214,9 @@ func TestMarkRequestAvailable_NoOpOnMiss(t *testing.T) {
 	s := newRequestStore(t)
 
 	// No requests — should not panic or error.
-	s.MarkAvailable("movie", 12345, 0, "Not In Queue", nil)
+	s.MarkAvailable(context.Background(), "movie", 12345, 0, "Not In Queue", nil)
 
-	if got := s.All(); len(got) != 0 {
+	if got := s.All(context.Background()); len(got) != 0 {
 		t.Errorf("expected 0 requests, got %d", len(got))
 	}
 }
@@ -231,9 +232,9 @@ func TestMarkRequestAvailable_FlipsGrabbedByTvdb(t *testing.T) {
 		State:  RequestGrabbed,
 	})
 
-	s.MarkAvailable("series", 0, 888, "Ready Show", nil)
+	s.MarkAvailable(context.Background(), "series", 0, 888, "Ready Show", nil)
 
-	all := s.All()
+	all := s.All(context.Background())
 	if all[0].State != RequestAvailable {
 		t.Errorf("State = %q after MarkAvailable, want available", all[0].State)
 	}
@@ -293,7 +294,7 @@ func TestHandleRequestCreate_LoopbackRequester(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
 
-	all := s.All()
+	all := s.All(context.Background())
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request in store, got %d", len(all))
 	}
@@ -347,7 +348,7 @@ func TestHandleRequestCreate_DedupeReturnsExisting(t *testing.T) {
 	}
 
 	// Store must still have exactly one request.
-	if got := len(s.All()); got != 1 {
+	if got := len(s.All(context.Background())); got != 1 {
 		t.Errorf("store has %d requests, want 1", got)
 	}
 }

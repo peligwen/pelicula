@@ -95,7 +95,8 @@ func (h *Handler) HandleImportHook(w http.ResponseWriter, r *http.Request) {
 		if reqType == "episode" {
 			reqType = "series"
 		}
-		go h.RequestStore.MarkAvailable(reqType, source.TmdbID, source.TvdbID, source.Title, h.Notify) //nolint:errcheck
+		// detached: this goroutine outlives the parent request, so context.Background() is correct.
+		go h.RequestStore.MarkAvailable(context.Background(), reqType, source.TmdbID, source.TvdbID, source.Title, h.Notify) //nolint:errcheck
 	}
 
 	// When SEEDING_REMOVE_ON_COMPLETE is set, delete the torrent from qBittorrent

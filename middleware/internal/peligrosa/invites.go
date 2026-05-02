@@ -153,7 +153,7 @@ func repoInviteRowToInvite(r repoinvites.Invite) Invite {
 }
 
 // CreateInvite adds a new invite and persists it.
-func (s *InviteStore) CreateInvite(createdBy, label string, expiresAt *time.Time, maxUses *int) (Invite, error) {
+func (s *InviteStore) CreateInvite(ctx context.Context, createdBy, label string, expiresAt *time.Time, maxUses *int) (Invite, error) {
 	inv := repoinvites.Invite{
 		Token:     generateInviteToken(),
 		Label:     label,
@@ -164,7 +164,7 @@ func (s *InviteStore) CreateInvite(createdBy, label string, expiresAt *time.Time
 		Uses:      0,
 		Revoked:   false,
 	}
-	if err := s.repo.Create(context.Background(), inv); err != nil {
+	if err := s.repo.Create(ctx, inv); err != nil {
 		return Invite{}, err
 	}
 	return repoInviteRowToInvite(inv), nil
@@ -173,8 +173,8 @@ func (s *InviteStore) CreateInvite(createdBy, label string, expiresAt *time.Time
 // InsertFull inserts an invite record from a backup export, preserving all
 // fields including the token and timestamps. Silently succeeds if the token
 // already exists (idempotent restore).
-func (s *InviteStore) InsertFull(inv InviteExport) error {
-	return s.repo.InsertFull(context.Background(), repoinvites.Invite{
+func (s *InviteStore) InsertFull(ctx context.Context, inv InviteExport) error {
+	return s.repo.InsertFull(ctx, repoinvites.Invite{
 		Token:     inv.Token,
 		Label:     inv.Label,
 		CreatedAt: inv.CreatedAt,
@@ -209,8 +209,8 @@ func (s *InviteStore) ListInvites() []InviteWithState {
 
 // CheckInvite looks up a token and returns its state without consuming it.
 // Returns ("", found=false) if the token does not exist.
-func (s *InviteStore) CheckInvite(token string) (string, bool) {
-	r, err := s.repo.Get(context.Background(), token)
+func (s *InviteStore) CheckInvite(ctx context.Context, token string) (string, bool) {
+	r, err := s.repo.Get(ctx, token)
 	if errors.Is(err, repoinvites.ErrNotFound) {
 		return "", false
 	}
@@ -230,9 +230,7 @@ var ErrInviteNotActive = errors.New("invite is not active")
 // Redeem validates the token, creates the Jellyfin account, then records the
 // redemption. A slot is reserved under a transaction before the Jellyfin call to
 // prevent concurrent over-use; the slot is released (decremented) on failure.
-func (s *InviteStore) Redeem(token, username, password string) error {
-	ctx := context.Background()
-
+func (s *InviteStore) Redeem(ctx context.Context, token, username, password string) error {
 	// Phase 1: validate and atomically reserve a slot (BEGIN tx).
 	repoInv, tx, err := s.repo.ReserveSlot(ctx, token)
 	if errors.Is(err, repoinvites.ErrNotFound) {
@@ -273,8 +271,8 @@ func (s *InviteStore) Redeem(token, username, password string) error {
 }
 
 // Revoke marks an invite as revoked.
-func (s *InviteStore) Revoke(token string) error {
-	err := s.repo.Revoke(context.Background(), token)
+func (s *InviteStore) Revoke(ctx context.Context, token string) error {
+	err := s.repo.Revoke(ctx, token)
 	if errors.Is(err, repoinvites.ErrNotFound) {
 		return ErrInviteNotFound
 	}
@@ -282,8 +280,8 @@ func (s *InviteStore) Revoke(token string) error {
 }
 
 // Delete hard-deletes an invite record.
-func (s *InviteStore) Delete(token string) error {
-	err := s.repo.Delete(context.Background(), token)
+func (s *InviteStore) Delete(ctx context.Context, token string) error {
+	err := s.repo.Delete(ctx, token)
 	if errors.Is(err, repoinvites.ErrNotFound) {
 		return ErrInviteNotFound
 	}
@@ -336,7 +334,7 @@ func (p *Deps) HandleInvites(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		inv, err := p.Invites.CreateInvite(createdBy, req.Label, expiresAt, maxUses)
+		inv, err := p.Invites.CreateInvite(r.Context(), createdBy, req.Label, expiresAt, maxUses)
 		if err != nil {
 			slog.Error("create invite failed", "component", "invites", "error", err)
 			httputil.WriteError(w, "could not create invite", http.StatusInternalServerError)
@@ -424,7 +422,7 @@ func (p *Deps) HandleInviteCheck(w http.ResponseWriter, r *http.Request, token s
 		return
 	}
 
-	state, found := p.Invites.CheckInvite(token)
+	state, found := p.Invites.CheckInvite(r.Context(), token)
 	if !found {
 		if p.Auth != nil {
 			p.Auth.recordFailure(r.Context(), ip)
@@ -472,7 +470,7 @@ func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token 
 		return
 	}
 
-	err := p.Invites.Redeem(token, req.Username, req.Password)
+	err := p.Invites.Redeem(r.Context(), token, req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
 			// A probe against a non-existent token is brute-force evidence.
@@ -520,7 +518,7 @@ func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token 
 
 // HandleInviteRevoke marks an invite as revoked.
 func (s *InviteStore) HandleInviteRevoke(w http.ResponseWriter, r *http.Request, token string) {
-	if err := s.Revoke(token); err != nil {
+	if err := s.Revoke(r.Context(), token); err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
 			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return
@@ -535,7 +533,7 @@ func (s *InviteStore) HandleInviteRevoke(w http.ResponseWriter, r *http.Request,
 
 // HandleInviteDelete hard-deletes an invite record.
 func (s *InviteStore) HandleInviteDelete(w http.ResponseWriter, r *http.Request, token string) {
-	if err := s.Delete(token); err != nil {
+	if err := s.Delete(r.Context(), token); err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
 			httputil.WriteError(w, "invite not found", http.StatusNotFound)
 			return

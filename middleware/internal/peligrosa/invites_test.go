@@ -2,6 +2,7 @@ package peligrosa
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,7 +71,7 @@ func TestCreateAndList(t *testing.T) {
 
 	exp := time.Now().Add(24 * time.Hour)
 	maxUses := 3
-	inv, err := s.CreateInvite("alice", "For Bob", &exp, &maxUses)
+	inv, err := s.CreateInvite(context.Background(), "alice", "For Bob", &exp, &maxUses)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestPersistence(t *testing.T) {
 	s1 := NewInviteStore(db, nil)
 	maxUses := 3
 	exp := time.Now().Add(24 * time.Hour).Truncate(time.Second)
-	inv, err := s1.CreateInvite("admin", "saved label", &exp, &maxUses)
+	inv, err := s1.CreateInvite(context.Background(), "admin", "saved label", &exp, &maxUses)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -125,9 +126,9 @@ func TestExpiryState(t *testing.T) {
 	s := newTestInviteStore(t)
 	past := time.Now().Add(-time.Hour)
 	maxUses := 5
-	inv, _ := s.CreateInvite("admin", "", &past, &maxUses)
+	inv, _ := s.CreateInvite(context.Background(), "admin", "", &past, &maxUses)
 
-	state, found := s.CheckInvite(inv.Token)
+	state, found := s.CheckInvite(context.Background(), inv.Token)
 	if !found {
 		t.Fatal("invite not found")
 	}
@@ -139,14 +140,14 @@ func TestExpiryState(t *testing.T) {
 func TestMaxUsesExhausted(t *testing.T) {
 	s := newTestInviteStore(t)
 	two := 2
-	inv, _ := s.CreateInvite("admin", "", nil, &two)
+	inv, _ := s.CreateInvite(context.Background(), "admin", "", nil, &two)
 
 	// Directly set uses=2 in the DB to simulate exhaustion.
 	if _, err := s.db().Exec(`UPDATE invites SET uses = 2 WHERE token = ?`, inv.Token); err != nil {
 		t.Fatalf("failed to set uses: %v", err)
 	}
 
-	state, _ := s.CheckInvite(inv.Token)
+	state, _ := s.CheckInvite(context.Background(), inv.Token)
 	if state != "exhausted" {
 		t.Errorf("expected exhausted, got %q", state)
 	}
@@ -155,25 +156,25 @@ func TestMaxUsesExhausted(t *testing.T) {
 func TestRevokeAndDelete(t *testing.T) {
 	s := newTestInviteStore(t)
 	maxUses := 1
-	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
+	inv, _ := s.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
 
-	if err := s.Revoke(inv.Token); err != nil {
+	if err := s.Revoke(context.Background(), inv.Token); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	state, _ := s.CheckInvite(inv.Token)
+	state, _ := s.CheckInvite(context.Background(), inv.Token)
 	if state != "revoked" {
 		t.Errorf("expected revoked, got %q", state)
 	}
 
-	if err := s.Delete(inv.Token); err != nil {
+	if err := s.Delete(context.Background(), inv.Token); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, found := s.CheckInvite(inv.Token); found {
+	if _, found := s.CheckInvite(context.Background(), inv.Token); found {
 		t.Error("invite still present after delete")
 	}
 
 	// Not-found errors
-	if err := s.Revoke("notexist" + strings.Repeat("a", 36)); !strings.Contains(err.Error(), "not found") {
+	if err := s.Revoke(context.Background(), "notexist"+strings.Repeat("a", 36)); !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected not-found, got %v", err)
 	}
 }
@@ -201,7 +202,7 @@ func TestRedeemRace(t *testing.T) {
 	s := newTestInviteStoreWithClient(t, jc)
 
 	maxUses := 1
-	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
+	inv, _ := s.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
 
 	// Launch two concurrent redemptions — with slot reservation exactly one must succeed.
 	var wg sync.WaitGroup
@@ -210,7 +211,7 @@ func TestRedeemRace(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = s.Redeem(inv.Token, fmt.Sprintf("user%d", idx), "pw123456")
+			results[idx] = s.Redeem(context.Background(), inv.Token, fmt.Sprintf("user%d", idx), "pw123456")
 		}(i)
 	}
 	wg.Wait()
@@ -302,7 +303,7 @@ func TestHandleInvitesCreateAndList(t *testing.T) {
 func TestHandleInviteCheck(t *testing.T) {
 	s := newTestInviteStore(t)
 	maxUses := 1
-	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
+	inv, _ := s.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
 	deps := newTestDeps(newTestAuth(), s)
 
 	// Valid token
@@ -319,7 +320,7 @@ func TestHandleInviteCheck(t *testing.T) {
 	}
 
 	// Revoked token → 410
-	s.Revoke(inv.Token)
+	s.Revoke(context.Background(), inv.Token)
 	r2 := httptest.NewRequest(http.MethodGet, "/api/pelicula/invites/"+inv.Token+"/check", nil)
 	w2 := httptest.NewRecorder()
 	deps.HandleInviteOp(w2, r2)
@@ -398,7 +399,7 @@ func TestHandleInviteRedeem(t *testing.T) {
 	s := newTestInviteStoreWithClient(t, jc)
 
 	maxUses := 2
-	inv, _ := s.CreateInvite("admin", "", nil, &maxUses)
+	inv, _ := s.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
 	deps := newTestDeps(newTestAuth(), s)
 
 	doRedeem := func(username, password string) *httptest.ResponseRecorder {
@@ -548,7 +549,7 @@ func TestInviteRedeem_InfraError_DoesNotCount(t *testing.T) {
 	deps := newTestDeps(a, s)
 
 	// Create a valid active invite with unlimited uses so it stays redeemable.
-	inv, err := s.CreateInvite("admin", "", nil, nil)
+	inv, err := s.CreateInvite(context.Background(), "admin", "", nil, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -625,7 +626,7 @@ func TestInviteLogs_DoNotContainTokenPrefix(t *testing.T) {
 	// ── Step 2: trigger the Redeem ReleaseSlot warn path ─────────────────────
 	// Redeem calls CreateUser which returns 502, so Redeem calls ReleaseSlot and
 	// logs a Warn. That log must not contain the token prefix.
-	_ = s.Redeem(invToken, "alice", "hunter12")
+	_ = s.Redeem(context.Background(), invToken, "alice", "hunter12")
 
 	// ── Step 3: revoke the invite via the HTTP handler ────────────────────────
 	r2 := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+invToken+"/revoke", nil)

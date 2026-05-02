@@ -2,6 +2,7 @@ package backup_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -372,7 +373,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 		Revoked:   false,
 	}
 
-	if err := store.InsertFull(inv); err != nil {
+	if err := store.InsertFull(context.Background(), inv); err != nil {
 		t.Fatalf("InsertFull: %v", err)
 	}
 
@@ -395,7 +396,7 @@ func TestInviteStoreInsertFull(t *testing.T) {
 	t.Run("idempotent on duplicate token", func(t *testing.T) {
 		t.Parallel()
 		// Second insert of same token must not error.
-		if err := store.InsertFull(inv); err != nil {
+		if err := store.InsertFull(context.Background(), inv); err != nil {
 			t.Errorf("second InsertFull: %v", err)
 		}
 		if len(store.ListInvites()) != 1 {
@@ -427,12 +428,12 @@ func TestRequestStoreInsertFull(t *testing.T) {
 		},
 	}
 
-	if err := store.InsertFull(req); err != nil {
+	if err := store.InsertFull(context.Background(), req); err != nil {
 		t.Fatalf("InsertFull: %v", err)
 	}
 
 	// Verify it's in the store.
-	all := store.All()
+	all := store.All(context.Background())
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(all))
 	}
@@ -449,10 +450,10 @@ func TestRequestStoreInsertFull(t *testing.T) {
 
 	t.Run("idempotent on duplicate id", func(t *testing.T) {
 		t.Parallel()
-		if err := store.InsertFull(req); err != nil {
+		if err := store.InsertFull(context.Background(), req); err != nil {
 			t.Errorf("second InsertFull: %v", err)
 		}
-		if len(store.All()) != 1 {
+		if len(store.All(context.Background())) != 1 {
 			t.Error("expected still 1 request after duplicate insert")
 		}
 	})

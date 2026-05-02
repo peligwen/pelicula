@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -93,7 +94,7 @@ func (h *Handler) importInvites(invites []peligrosa.InviteExport, result *Import
 		return
 	}
 	for _, inv := range invites {
-		if err := h.Invites.InsertFull(inv); err != nil {
+		if err := h.Invites.InsertFull(context.Background(), inv); err != nil {
 			slog.Warn("failed to insert invite from backup", "component", "export",
 				"token", fmt.Sprintf("%.8s...", inv.Token), "error", err)
 			// Don't add to errors — duplicate tokens are expected and silently skipped
@@ -107,7 +108,7 @@ func (h *Handler) importRequests(requests []peligrosa.RequestExport, result *Imp
 		return
 	}
 	for _, req := range requests {
-		if err := h.Requests.InsertFull(req); err != nil {
+		if err := h.Requests.InsertFull(context.Background(), req); err != nil {
 			slog.Warn("failed to insert request from backup", "component", "export",
 				"id", req.ID, "error", err)
 			// Don't add to errors — duplicate IDs are expected and silently skipped

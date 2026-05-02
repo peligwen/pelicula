@@ -1,6 +1,7 @@
 package migratejson
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"os"
@@ -294,7 +295,7 @@ func TestMigrateRequestsJSON_Inserts(t *testing.T) {
 	}
 
 	store := peligrosa.NewRequestStore(reporeqs.New(db), &migrateTestFulfiller{})
-	all := store.All()
+	all := store.All(context.Background())
 	if len(all) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(all))
 	}
