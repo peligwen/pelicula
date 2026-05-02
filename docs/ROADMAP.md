@@ -21,6 +21,13 @@ _Nothing in active development — v0.1 scope is complete._
 
 ## Shipped
 
+### 2026-05-02 — middleware bootstrap & lifecycle sweep (R8)
+- VERSION ldflags wiring (Dockerfile ARG + CLI `--build-arg VERSION=$(git describe)`) so deployed binaries log a real version instead of "dev"; UA header now identifies build. Includes the setup-mode `compose up --build` path.
+- bootstrap.New accepts ctx; migratejson.Run cancellable mid-startup. cfg.WebhookSecret refreshed after ensureWebhookSecret so the field matches reality; autowire and hooks/receive consume cfg directly.
+- Graceful shutdown: ctx-bound auth cleanup goroutine (Auth.Stop), deferred MainDB/CatalogDB.Close via new (*App).Close, supervisor.Run returns a WaitGroup joined by main with a 5s hard cap.
+- Pruned dead App-struct fields (AutowireState/Invites/Requests). Documented setup→production transition contract owned by cmd_up.go.
+- Audited every background goroutine for ctx.Done compliance; only auth.cleanupSessions was leaking before this round.
+
 ### 2026-05-02 — middleware repo / SQLite layer robustness sweep (R7)
 - Consolidated SQLite open path into dbutil.Open; deleted dead cmd/pelicula-api/db.go duplicate. New busy_timeout=5000 pragma is defense-in-depth.
 - Threaded context.Context through repo/roles (the last repo store missing it). Found and fixed two bonus call sites in app/backup/{export,restore}.go.
