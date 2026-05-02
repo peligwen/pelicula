@@ -192,15 +192,12 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 
 	// Construct the shared catalog cache once; both CatalogHandler and
 	// missingwatcher draw from it to avoid redundant full-library fetches.
-	catalogCacheSvc := svc // capture for closures below
 	arrCatalogCache := catalog.NewCatalogCache(
 		func(ctx context.Context) ([]byte, error) {
-			_, radarrKey, _ := catalogCacheSvc.Keys()
-			return catalogCacheSvc.ArrGet(ctx, urls.Radarr, radarrKey, "/api/v3/movie")
+			return svc.RadarrClient().Get(ctx, "/api/v3/movie")
 		},
 		func(ctx context.Context) ([]byte, error) {
-			sonarrKey, _, _ := catalogCacheSvc.Keys()
-			return catalogCacheSvc.ArrGet(ctx, urls.Sonarr, sonarrKey, "/api/v3/series")
+			return svc.SonarrClient().Get(ctx, "/api/v3/series")
 		},
 	)
 
@@ -235,8 +232,6 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		IdxCache:      pelapp.IndexerCountCache{ProwlarrURL: urls.Prowlarr},
 		SysinfoHandler: &sysinfo.Handler{
 			Svc:          svc,
-			RadarrURL:    urls.Radarr,
-			SonarrURL:    urls.Sonarr,
 			DockerClient: dockerCli,
 		},
 		BackupHandler: backup.New(svc, libHandler, auth, invites, requests, urls.Radarr, urls.Sonarr),
@@ -255,7 +250,8 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			SonarrURL:               urls.Sonarr,
 			RadarrURL:               urls.Radarr,
 			GetKeys:                 func() (string, string, string) { return svc.Keys() },
-			ArrGet:                  svc.ArrGet,
+			SonarrClient:            svc.SonarrClient(),
+			RadarrClient:            svc.RadarrClient(),
 			CatalogDB:               cdb,
 			RequestStore:            requests,
 			Qbt:                     svc.Qbt,

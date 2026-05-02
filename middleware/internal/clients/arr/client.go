@@ -85,13 +85,13 @@ func (c *Client) ListDownloadClients(ctx context.Context, apiVer string) ([]map[
 }
 
 // AddDownloadClient creates a new download client configuration.
-func (c *Client) AddDownloadClient(ctx context.Context, apiVer string, cfg map[string]any) error {
+func (c *Client) AddDownloadClient(ctx context.Context, apiVer string, cfg any) error {
 	_, err := c.Post(ctx, apiVer+"/downloadclient", cfg)
 	return err
 }
 
 // UpdateDownloadClient replaces a download client record by ID.
-func (c *Client) UpdateDownloadClient(ctx context.Context, apiVer string, id int, payload map[string]any) error {
+func (c *Client) UpdateDownloadClient(ctx context.Context, apiVer string, id int, payload any) error {
 	_, err := c.Put(ctx, fmt.Sprintf("%s/downloadclient/%d", apiVer, id), payload)
 	return err
 }
@@ -110,7 +110,7 @@ func (c *Client) ListRootFolders(ctx context.Context, apiVer string) ([]map[stri
 }
 
 // AddRootFolder creates a new root folder.
-func (c *Client) AddRootFolder(ctx context.Context, apiVer string, payload map[string]any) error {
+func (c *Client) AddRootFolder(ctx context.Context, apiVer string, payload any) error {
 	_, err := c.Post(ctx, apiVer+"/rootfolder", payload)
 	return err
 }
@@ -129,13 +129,13 @@ func (c *Client) ListNotifications(ctx context.Context, apiVer string) ([]map[st
 }
 
 // AddNotification creates a new notification.
-func (c *Client) AddNotification(ctx context.Context, apiVer string, payload map[string]any) error {
+func (c *Client) AddNotification(ctx context.Context, apiVer string, payload any) error {
 	_, err := c.Post(ctx, apiVer+"/notification", payload)
 	return err
 }
 
 // UpdateNotification replaces a notification record by ID.
-func (c *Client) UpdateNotification(ctx context.Context, apiVer string, id int, payload map[string]any) error {
+func (c *Client) UpdateNotification(ctx context.Context, apiVer string, id int, payload any) error {
 	_, err := c.Put(ctx, fmt.Sprintf("%s/notification/%d", apiVer, id), payload)
 	return err
 }
@@ -379,13 +379,13 @@ func (c *Client) ListApplications(ctx context.Context) ([]map[string]any, error)
 }
 
 // UpdateApplication replaces an application record (Prowlarr only).
-func (c *Client) UpdateApplication(ctx context.Context, id int, payload map[string]any) error {
+func (c *Client) UpdateApplication(ctx context.Context, id int, payload any) error {
 	_, err := c.Put(ctx, fmt.Sprintf("/api/v1/applications/%d", id), payload)
 	return err
 }
 
 // AddApplication registers a new application (Prowlarr only).
-func (c *Client) AddApplication(ctx context.Context, payload map[string]any) error {
+func (c *Client) AddApplication(ctx context.Context, payload any) error {
 	_, err := c.Post(ctx, "/api/v1/applications", payload)
 	return err
 }
@@ -504,13 +504,13 @@ func (c *Client) ListReleaseProfiles(ctx context.Context, apiVer string) ([]map[
 }
 
 // AddReleaseProfile creates a release profile.
-func (c *Client) AddReleaseProfile(ctx context.Context, apiVer string, payload map[string]any) error {
+func (c *Client) AddReleaseProfile(ctx context.Context, apiVer string, payload any) error {
 	_, err := c.Post(ctx, apiVer+"/releaseprofile", payload)
 	return err
 }
 
 // UpdateReleaseProfile replaces a release profile by ID.
-func (c *Client) UpdateReleaseProfile(ctx context.Context, apiVer string, id int, payload map[string]any) error {
+func (c *Client) UpdateReleaseProfile(ctx context.Context, apiVer string, id int, payload any) error {
 	_, err := c.Put(ctx, fmt.Sprintf("%s/releaseprofile/%d", apiVer, id), payload)
 	return err
 }

@@ -5,12 +5,12 @@
 package hooks
 
 import (
-	"context"
 	"database/sql"
 	"net/http"
 
 	"pelicula-api/internal/peligrosa"
 
+	arrclient "pelicula-api/internal/clients/arr"
 	proculaclient "pelicula-api/internal/clients/procula"
 	qbtclient "pelicula-api/internal/clients/qbt"
 )
@@ -42,9 +42,10 @@ type Handler struct {
 	// Called on each request so that key reloads are picked up without restart.
 	GetKeys func() (sonarr, radarr, prowlarr string)
 
-	// ArrGet fetches a JSON endpoint from a *arr service using its API key.
-	// Signature matches ServiceClients.ArrGet.
-	ArrGet func(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
+	// SonarrClient and RadarrClient are the typed arr clients used to fetch
+	// history for the notifications endpoint.
+	SonarrClient *arrclient.Client
+	RadarrClient *arrclient.Client
 
 	// CatalogDB is the catalog SQLite handle used for UpsertFromHook.
 	CatalogDB *sql.DB

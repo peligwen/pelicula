@@ -6,7 +6,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -109,12 +108,8 @@ func (c *IndexerCountCache) Get(ctx context.Context, svc *appservices.Clients) *
 	if prowlarrKey == "" {
 		return c.count
 	}
-	data, err := svc.ArrGet(ctx, c.ProwlarrURL, prowlarrKey, "/api/v1/indexer")
+	indexers, err := svc.ProwlarrClient().ListIndexers(ctx, "/api/v1")
 	if err != nil {
-		return c.count
-	}
-	var indexers []map[string]any
-	if json.Unmarshal(data, &indexers) != nil {
 		return c.count
 	}
 	n := len(indexers)

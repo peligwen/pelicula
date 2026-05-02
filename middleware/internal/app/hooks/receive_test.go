@@ -2,7 +2,6 @@ package hooks_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +56,6 @@ func TestSeedingRemoveOnComplete_NoLongerReadsEnv(t *testing.T) {
 		SeedingRemoveOnComplete: false, // field is false; env is "true"
 		Qbt:                     qbtclient.New(fakeQBT.URL),
 		GetKeys:                 func() (string, string, string) { return "", "", "" },
-		ArrGet:                  func(_ context.Context, _, _, _ string) ([]byte, error) { return nil, nil },
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrImportBody("hash-abc")))
@@ -92,7 +90,6 @@ func TestSeedingRemoveOnComplete_HandlerFieldTrue(t *testing.T) {
 		SeedingRemoveOnComplete: true, // field true; env not set
 		Qbt:                     qbtclient.New(fakeQBT.URL),
 		GetKeys:                 func() (string, string, string) { return "", "", "" },
-		ArrGet:                  func(_ context.Context, _, _, _ string) ([]byte, error) { return nil, nil },
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrImportBody("hash-xyz")))
@@ -120,7 +117,6 @@ func TestHandleImportHook_SecretHeader(t *testing.T) {
 		ProculaURL:    fake.URL,
 		WebhookSecret: secret,
 		GetKeys:       func() (string, string, string) { return "", "", "" },
-		ArrGet:        func(_ context.Context, _, _, _ string) ([]byte, error) { return nil, nil },
 	}
 
 	validBody := []byte(`{"eventType":"Download","series":{"id":1,"title":"Test Show","tvdbId":123},"episodes":[{"id":1,"episodeNumber":1,"seasonNumber":1,"title":"Pilot"}],"episodeFile":{"path":"/media/tv/show/s01e01.mkv","quality":{"quality":{"name":"HDTV-1080p"}}},"downloadClient":"qbittorrent","downloadId":"abc123"}`)

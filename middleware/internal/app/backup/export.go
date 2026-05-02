@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/peligrosa"
 )
 
@@ -140,25 +141,21 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // exportMovies fetches all movies from Radarr and maps them to MovieExport.
-func (h *Handler) exportMovies(ctx context.Context, apiKey string) ([]MovieExport, error) {
-	profMap, err := h.loadProfileMap(ctx, h.RadarrURL, apiKey)
+func (h *Handler) exportMovies(ctx context.Context, _ string) ([]MovieExport, error) {
+	radarrCli := h.Svc.RadarrClient()
+	profMap, err := h.loadProfileMap(ctx, radarrCli)
 	if err != nil {
 		return nil, fmt.Errorf("quality profiles: %w", err)
 	}
 
-	tagMap, err := h.loadTagMap(ctx, h.RadarrURL, apiKey)
+	tagMap, err := h.loadTagMap(ctx, radarrCli)
 	if err != nil {
 		return nil, fmt.Errorf("tags: %w", err)
 	}
 
-	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey, "/api/v3/movie")
+	raw, err := radarrCli.GetMovies(ctx, "/api/v3")
 	if err != nil {
 		return nil, fmt.Errorf("movies: %w", err)
-	}
-
-	var raw []map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse movies: %w", err)
 	}
 
 	out := make([]MovieExport, 0, len(raw))
@@ -194,25 +191,21 @@ func (h *Handler) exportMovies(ctx context.Context, apiKey string) ([]MovieExpor
 }
 
 // exportSeries fetches all series from Sonarr and maps them to SeriesExport.
-func (h *Handler) exportSeries(ctx context.Context, apiKey string) ([]SeriesExport, error) {
-	profMap, err := h.loadProfileMap(ctx, h.SonarrURL, apiKey)
+func (h *Handler) exportSeries(ctx context.Context, _ string) ([]SeriesExport, error) {
+	sonarrCli := h.Svc.SonarrClient()
+	profMap, err := h.loadProfileMap(ctx, sonarrCli)
 	if err != nil {
 		return nil, fmt.Errorf("quality profiles: %w", err)
 	}
 
-	tagMap, err := h.loadTagMap(ctx, h.SonarrURL, apiKey)
+	tagMap, err := h.loadTagMap(ctx, sonarrCli)
 	if err != nil {
 		return nil, fmt.Errorf("tags: %w", err)
 	}
 
-	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey, "/api/v3/series")
+	raw, err := sonarrCli.GetSeries(ctx, "/api/v3")
 	if err != nil {
 		return nil, fmt.Errorf("series: %w", err)
-	}
-
-	var raw []map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse series: %w", err)
 	}
 
 	out := make([]SeriesExport, 0, len(raw))
@@ -243,13 +236,9 @@ func (h *Handler) exportSeries(ctx context.Context, apiKey string) ([]SeriesExpo
 // ── Shared map helpers ────────────────────────────────────────────────────────
 
 // loadProfileMap returns id → name for quality profiles.
-func (h *Handler) loadProfileMap(ctx context.Context, baseURL, apiKey string) (map[int]string, error) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/qualityprofile")
+func (h *Handler) loadProfileMap(ctx context.Context, arrCli *arr.Client) (map[int]string, error) {
+	profiles, err := arrCli.GetQualityProfiles(ctx, "/api/v3")
 	if err != nil {
-		return nil, err
-	}
-	var profiles []map[string]any
-	if err := json.Unmarshal(data, &profiles); err != nil {
 		return nil, err
 	}
 	m := make(map[int]string, len(profiles))
@@ -260,13 +249,9 @@ func (h *Handler) loadProfileMap(ctx context.Context, baseURL, apiKey string) (m
 }
 
 // loadTagMap returns id → label for tags.
-func (h *Handler) loadTagMap(ctx context.Context, baseURL, apiKey string) (map[int]string, error) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/tag")
+func (h *Handler) loadTagMap(ctx context.Context, arrCli *arr.Client) (map[int]string, error) {
+	tags, err := arrCli.GetTags(ctx, "/api/v3")
 	if err != nil {
-		return nil, err
-	}
-	var tags []map[string]any
-	if err := json.Unmarshal(data, &tags); err != nil {
 		return nil, err
 	}
 	m := make(map[int]string, len(tags))

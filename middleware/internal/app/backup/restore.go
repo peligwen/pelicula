@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/peligrosa"
 )
 
@@ -118,10 +119,11 @@ func (h *Handler) importRequests(ctx context.Context, requests []peligrosa.Reque
 }
 
 // importMovies restores movies from a backup into Radarr.
-func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []MovieExport, result *ImportResult, mu *sync.Mutex) {
-	existing := h.loadExistingMovieIDs(ctx, apiKey)
-	profMap, _ := h.loadProfileNameMap(ctx, h.RadarrURL, apiKey)
-	tagMap, _ := h.ensureTags(ctx, h.RadarrURL, apiKey, collectMovieTags(movies))
+func (h *Handler) importMovies(ctx context.Context, _ string, movies []MovieExport, result *ImportResult, mu *sync.Mutex) {
+	radarrCli := h.Svc.RadarrClient()
+	existing := h.loadExistingMovieIDs(ctx, radarrCli)
+	profMap, _ := h.loadProfileNameMap(ctx, radarrCli)
+	tagMap, _ := h.ensureTags(ctx, radarrCli, collectMovieTags(movies))
 
 	radarrRoot := h.Lib.FirstLibraryPath("radarr", "/media/movies")
 
@@ -156,7 +158,7 @@ func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []Movi
 			},
 		}
 
-		if _, err := h.Svc.ArrPost(ctx, h.RadarrURL, apiKey, "/api/v3/movie", payload); err != nil {
+		if _, err := radarrCli.AddMovie(ctx, "/api/v3", payload); err != nil {
 			mu.Lock()
 			result.MoviesFailed++
 			result.Errors = append(result.Errors, fmt.Sprintf("movie %q (tmdb:%d): %v", m.Title, m.TmdbID, err))
@@ -171,10 +173,11 @@ func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []Movi
 }
 
 // importSeries restores series from a backup into Sonarr.
-func (h *Handler) importSeries(ctx context.Context, apiKey string, series []SeriesExport, result *ImportResult, mu *sync.Mutex) {
-	existing := h.loadExistingSeriesIDs(ctx, apiKey)
-	profMap, _ := h.loadProfileNameMap(ctx, h.SonarrURL, apiKey)
-	tagMap, _ := h.ensureTags(ctx, h.SonarrURL, apiKey, collectSeriesTags(series))
+func (h *Handler) importSeries(ctx context.Context, _ string, series []SeriesExport, result *ImportResult, mu *sync.Mutex) {
+	sonarrCli := h.Svc.SonarrClient()
+	existing := h.loadExistingSeriesIDs(ctx, sonarrCli)
+	profMap, _ := h.loadProfileNameMap(ctx, sonarrCli)
+	tagMap, _ := h.ensureTags(ctx, sonarrCli, collectSeriesTags(series))
 
 	sonarrRoot := h.Lib.FirstLibraryPath("sonarr", "/media/tv")
 
@@ -219,7 +222,7 @@ func (h *Handler) importSeries(ctx context.Context, apiKey string, series []Seri
 			},
 		}
 
-		if _, err := h.Svc.ArrPost(ctx, h.SonarrURL, apiKey, "/api/v3/series", payload); err != nil {
+		if _, err := sonarrCli.AddSeries(ctx, "/api/v3", payload); err != nil {
 			mu.Lock()
 			result.SeriesFailed++
 			result.Errors = append(result.Errors, fmt.Sprintf("series %q (tvdb:%d): %v", s.Title, s.TvdbID, err))
@@ -236,13 +239,9 @@ func (h *Handler) importSeries(ctx context.Context, apiKey string, series []Seri
 // ── Restore-only map helpers ──────────────────────────────────────────────────
 
 // loadProfileNameMap returns name → id for quality profiles (used during restore).
-func (h *Handler) loadProfileNameMap(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/qualityprofile")
+func (h *Handler) loadProfileNameMap(ctx context.Context, arrCli *arr.Client) (map[string]int, error) {
+	profiles, err := arrCli.GetQualityProfiles(ctx, "/api/v3")
 	if err != nil {
-		return nil, err
-	}
-	var profiles []map[string]any
-	if err := json.Unmarshal(data, &profiles); err != nil {
 		return nil, err
 	}
 	m := make(map[string]int, len(profiles))
@@ -253,13 +252,9 @@ func (h *Handler) loadProfileNameMap(ctx context.Context, baseURL, apiKey string
 }
 
 // ensureTags creates any missing tags and returns label → id map.
-func (h *Handler) ensureTags(ctx context.Context, baseURL, apiKey string, labels []string) (map[string]int, error) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/tag")
+func (h *Handler) ensureTags(ctx context.Context, arrCli *arr.Client, labels []string) (map[string]int, error) {
+	existing, err := arrCli.GetTags(ctx, "/api/v3")
 	if err != nil {
-		return nil, err
-	}
-	var existing []map[string]any
-	if err := json.Unmarshal(data, &existing); err != nil {
 		return nil, err
 	}
 	m := make(map[string]int, len(existing))
@@ -271,26 +266,19 @@ func (h *Handler) ensureTags(ctx context.Context, baseURL, apiKey string, labels
 		if _, ok := m[label]; ok {
 			continue
 		}
-		resp, err := h.Svc.ArrPost(ctx, baseURL, apiKey, "/api/v3/tag", map[string]any{"label": label})
+		created, err := arrCli.AddTag(ctx, "/api/v3", map[string]any{"label": label})
 		if err != nil {
 			continue // non-fatal: missing tag just won't be applied
 		}
-		var created map[string]any
-		if err := json.Unmarshal(resp, &created); err == nil {
-			m[label] = int(floatVal(created, "id"))
-		}
+		m[label] = int(floatVal(created, "id"))
 	}
 	return m, nil
 }
 
 // loadExistingMovieIDs returns a set of tmdbIds already in Radarr.
-func (h *Handler) loadExistingMovieIDs(ctx context.Context, apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey, "/api/v3/movie")
+func (h *Handler) loadExistingMovieIDs(ctx context.Context, arrCli *arr.Client) map[int]bool {
+	movies, err := arrCli.GetMovies(ctx, "/api/v3")
 	if err != nil {
-		return nil
-	}
-	var movies []map[string]any
-	if err := json.Unmarshal(data, &movies); err != nil {
 		return nil
 	}
 	m := make(map[int]bool, len(movies))
@@ -301,13 +289,9 @@ func (h *Handler) loadExistingMovieIDs(ctx context.Context, apiKey string) map[i
 }
 
 // loadExistingSeriesIDs returns a set of tvdbIds already in Sonarr.
-func (h *Handler) loadExistingSeriesIDs(ctx context.Context, apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey, "/api/v3/series")
+func (h *Handler) loadExistingSeriesIDs(ctx context.Context, arrCli *arr.Client) map[int]bool {
+	series, err := arrCli.GetSeries(ctx, "/api/v3")
 	if err != nil {
-		return nil
-	}
-	var series []map[string]any
-	if err := json.Unmarshal(data, &series); err != nil {
 		return nil
 	}
 	m := make(map[int]bool, len(series))

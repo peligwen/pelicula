@@ -4,9 +4,9 @@
 package sysinfo
 
 import (
-	"context"
 	"net/http"
 
+	"pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/clients/docker"
 )
 
@@ -14,7 +14,8 @@ import (
 // needs to fetch movie and series counts.
 type LibraryClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
+	SonarrClient() *arr.Client
+	RadarrClient() *arr.Client
 }
 
 // Handler holds injected dependencies for the sysinfo handlers.
@@ -22,10 +23,6 @@ type LibraryClient interface {
 type Handler struct {
 	// Svc provides *arr API access for library counts in ServeHost.
 	Svc LibraryClient
-
-	// RadarrURL and SonarrURL are the base URLs for the respective services.
-	RadarrURL string
-	SonarrURL string
 
 	// DockerClient is used by ServeLogs to fan-out log fetches across containers.
 	DockerClient *docker.Client

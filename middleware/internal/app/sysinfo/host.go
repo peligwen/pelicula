@@ -85,12 +85,12 @@ func libraryCounts(ctx context.Context, h *Handler) hostLibrary {
 	lib := hostLibrary{}
 
 	if radarrKey != "" {
-		if body, err := h.Svc.ArrGet(ctx, h.RadarrURL, radarrKey, "/api/v3/movie"); err == nil {
+		if body, err := h.Svc.RadarrClient().Get(ctx, "/api/v3/movie"); err == nil {
 			lib.Movies = jsonArrayLen(body)
 		}
 	}
 	if sonarrKey != "" {
-		if body, err := h.Svc.ArrGet(ctx, h.SonarrURL, sonarrKey, "/api/v3/series"); err == nil {
+		if body, err := h.Svc.SonarrClient().Get(ctx, "/api/v3/series"); err == nil {
 			lib.Series = jsonArrayLen(body)
 		}
 	}

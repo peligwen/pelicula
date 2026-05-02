@@ -3,8 +3,11 @@ package autowire_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"pelicula-api/internal/app/autowire"
@@ -13,6 +16,8 @@ import (
 )
 
 // stubSvc implements ArrSvc with controllable responses for testing.
+// Typed clients (SonarrClient/RadarrClient/ProwlarrClient) are backed by a
+// shared httptest.Server; all *arr HTTP calls are captured in-process.
 type stubSvc struct {
 	sonarrKey   string
 	radarrKey   string
@@ -22,15 +27,21 @@ type stubSvc struct {
 	bazarrKey   string
 	bazarr      *bazarrclient.Client
 	httpClient  *http.Client
-	// responses maps "METHOD baseURL+path" → (body, statusCode)
-	responses map[string]stubResp
+
+	mu sync.Mutex
+	// responses maps "METHOD /path" → body bytes served by the test server.
+	// Only the path portion is keyed (no host), because all three typed clients
+	// point at the same httptest.Server.
+	responses map[string][]byte
 	// captured records every non-GET call for assertion in drift tests.
 	captured []capturedCall
-}
 
-type stubResp struct {
-	body   []byte
-	status int
+	// typed clients — constructed by newStubSvc, never nil after that.
+	sonarr   *arrclient.Client
+	radarr   *arrclient.Client
+	prowlarr *arrclient.Client
+	// arrSrv is the backing test server shared by all three typed clients.
+	arrSrv *httptest.Server
 }
 
 type capturedCall struct {
@@ -39,43 +50,108 @@ type capturedCall struct {
 	payload any
 }
 
+// newStubSvc builds a stubSvc whose typed arr clients are backed by an
+// httptest.Server. responses maps "METHOD /path" → JSON body. The caller is
+// responsible for calling svc.arrSrv.Close() when done.
+func newStubSvc(t *testing.T, httpCli *http.Client) *stubSvc {
+	t.Helper()
+	s := &stubSvc{
+		httpClient: httpCli,
+		configDir:  t.TempDir(),
+		responses:  map[string][]byte{},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture non-GET calls.
+		if r.Method != http.MethodGet {
+			body, _ := io.ReadAll(r.Body)
+			// Decode to map[string]any for generic inspection; callers that need
+			// typed structs will re-decode from the map.
+			var payload any
+			if len(body) > 0 {
+				if body[0] == '[' {
+					var arr []map[string]any
+					if json.Unmarshal(body, &arr) == nil {
+						payload = arr
+					}
+				} else {
+					var m map[string]any
+					if json.Unmarshal(body, &m) == nil {
+						payload = m
+					}
+				}
+				if payload == nil {
+					payload = body
+				}
+			}
+			s.mu.Lock()
+			s.captured = append(s.captured, capturedCall{r.Method, r.URL.Path, payload})
+			s.mu.Unlock()
+		}
+
+		key := r.Method + " " + r.URL.Path
+		s.mu.Lock()
+		resp, ok := s.responses[key]
+		s.mu.Unlock()
+		if !ok {
+			resp = []byte("[]")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(resp) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+
+	s.arrSrv = srv
+	s.sonarr = arrclient.New(srv.URL, "test-key")
+	s.radarr = arrclient.New(srv.URL, "test-key")
+	s.prowlarr = arrclient.New(srv.URL, "test-key")
+	return s
+}
+
+// setResponse registers a canned response for a method+path combination.
+func (s *stubSvc) setResponse(method, path string, body []byte) {
+	s.mu.Lock()
+	s.responses[method+" "+path] = body
+	s.mu.Unlock()
+}
+
 func (s *stubSvc) ReloadKeys() {}
 func (s *stubSvc) SonarrRadarrKeys() (string, string) {
 	return s.sonarrKey, s.radarrKey
 }
-func (s *stubSvc) GetProwlarrKey() string { return s.prowlarrKey }
-func (s *stubSvc) SetWired(v bool)        { s.wired = v }
-func (s *stubSvc) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	s.captured = append(s.captured, capturedCall{"GET", baseURL + path, nil})
-	return s.lookup("GET", baseURL+path)
-}
-func (s *stubSvc) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	s.captured = append(s.captured, capturedCall{"POST", baseURL + path, payload})
-	return s.lookup("POST", baseURL+path)
-}
-func (s *stubSvc) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	s.captured = append(s.captured, capturedCall{"PUT", baseURL + path, payload})
-	return s.lookup("PUT", baseURL+path)
-}
-func (s *stubSvc) HTTPClient() *http.Client { return s.httpClient }
-func (s *stubSvc) ConfigDir() string        { return s.configDir }
-func (s *stubSvc) SetBazarrAPIKey(apiKey string) {
-	s.bazarrKey = apiKey
-}
+func (s *stubSvc) GetProwlarrKey() string             { return s.prowlarrKey }
+func (s *stubSvc) SetWired(v bool)                    { s.wired = v }
+func (s *stubSvc) SonarrClient() *arrclient.Client    { return s.sonarr }
+func (s *stubSvc) RadarrClient() *arrclient.Client    { return s.radarr }
+func (s *stubSvc) ProwlarrClient() *arrclient.Client  { return s.prowlarr }
+func (s *stubSvc) HTTPClient() *http.Client           { return s.httpClient }
+func (s *stubSvc) ConfigDir() string                  { return s.configDir }
+func (s *stubSvc) SetBazarrAPIKey(apiKey string)      { s.bazarrKey = apiKey }
 func (s *stubSvc) BazarrClient() *bazarrclient.Client { return s.bazarr }
 
-func (s *stubSvc) lookup(method, key string) ([]byte, error) {
-	if r, ok := s.responses[method+" "+key]; ok {
-		return r.body, nil
+// findPut finds the first captured PUT whose path ends with pathSuffix and
+// returns the raw decoded payload (map[string]any or []map[string]any).
+func (s *stubSvc) findPut(pathSuffix string) *capturedCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.captured {
+		c := &s.captured[i]
+		if c.method == "PUT" && strings.HasSuffix(c.path, pathSuffix) {
+			return c
+		}
 	}
-	return []byte("[]"), nil
+	return nil
 }
 
-func (s *stubSvc) findPut(pathSuffix string) *capturedCall {
+// findPost finds the first captured POST whose path ends with pathSuffix.
+func (s *stubSvc) findPost(pathSuffix string) *capturedCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for i := range s.captured {
-		if s.captured[i].method == "PUT" && len(s.captured[i].path) >= len(pathSuffix) &&
-			s.captured[i].path[len(s.captured[i].path)-len(pathSuffix):] == pathSuffix {
-			return &s.captured[i]
+		c := &s.captured[i]
+		if c.method == "POST" && strings.HasSuffix(c.path, pathSuffix) {
+			return c
 		}
 	}
 	return nil
@@ -85,43 +161,31 @@ func (s *stubSvc) findPut(pathSuffix string) *capturedCall {
 // and becomes true after a successful Run.
 func TestAutowireStateDone(t *testing.T) {
 	// Spin up a tiny HTTP server that answers all service-readiness pings.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/ping", "/System/Info/Public", "/api/system/status", "/":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}")) //nolint:errcheck
-		case "/api/v3/downloadclient", "/api/v3/rootfolder", "/api/v3/notification":
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("[]")) //nolint:errcheck
-		default:
-			w.WriteHeader(http.StatusOK)
-		}
+	pingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{}")) //nolint:errcheck
 	}))
-	defer srv.Close()
+	defer pingSrv.Close()
 
-	svc := &stubSvc{
-		sonarrKey:  "sonarr-key",
-		radarrKey:  "radarr-key",
-		configDir:  t.TempDir(), // no bazarr config.yaml → wireBazarr is a no-op
-		httpClient: srv.Client(),
-	}
+	svc := newStubSvc(t, pingSrv.Client())
+	svc.sonarrKey = "sonarr-key"
+	svc.radarrKey = "radarr-key"
+
+	// Empty lists — "nothing configured yet".
+	empty, _ := json.Marshal([]any{})
+	svc.setResponse("GET", "/api/v3/downloadclient", empty)
+	svc.setResponse("GET", "/api/v3/rootfolder", empty)
+	svc.setResponse("GET", "/api/v3/notification", empty)
+	svc.setResponse("GET", "/api/v3/releaseprofile", empty)
 
 	urls := autowire.URLs{
-		Sonarr:      srv.URL,
-		Radarr:      srv.URL,
-		Prowlarr:    srv.URL,
-		Bazarr:      srv.URL,
-		Jellyfin:    srv.URL,
-		QBT:         srv.URL,
+		Sonarr:      pingSrv.URL,
+		Radarr:      pingSrv.URL,
+		Prowlarr:    pingSrv.URL,
+		Bazarr:      pingSrv.URL,
+		Jellyfin:    pingSrv.URL,
+		QBT:         pingSrv.URL,
 		PeliculaAPI: "http://pelicula-api:8181",
-	}
-
-	// Stub arr responses: empty lists = "nothing configured yet"
-	empty, _ := json.Marshal([]any{})
-	svc.responses = map[string]stubResp{
-		"GET " + srv.URL + "/api/v3/downloadclient": {body: empty},
-		"GET " + srv.URL + "/api/v3/rootfolder":     {body: empty},
-		"GET " + srv.URL + "/api/v3/notification":   {body: empty},
 	}
 
 	jellyfinCalled := false
@@ -155,12 +219,15 @@ func TestAutowireStateDone(t *testing.T) {
 
 // TestAutowireStateDoneBeforeRun verifies the zero-value is false.
 func TestAutowireStateDoneBeforeRun(t *testing.T) {
+	pingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer pingSrv.Close()
+	svc := newStubSvc(t, pingSrv.Client())
+	svc.sonarrKey = "k"
+	svc.radarrKey = "k"
 	_, state := autowire.NewAutowirer(autowire.Config{
-		Svc: &stubSvc{
-			sonarrKey:  "k",
-			radarrKey:  "k",
-			httpClient: http.DefaultClient,
-		},
+		Svc:          svc,
 		URLs:         autowire.URLs{},
 		GetLibraries: func() []autowire.Library { return nil },
 	})
@@ -170,9 +237,8 @@ func TestAutowireStateDoneBeforeRun(t *testing.T) {
 }
 
 // newDriftTestSrv creates a test HTTP server that answers readiness pings
-// and returns 200 OK for everything else. The caller provides arrResponses which
-// are served by the stubSvc, not the HTTP server — this server only satisfies
-// waitForServices polling.
+// and returns 200 OK for everything else. The caller provides responses which
+// are served by the stubSvc's internal arr server, not this ping server.
 func newDriftTestSrv(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -183,8 +249,13 @@ func newDriftTestSrv(t *testing.T) *httptest.Server {
 // TestWireDownloadClientDrift verifies that when an existing QBittorrent client
 // has a stale host or category, wireDownloadClient issues a PUT to correct it.
 func TestWireDownloadClientDrift(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
+
+	svc := newStubSvc(t, pingSrv.Client())
+	svc.sonarrKey = "sonarr-key"
+	svc.radarrKey = "radarr-key"
+	svc.prowlarrKey = "prowlarr-key"
 
 	// Existing client with wrong host and wrong category.
 	existing := []map[string]any{
@@ -204,27 +275,20 @@ func TestWireDownloadClientDrift(t *testing.T) {
 	}
 	existingJSON, _ := json.Marshal(existing)
 
-	svc := &stubSvc{
-		sonarrKey:   "sonarr-key",
-		radarrKey:   "radarr-key",
-		prowlarrKey: "prowlarr-key",
-		configDir:   t.TempDir(),
-		httpClient:  srv.Client(),
-		responses: map[string]stubResp{
-			"GET " + srv.URL + "/api/v3/downloadclient": {body: existingJSON},
-			"GET " + srv.URL + "/api/v3/notification":   {body: []byte("[]")},
-			"GET " + srv.URL + "/api/v3/rootfolder":     {body: []byte("[]")},
-			"GET " + srv.URL + "/api/v1/applications":   {body: []byte("[]")},
-		},
-	}
+	empty := []byte("[]")
+	svc.setResponse("GET", "/api/v3/downloadclient", existingJSON)
+	svc.setResponse("GET", "/api/v3/notification", empty)
+	svc.setResponse("GET", "/api/v3/rootfolder", empty)
+	svc.setResponse("GET", "/api/v1/applications", empty)
+	svc.setResponse("GET", "/api/v3/releaseprofile", empty)
 
 	urls := autowire.URLs{
-		Sonarr:      srv.URL,
-		Radarr:      srv.URL,
-		Prowlarr:    srv.URL,
-		Bazarr:      srv.URL,
-		Jellyfin:    srv.URL,
-		QBT:         srv.URL,
+		Sonarr:      pingSrv.URL,
+		Radarr:      pingSrv.URL,
+		Prowlarr:    pingSrv.URL,
+		Bazarr:      pingSrv.URL,
+		Jellyfin:    pingSrv.URL,
+		QBT:         pingSrv.URL,
 		PeliculaAPI: "http://pelicula-api:8181",
 	}
 	a, _ := autowire.NewAutowirer(autowire.Config{
@@ -243,13 +307,19 @@ func TestWireDownloadClientDrift(t *testing.T) {
 		t.Fatal("expected PUT to /api/v3/downloadclient/7 to correct drift, but none was issued")
 	}
 
-	payload, ok := put.payload.(*arrclient.DownloadClientResource)
+	payload, ok := put.payload.(map[string]any)
 	if !ok {
-		t.Fatalf("PUT payload is not *arr.DownloadClientResource, got %T", put.payload)
+		t.Fatalf("PUT payload is not map[string]any, got %T", put.payload)
 	}
-	got := map[string]any{}
-	for _, f := range payload.Fields {
-		got[f.Name] = f.Value
+	// Extract fields array from the payload.
+	fields, _ := payload["fields"].([]any)
+	got := make(map[string]any)
+	for _, fRaw := range fields {
+		f, ok := fRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		got[f["name"].(string)] = f["value"]
 	}
 	if got["host"] != "gluetun" {
 		t.Errorf("host not corrected: got %v", got["host"])
@@ -262,8 +332,8 @@ func TestWireDownloadClientDrift(t *testing.T) {
 // TestWireImportWebhookURLDrift verifies that when the Procula webhook exists
 // but has a stale URL, wireImportWebhook issues a PUT with the correct URL.
 func TestWireImportWebhookURLDrift(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	const correctAPI = "http://pelicula-api-new:8181"
 
@@ -283,23 +353,21 @@ func TestWireImportWebhookURLDrift(t *testing.T) {
 	}
 	existingJSON, _ := json.Marshal(existing)
 
-	svc := &stubSvc{
-		sonarrKey:  "sonarr-key",
-		radarrKey:  "radarr-key",
-		configDir:  t.TempDir(),
-		httpClient: srv.Client(),
-		responses: map[string]stubResp{
-			"GET " + srv.URL + "/api/v3/notification":   {body: existingJSON},
-			"GET " + srv.URL + "/api/v3/downloadclient": {body: []byte("[]")},
-			"GET " + srv.URL + "/api/v3/rootfolder":     {body: []byte("[]")},
-		},
-	}
+	svc := newStubSvc(t, pingSrv.Client())
+	svc.sonarrKey = "sonarr-key"
+	svc.radarrKey = "radarr-key"
+
+	empty := []byte("[]")
+	svc.setResponse("GET", "/api/v3/notification", existingJSON)
+	svc.setResponse("GET", "/api/v3/downloadclient", empty)
+	svc.setResponse("GET", "/api/v3/rootfolder", empty)
+	svc.setResponse("GET", "/api/v3/releaseprofile", empty)
 
 	urls := autowire.URLs{
-		Sonarr:      srv.URL,
-		Radarr:      srv.URL,
-		Bazarr:      srv.URL,
-		Jellyfin:    srv.URL,
+		Sonarr:      pingSrv.URL,
+		Radarr:      pingSrv.URL,
+		Bazarr:      pingSrv.URL,
+		Jellyfin:    pingSrv.URL,
 		PeliculaAPI: correctAPI,
 	}
 	a, _ := autowire.NewAutowirer(autowire.Config{
@@ -318,14 +386,19 @@ func TestWireImportWebhookURLDrift(t *testing.T) {
 		t.Fatal("expected PUT to /api/v3/notification/3 to correct URL drift, but none was issued")
 	}
 
-	payload, ok := put.payload.(*arrclient.NotificationResource)
+	payload, ok := put.payload.(map[string]any)
 	if !ok {
-		t.Fatalf("PUT payload is not *arr.NotificationResource, got %T", put.payload)
+		t.Fatalf("PUT payload is not map[string]any, got %T", put.payload)
 	}
+	fields, _ := payload["fields"].([]any)
 	var gotURL string
-	for _, f := range payload.Fields {
-		if f.Name == "url" {
-			gotURL, _ = f.Value.(string)
+	for _, fRaw := range fields {
+		f, ok := fRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if f["name"] == "url" {
+			gotURL, _ = f["value"].(string)
 		}
 	}
 	wantURL := correctAPI + "/api/pelicula/hooks/import"
@@ -337,8 +410,8 @@ func TestWireImportWebhookURLDrift(t *testing.T) {
 // TestWireImportWebhookSecretDrift verifies that a rotated webhook secret
 // triggers a PUT that updates the X-Webhook-Secret header value.
 func TestWireImportWebhookSecretDrift(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	const peliculaAPI = "http://pelicula-api:8181"
 	const newSecret = "new-secret-456"
@@ -365,23 +438,21 @@ func TestWireImportWebhookSecretDrift(t *testing.T) {
 	}
 	existingJSON, _ := json.Marshal(existing)
 
-	svc := &stubSvc{
-		sonarrKey:  "sonarr-key",
-		radarrKey:  "radarr-key",
-		configDir:  t.TempDir(),
-		httpClient: srv.Client(),
-		responses: map[string]stubResp{
-			"GET " + srv.URL + "/api/v3/notification":   {body: existingJSON},
-			"GET " + srv.URL + "/api/v3/downloadclient": {body: []byte("[]")},
-			"GET " + srv.URL + "/api/v3/rootfolder":     {body: []byte("[]")},
-		},
-	}
+	svc := newStubSvc(t, pingSrv.Client())
+	svc.sonarrKey = "sonarr-key"
+	svc.radarrKey = "radarr-key"
+
+	empty := []byte("[]")
+	svc.setResponse("GET", "/api/v3/notification", existingJSON)
+	svc.setResponse("GET", "/api/v3/downloadclient", empty)
+	svc.setResponse("GET", "/api/v3/rootfolder", empty)
+	svc.setResponse("GET", "/api/v3/releaseprofile", empty)
 
 	urls := autowire.URLs{
-		Sonarr:      srv.URL,
-		Radarr:      srv.URL,
-		Bazarr:      srv.URL,
-		Jellyfin:    srv.URL,
+		Sonarr:      pingSrv.URL,
+		Radarr:      pingSrv.URL,
+		Bazarr:      pingSrv.URL,
+		Jellyfin:    pingSrv.URL,
 		PeliculaAPI: peliculaAPI,
 	}
 	a, _ := autowire.NewAutowirer(autowire.Config{
@@ -401,19 +472,28 @@ func TestWireImportWebhookSecretDrift(t *testing.T) {
 		t.Fatal("expected PUT to /api/v3/notification/5 to correct secret drift, but none was issued")
 	}
 
-	payload, ok := put.payload.(*arrclient.NotificationResource)
+	payload, ok := put.payload.(map[string]any)
 	if !ok {
-		t.Fatalf("PUT payload is not *arr.NotificationResource, got %T", put.payload)
+		t.Fatalf("PUT payload is not map[string]any, got %T", put.payload)
 	}
+	fields, _ := payload["fields"].([]any)
 	var gotSecret string
-	for _, f := range payload.Fields {
-		if f.Name != "headers" {
+	for _, fRaw := range fields {
+		f, ok := fRaw.(map[string]any)
+		if !ok {
 			continue
 		}
-		if hdrs, ok := f.Value.([]arrclient.HeaderField); ok {
-			for _, h := range hdrs {
-				if h.Key == "X-Webhook-Secret" {
-					gotSecret = h.Value
+		if f["name"] != "headers" {
+			continue
+		}
+		if hdrs, ok := f["value"].([]any); ok {
+			for _, hRaw := range hdrs {
+				h, ok := hRaw.(map[string]any)
+				if !ok {
+					continue
+				}
+				if h["key"] == "X-Webhook-Secret" {
+					gotSecret, _ = h["value"].(string)
 				}
 			}
 		}
@@ -426,30 +506,27 @@ func TestWireImportWebhookSecretDrift(t *testing.T) {
 // newReleaseProfileSvc builds a stubSvc wired for release-profile-only tests.
 // It answers readiness pings via the test server and stubs out the other
 // endpoints so Run() doesn't fail before reaching wireReleaseProfile.
-func newReleaseProfileSvc(t *testing.T, srv *httptest.Server, profileJSON []byte) *stubSvc {
+func newReleaseProfileSvc(t *testing.T, pingSrv *httptest.Server, profileJSON []byte) *stubSvc {
 	t.Helper()
+	svc := newStubSvc(t, pingSrv.Client())
+	svc.sonarrKey = "sonarr-key"
+	svc.radarrKey = "radarr-key"
+
 	empty := []byte("[]")
-	return &stubSvc{
-		sonarrKey:  "sonarr-key",
-		radarrKey:  "radarr-key",
-		configDir:  t.TempDir(),
-		httpClient: srv.Client(),
-		responses: map[string]stubResp{
-			"GET " + srv.URL + "/api/v3/releaseprofile": {body: profileJSON},
-			"GET " + srv.URL + "/api/v3/downloadclient": {body: empty},
-			"GET " + srv.URL + "/api/v3/rootfolder":     {body: empty},
-			"GET " + srv.URL + "/api/v3/notification":   {body: empty},
-		},
-	}
+	svc.setResponse("GET", "/api/v3/releaseprofile", profileJSON)
+	svc.setResponse("GET", "/api/v3/downloadclient", empty)
+	svc.setResponse("GET", "/api/v3/rootfolder", empty)
+	svc.setResponse("GET", "/api/v3/notification", empty)
+	return svc
 }
 
-func runReleaseProfileTest(t *testing.T, svc *stubSvc, srv *httptest.Server) {
+func runReleaseProfileTest(t *testing.T, svc *stubSvc, pingSrv *httptest.Server) {
 	t.Helper()
 	urls := autowire.URLs{
-		Sonarr:      srv.URL,
-		Radarr:      srv.URL,
-		Bazarr:      srv.URL,
-		Jellyfin:    srv.URL,
+		Sonarr:      pingSrv.URL,
+		Radarr:      pingSrv.URL,
+		Bazarr:      pingSrv.URL,
+		Jellyfin:    pingSrv.URL,
 		PeliculaAPI: "http://pelicula-api:8181",
 	}
 	a, _ := autowire.NewAutowirer(autowire.Config{
@@ -467,43 +544,38 @@ func runReleaseProfileTest(t *testing.T, svc *stubSvc, srv *httptest.Server) {
 // TestWireReleaseProfileCreate verifies that when no release profile exists,
 // wireReleaseProfile POSTs a new profile with the desired ignored list.
 func TestWireReleaseProfileCreate(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	empty, _ := json.Marshal([]any{})
-	svc := newReleaseProfileSvc(t, srv, empty)
+	svc := newReleaseProfileSvc(t, pingSrv, empty)
 
-	runReleaseProfileTest(t, svc, srv)
+	runReleaseProfileTest(t, svc, pingSrv)
 
-	var found *capturedCall
-	for i := range svc.captured {
-		c := &svc.captured[i]
-		if c.method == "POST" && len(c.path) > 0 &&
-			c.path[len(c.path)-len("/api/v3/releaseprofile"):] == "/api/v3/releaseprofile" {
-			found = c
-			break
-		}
-	}
-	if found == nil {
+	post := svc.findPost("/api/v3/releaseprofile")
+	if post == nil {
 		t.Fatal("expected POST to /api/v3/releaseprofile, none issued")
 	}
 
-	payload, ok := found.payload.(arrclient.ReleaseProfileResource)
+	payload, ok := post.payload.(map[string]any)
 	if !ok {
-		t.Fatalf("POST payload is not arrclient.ReleaseProfileResource, got %T", found.payload)
+		t.Fatalf("POST payload is not map[string]any, got %T", post.payload)
 	}
-	if payload.Name != "Pelicula" {
-		t.Errorf("name = %q, want Pelicula", payload.Name)
+	if payload["name"] != "Pelicula" {
+		t.Errorf("name = %q, want Pelicula", payload["name"])
 	}
-	if !payload.Enabled {
+	if enabled, _ := payload["enabled"].(bool); !enabled {
 		t.Error("expected enabled=true")
 	}
+	ignored, _ := payload["ignored"].([]any)
 	wantSet := map[string]struct{}{
 		"REMUX": {}, "BluRay-2160p": {}, "WEB-2160p": {}, "WEBDL-2160p": {}, "HDR10+": {}, "DV ": {},
 	}
-	gotSet := make(map[string]struct{}, len(payload.Ignored))
-	for _, v := range payload.Ignored {
-		gotSet[v] = struct{}{}
+	gotSet := make(map[string]struct{}, len(ignored))
+	for _, v := range ignored {
+		if s, ok := v.(string); ok {
+			gotSet[s] = struct{}{}
+		}
 	}
 	for k := range wantSet {
 		if _, ok := gotSet[k]; !ok {
@@ -516,8 +588,8 @@ func TestWireReleaseProfileCreate(t *testing.T) {
 // has a stale ignored list, wireReleaseProfile PUTs with the corrected list,
 // preserving id and enabled.
 func TestWireReleaseProfileDriftCorrected(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	existing := []map[string]any{
 		{
@@ -531,31 +603,34 @@ func TestWireReleaseProfileDriftCorrected(t *testing.T) {
 		},
 	}
 	existingJSON, _ := json.Marshal(existing)
-	svc := newReleaseProfileSvc(t, srv, existingJSON)
+	svc := newReleaseProfileSvc(t, pingSrv, existingJSON)
 
-	runReleaseProfileTest(t, svc, srv)
+	runReleaseProfileTest(t, svc, pingSrv)
 
 	put := svc.findPut("/api/v3/releaseprofile/42")
 	if put == nil {
 		t.Fatal("expected PUT to /api/v3/releaseprofile/42, none issued")
 	}
 
-	payload, ok := put.payload.(*arrclient.ReleaseProfileResource)
+	payload, ok := put.payload.(map[string]any)
 	if !ok {
-		t.Fatalf("PUT payload is not *arrclient.ReleaseProfileResource, got %T", put.payload)
+		t.Fatalf("PUT payload is not map[string]any, got %T", put.payload)
 	}
-	if payload.ID != 42 {
-		t.Errorf("id not preserved: got %d, want 42", payload.ID)
+	if id := payload["id"]; id != float64(42) {
+		t.Errorf("id not preserved: got %v, want 42", id)
 	}
-	if !payload.Enabled {
+	if enabled, _ := payload["enabled"].(bool); !enabled {
 		t.Error("enabled not preserved: want true")
 	}
+	ignored, _ := payload["ignored"].([]any)
 	wantSet := map[string]struct{}{
 		"REMUX": {}, "BluRay-2160p": {}, "WEB-2160p": {}, "WEBDL-2160p": {}, "HDR10+": {}, "DV ": {},
 	}
-	gotSet := make(map[string]struct{}, len(payload.Ignored))
-	for _, v := range payload.Ignored {
-		gotSet[v] = struct{}{}
+	gotSet := make(map[string]struct{}, len(ignored))
+	for _, v := range ignored {
+		if s, ok := v.(string); ok {
+			gotSet[s] = struct{}{}
+		}
 	}
 	for k := range wantSet {
 		if _, ok := gotSet[k]; !ok {
@@ -567,8 +642,8 @@ func TestWireReleaseProfileDriftCorrected(t *testing.T) {
 // TestWireReleaseProfileNoChange verifies that when the existing profile
 // already matches, no PUT or POST is issued.
 func TestWireReleaseProfileNoChange(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	existing := []map[string]any{
 		{
@@ -582,14 +657,14 @@ func TestWireReleaseProfileNoChange(t *testing.T) {
 		},
 	}
 	existingJSON, _ := json.Marshal(existing)
-	svc := newReleaseProfileSvc(t, srv, existingJSON)
+	svc := newReleaseProfileSvc(t, pingSrv, existingJSON)
 
-	runReleaseProfileTest(t, svc, srv)
+	runReleaseProfileTest(t, svc, pingSrv)
 
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
 	for _, c := range svc.captured {
-		if (c.method == "PUT" || c.method == "POST") &&
-			len(c.path) >= len("/api/v3/releaseprofile") &&
-			c.path[len(c.path)-len("/api/v3/releaseprofile"):] == "/api/v3/releaseprofile" {
+		if (c.method == "PUT" || c.method == "POST") && strings.HasSuffix(c.path, "/api/v3/releaseprofile") {
 			t.Errorf("unexpected %s to %s when profile already correct", c.method, c.path)
 		}
 	}
@@ -600,17 +675,18 @@ func TestWireReleaseProfileNoChange(t *testing.T) {
 func TestWireReleaseProfileOptOut(t *testing.T) {
 	t.Setenv("PELICULA_DEFAULT_RELEASE_PROFILE", "false")
 
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	empty, _ := json.Marshal([]any{})
-	svc := newReleaseProfileSvc(t, srv, empty)
+	svc := newReleaseProfileSvc(t, pingSrv, empty)
 
-	runReleaseProfileTest(t, svc, srv)
+	runReleaseProfileTest(t, svc, pingSrv)
 
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
 	for _, c := range svc.captured {
-		if len(c.path) >= len("/api/v3/releaseprofile") &&
-			c.path[len(c.path)-len("/api/v3/releaseprofile"):] == "/api/v3/releaseprofile" {
+		if strings.HasSuffix(c.path, "/api/v3/releaseprofile") {
 			t.Errorf("unexpected %s to %s when PELICULA_DEFAULT_RELEASE_PROFILE=false", c.method, c.path)
 		}
 	}
@@ -620,8 +696,8 @@ func TestWireReleaseProfileOptOut(t *testing.T) {
 // profile has user-added tags and a stale ignored list, the PUT preserves the
 // tags while correcting ignored.
 func TestWireReleaseProfileUserEditedTagsPreserved(t *testing.T) {
-	srv := newDriftTestSrv(t)
-	defer srv.Close()
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
 
 	existing := []map[string]any{
 		{
@@ -635,20 +711,21 @@ func TestWireReleaseProfileUserEditedTagsPreserved(t *testing.T) {
 		},
 	}
 	existingJSON, _ := json.Marshal(existing)
-	svc := newReleaseProfileSvc(t, srv, existingJSON)
+	svc := newReleaseProfileSvc(t, pingSrv, existingJSON)
 
-	runReleaseProfileTest(t, svc, srv)
+	runReleaseProfileTest(t, svc, pingSrv)
 
 	put := svc.findPut("/api/v3/releaseprofile/7")
 	if put == nil {
 		t.Fatal("expected PUT to /api/v3/releaseprofile/7, none issued")
 	}
 
-	payload, ok := put.payload.(*arrclient.ReleaseProfileResource)
+	payload, ok := put.payload.(map[string]any)
 	if !ok {
-		t.Fatalf("PUT payload is not *arrclient.ReleaseProfileResource, got %T", put.payload)
+		t.Fatalf("PUT payload is not map[string]any, got %T", put.payload)
 	}
-	if len(payload.Tags) != 1 || payload.Tags[0] != 3 {
-		t.Errorf("tags not preserved: got %v, want [3]", payload.Tags)
+	tags, _ := payload["tags"].([]any)
+	if len(tags) != 1 || tags[0] != float64(3) {
+		t.Errorf("tags not preserved: got %v, want [3]", tags)
 	}
 }

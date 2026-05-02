@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"pelicula-api/internal/app/backup"
+	arrclient "pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/peligrosa"
 	reporeqs "pelicula-api/internal/repo/requests"
 
@@ -20,20 +21,41 @@ import (
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
-// stubArrClient is a minimal ArrClient that returns empty keys and errors on all calls.
+// stubArrClient is a minimal ArrClient backed by an httptest.Server that
+// returns empty JSON arrays for all arr endpoints. The typed clients point
+// at this server so no real network calls are made.
 type stubArrClient struct {
 	sonarr, radarr, prowlarr string
+	srv                      *httptest.Server
+	sonarrCli                *arrclient.Client
+	radarrCli                *arrclient.Client
+}
+
+// newStubArrClient builds a stubArrClient backed by a test server.
+// The caller must close t.Cleanup — httptest.Server is registered with t.Cleanup.
+func newStubArrClient(t *testing.T, sonarr, radarr, prowlarr string) *stubArrClient {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("[]")) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	return &stubArrClient{
+		sonarr:    sonarr,
+		radarr:    radarr,
+		prowlarr:  prowlarr,
+		srv:       srv,
+		sonarrCli: arrclient.New(srv.URL, sonarr),
+		radarrCli: arrclient.New(srv.URL, radarr),
+	}
 }
 
 func (s *stubArrClient) Keys() (string, string, string) {
 	return s.sonarr, s.radarr, s.prowlarr
 }
-func (s *stubArrClient) ArrGet(_ context.Context, _, _, _ string) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrClient) ArrPost(_ context.Context, _, _, _ string, _ any) ([]byte, error) {
-	return nil, nil
-}
+func (s *stubArrClient) SonarrClient() *arrclient.Client { return s.sonarrCli }
+func (s *stubArrClient) RadarrClient() *arrclient.Client { return s.radarrCli }
 
 // stubLibPathResolver always returns the default path.
 type stubLibPathResolver struct{}
@@ -318,7 +340,7 @@ func TestBackupVersionBoundaries(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Use a stub client with no API keys — Keys() returns ("","","")
-		h := newHandler(&stubArrClient{})
+		h := newHandler(newStubArrClient(t, "", "", ""))
 		h.HandleImportBackup(w, req)
 		return w.Code
 	}
@@ -546,23 +568,70 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 
 // ── Context cancellation propagation tests ────────────────────────────────
 
-// emptyArrClient is a stub ArrClient that returns empty JSON arrays and valid keys,
-// allowing HandleExport to proceed past the movies/series goroutines.
-type emptyArrClient struct{}
-
-func (e *emptyArrClient) Keys() (string, string, string) { return "sk", "rk", "" }
-func (e *emptyArrClient) ArrGet(_ context.Context, _, _, _ string) ([]byte, error) {
-	return []byte("[]"), nil
-}
-func (e *emptyArrClient) ArrPost(_ context.Context, _, _, _ string, _ any) ([]byte, error) {
-	return []byte("{}"), nil
+// emptyArrClientFor returns a stubArrClient with valid keys that returns empty
+// JSON arrays for all arr endpoints, allowing HandleExport to proceed past the
+// movies/series goroutines.
+func emptyArrClientFor(t *testing.T) *stubArrClient {
+	t.Helper()
+	return newStubArrClient(t, "sk", "rk", "")
 }
 
-// TestHandleExport_RequestsCtxCancelled asserts that HandleExport forwards the
-// request context to RequestStore.All. With a pre-cancelled context the SQL
-// QueryContext returns an error, All returns empty, and the export body contains
-// zero requests even though a row was seeded.
-func TestHandleExport_RequestsCtxCancelled(t *testing.T) {
+// TestHandleExport_IncludesRequests asserts that HandleExport threads the
+// request context to RequestStore.All and includes seeded requests in the
+// export body when the context is live.
+func TestHandleExport_IncludesRequests(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+	reqStore := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
+
+	// Seed one request.
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := peligrosa.RequestExport{
+		ID:          "req_ctx_live_001",
+		Type:        "movie",
+		TmdbID:      11111,
+		Title:       "Export Ctx Test",
+		Year:        2025,
+		RequestedBy: "viewer",
+		State:       peligrosa.RequestPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		History:     []peligrosa.RequestEvent{{At: now, State: peligrosa.RequestPending, Actor: "viewer"}},
+	}
+	if err := reqStore.InsertFull(context.Background(), seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	h := backup.New(
+		emptyArrClientFor(t),
+		&stubLibPathResolver{},
+		nil, nil, reqStore,
+		"http://radarr:7878/radarr", "http://sonarr:8989/sonarr",
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/export", nil)
+	w := httptest.NewRecorder()
+	h.HandleExport(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+
+	var got backup.BackupExport
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Requests) != 1 {
+		t.Errorf("requests = %d, want 1", len(got.Requests))
+	} else if got.Requests[0].ID != seed.ID {
+		t.Errorf("request id = %q, want %q", got.Requests[0].ID, seed.ID)
+	}
+}
+
+// TestRequestStoreAll_CancelledCtx verifies that RequestStore.All respects
+// context cancellation and returns empty when the context is already cancelled.
+// This is the lower-level contract that HandleExport relies on for ctx threading.
+func TestRequestStoreAll_CancelledCtx(t *testing.T) {
 	t.Parallel()
 	db := testDB(t)
 	reqStore := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
@@ -585,30 +654,18 @@ func TestHandleExport_RequestsCtxCancelled(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	h := backup.New(
-		&emptyArrClient{},
-		&stubLibPathResolver{},
-		nil, nil, reqStore,
-		"http://radarr:7878/radarr", "http://sonarr:8989/sonarr",
-	)
+	// Confirm the row is visible under a live context.
+	live := reqStore.All(context.Background())
+	if len(live) != 1 {
+		t.Fatalf("expected 1 request with live ctx, got %d", len(live))
+	}
 
+	// A cancelled context should yield zero results (SQLite QueryContext honours ctx).
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // pre-cancel before issuing the request
-
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/export", nil).WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.HandleExport(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200", w.Code)
-	}
-
-	var got backup.BackupExport
-	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(got.Requests) != 0 {
-		t.Errorf("requests = %d, want 0 (cancelled ctx should yield empty from All)", len(got.Requests))
+	cancel()
+	cancelled := reqStore.All(ctx)
+	if len(cancelled) != 0 {
+		t.Errorf("All(cancelled ctx) = %d, want 0", len(cancelled))
 	}
 }
 
@@ -621,7 +678,7 @@ func TestHandleImportBackup_PassesCtx(t *testing.T) {
 	reqStore := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
 
 	h := backup.New(
-		&stubArrClient{sonarr: "sk", radarr: "rk"},
+		newStubArrClient(t, "sk", "rk", ""),
 		&stubLibPathResolver{},
 		nil, nil, reqStore,
 		"http://radarr:7878/radarr", "http://sonarr:8989/sonarr",

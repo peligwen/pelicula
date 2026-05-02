@@ -46,12 +46,12 @@ type ArrSvc interface {
 	GetProwlarrKey() string
 	// SetWired marks the service as fully wired.
 	SetWired(v bool)
-	// ArrGet makes a GET request to a *arr service.
-	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	// ArrPost makes a POST request to a *arr service.
-	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
-	// ArrPut makes a PUT request to a *arr service.
-	ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
+	// SonarrClient returns the typed Sonarr client.
+	SonarrClient() *arrclient.Client
+	// RadarrClient returns the typed Radarr client.
+	RadarrClient() *arrclient.Client
+	// ProwlarrClient returns the typed Prowlarr client.
+	ProwlarrClient() *arrclient.Client
 	// HTTPClient returns the shared HTTP client (used for health polling).
 	HTTPClient() *http.Client
 	// ConfigDir returns the config directory root (e.g. "/config").
@@ -165,8 +165,8 @@ func (a *Autowirer) Run(ctx context.Context) error {
 			slog.Warn("Prowlarr API key not found — skipping download client and indexer wiring", "component", "autowire")
 			prowlarrWired = false
 		} else {
-			sonarrWired = a.wireDownloadClient(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", "tv-sonarr")
-			radarrWired = a.wireDownloadClient(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3", "radarr")
+			sonarrWired = a.wireDownloadClient(ctx, "Sonarr", a.svc.SonarrClient(), "/api/v3", "tv-sonarr")
+			radarrWired = a.wireDownloadClient(ctx, "Radarr", a.svc.RadarrClient(), "/api/v3", "radarr")
 			prowlarrWired = a.wireProwlarrApp(ctx, "Sonarr", a.urls.Sonarr, sonarrKey) &&
 				a.wireProwlarrApp(ctx, "Radarr", a.urls.Radarr, radarrKey)
 		}
@@ -178,21 +178,21 @@ func (a *Autowirer) Run(ctx context.Context) error {
 	for _, lib := range a.getLibraries() {
 		switch lib.Arr {
 		case "sonarr":
-			a.wireRootFolder(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", lib.ContainerPath)
+			a.wireRootFolder(ctx, "Sonarr", a.svc.SonarrClient(), "/api/v3", lib.ContainerPath)
 		case "radarr":
-			a.wireRootFolder(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3", lib.ContainerPath)
+			a.wireRootFolder(ctx, "Radarr", a.svc.RadarrClient(), "/api/v3", lib.ContainerPath)
 		}
 	}
 
 	// Wire default release profile (demotes REMUX/4K releases) unless opted out.
 	if os.Getenv("PELICULA_DEFAULT_RELEASE_PROFILE") != "false" {
-		a.wireReleaseProfile(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
-		a.wireReleaseProfile(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+		a.wireReleaseProfile(ctx, "Sonarr", a.svc.SonarrClient(), "/api/v3")
+		a.wireReleaseProfile(ctx, "Radarr", a.svc.RadarrClient(), "/api/v3")
 	}
 
 	// Wire Procula import webhooks (useful even without VPN, for manual imports).
-	a.wireImportWebhook(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
-	a.wireImportWebhook(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+	a.wireImportWebhook(ctx, "Sonarr", a.svc.SonarrClient(), "/api/v3")
+	a.wireImportWebhook(ctx, "Radarr", a.svc.RadarrClient(), "/api/v3")
 
 	// Auto-configure Jellyfin (via callback into cmd/).
 	a.wireJellyfin()
@@ -205,8 +205,8 @@ func (a *Autowirer) Run(ctx context.Context) error {
 		a.invalidateIdx()
 		slog.Info("all services wired successfully", "component", "autowire")
 		// Force health re-check so stale "connection refused" errors clear from the *arr UI.
-		a.triggerHealthCheck(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
-		a.triggerHealthCheck(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+		a.triggerHealthCheck(ctx, "Sonarr", a.svc.SonarrClient(), "/api/v3")
+		a.triggerHealthCheck(ctx, "Radarr", a.svc.RadarrClient(), "/api/v3")
 	} else {
 		slog.Warn("some wiring failed — check logs above", "component", "autowire")
 	}
@@ -215,9 +215,8 @@ func (a *Autowirer) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a *Autowirer) triggerHealthCheck(ctx context.Context, name, baseURL, apiKey, apiPath string) {
-	_, err := a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/command", map[string]string{"name": "CheckHealth"})
-	if err != nil {
+func (a *Autowirer) triggerHealthCheck(ctx context.Context, name string, arrClient *arrclient.Client, apiPath string) {
+	if err := arrClient.TriggerCommand(ctx, apiPath, map[string]any{"name": "CheckHealth"}); err != nil {
 		slog.Warn("failed to trigger health check", "component", "autowire", "service", name, "error", err)
 	}
 }
@@ -264,21 +263,23 @@ func (a *Autowirer) waitForServices(ctx context.Context) error {
 	return fmt.Errorf("timeout waiting for services")
 }
 
-func (a *Autowirer) wireDownloadClient(ctx context.Context, name, baseURL, apiKey, apiPath, category string) bool {
-	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/downloadclient")
+func (a *Autowirer) wireDownloadClient(ctx context.Context, name string, arrClient *arrclient.Client, apiPath, category string) bool {
+	clients, err := arrClient.ListDownloadClients(ctx, apiPath)
 	if err != nil {
 		slog.Error("failed to check download clients", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
-	var clients []arrclient.DownloadClientResource
-	if err := json.Unmarshal(data, &clients); err != nil {
+	// Re-parse into typed structs for field manipulation.
+	data, _ := json.Marshal(clients)
+	var typed []arrclient.DownloadClientResource
+	if err := json.Unmarshal(data, &typed); err != nil {
 		slog.Error("failed to parse download clients response", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
-	for i := range clients {
-		c := &clients[i]
+	for i := range typed {
+		c := &typed[i]
 		if c.Implementation != "QBittorrent" {
 			continue
 		}
@@ -305,8 +306,7 @@ func (a *Autowirer) wireDownloadClient(ctx context.Context, name, baseURL, apiKe
 			slog.Info("qBittorrent already configured, skipping", "component", "autowire", "service", name)
 			return true
 		}
-		_, err = a.svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/downloadclient/%d", apiPath, c.ID), c)
-		if err != nil {
+		if err := arrClient.UpdateDownloadClient(ctx, apiPath, c.ID, c); err != nil {
 			slog.Error("failed to update qBittorrent download client", "component", "autowire", "service", name, "error", err)
 			return false
 		}
@@ -330,8 +330,7 @@ func (a *Autowirer) wireDownloadClient(ctx context.Context, name, baseURL, apiKe
 		},
 	}
 
-	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/downloadclient", payload)
-	if err != nil {
+	if err := arrClient.AddDownloadClient(ctx, apiPath, payload); err != nil {
 		slog.Error("failed to add qBittorrent download client", "component", "autowire", "service", name, "error", err)
 		return false
 	}
@@ -340,16 +339,10 @@ func (a *Autowirer) wireDownloadClient(ctx context.Context, name, baseURL, apiKe
 	return true
 }
 
-func (a *Autowirer) wireRootFolder(ctx context.Context, name, baseURL, apiKey, apiPath, folderPath string) bool {
-	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/rootfolder")
+func (a *Autowirer) wireRootFolder(ctx context.Context, name string, arrClient *arrclient.Client, apiPath, folderPath string) bool {
+	folders, err := arrClient.ListRootFolders(ctx, apiPath)
 	if err != nil {
 		slog.Error("failed to check root folders", "component", "autowire", "service", name, "error", err)
-		return false
-	}
-
-	var folders []map[string]any
-	if err := json.Unmarshal(data, &folders); err != nil {
-		slog.Error("failed to parse root folders response", "component", "autowire", "service", name, "error", err)
 		return false
 	}
 
@@ -360,8 +353,7 @@ func (a *Autowirer) wireRootFolder(ctx context.Context, name, baseURL, apiKey, a
 		}
 	}
 
-	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/rootfolder", map[string]any{"path": folderPath})
-	if err != nil {
+	if err := arrClient.AddRootFolder(ctx, apiPath, map[string]any{"path": folderPath}); err != nil {
 		slog.Error("failed to add root folder", "component", "autowire", "service", name, "path", folderPath, "error", err)
 		return false
 	}
@@ -374,13 +366,14 @@ var desiredReleaseProfileIgnored = []string{
 	"REMUX", "BluRay-2160p", "WEB-2160p", "WEBDL-2160p", "HDR10+", "DV ",
 }
 
-func (a *Autowirer) wireReleaseProfile(ctx context.Context, name, baseURL, apiKey, apiPath string) {
-	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/releaseprofile")
+func (a *Autowirer) wireReleaseProfile(ctx context.Context, name string, arrClient *arrclient.Client, apiPath string) {
+	raw, err := arrClient.ListReleaseProfiles(ctx, apiPath)
 	if err != nil {
 		slog.Error("failed to check release profiles", "component", "autowire", "service", name, "error", err)
 		return
 	}
 
+	data, _ := json.Marshal(raw)
 	var profiles []arrclient.ReleaseProfileResource
 	if err := json.Unmarshal(data, &profiles); err != nil {
 		slog.Error("failed to parse release profiles response", "component", "autowire", "service", name, "error", err)
@@ -417,8 +410,7 @@ func (a *Autowirer) wireReleaseProfile(ctx context.Context, name, baseURL, apiKe
 		}
 
 		p.Ignored = desiredReleaseProfileIgnored
-		_, err = a.svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/releaseprofile/%d", apiPath, p.ID), p)
-		if err != nil {
+		if err := arrClient.UpdateReleaseProfile(ctx, apiPath, p.ID, p); err != nil {
 			slog.Error("failed to update release profile", "component", "autowire", "service", name, "error", err)
 			return
 		}
@@ -434,8 +426,7 @@ func (a *Autowirer) wireReleaseProfile(ctx context.Context, name, baseURL, apiKe
 		IndexerID: 0,
 		Tags:      []int{},
 	}
-	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/releaseprofile", payload)
-	if err != nil {
+	if err := arrClient.AddReleaseProfile(ctx, apiPath, payload); err != nil {
 		slog.Error("failed to add release profile", "component", "autowire", "service", name, "error", err)
 		return
 	}
@@ -444,13 +435,14 @@ func (a *Autowirer) wireReleaseProfile(ctx context.Context, name, baseURL, apiKe
 
 // wireImportWebhook adds a Procula import webhook notification to a *arr app.
 // It is idempotent and corrects stale URL or webhook-secret drift via PUT.
-func (a *Autowirer) wireImportWebhook(ctx context.Context, name, baseURL, apiKey, apiPath string) {
-	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/notification")
+func (a *Autowirer) wireImportWebhook(ctx context.Context, name string, arrClient *arrclient.Client, apiPath string) {
+	raw, err := arrClient.ListNotifications(ctx, apiPath)
 	if err != nil {
 		slog.Error("failed to check notifications", "component", "autowire", "service", name, "error", err)
 		return
 	}
 
+	data, _ := json.Marshal(raw)
 	var existing []arrclient.NotificationResource
 	if err := json.Unmarshal(data, &existing); err != nil {
 		slog.Error("failed to parse notifications response", "component", "autowire", "service", name, "error", err)
@@ -510,8 +502,7 @@ func (a *Autowirer) wireImportWebhook(ctx context.Context, name, baseURL, apiKey
 			slog.Info("Procula webhook already configured, skipping", "component", "autowire", "service", name)
 			return
 		}
-		_, err = a.svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/notification/%d", apiPath, n.ID), n)
-		if err != nil {
+		if err := arrClient.UpdateNotification(ctx, apiPath, n.ID, n); err != nil {
 			slog.Error("failed to update Procula webhook", "component", "autowire", "service", name, "error", err)
 			return
 		}
@@ -545,8 +536,7 @@ func (a *Autowirer) wireImportWebhook(ctx context.Context, name, baseURL, apiKey
 		OnApplicationUpdate: false,
 	}
 
-	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/notification", payload)
-	if err != nil {
+	if err := arrClient.AddNotification(ctx, apiPath, payload); err != nil {
 		slog.Error("failed to add Procula webhook", "component", "autowire", "service", name, "error", err)
 		return
 	}
@@ -554,19 +544,19 @@ func (a *Autowirer) wireImportWebhook(ctx context.Context, name, baseURL, apiKey
 }
 
 func (a *Autowirer) wireProwlarrApp(ctx context.Context, appName, appURL, appAPIKey string) bool {
-	data, err := a.svc.ArrGet(ctx, a.urls.Prowlarr, a.svc.GetProwlarrKey(), "/api/v1/applications")
+	prowlarrCli := a.svc.ProwlarrClient()
+	raw, err := prowlarrCli.ListApplications(ctx)
 	if err != nil {
 		slog.Error("failed to check Prowlarr applications", "component", "autowire", "error", err)
 		return false
 	}
 
+	data, _ := json.Marshal(raw)
 	var apps []arrclient.ApplicationResource
 	if err := json.Unmarshal(data, &apps); err != nil {
 		slog.Error("failed to parse Prowlarr applications response", "component", "autowire", "error", err)
 		return false
 	}
-
-	prowlarrKey := a.svc.GetProwlarrKey()
 
 	for i := range apps {
 		app := &apps[i]
@@ -595,8 +585,7 @@ func (a *Autowirer) wireProwlarrApp(ctx context.Context, appName, appURL, appAPI
 
 		app.Fields.Set("prowlarrUrl", a.urls.Prowlarr)
 		app.Fields.Set("apiKey", appAPIKey)
-		_, err = a.svc.ArrPut(ctx, a.urls.Prowlarr, prowlarrKey, fmt.Sprintf("/api/v1/applications/%d", app.ID), app)
-		if err != nil {
+		if err := prowlarrCli.UpdateApplication(ctx, app.ID, app); err != nil {
 			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
 			return false
 		}
@@ -616,8 +605,7 @@ func (a *Autowirer) wireProwlarrApp(ctx context.Context, appName, appURL, appAPI
 		},
 	}
 
-	_, err = a.svc.ArrPost(ctx, a.urls.Prowlarr, prowlarrKey, "/api/v1/applications", payload)
-	if err != nil {
+	if err := prowlarrCli.AddApplication(ctx, payload); err != nil {
 		slog.Error("failed to connect Prowlarr app", "component", "autowire", "app", appName, "error", err)
 		return false
 	}
