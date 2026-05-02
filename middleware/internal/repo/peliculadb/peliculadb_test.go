@@ -31,14 +31,14 @@ func currentVersion(t *testing.T, db *sql.DB) int {
 func TestOpen_CreatesTablesAndSetsVersion(t *testing.T) {
 	db := testDB(t)
 
-	if got := currentVersion(t, db); got != 1 {
-		t.Errorf("user_version = %d, want 1", got)
+	if got := currentVersion(t, db); got != 2 {
+		t.Errorf("user_version = %d, want 2", got)
 	}
 
 	for _, table := range []string{
 		"roles", "invites", "redemptions",
 		"requests", "request_events",
-		"sessions", "rate_limits",
+		"sessions", "rate_limits", "migrated_json_files",
 	} {
 		var name string
 		err := db.QueryRow(
@@ -62,15 +62,15 @@ func TestOpen_MigratesForwardFromZero(t *testing.T) {
 	}
 	raw.Close()
 
-	// Open via peliculadb.Open — must migrate 0 → 1.
+	// Open via peliculadb.Open — must migrate 0 → 2.
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 
-	if got := currentVersion(t, db); got != 1 {
-		t.Errorf("user_version = %d, want 1", got)
+	if got := currentVersion(t, db); got != 2 {
+		t.Errorf("user_version = %d, want 2", got)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestOpen_IdempotentOnSecondOpen(t *testing.T) {
 	}
 	defer db2.Close()
 
-	if got := currentVersion(t, db2); got != 1 {
-		t.Errorf("user_version = %d after second open, want 1", got)
+	if got := currentVersion(t, db2); got != 2 {
+		t.Errorf("user_version = %d after second open, want 2", got)
 	}
 }
 
@@ -122,9 +122,9 @@ func TestSchemaEquivalence_PeliculaDB(t *testing.T) {
 	sort.Strings(tables)
 	got := strings.Join(tables, ",")
 
-	// Known-good snapshot after migration v1.
+	// Known-good snapshot after all migrations.
 	// If this fails, a migration was renumbered, reordered, or the schema changed unexpectedly.
-	const want = "invites,rate_limits,redemptions,request_events,requests,roles,sessions"
+	const want = "invites,migrated_json_files,rate_limits,redemptions,request_events,requests,roles,sessions"
 	if got != want {
 		t.Errorf("schema mismatch\n  got:  %s\n  want: %s", got, want)
 	}

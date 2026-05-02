@@ -180,7 +180,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 		db.Close()
 		return nil, err
 	}
-	migratejson.Run(db, "/config/pelicula")
+	migratejson.Run(context.Background(), db, "/config/pelicula")
 
 	searchHandler := search.New(svc, urls.Sonarr, urls.Radarr, urls.Prowlarr, libHandler, tmdbKey, searchMode)
 

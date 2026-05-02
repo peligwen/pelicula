@@ -17,6 +17,7 @@ func Open(path string) (*sql.DB, error) {
 // migrations is the ordered list of all schema migrations for pelicula.db.
 var migrations = []dbutil.Migration{
 	{Version: 1, Up: migrate1},
+	{Version: 2, Up: migrate2},
 }
 
 func migrate1(tx *sql.Tx) error {
@@ -83,6 +84,17 @@ func migrate1(tx *sql.Tx) error {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
 		}
+	}
+	return nil
+}
+
+func migrate2(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS migrated_json_files (
+		filename    TEXT PRIMARY KEY,
+		migrated_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		return fmt.Errorf("create migrated_json_files: %w", err)
 	}
 	return nil
 }
