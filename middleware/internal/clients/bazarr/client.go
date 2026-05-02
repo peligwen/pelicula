@@ -15,7 +15,8 @@ import (
 	"pelicula-api/internal/httpx"
 )
 
-const defaultTimeout = 10 * time.Second
+// 30s: Bazarr is slow under load (Flask-RESTx with subtitle scanning).
+const defaultTimeout = 30 * time.Second
 
 // Client is a typed HTTP client for Bazarr.
 type Client struct {
