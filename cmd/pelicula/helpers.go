@@ -94,6 +94,22 @@ func capitalize(s string) string {
 	return s
 }
 
+// gitDescribe returns the output of `git describe --tags --always --dirty`,
+// trimmed of whitespace. Falls back to "dev" if git is unavailable or the
+// working tree is not a git repository.
+func gitDescribe() string {
+	out, err := exec.Command("git", "describe", "--tags", "--always", "--dirty").Output()
+	if err != nil || len(out) == 0 {
+		return "dev"
+	}
+	v := string(out)
+	// trim newline
+	for len(v) > 0 && (v[len(v)-1] == '\n' || v[len(v)-1] == '\r') {
+		v = v[:len(v)-1]
+	}
+	return v
+}
+
 // requireEnv prints an error and exits if the .env file does not exist.
 func requireEnv(envFile string) {
 	if _, err := os.Stat(envFile); err != nil {

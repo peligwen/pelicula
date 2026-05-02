@@ -164,10 +164,11 @@ func (c *Compose) DockerExec(container string, cmdArgs ...string) error {
 	return cmd.Run()
 }
 
-// buildSetupCmd creates an exec.Cmd for `docker compose -f setupCompose up -d --build`
-// with the given environment variables.
-func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
-	cmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "up", "-d", "--build")
+// runSetupBuild builds and starts the setup compose stack with the given
+// environment variables. It runs `docker compose build --build-arg VERSION=...`
+// first so the middleware image is stamped with the correct git version, then
+// `docker compose up -d` to start the containers.
+func (c *Compose) runSetupBuild(setupCompose string, env []string) error {
 	// Start from caller-supplied env; strip HOME and re-add a safe one on Synology.
 	if c.isSynology {
 		out := make([]string, 0, len(env)+1)
@@ -179,11 +180,22 @@ func (c *Compose) buildSetupCmd(setupCompose string, env []string) *exec.Cmd {
 		}
 		env = append(out, "HOME="+c.projectDir)
 	}
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd
+
+	buildCmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "build", "--build-arg", "VERSION="+gitDescribe())
+	buildCmd.Env = env
+	buildCmd.Stdin = os.Stdin
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return err
+	}
+
+	upCmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "up", "-d")
+	upCmd.Env = env
+	upCmd.Stdin = os.Stdin
+	upCmd.Stdout = os.Stdout
+	upCmd.Stderr = os.Stderr
+	return upCmd.Run()
 }
 
 // runSetupDown tears down the setup compose stack.

@@ -25,6 +25,7 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.Info("starting pelicula-api", "version", appservices.Version, "component", "main")
 	httpx.DefaultUserAgent = "Pelicula/" + appservices.Version + " (+https://github.com/peligwen/pelicula)"
 	cfg := config.Load()
 
@@ -41,7 +42,7 @@ func main() {
 		mux.Handle("/api/pelicula/setup", httputil.RequireLocalOriginStrict(http.HandlerFunc(setupH.HandleSubmit)))
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
+		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181", "version", appservices.Version)
 		serveWithShutdown(ctx, ":8181", httpx.RecoverMiddleware(mux))
 		return
 	}
@@ -83,7 +84,7 @@ func main() {
 		JobsHandler:   http.HandlerFunc(handleJobsList),
 	})
 
-	slog.Info("listening", "component", "main", "addr", ":8181")
+	slog.Info("listening", "component", "main", "addr", ":8181", "version", appservices.Version)
 	serveWithShutdown(ctx, ":8181", httpx.RecoverMiddleware(mux))
 }
 

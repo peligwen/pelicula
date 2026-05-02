@@ -43,8 +43,7 @@ func cmdUp(ctx *Context, _ []string) {
 			"HOST_LAN_URL="+detectLANURL(),
 		)
 
-		setupCmd := c.buildSetupCmd(setupCompose, setupEnv)
-		if err := setupCmd.Run(); err != nil {
+		if err := c.runSetupBuild(setupCompose, setupEnv); err != nil {
 			fatal("Failed to start setup containers: " + err.Error())
 		}
 
