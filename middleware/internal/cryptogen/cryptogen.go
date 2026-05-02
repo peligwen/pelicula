@@ -5,7 +5,7 @@ package cryptogen
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
+	"fmt"
 )
 
 // GenerateAPIKey returns a 32-character (16-byte) random hex string suitable
@@ -13,8 +13,8 @@ import (
 func GenerateAPIKey() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand.Read should never fail on any supported platform.
-		slog.Error("crypto/rand.Read failed generating API key", "error", err)
+		// Panic is intentional: a zero-key fallback would be a silent security failure.
+		panic(fmt.Errorf("crypto/rand failed: %w", err))
 	}
 	return hex.EncodeToString(b)
 }

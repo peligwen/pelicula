@@ -19,6 +19,7 @@ import (
 	appsetup "pelicula-api/internal/app/setup"
 	"pelicula-api/internal/app/supervisor"
 	"pelicula-api/internal/config"
+	"pelicula-api/internal/cryptogen"
 	"pelicula-api/internal/httpx"
 )
 
@@ -30,7 +31,7 @@ func main() {
 	// Setup mode: serve only the wizard endpoints then return.
 	if appsetup.NeedsSetup() {
 		slog.Info("starting in setup mode", "component", "main")
-		setupH := appsetup.New("/project/.env", generateAPIKey, generateReadablePassword)
+		setupH := appsetup.New("/project/.env", cryptogen.GenerateAPIKey, generateReadablePassword)
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/pelicula/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
