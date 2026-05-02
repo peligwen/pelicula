@@ -15,13 +15,16 @@ import (
 	"pelicula-api/httputil"
 	"pelicula-api/internal/app/bootstrap"
 	"pelicula-api/internal/app/router"
+	appservices "pelicula-api/internal/app/services"
 	appsetup "pelicula-api/internal/app/setup"
 	"pelicula-api/internal/app/supervisor"
 	"pelicula-api/internal/config"
+	"pelicula-api/internal/httpx"
 )
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	httpx.DefaultUserAgent = "Pelicula/" + appservices.Version + " (+https://github.com/peligwen/pelicula)"
 	cfg := config.Load()
 
 	// Setup mode: serve only the wizard endpoints then return.

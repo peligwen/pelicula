@@ -13,6 +13,27 @@ import (
 	"time"
 )
 
+// DefaultUserAgent is injected as the User-Agent header on every request made
+// through New(). Set it at program startup (before constructing any clients)
+// to embed a build-time version, e.g. "Pelicula/1.2.3 (+https://…)".
+var DefaultUserAgent = "Pelicula/dev"
+
+// uaTransport wraps an http.RoundTripper to inject a User-Agent header on
+// outbound requests that do not already carry one.
+type uaTransport struct {
+	base http.RoundTripper
+	ua   string
+}
+
+func (t *uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Header.Get("User-Agent") != "" {
+		return t.base.RoundTrip(r)
+	}
+	r = r.Clone(r.Context())
+	r.Header.Set("User-Agent", t.ua)
+	return t.base.RoundTrip(r)
+}
+
 // Client is a typed HTTP client for a single upstream service.
 // All calls carry context and inject authentication via a configurable header.
 type Client struct {
@@ -100,15 +121,20 @@ func (c *Client) withRetry(ctx context.Context, fn func() (bool, error)) error {
 }
 
 // New constructs a Client with the given base URL, key, and header.
-// A dedicated http.Client with the supplied timeout is created.
+// A dedicated http.Client with the supplied timeout is created, wrapping
+// http.DefaultTransport with a uaTransport that sets DefaultUserAgent on
+// requests that do not already carry a User-Agent header.
 // The default RetryPolicy retries up to 3 times on 5xx/transport errors.
 func New(baseURL, apiKey, keyHeader string, timeout time.Duration) *Client {
 	return &Client{
-		BaseURL:    baseURL,
-		APIKey:     apiKey,
-		KeyHeader:  keyHeader,
-		HTTPClient: &http.Client{Timeout: timeout},
-		Retry:      RetryPolicy{MaxAttempts: 3, Delay: 500 * time.Millisecond},
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		KeyHeader: keyHeader,
+		HTTPClient: &http.Client{
+			Timeout:   timeout,
+			Transport: &uaTransport{base: http.DefaultTransport, ua: DefaultUserAgent},
+		},
+		Retry: RetryPolicy{MaxAttempts: 3, Delay: 500 * time.Millisecond},
 	}
 }
 

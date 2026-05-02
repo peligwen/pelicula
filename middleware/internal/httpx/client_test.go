@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,6 +73,72 @@ func TestRetryExhausted(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Errorf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestUserAgentSetByDefault(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", "", time.Second)
+	var out map[string]any
+	if err := c.GetJSON(context.Background(), "/", &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(gotUA, "Pelicula/") {
+		t.Errorf("expected User-Agent to start with Pelicula/, got %q", gotUA)
+	}
+}
+
+func TestUserAgentRespectsCustomHTTPClient(t *testing.T) {
+	type roundTripperFunc func(*http.Request) (*http.Response, error)
+	var capturedUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", "", time.Second)
+	// Override with a bare http.Client that has no transport; Go will use
+	// http.DefaultTransport, which sets no User-Agent, so the header is absent.
+	c.HTTPClient = &http.Client{}
+
+	var out map[string]any
+	if err := c.GetJSON(context.Background(), "/", &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.HasPrefix(capturedUA, "Pelicula/") {
+		t.Errorf("custom HTTPClient should suppress uaTransport, but got Pelicula/ UA: %q", capturedUA)
+	}
+}
+
+func TestUserAgentOverridable(t *testing.T) {
+	prev := DefaultUserAgent
+	t.Cleanup(func() { DefaultUserAgent = prev })
+	DefaultUserAgent = "test/1.2.3"
+
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", "", time.Second)
+	var out map[string]any
+	if err := c.GetJSON(context.Background(), "/", &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotUA != "test/1.2.3" {
+		t.Errorf("expected User-Agent %q, got %q", "test/1.2.3", gotUA)
 	}
 }
 

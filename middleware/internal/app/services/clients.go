@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"pelicula-api/internal/config"
+	"pelicula-api/internal/httpx"
 
 	arrclient "pelicula-api/internal/clients/arr"
 	bazarrclient "pelicula-api/internal/clients/bazarr"
@@ -90,7 +91,7 @@ func New(cfg *config.Config, jellyfinAPIKey string) *Clients {
 			Timeout: 10 * time.Second,
 			Transport: &uaTransport{
 				base:      http.DefaultTransport,
-				userAgent: "Pelicula/" + Version + " (+https://github.com/peligwen/pelicula)",
+				userAgent: httpx.DefaultUserAgent,
 			},
 		},
 		sonarrURL:   cfg.URLs.Sonarr,
