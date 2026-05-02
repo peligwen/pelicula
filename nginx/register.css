@@ -66,6 +66,7 @@ body {
 
 /* Error / success messages */
 .reg-error { font-size: 0.8rem; color: var(--pink, #f060a8); margin-top: 0.75rem; line-height: 1.4; display: none; }
+.reg-error.show { display: block; }
 .reg-error a { color: var(--pink, #f060a8); }
 
 .reg-success { display: none; text-align: center; }

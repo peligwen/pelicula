@@ -22,16 +22,18 @@
           const heading = document.querySelector('.reg-heading');
           if (heading) heading.textContent = 'Create Admin Account';
           const hint = document.querySelector('.reg-hint');
-          if (hint) hint.textContent = 'Create your admin account. You\u2019ll use these credentials to log in and manage everything.';
+          if (hint) hint.textContent = 'Create your admin account. You’ll use these credentials to log in and manage everything.';
           suggestPassword();
+          document.getElementById('reg-username').focus();
           return;
         } else if (data.open_registration) {
           openRegMode = true;
           document.getElementById('reg-loading').style.display = 'none';
           document.getElementById('reg-form-wrap').style.display = '';
           const hint = document.querySelector('.reg-hint');
-          if (hint) hint.textContent = 'Create a viewer account. You\u2019ll use these credentials to log in.';
+          if (hint) hint.textContent = 'Create a viewer account. You’ll use these credentials to log in.';
           suggestPassword();
+          document.getElementById('reg-username').focus();
           return;
         }
       } catch (e) {
@@ -72,6 +74,7 @@
     document.getElementById('reg-loading').style.display = 'none';
     document.getElementById('reg-form-wrap').style.display = '';
     suggestPassword();
+    document.getElementById('reg-username').focus();
   }
 
   function showDead(title, text) {
@@ -86,13 +89,27 @@
   function showError(msg) {
     const el = document.getElementById('reg-error');
     el.textContent = msg;
-    el.style.display = 'block';
+    el.classList.add('show');
   }
 
   function clearError() {
     const el = document.getElementById('reg-error');
-    el.style.display = 'none';
+    el.classList.remove('show');
     el.textContent = '';
+  }
+
+  // Mirrors clients.IsValidUsername in middleware/clients/jellyfin.go:
+  // 1–64 chars, no leading/trailing whitespace, no control chars, no / or \.
+  function isValidUsername(s) {
+    if (s.length === 0 || s.length > 64) return false;
+    if (s !== s.trim()) return false;
+    for (const ch of s) {
+      const cp = ch.codePointAt(0);
+      if (cp < 0x20 || cp === 0x7f) return false;   // C0 controls + DEL
+      if (cp >= 0x80 && cp <= 0x9f) return false;    // C1 controls
+      if (ch === '/' || ch === '\\') return false;
+    }
+    return true;
   }
 
   // ── Suggest password ─────────────────────────────────────────────────────
@@ -137,11 +154,21 @@
     e.preventDefault();
     clearError();
 
-    const username = document.getElementById('reg-username').value.trim();
+    const username = document.getElementById('reg-username').value;
     const password = document.getElementById('reg-password').value;
     const confirm  = document.getElementById('reg-confirm').value;
 
     if (!username) { showError('Username is required.'); return; }
+    if (!isValidUsername(username)) {
+      if (username !== username.trim()) {
+        showError('Username must not have leading or trailing spaces.');
+      } else if (username.length > 64) {
+        showError('Username must be 64 characters or fewer.');
+      } else {
+        showError('Username contains invalid characters (no / or \\ allowed).');
+      }
+      return;
+    }
     if (!password) { showError('Password is required.'); return; }
     if (password !== confirm) { showError('Passwords do not match.'); return; }
     if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
@@ -150,6 +177,9 @@
     btn.disabled = true;
     btn.textContent = 'Creating account…';
 
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
+    let succeeded = false;
     try {
       const url = openRegMode
         ? '/api/pelicula/register'
@@ -158,26 +188,38 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
+        signal: ctrl.signal,
       });
+      clearTimeout(timeoutId);
       const data = await resp.json().catch(() => ({}));
 
       if (resp.ok) {
         if (initialSetupMode) {
-          // Auto-login after initial setup registration
+          const loginCtrl = new AbortController();
+          const loginTimeoutId = setTimeout(() => loginCtrl.abort(), 15000);
           try {
             const loginResp = await fetch('/api/pelicula/auth/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ username, password }),
+              signal: loginCtrl.signal,
             });
+            clearTimeout(loginTimeoutId);
             if (loginResp.ok) {
+              succeeded = true;
               window.location.href = '/';
               return;
             }
-          } catch (e) {
-            console.error('auto-login after registration failed', e);
+          } catch (loginErr) {
+            clearTimeout(loginTimeoutId);
           }
+          // Registration succeeded but auto-login failed — surface actionable message.
+          succeeded = true;
+          showError('Account created but auto-login failed — please log in manually.');
+          setTimeout(() => { window.location.href = '/?login=1'; }, 2000);
+          return;
         }
+        succeeded = true;
         showSuccess();
         return;
       }
@@ -196,10 +238,17 @@
       }
       showError(data.error || 'Something went wrong. Please try again.');
     } catch (err) {
-      showError('Network error. Check your connection and try again.');
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        showError('Request timed out — please try again.');
+      } else {
+        showError('Network error — please check your connection.');
+      }
     } finally {
-      btn.disabled = false;
-      btn.textContent = 'Create account';
+      if (!succeeded) {
+        btn.disabled = false;
+        btn.textContent = 'Create account';
+      }
     }
   });
 
