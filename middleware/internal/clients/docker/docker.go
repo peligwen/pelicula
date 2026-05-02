@@ -1,10 +1,19 @@
 // Package docker provides a typed HTTP client for the Docker socket proxy
-// (tecnativa/docker-socket-proxy). It exposes only the container restart and
-// log-fetch operations that pelicula-api requires, against an explicit
-// allowlist of Compose service names.
+// (tecnativa/docker-socket-proxy). It exposes only the container restart,
+// log-fetch, and stats operations that pelicula-api requires, against an
+// explicit allowlist of Compose service names.
+//
+// The socket proxy is configured to allow only:
+//
+//	POST /containers/<name>/restart
+//	GET  /containers/<name>/logs
+//	GET  /containers/<name>/stats
+//
+// No other Docker Engine API paths are reachable through it.
 package docker
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -13,6 +22,8 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+
+	"pelicula-api/internal/httpx"
 )
 
 // allowedContainers is the explicit whitelist of Compose service names the
@@ -34,6 +45,22 @@ var defaultAllowed = map[string]bool{
 
 var projectNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// uaTransport wraps an http.RoundTripper to inject a User-Agent header on
+// outbound requests that do not already carry one.
+type uaTransport struct {
+	base http.RoundTripper
+	ua   string
+}
+
+func (t *uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Header.Get("User-Agent") != "" {
+		return t.base.RoundTrip(r)
+	}
+	r = r.Clone(r.Context())
+	r.Header.Set("User-Agent", t.ua)
+	return t.base.RoundTrip(r)
+}
+
 // Client is a typed HTTP client for the Docker socket proxy.
 type Client struct {
 	baseURL     string
@@ -41,7 +68,7 @@ type Client struct {
 	allowed     map[string]bool
 	httpClient  *http.Client
 	// LogsFunc is the function used by Logs; replace in tests to inject fakes.
-	LogsFunc func(name string, tail int, timestamps bool) ([]byte, error)
+	LogsFunc func(ctx context.Context, name string, tail int, timestamps bool) ([]byte, error)
 }
 
 // New constructs a Client for the given Docker socket proxy base URL and
@@ -56,7 +83,10 @@ func New(baseURL, projectName string) *Client {
 		baseURL:     baseURL,
 		projectName: projectName,
 		allowed:     defaultAllowed,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: &uaTransport{base: http.DefaultTransport, ua: httpx.DefaultUserAgent},
+		},
 	}
 	c.LogsFunc = c.logs
 	return c
@@ -82,9 +112,9 @@ func (c *Client) serviceToContainer(svc string) string {
 // Restart sends a restart request to the Docker Engine API for the named
 // service (POST /containers/{container}/restart?t=5).
 // name is a Compose service name; it is mapped to the generated container name.
-func (c *Client) Restart(name string) error {
+func (c *Client) Restart(ctx context.Context, name string) error {
 	url := c.baseURL + "/containers/" + c.serviceToContainer(name) + "/restart?t=5"
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
@@ -102,15 +132,15 @@ func (c *Client) Restart(name string) error {
 
 // Logs fetches log lines for a service via LogsFunc. In production LogsFunc
 // is bound to the internal logs implementation; tests replace it with a fake.
-func (c *Client) Logs(name string, tail int, timestamps bool) ([]byte, error) {
-	return c.LogsFunc(name, tail, timestamps)
+func (c *Client) Logs(ctx context.Context, name string, tail int, timestamps bool) ([]byte, error) {
+	return c.LogsFunc(ctx, name, tail, timestamps)
 }
 
 // logs is the real implementation, used as the default value of LogsFunc.
 // It fetches the last tail lines of stdout+stderr for a service.
 // Docker multiplexes streams using an 8-byte framing header when the container
 // has no TTY (our case); we strip those headers and return raw log bytes.
-func (c *Client) logs(name string, tail int, timestamps bool) ([]byte, error) {
+func (c *Client) logs(ctx context.Context, name string, tail int, timestamps bool) ([]byte, error) {
 	if tail <= 0 || tail > 500 {
 		tail = 200
 	}
@@ -120,7 +150,11 @@ func (c *Client) logs(name string, tail int, timestamps bool) ([]byte, error) {
 	}
 	url := fmt.Sprintf("%s/containers/%s/logs?stdout=1&stderr=1&tail=%d&timestamps=%s",
 		c.baseURL, c.serviceToContainer(name), tail, tsParam)
-	resp, err := c.httpClient.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("docker logs %s: %w (is the Docker socket proxy reachable?)", name, err)
 	}
@@ -147,9 +181,13 @@ type StatsResponse struct {
 
 // Stats fetches a one-shot stats snapshot for the named Compose service.
 // GET /containers/{container}/stats?stream=false
-func (c *Client) Stats(name string) (*StatsResponse, error) {
+func (c *Client) Stats(ctx context.Context, name string) (*StatsResponse, error) {
 	url := c.baseURL + "/containers/" + c.serviceToContainer(name) + "/stats?stream=false"
-	resp, err := c.httpClient.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("docker stats %s: %w", name, err)
 	}

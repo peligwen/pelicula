@@ -1,6 +1,7 @@
 package adminops
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"pelicula-api/httputil"
@@ -14,8 +15,8 @@ import (
 // tests may substitute a fake.
 type DockerClient interface {
 	IsAllowed(name string) bool
-	Restart(name string) error
-	Logs(name string, tail int, timestamps bool) ([]byte, error)
+	Restart(ctx context.Context, name string) error
+	Logs(ctx context.Context, name string, tail int, timestamps bool) ([]byte, error)
 }
 
 // Handler owns the admin ops dependencies.
@@ -93,7 +94,7 @@ func (h *Handler) HandleStackRestart(w http.ResponseWriter, r *http.Request) {
 		if !h.Docker.IsAllowed(svc) {
 			continue // defense-in-depth: skip any future typo in order
 		}
-		if err := h.Docker.Restart(svc); err != nil {
+		if err := h.Docker.Restart(r.Context(), svc); err != nil {
 			slog.Warn("stack restart: skipping", "component", "admin_ops", "svc", svc, "error", err)
 			errs = append(errs, svc+": "+err.Error())
 		}
@@ -111,7 +112,7 @@ func (h *Handler) HandleStackRestart(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond) // fallback if writer doesn't support flush
 	}
 	go func() {
-		h.Docker.Restart("pelicula-api") //nolint:errcheck — we won't be here to log it
+		h.Docker.Restart(context.Background(), "pelicula-api") //nolint:errcheck — we won't be here to log it
 	}()
 }
 
@@ -132,7 +133,7 @@ func (h *Handler) HandleVPNRestart(w http.ResponseWriter, r *http.Request) {
 		if !h.Docker.IsAllowed(svc) {
 			continue
 		}
-		if err := h.Docker.Restart(svc); err != nil {
+		if err := h.Docker.Restart(r.Context(), svc); err != nil {
 			slog.Warn("vpn restart: container error",
 				"component", "admin_ops", "svc", svc, "error", err)
 			errs = append(errs, svc+": "+err.Error())
@@ -167,7 +168,7 @@ func (h *Handler) HandleServiceLogs(w http.ResponseWriter, r *http.Request) {
 			tail = n
 		}
 	}
-	logs, err := h.Docker.Logs(svc, tail, false)
+	logs, err := h.Docker.Logs(r.Context(), svc, tail, false)
 	if err != nil {
 		slog.Warn("logs failed", "component", "admin_ops", "svc", svc, "error", err)
 		httputil.WriteError(w, "logs unavailable: "+err.Error(), http.StatusBadGateway)

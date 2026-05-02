@@ -97,7 +97,7 @@ func handleLogsAggregate(h *Handler, w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			raw, err := h.DockerClient.LogsFunc(name, tail, true)
+			raw, err := h.DockerClient.LogsFunc(r.Context(), name, tail, true)
 			resCh <- fetchResult{svc: name, raw: raw, err: err}
 		}(svc)
 	}

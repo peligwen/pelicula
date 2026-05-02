@@ -361,7 +361,7 @@ func newSettingsHandler(envPath string, dockerCli *docker.Client) *settings.Hand
 			return remoteconfig.WriteJellyfinNetworkXML(jellyfinConfigDir, publishedURL)
 		},
 		RestartJellyfin: func() error {
-			return dockerCli.Restart("jellyfin")
+			return dockerCli.Restart(context.Background(), "jellyfin")
 		},
 	}
 	return h

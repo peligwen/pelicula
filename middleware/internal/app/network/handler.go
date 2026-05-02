@@ -4,6 +4,7 @@
 package network
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -24,7 +25,7 @@ var DefaultVPNContainers = map[string]bool{
 
 // statsSource is the narrow interface the handler requires from the docker client.
 type statsSource interface {
-	Stats(name string) (*docker.StatsResponse, error)
+	Stats(ctx context.Context, name string) (*docker.StatsResponse, error)
 	AllowedNames() map[string]bool
 }
 
@@ -108,11 +109,12 @@ func (h *Handler) ServeStats(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	ch := make(chan result, len(names))
 
+	ctx := r.Context()
 	for name := range names {
 		wg.Add(1)
 		go func(n string) {
 			defer wg.Done()
-			s, err := h.Docker.Stats(n)
+			s, err := h.Docker.Stats(ctx, n)
 			ch <- result{name: n, stats: s, err: err}
 		}(name)
 	}

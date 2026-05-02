@@ -39,7 +39,7 @@ type ServiceQuerier interface {
 
 // DockerLogsFunc is a function that fetches container logs.
 // Matches the signature of docker.Client.LogsFunc.
-type DockerLogsFunc func(name string, tail int, timestamps bool) ([]byte, error)
+type DockerLogsFunc func(ctx context.Context, name string, tail int, timestamps bool) ([]byte, error)
 
 // LogEntry is one log line tagged with its source service.
 type LogEntry struct {
@@ -327,7 +327,7 @@ func (p *Poller) fetchLogs(ctx context.Context) ([]byte, error) {
 		wg.Add(1)
 		go func(svc string) {
 			defer wg.Done()
-			raw, err := p.dockerLogs(svc, perSvcTail, true)
+			raw, err := p.dockerLogs(ctx, svc, perSvcTail, true)
 			ch <- result{svc: svc, raw: raw, err: err}
 		}(name)
 	}

@@ -1,6 +1,7 @@
 package adminops_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -25,12 +26,12 @@ func (f *fakeDocker) IsAllowed(name string) bool {
 	return allowed[name]
 }
 
-func (f *fakeDocker) Restart(name string) error {
+func (f *fakeDocker) Restart(_ context.Context, name string) error {
 	f.restarted = append(f.restarted, name)
 	return nil
 }
 
-func (f *fakeDocker) Logs(name string, tail int, timestamps bool) ([]byte, error) {
+func (f *fakeDocker) Logs(_ context.Context, name string, tail int, timestamps bool) ([]byte, error) {
 	return []byte("fake logs"), nil
 }
 

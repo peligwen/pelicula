@@ -301,7 +301,7 @@ func (w *Watchdog) Run(ctx context.Context) {
 					if !w.Docker.IsAllowed(svc) {
 						continue
 					}
-					if err := w.Docker.Restart(svc); err != nil {
+					if err := w.Docker.Restart(ctx, svc); err != nil {
 						slog.Error("vpn watchdog restart failed",
 							"component", "vpn_watchdog", "svc", svc, "error", err)
 					}

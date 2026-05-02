@@ -1,6 +1,7 @@
 package network_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +24,7 @@ type fakeDocker struct {
 }
 
 func (f *fakeDocker) AllowedNames() map[string]bool { return f.allowed }
-func (f *fakeDocker) Stats(name string) (*docker.StatsResponse, error) {
+func (f *fakeDocker) Stats(_ context.Context, name string) (*docker.StatsResponse, error) {
 	f.mu.Lock()
 	f.statCalls++
 	f.mu.Unlock()

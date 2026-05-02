@@ -1,6 +1,7 @@
 package sysinfo_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestSortedLogEntries(t *testing.T) {
 
 func TestHandleLogsAggregateFansOut(t *testing.T) {
 	dc := docker.New("http://docker-proxy:2375", "pelicula")
-	dc.LogsFunc = func(name string, tail int, ts bool) ([]byte, error) {
+	dc.LogsFunc = func(ctx context.Context, name string, tail int, ts bool) ([]byte, error) {
 		switch name {
 		case "sonarr":
 			return []byte("sonarr line 1\nsonarr line 2\n"), nil

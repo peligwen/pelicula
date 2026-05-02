@@ -87,7 +87,7 @@ func TestPollerBroadcastsOnChange(t *testing.T) {
 
 	hub := NewHub()
 	svc := &stubSvc{qbtHandler: qbtMux}
-	poller := NewPoller(hub, svc, procula.URL, func(name string, tail int, ts bool) ([]byte, error) {
+	poller := NewPoller(hub, svc, procula.URL, func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
 	// Restrict allowed containers to avoid spinning up real docker calls.
@@ -152,7 +152,7 @@ func TestPollerTriggerImmediate(t *testing.T) {
 
 	hub := NewHub()
 	svc := &stubSvc{qbtHandler: http.NewServeMux()}
-	poller := NewPoller(hub, svc, procula.URL, func(name string, tail int, ts bool) ([]byte, error) {
+	poller := NewPoller(hub, svc, procula.URL, func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
 
@@ -200,7 +200,7 @@ func TestFetchLogsTimestampedAndSorted(t *testing.T) {
 
 	hub := NewHub()
 	svc := &stubSvc{qbtHandler: http.NewServeMux()}
-	poller := NewPoller(hub, svc, "", func(name string, tail int, ts bool) ([]byte, error) {
+	poller := NewPoller(hub, svc, "", func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		if !ts {
 			t.Errorf("fetchLogs should pass timestamps=true, got false for %q", name)
 		}
@@ -244,7 +244,7 @@ func TestPollerUnknownEventType(t *testing.T) {
 
 	hub := NewHub()
 	svc := &stubSvc{qbtHandler: http.NewServeMux()}
-	poller := NewPoller(hub, svc, "", func(name string, tail int, ts bool) ([]byte, error) {
+	poller := NewPoller(hub, svc, "", func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
 
