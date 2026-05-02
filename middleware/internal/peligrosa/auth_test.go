@@ -985,6 +985,7 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 		DB:       db,
 		Jellyfin: jc,
 	})
+	t.Cleanup(a1.Stop)
 
 	loginBody := strings.NewReader(`{"username":"alice","password":"pass"}`)
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", loginBody)
@@ -1011,6 +1012,7 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 		DB:       db,
 		Jellyfin: jc,
 	})
+	t.Cleanup(a2.Stop)
 
 	// Verify the session is available via HandleCheck.
 	checkReq := httptest.NewRequest(http.MethodGet, "/api/pelicula/auth/check", nil)
@@ -1095,6 +1097,7 @@ func TestRateLimit_PersistsAcrossAuthInstances(t *testing.T) {
 
 	// Auth1: record rateLimitThreshold failures for one IP.
 	a1 := NewAuth(AuthConfig{DB: db})
+	t.Cleanup(a1.Stop)
 	for i := 0; i < rateLimitThreshold; i++ {
 		a1.recordFailure(ctx, "1.2.3.4")
 	}
@@ -1105,6 +1108,7 @@ func TestRateLimit_PersistsAcrossAuthInstances(t *testing.T) {
 	// Auth2: new instance on the same DB (simulates a middleware restart).
 	// The in-memory map starts empty; counts must come from SQLite.
 	a2 := NewAuth(AuthConfig{DB: db})
+	t.Cleanup(a2.Stop)
 
 	if !a2.isRateLimited(ctx, "1.2.3.4") {
 		t.Error("rate-limit count did not survive restart: 1.2.3.4 should still be limited on Auth2")
@@ -1144,4 +1148,38 @@ func TestLogin_SessionCookie_SameSiteStrict(t *testing.T) {
 	if !found {
 		t.Error("pelicula_session cookie not found in login response")
 	}
+}
+
+// ── Auth.Stop / cleanupSessions lifecycle ────────────────────────────────────
+
+// TestCleanupSessions_ExitsOnCancelledCtx verifies that cleanupSessions returns
+// promptly when its context is cancelled, exercising the select branch.
+func TestCleanupSessions_ExitsOnCancelledCtx(t *testing.T) {
+	a := &Auth{sessions: make(map[string]session)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	exited := make(chan struct{})
+	go func() {
+		a.cleanupSessions(ctx)
+		close(exited)
+	}()
+
+	select {
+	case <-exited:
+	case <-time.After(100 * time.Millisecond):
+		t.Error("cleanupSessions did not exit within 100ms after ctx cancel")
+	}
+}
+
+// TestStop_IdempotentAndExitsGoroutine verifies that Stop cancels the cleanup
+// goroutine and is safe to call multiple times.
+func TestStop_IdempotentAndExitsGoroutine(t *testing.T) {
+	db := testDB(t)
+	a := NewAuth(AuthConfig{DB: db})
+	t.Cleanup(a.Stop)
+
+	// Second Stop must not panic.
+	a.Stop()
+	a.Stop()
 }

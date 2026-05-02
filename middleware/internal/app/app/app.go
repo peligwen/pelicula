@@ -68,6 +68,26 @@ type App struct {
 	Watchdog        *vpnwatchdog.Watchdog
 }
 
+// Close stops the auth cleanup goroutine and closes the SQLite handles. Safe
+// to call once; subsequent calls are no-ops on nil fields.
+func (a *App) Close() error {
+	if a.Auth != nil {
+		a.Auth.Stop()
+	}
+	var firstErr error
+	if a.MainDB != nil {
+		if err := a.MainDB.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if a.CatalogDB != nil {
+		if err := a.CatalogDB.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // ── IndexerCountCache ──────────────────────────────────────────────────────────
 
 const indexerCountTTL = 5 * time.Minute

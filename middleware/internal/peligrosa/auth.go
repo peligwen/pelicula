@@ -58,6 +58,7 @@ type Auth struct {
 	jellyfin      clients.JellyfinClient // used for Jellyfin auth calls
 	sessions      map[string]session
 	mu            sync.RWMutex
+	cancel        context.CancelFunc
 }
 
 // AuthConfig holds parameters for NewAuth.
@@ -83,8 +84,17 @@ func NewAuth(cfg AuthConfig) *Auth {
 	slog.Info("auth: Jellyfin credentials required for login", "component", "auth")
 	// Restore persisted sessions from DB into the in-memory map on startup.
 	a.loadSessionsFromDB()
-	go a.cleanupSessions()
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancel = cancel
+	go a.cleanupSessions(ctx)
 	return a
+}
+
+// Stop cancels the cleanup goroutine. Safe to call multiple times.
+func (a *Auth) Stop() {
+	if a.cancel != nil {
+		a.cancel()
+	}
 }
 
 // Roles returns the roles store. Returns nil when a is nil (e.g. tests using
@@ -113,28 +123,36 @@ func (a *Auth) loadSessionsFromDB() {
 
 // cleanupSessions periodically removes expired sessions and stale rate-limit
 // entries to prevent unbounded DB growth.
-func (a *Auth) cleanupSessions() {
+func (a *Auth) cleanupSessions(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		now := time.Now()
-		a.mu.Lock()
-		for token, sess := range a.sessions {
-			if now.After(sess.expiry) {
-				delete(a.sessions, token)
-			}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.purgeExpiredSessions(ctx)
 		}
-		a.mu.Unlock()
+	}
+}
 
-		ctx := context.Background()
-		if a.sessionsStore != nil {
-			if err := a.sessionsStore.PruneExpired(ctx); err != nil {
-				slog.Warn("cleanup: failed to delete expired sessions", "component", "auth", "error", err)
-			}
-			// Prune rate-limit rows whose window has long expired (2× the window).
-			if err := a.sessionsStore.PruneRateLimit(ctx, now.Add(-2*rateLimitWindow)); err != nil {
-				slog.Warn("cleanup: failed to prune rate-limit entries", "component", "auth", "error", err)
-			}
+func (a *Auth) purgeExpiredSessions(ctx context.Context) {
+	now := time.Now()
+	a.mu.Lock()
+	for token, sess := range a.sessions {
+		if now.After(sess.expiry) {
+			delete(a.sessions, token)
+		}
+	}
+	a.mu.Unlock()
+
+	if a.sessionsStore != nil {
+		if err := a.sessionsStore.PruneExpired(ctx); err != nil {
+			slog.Warn("cleanup: failed to delete expired sessions", "component", "auth", "error", err)
+		}
+		// Prune rate-limit rows whose window has long expired (2× the window).
+		if err := a.sessionsStore.PruneRateLimit(ctx, now.Add(-2*rateLimitWindow)); err != nil {
+			slog.Warn("cleanup: failed to prune rate-limit entries", "component", "auth", "error", err)
 		}
 	}
 }

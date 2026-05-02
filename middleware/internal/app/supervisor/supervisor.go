@@ -6,6 +6,7 @@ package supervisor
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	pelapp "pelicula-api/internal/app/app"
@@ -14,12 +15,27 @@ import (
 )
 
 // Run launches all background goroutines. It returns immediately; goroutines
-// are tied to ctx and exit when it is cancelled.
-func Run(ctx context.Context, a *pelapp.App) {
-	go a.SSEPoller.Run(ctx)
-	go catalog.RunQueuePoller(ctx, a.CatalogDB, a.Svc, a.URLs.Radarr, a.URLs.Sonarr)
+// are tied to ctx and exit when it is cancelled. The returned WaitGroup drains
+// to zero once every goroutine has exited — callers should Wait after ctx
+// cancel to avoid racing ongoing writes at shutdown.
+func Run(ctx context.Context, a *pelapp.App) *sync.WaitGroup {
+	var wg sync.WaitGroup
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		a.SSEPoller.Run(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		catalog.RunQueuePoller(ctx, a.CatalogDB, a.Svc, a.URLs.Radarr, a.URLs.Sonarr)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		if err := a.Autowirer.Run(ctx); err != nil {
 			slog.Error("autowire failed", "component", "supervisor", "error", err)
 		}
@@ -27,9 +43,19 @@ func Run(ctx context.Context, a *pelapp.App) {
 
 	mw := missingwatcher.New(a.Svc, a.URLs.Sonarr, a.URLs.Radarr)
 	mw.CatalogCache = a.ArrCatalogCache
-	go mw.Run(ctx, 10*time.Minute)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mw.Run(ctx, 10*time.Minute)
+	}()
 
 	if a.Watchdog != nil {
-		go a.Watchdog.Run(ctx)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.Watchdog.Run(ctx)
+		}()
 	}
+
+	return &wg
 }

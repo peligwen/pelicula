@@ -59,7 +59,7 @@ func main() {
 	// Wire the one remaining cmd-level global (used by handleJobsList in jobs.go).
 	services = a.Svc
 
-	supervisor.Run(ctx, a)
+	wg := supervisor.Run(ctx, a)
 
 	mux := http.NewServeMux()
 	router.Register(mux, router.Config{
@@ -86,6 +86,25 @@ func main() {
 
 	slog.Info("listening", "component", "main", "addr", ":8181", "version", appservices.Version)
 	serveWithShutdown(ctx, ":8181", httpx.RecoverMiddleware(mux))
+
+	// Drain background goroutines before closing resources. The 5s cap
+	// prevents a misbehaving goroutine from blocking the process indefinitely.
+	shutdownDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(shutdownDone)
+	}()
+	t := time.NewTimer(5 * time.Second)
+	defer t.Stop()
+	select {
+	case <-shutdownDone:
+	case <-t.C:
+		slog.Warn("background goroutines did not exit within 5s", "component", "main")
+	}
+
+	if err := a.Close(); err != nil {
+		slog.Error("app close", "err", err, "component", "main")
+	}
 }
 
 func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {

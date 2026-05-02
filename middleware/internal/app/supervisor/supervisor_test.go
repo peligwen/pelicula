@@ -6,8 +6,12 @@ import (
 	"testing"
 	"time"
 
+	pelapp "pelicula-api/internal/app/app"
+	"pelicula-api/internal/app/autowire"
 	"pelicula-api/internal/app/missingwatcher"
 	appservices "pelicula-api/internal/app/services"
+	"pelicula-api/internal/app/sse"
+	"pelicula-api/internal/app/supervisor"
 	"pelicula-api/internal/app/vpnwatchdog"
 	"pelicula-api/internal/clients/docker"
 	gluetunclient "pelicula-api/internal/clients/gluetun"
@@ -61,5 +65,47 @@ func TestSupervisor_GoroutinesExitOnCtxCancel(t *testing.T) {
 		// success
 	case <-time.After(500 * time.Millisecond):
 		t.Error("goroutines did not exit within 500ms of ctx cancellation")
+	}
+}
+
+// TestRun_WaitsForGoroutines verifies that supervisor.Run returns a non-nil
+// *sync.WaitGroup and that wg.Wait() returns promptly after ctx cancel.
+func TestRun_WaitsForGoroutines(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so all goroutines exit on first ctx.Done() check
+
+	svc := appservices.New(&config.Config{}, "")
+	svc.SetWired(true)
+
+	hub := sse.NewHub()
+	poller := sse.NewPoller(hub, svc, "", nil)
+	autowirer, _ := autowire.NewAutowirer(autowire.Config{Svc: svc})
+
+	a := &pelapp.App{
+		Svc:       svc,
+		SSEHub:    hub,
+		SSEPoller: poller,
+		Autowirer: autowirer,
+		// CatalogDB, ArrCatalogCache, Watchdog intentionally nil/zero:
+		// RunQueuePoller skips DB ops when keys are empty; mw.CatalogCache
+		// is set to nil (zero value); Watchdog is nil-guarded in Run.
+	}
+
+	wg := supervisor.Run(ctx, a)
+	if wg == nil {
+		t.Fatal("supervisor.Run returned nil WaitGroup")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(500 * time.Millisecond):
+		t.Error("wg.Wait() did not return within 500ms after ctx cancel")
 	}
 }
