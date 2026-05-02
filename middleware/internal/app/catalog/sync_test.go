@@ -93,22 +93,22 @@ type stubArrBackfill struct {
 func (s *stubArrBackfill) Keys() (sonarr, radarr, prowlarr string) {
 	return "sk", "rk", ""
 }
-func (s *stubArrBackfill) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrBackfill) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	if s.doGet != nil {
 		return s.doGet(baseURL, apiKey, path)
 	}
 	return nil, fmt.Errorf("stub: unexpected ArrGet %q", path)
 }
-func (s *stubArrBackfill) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrBackfill) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubArrBackfill) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrBackfill) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubArrBackfill) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrBackfill) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubArrBackfill) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+func (s *stubArrBackfill) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	return nil, nil
 }
 

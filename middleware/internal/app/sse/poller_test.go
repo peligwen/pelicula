@@ -19,7 +19,7 @@ type stubSvc struct {
 
 func (s *stubSvc) CheckHealth() map[string]string { return map[string]string{} }
 func (s *stubSvc) IsWired() bool                  { return false }
-func (s *stubSvc) QbtGet(path string) ([]byte, error) {
+func (s *stubSvc) QbtGet(_ context.Context, path string) ([]byte, error) {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	s.qbtHandler.ServeHTTP(rec, req)

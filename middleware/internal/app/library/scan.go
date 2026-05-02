@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -199,8 +200,9 @@ func (h *Handler) HandleLibraryScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingMovies := h.loadExistingMovieIDs(radarrKey)
-	existingSeries := h.loadExistingSeriesIDs(sonarrKey)
+	ctx := r.Context()
+	existingMovies := h.loadExistingMovieIDs(ctx, radarrKey)
+	existingSeries := h.loadExistingSeriesIDs(ctx, sonarrKey)
 
 	// Lookup cache to avoid hammering the *arr APIs with duplicate titles.
 	cache := make(map[string]*MediaMatch)
@@ -223,7 +225,7 @@ func (h *Handler) HandleLibraryScan(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			for j := range jobs {
 				results[j.idx] = h.matchFile(
-					j.file, radarrKey, sonarrKey,
+					ctx, j.file, radarrKey, sonarrKey,
 					existingMovies, existingSeries,
 					cache, &cacheMu,
 				)
@@ -270,8 +272,8 @@ func (h *Handler) HandleLibraryScan(w http.ResponseWriter, r *http.Request) {
 // ── *arr helpers ──────────────────────────────────────────────────────────────
 
 // loadExistingMovieIDs returns a set of tmdbIds already in Radarr.
-func (h *Handler) loadExistingMovieIDs(apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(h.RadarrURL, apiKey, "/api/v3/movie")
+func (h *Handler) loadExistingMovieIDs(ctx context.Context, apiKey string) map[int]bool {
+	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey, "/api/v3/movie")
 	if err != nil {
 		return nil
 	}
@@ -287,8 +289,8 @@ func (h *Handler) loadExistingMovieIDs(apiKey string) map[int]bool {
 }
 
 // loadExistingSeriesIDs returns a set of tvdbIds already in Sonarr.
-func (h *Handler) loadExistingSeriesIDs(apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(h.SonarrURL, apiKey, "/api/v3/series")
+func (h *Handler) loadExistingSeriesIDs(ctx context.Context, apiKey string) map[int]bool {
+	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey, "/api/v3/series")
 	if err != nil {
 		return nil
 	}
@@ -304,8 +306,8 @@ func (h *Handler) loadExistingSeriesIDs(apiKey string) map[int]bool {
 }
 
 // loadProfileNameMap returns name → id for quality profiles.
-func (h *Handler) loadProfileNameMap(baseURL, apiKey string) (map[string]int, error) {
-	data, err := h.Svc.ArrGet(baseURL, apiKey, "/api/v3/qualityprofile")
+func (h *Handler) loadProfileNameMap(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
+	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/qualityprofile")
 	if err != nil {
 		return nil, err
 	}

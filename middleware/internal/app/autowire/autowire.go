@@ -47,11 +47,11 @@ type ArrSvc interface {
 	// SetWired marks the service as fully wired.
 	SetWired(v bool)
 	// ArrGet makes a GET request to a *arr service.
-	ArrGet(baseURL, apiKey, path string) ([]byte, error)
+	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
 	// ArrPost makes a POST request to a *arr service.
-	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 	// ArrPut makes a PUT request to a *arr service.
-	ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 	// HTTPClient returns the shared HTTP client (used for health polling).
 	HTTPClient() *http.Client
 	// ConfigDir returns the config directory root (e.g. "/config").
@@ -165,10 +165,10 @@ func (a *Autowirer) Run(ctx context.Context) error {
 			slog.Warn("Prowlarr API key not found — skipping download client and indexer wiring", "component", "autowire")
 			prowlarrWired = false
 		} else {
-			sonarrWired = a.wireDownloadClient("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", "tv-sonarr")
-			radarrWired = a.wireDownloadClient("Radarr", a.urls.Radarr, radarrKey, "/api/v3", "radarr")
-			prowlarrWired = a.wireProwlarrApp("Sonarr", a.urls.Sonarr, sonarrKey) &&
-				a.wireProwlarrApp("Radarr", a.urls.Radarr, radarrKey)
+			sonarrWired = a.wireDownloadClient(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", "tv-sonarr")
+			radarrWired = a.wireDownloadClient(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3", "radarr")
+			prowlarrWired = a.wireProwlarrApp(ctx, "Sonarr", a.urls.Sonarr, sonarrKey) &&
+				a.wireProwlarrApp(ctx, "Radarr", a.urls.Radarr, radarrKey)
 		}
 	} else {
 		slog.Info("VPN not configured — skipping download client and indexer wiring", "component", "autowire")
@@ -178,21 +178,21 @@ func (a *Autowirer) Run(ctx context.Context) error {
 	for _, lib := range a.getLibraries() {
 		switch lib.Arr {
 		case "sonarr":
-			a.wireRootFolder("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", lib.ContainerPath)
+			a.wireRootFolder(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3", lib.ContainerPath)
 		case "radarr":
-			a.wireRootFolder("Radarr", a.urls.Radarr, radarrKey, "/api/v3", lib.ContainerPath)
+			a.wireRootFolder(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3", lib.ContainerPath)
 		}
 	}
 
 	// Wire default release profile (demotes REMUX/4K releases) unless opted out.
 	if os.Getenv("PELICULA_DEFAULT_RELEASE_PROFILE") != "false" {
-		a.wireReleaseProfile("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
-		a.wireReleaseProfile("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+		a.wireReleaseProfile(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
+		a.wireReleaseProfile(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3")
 	}
 
 	// Wire Procula import webhooks (useful even without VPN, for manual imports).
-	a.wireImportWebhook("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
-	a.wireImportWebhook("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+	a.wireImportWebhook(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
+	a.wireImportWebhook(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3")
 
 	// Auto-configure Jellyfin (via callback into cmd/).
 	a.wireJellyfin()
@@ -205,8 +205,8 @@ func (a *Autowirer) Run(ctx context.Context) error {
 		a.invalidateIdx()
 		slog.Info("all services wired successfully", "component", "autowire")
 		// Force health re-check so stale "connection refused" errors clear from the *arr UI.
-		a.triggerHealthCheck("Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
-		a.triggerHealthCheck("Radarr", a.urls.Radarr, radarrKey, "/api/v3")
+		a.triggerHealthCheck(ctx, "Sonarr", a.urls.Sonarr, sonarrKey, "/api/v3")
+		a.triggerHealthCheck(ctx, "Radarr", a.urls.Radarr, radarrKey, "/api/v3")
 	} else {
 		slog.Warn("some wiring failed — check logs above", "component", "autowire")
 	}
@@ -215,8 +215,8 @@ func (a *Autowirer) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a *Autowirer) triggerHealthCheck(name, baseURL, apiKey, apiPath string) {
-	_, err := a.svc.ArrPost(baseURL, apiKey, apiPath+"/command", map[string]string{"name": "CheckHealth"})
+func (a *Autowirer) triggerHealthCheck(ctx context.Context, name, baseURL, apiKey, apiPath string) {
+	_, err := a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/command", map[string]string{"name": "CheckHealth"})
 	if err != nil {
 		slog.Warn("failed to trigger health check", "component", "autowire", "service", name, "error", err)
 	}
@@ -264,8 +264,8 @@ func (a *Autowirer) waitForServices(ctx context.Context) error {
 	return fmt.Errorf("timeout waiting for services")
 }
 
-func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category string) bool {
-	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/downloadclient")
+func (a *Autowirer) wireDownloadClient(ctx context.Context, name, baseURL, apiKey, apiPath, category string) bool {
+	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/downloadclient")
 	if err != nil {
 		slog.Error("failed to check download clients", "component", "autowire", "service", name, "error", err)
 		return false
@@ -305,7 +305,7 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 			slog.Info("qBittorrent already configured, skipping", "component", "autowire", "service", name)
 			return true
 		}
-		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/downloadclient/%d", apiPath, c.ID), c)
+		_, err = a.svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/downloadclient/%d", apiPath, c.ID), c)
 		if err != nil {
 			slog.Error("failed to update qBittorrent download client", "component", "autowire", "service", name, "error", err)
 			return false
@@ -330,7 +330,7 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 		},
 	}
 
-	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/downloadclient", payload)
+	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/downloadclient", payload)
 	if err != nil {
 		slog.Error("failed to add qBittorrent download client", "component", "autowire", "service", name, "error", err)
 		return false
@@ -340,8 +340,8 @@ func (a *Autowirer) wireDownloadClient(name, baseURL, apiKey, apiPath, category 
 	return true
 }
 
-func (a *Autowirer) wireRootFolder(name, baseURL, apiKey, apiPath, folderPath string) bool {
-	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/rootfolder")
+func (a *Autowirer) wireRootFolder(ctx context.Context, name, baseURL, apiKey, apiPath, folderPath string) bool {
+	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/rootfolder")
 	if err != nil {
 		slog.Error("failed to check root folders", "component", "autowire", "service", name, "error", err)
 		return false
@@ -360,7 +360,7 @@ func (a *Autowirer) wireRootFolder(name, baseURL, apiKey, apiPath, folderPath st
 		}
 	}
 
-	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/rootfolder", map[string]any{"path": folderPath})
+	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/rootfolder", map[string]any{"path": folderPath})
 	if err != nil {
 		slog.Error("failed to add root folder", "component", "autowire", "service", name, "path", folderPath, "error", err)
 		return false
@@ -374,8 +374,8 @@ var desiredReleaseProfileIgnored = []string{
 	"REMUX", "BluRay-2160p", "WEB-2160p", "WEBDL-2160p", "HDR10+", "DV ",
 }
 
-func (a *Autowirer) wireReleaseProfile(name, baseURL, apiKey, apiPath string) {
-	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/releaseprofile")
+func (a *Autowirer) wireReleaseProfile(ctx context.Context, name, baseURL, apiKey, apiPath string) {
+	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/releaseprofile")
 	if err != nil {
 		slog.Error("failed to check release profiles", "component", "autowire", "service", name, "error", err)
 		return
@@ -417,7 +417,7 @@ func (a *Autowirer) wireReleaseProfile(name, baseURL, apiKey, apiPath string) {
 		}
 
 		p.Ignored = desiredReleaseProfileIgnored
-		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/releaseprofile/%d", apiPath, p.ID), p)
+		_, err = a.svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/releaseprofile/%d", apiPath, p.ID), p)
 		if err != nil {
 			slog.Error("failed to update release profile", "component", "autowire", "service", name, "error", err)
 			return
@@ -434,7 +434,7 @@ func (a *Autowirer) wireReleaseProfile(name, baseURL, apiKey, apiPath string) {
 		IndexerID: 0,
 		Tags:      []int{},
 	}
-	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/releaseprofile", payload)
+	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/releaseprofile", payload)
 	if err != nil {
 		slog.Error("failed to add release profile", "component", "autowire", "service", name, "error", err)
 		return
@@ -444,8 +444,8 @@ func (a *Autowirer) wireReleaseProfile(name, baseURL, apiKey, apiPath string) {
 
 // wireImportWebhook adds a Procula import webhook notification to a *arr app.
 // It is idempotent and corrects stale URL or webhook-secret drift via PUT.
-func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
-	data, err := a.svc.ArrGet(baseURL, apiKey, apiPath+"/notification")
+func (a *Autowirer) wireImportWebhook(ctx context.Context, name, baseURL, apiKey, apiPath string) {
+	data, err := a.svc.ArrGet(ctx, baseURL, apiKey, apiPath+"/notification")
 	if err != nil {
 		slog.Error("failed to check notifications", "component", "autowire", "service", name, "error", err)
 		return
@@ -510,7 +510,7 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 			slog.Info("Procula webhook already configured, skipping", "component", "autowire", "service", name)
 			return
 		}
-		_, err = a.svc.ArrPut(baseURL, apiKey, fmt.Sprintf("%s/notification/%d", apiPath, n.ID), n)
+		_, err = a.svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/notification/%d", apiPath, n.ID), n)
 		if err != nil {
 			slog.Error("failed to update Procula webhook", "component", "autowire", "service", name, "error", err)
 			return
@@ -545,7 +545,7 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 		OnApplicationUpdate: false,
 	}
 
-	_, err = a.svc.ArrPost(baseURL, apiKey, apiPath+"/notification", payload)
+	_, err = a.svc.ArrPost(ctx, baseURL, apiKey, apiPath+"/notification", payload)
 	if err != nil {
 		slog.Error("failed to add Procula webhook", "component", "autowire", "service", name, "error", err)
 		return
@@ -553,8 +553,8 @@ func (a *Autowirer) wireImportWebhook(name, baseURL, apiKey, apiPath string) {
 	slog.Info("added Procula import webhook", "component", "autowire", "service", name, "url", hookURL)
 }
 
-func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
-	data, err := a.svc.ArrGet(a.urls.Prowlarr, a.svc.GetProwlarrKey(), "/api/v1/applications")
+func (a *Autowirer) wireProwlarrApp(ctx context.Context, appName, appURL, appAPIKey string) bool {
+	data, err := a.svc.ArrGet(ctx, a.urls.Prowlarr, a.svc.GetProwlarrKey(), "/api/v1/applications")
 	if err != nil {
 		slog.Error("failed to check Prowlarr applications", "component", "autowire", "error", err)
 		return false
@@ -595,7 +595,7 @@ func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
 
 		app.Fields.Set("prowlarrUrl", a.urls.Prowlarr)
 		app.Fields.Set("apiKey", appAPIKey)
-		_, err = a.svc.ArrPut(a.urls.Prowlarr, prowlarrKey, fmt.Sprintf("/api/v1/applications/%d", app.ID), app)
+		_, err = a.svc.ArrPut(ctx, a.urls.Prowlarr, prowlarrKey, fmt.Sprintf("/api/v1/applications/%d", app.ID), app)
 		if err != nil {
 			slog.Error("failed to update Prowlarr app", "component", "autowire", "app", appName, "error", err)
 			return false
@@ -616,7 +616,7 @@ func (a *Autowirer) wireProwlarrApp(appName, appURL, appAPIKey string) bool {
 		},
 	}
 
-	_, err = a.svc.ArrPost(a.urls.Prowlarr, prowlarrKey, "/api/v1/applications", payload)
+	_, err = a.svc.ArrPost(ctx, a.urls.Prowlarr, prowlarrKey, "/api/v1/applications", payload)
 	if err != nil {
 		slog.Error("failed to connect Prowlarr app", "component", "autowire", "app", appName, "error", err)
 		return false

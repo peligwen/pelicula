@@ -7,6 +7,7 @@
 package library
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,8 +24,8 @@ import (
 // ArrClient is the subset of ServiceClients that the library package needs.
 type ArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(baseURL, apiKey, path string) ([]byte, error)
-	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
+	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 }
 
 // ForwardToProculaFunc is a callback that creates a Procula pipeline job.

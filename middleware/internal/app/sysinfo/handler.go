@@ -4,6 +4,7 @@
 package sysinfo
 
 import (
+	"context"
 	"net/http"
 
 	"pelicula-api/internal/clients/docker"
@@ -13,7 +14,7 @@ import (
 // needs to fetch movie and series counts.
 type LibraryClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(baseURL, apiKey, path string) ([]byte, error)
+	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
 }
 
 // Handler holds injected dependencies for the sysinfo handlers.

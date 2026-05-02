@@ -32,13 +32,13 @@ type stubArr struct {
 func (s *stubArr) Keys() (sonarr, radarr, prowlarr string) {
 	return s.sonarrKey, s.radarrKey, s.prowlarrKey
 }
-func (s *stubArr) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArr) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	if s.doGet != nil {
 		return s.doGet(baseURL, apiKey, path)
 	}
 	return nil, fmt.Errorf("stub: unexpected ArrGet baseURL=%q path=%q", baseURL, path)
 }
-func (s *stubArr) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArr) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	if s.doPost != nil {
 		return s.doPost(baseURL, apiKey, path, payload)
 	}
@@ -437,11 +437,11 @@ func TestCachedIndexerSearch_TTL(t *testing.T) {
 	h.now = func() time.Time { return faketime }
 
 	// First call — cache miss.
-	if _, err := h.cachedIndexerSearch("dune"); err != nil {
+	if _, err := h.cachedIndexerSearch(context.Background(), "dune"); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
 	// Second call within TTL — cache hit, no upstream.
-	if _, err := h.cachedIndexerSearch("dune"); err != nil {
+	if _, err := h.cachedIndexerSearch(context.Background(), "dune"); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
 	if calls.Load() != 1 {
@@ -452,7 +452,7 @@ func TestCachedIndexerSearch_TTL(t *testing.T) {
 	faketime = faketime.Add(indexerSearchTTL + time.Second)
 
 	// Third call — should miss.
-	if _, err := h.cachedIndexerSearch("dune"); err != nil {
+	if _, err := h.cachedIndexerSearch(context.Background(), "dune"); err != nil {
 		t.Fatalf("third call: %v", err)
 	}
 	if calls.Load() != 2 {
@@ -485,8 +485,8 @@ func TestCachedIndexerSearch_LazyEviction(t *testing.T) {
 	h.now = func() time.Time { return faketime }
 
 	// Prime A and B.
-	h.cachedIndexerSearch("alpha") //nolint:errcheck
-	h.cachedIndexerSearch("beta")  //nolint:errcheck
+	h.cachedIndexerSearch(context.Background(), "alpha") //nolint:errcheck
+	h.cachedIndexerSearch(context.Background(), "beta")  //nolint:errcheck
 
 	h.cache.mu.Lock()
 	if len(h.cache.entries) != 2 {
@@ -499,7 +499,7 @@ func TestCachedIndexerSearch_LazyEviction(t *testing.T) {
 	faketime = faketime.Add(indexerSearchTTL + time.Second)
 
 	// Query a new key C — the lazy eviction loop runs inside cachedIndexerSearch.
-	h.cachedIndexerSearch("gamma") //nolint:errcheck
+	h.cachedIndexerSearch(context.Background(), "gamma") //nolint:errcheck
 
 	h.cache.mu.Lock()
 	defer h.cache.mu.Unlock()

@@ -2,6 +2,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -69,11 +70,12 @@ func (h *Handler) HandleNotificationsProxy(w http.ResponseWriter, r *http.Reques
 
 	// ── Sonarr history ────────────────────────────────────────────────────────
 	sonarrKey, radarrKey, _ := h.GetKeys()
+	ctx := r.Context()
 	if sonarrKey != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			notifs := h.fetchArrHistory(h.SonarrURL, sonarrKey, "sonarr")
+			notifs := h.fetchArrHistory(ctx, h.SonarrURL, sonarrKey, "sonarr")
 			mu.Lock()
 			all = append(all, notifs...)
 			mu.Unlock()
@@ -85,7 +87,7 @@ func (h *Handler) HandleNotificationsProxy(w http.ResponseWriter, r *http.Reques
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			notifs := h.fetchArrHistory(h.RadarrURL, radarrKey, "radarr")
+			notifs := h.fetchArrHistory(ctx, h.RadarrURL, radarrKey, "radarr")
 			mu.Lock()
 			all = append(all, notifs...)
 			mu.Unlock()
@@ -115,8 +117,8 @@ func (h *Handler) HandleNotificationsProxy(w http.ResponseWriter, r *http.Reques
 
 // fetchArrHistory fetches the last 20 history records from a Sonarr or Radarr
 // instance and maps import/failure events into dashboard notifications.
-func (h *Handler) fetchArrHistory(baseURL, apiKey, arrType string) []DashNotif {
-	data, err := h.ArrGet(baseURL, apiKey, "/api/v3/history?pageSize=20&sortKey=date&sortDir=desc")
+func (h *Handler) fetchArrHistory(ctx context.Context, baseURL, apiKey, arrType string) []DashNotif {
+	data, err := h.ArrGet(ctx, baseURL, apiKey, "/api/v3/history?pageSize=20&sortKey=date&sortDir=desc")
 	if err != nil {
 		slog.Warn("fetchArrHistory: request failed", "component", "hooks", "arr_type", arrType, "error", err)
 		return nil

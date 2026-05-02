@@ -226,7 +226,7 @@ func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, 
 }
 
 func backfillRadarr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, apiKey string) error {
-	data, err := svc.ArrGet(radarrURL, apiKey, "/api/v3/movie")
+	data, err := svc.ArrGet(ctx, radarrURL, apiKey, "/api/v3/movie")
 	if err != nil {
 		return fmt.Errorf("radarr list: %w", err)
 	}
@@ -269,7 +269,7 @@ func backfillRadarr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, a
 const episodeConcurrency = 10
 
 func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
-	data, err := svc.ArrGet(sonarrURL, apiKey, "/api/v3/series")
+	data, err := svc.ArrGet(ctx, sonarrURL, apiKey, "/api/v3/series")
 	if err != nil {
 		return fmt.Errorf("sonarr list: %w", err)
 	}
@@ -342,7 +342,7 @@ func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, a
 			defer func() { <-sem }()
 
 			path := "/api/v3/episode?seriesId=" + strconv.Itoa(arrID)
-			epData, err := svc.ArrGet(sonarrURL, apiKey, path)
+			epData, err := svc.ArrGet(ctx, sonarrURL, apiKey, path)
 			if err != nil {
 				slog.Error("backfill: fetch episodes", "component", "catalog_sync",
 					"arr_id", arrID, "error", err)

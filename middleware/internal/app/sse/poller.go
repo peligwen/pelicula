@@ -34,7 +34,7 @@ type StatusCache interface {
 type ServiceQuerier interface {
 	CheckHealth() map[string]string
 	IsWired() bool
-	QbtGet(path string) ([]byte, error)
+	QbtGet(ctx context.Context, path string) ([]byte, error)
 }
 
 // DockerLogsFunc is a function that fetches container logs.
@@ -285,7 +285,7 @@ func (p *Poller) fetchServices(ctx context.Context) ([]byte, error) {
 
 // fetchDownloads fetches raw torrent list and transfer stats from qBittorrent.
 func (p *Poller) fetchDownloads(ctx context.Context) ([]byte, error) {
-	torrentData, err := p.svc.QbtGet("/api/v2/torrents/info")
+	torrentData, err := p.svc.QbtGet(ctx, "/api/v2/torrents/info")
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (p *Poller) fetchDownloads(ctx context.Context) ([]byte, error) {
 	}
 	out := combined{Torrents: torrentData}
 
-	if statsData, err := p.svc.QbtGet("/api/v2/transfer/info"); err == nil {
+	if statsData, err := p.svc.QbtGet(ctx, "/api/v2/transfer/info"); err == nil {
 		out.Stats = statsData
 	}
 

@@ -1,6 +1,7 @@
 package sysinfo
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,7 +39,7 @@ func handleHost(h *Handler, w http.ResponseWriter, r *http.Request) {
 	resp := hostResponse{
 		UptimeSeconds: readUptime(),
 		Disk:          diskStats(),
-		Library:       libraryCounts(h),
+		Library:       libraryCounts(r.Context(), h),
 	}
 	httputil.WriteJSON(w, resp)
 }
@@ -79,17 +80,17 @@ func diskStats() hostDisk {
 }
 
 // libraryCounts queries Radarr and Sonarr for movie/series counts.
-func libraryCounts(h *Handler) hostLibrary {
+func libraryCounts(ctx context.Context, h *Handler) hostLibrary {
 	sonarrKey, radarrKey, _ := h.Svc.Keys()
 	lib := hostLibrary{}
 
 	if radarrKey != "" {
-		if body, err := h.Svc.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie"); err == nil {
+		if body, err := h.Svc.ArrGet(ctx, h.RadarrURL, radarrKey, "/api/v3/movie"); err == nil {
 			lib.Movies = jsonArrayLen(body)
 		}
 	}
 	if sonarrKey != "" {
-		if body, err := h.Svc.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series"); err == nil {
+		if body, err := h.Svc.ArrGet(ctx, h.SonarrURL, sonarrKey, "/api/v3/series"); err == nil {
 			lib.Series = jsonArrayLen(body)
 		}
 	}

@@ -119,10 +119,9 @@ func (h *Handler) importRequests(ctx context.Context, requests []peligrosa.Reque
 
 // importMovies restores movies from a backup into Radarr.
 func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []MovieExport, result *ImportResult, mu *sync.Mutex) {
-	_ = ctx // wired for when ArrClient adopts ctx (R16.5)
-	existing := h.loadExistingMovieIDs(apiKey)
-	profMap, _ := h.loadProfileNameMap(h.RadarrURL, apiKey)
-	tagMap, _ := h.ensureTags(h.RadarrURL, apiKey, collectMovieTags(movies))
+	existing := h.loadExistingMovieIDs(ctx, apiKey)
+	profMap, _ := h.loadProfileNameMap(ctx, h.RadarrURL, apiKey)
+	tagMap, _ := h.ensureTags(ctx, h.RadarrURL, apiKey, collectMovieTags(movies))
 
 	radarrRoot := h.Lib.FirstLibraryPath("radarr", "/media/movies")
 
@@ -157,7 +156,7 @@ func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []Movi
 			},
 		}
 
-		if _, err := h.Svc.ArrPost(h.RadarrURL, apiKey, "/api/v3/movie", payload); err != nil {
+		if _, err := h.Svc.ArrPost(ctx, h.RadarrURL, apiKey, "/api/v3/movie", payload); err != nil {
 			mu.Lock()
 			result.MoviesFailed++
 			result.Errors = append(result.Errors, fmt.Sprintf("movie %q (tmdb:%d): %v", m.Title, m.TmdbID, err))
@@ -173,10 +172,9 @@ func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []Movi
 
 // importSeries restores series from a backup into Sonarr.
 func (h *Handler) importSeries(ctx context.Context, apiKey string, series []SeriesExport, result *ImportResult, mu *sync.Mutex) {
-	_ = ctx // wired for when ArrClient adopts ctx (R16.5)
-	existing := h.loadExistingSeriesIDs(apiKey)
-	profMap, _ := h.loadProfileNameMap(h.SonarrURL, apiKey)
-	tagMap, _ := h.ensureTags(h.SonarrURL, apiKey, collectSeriesTags(series))
+	existing := h.loadExistingSeriesIDs(ctx, apiKey)
+	profMap, _ := h.loadProfileNameMap(ctx, h.SonarrURL, apiKey)
+	tagMap, _ := h.ensureTags(ctx, h.SonarrURL, apiKey, collectSeriesTags(series))
 
 	sonarrRoot := h.Lib.FirstLibraryPath("sonarr", "/media/tv")
 
@@ -221,7 +219,7 @@ func (h *Handler) importSeries(ctx context.Context, apiKey string, series []Seri
 			},
 		}
 
-		if _, err := h.Svc.ArrPost(h.SonarrURL, apiKey, "/api/v3/series", payload); err != nil {
+		if _, err := h.Svc.ArrPost(ctx, h.SonarrURL, apiKey, "/api/v3/series", payload); err != nil {
 			mu.Lock()
 			result.SeriesFailed++
 			result.Errors = append(result.Errors, fmt.Sprintf("series %q (tvdb:%d): %v", s.Title, s.TvdbID, err))
@@ -238,8 +236,8 @@ func (h *Handler) importSeries(ctx context.Context, apiKey string, series []Seri
 // ── Restore-only map helpers ──────────────────────────────────────────────────
 
 // loadProfileNameMap returns name → id for quality profiles (used during restore).
-func (h *Handler) loadProfileNameMap(baseURL, apiKey string) (map[string]int, error) {
-	data, err := h.Svc.ArrGet(baseURL, apiKey, "/api/v3/qualityprofile")
+func (h *Handler) loadProfileNameMap(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
+	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/qualityprofile")
 	if err != nil {
 		return nil, err
 	}
@@ -255,8 +253,8 @@ func (h *Handler) loadProfileNameMap(baseURL, apiKey string) (map[string]int, er
 }
 
 // ensureTags creates any missing tags and returns label → id map.
-func (h *Handler) ensureTags(baseURL, apiKey string, labels []string) (map[string]int, error) {
-	data, err := h.Svc.ArrGet(baseURL, apiKey, "/api/v3/tag")
+func (h *Handler) ensureTags(ctx context.Context, baseURL, apiKey string, labels []string) (map[string]int, error) {
+	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/tag")
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +271,7 @@ func (h *Handler) ensureTags(baseURL, apiKey string, labels []string) (map[strin
 		if _, ok := m[label]; ok {
 			continue
 		}
-		resp, err := h.Svc.ArrPost(baseURL, apiKey, "/api/v3/tag", map[string]any{"label": label})
+		resp, err := h.Svc.ArrPost(ctx, baseURL, apiKey, "/api/v3/tag", map[string]any{"label": label})
 		if err != nil {
 			continue // non-fatal: missing tag just won't be applied
 		}
@@ -286,8 +284,8 @@ func (h *Handler) ensureTags(baseURL, apiKey string, labels []string) (map[strin
 }
 
 // loadExistingMovieIDs returns a set of tmdbIds already in Radarr.
-func (h *Handler) loadExistingMovieIDs(apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(h.RadarrURL, apiKey, "/api/v3/movie")
+func (h *Handler) loadExistingMovieIDs(ctx context.Context, apiKey string) map[int]bool {
+	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey, "/api/v3/movie")
 	if err != nil {
 		return nil
 	}
@@ -303,8 +301,8 @@ func (h *Handler) loadExistingMovieIDs(apiKey string) map[int]bool {
 }
 
 // loadExistingSeriesIDs returns a set of tvdbIds already in Sonarr.
-func (h *Handler) loadExistingSeriesIDs(apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(h.SonarrURL, apiKey, "/api/v3/series")
+func (h *Handler) loadExistingSeriesIDs(ctx context.Context, apiKey string) map[int]bool {
+	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey, "/api/v3/series")
 	if err != nil {
 		return nil
 	}

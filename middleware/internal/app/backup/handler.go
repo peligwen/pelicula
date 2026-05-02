@@ -1,13 +1,17 @@
 package backup
 
-import "pelicula-api/internal/peligrosa"
+import (
+	"context"
+
+	"pelicula-api/internal/peligrosa"
+)
 
 // ArrClient is the minimal interface the Handler needs to reach *arr services.
 // *ServiceClients from package main satisfies this interface.
 type ArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(baseURL, apiKey, path string) ([]byte, error)
-	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
+	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 }
 
 // LibPathResolver resolves the first available library root path for a given

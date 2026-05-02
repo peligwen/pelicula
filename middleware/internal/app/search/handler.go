@@ -3,6 +3,7 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,8 +22,8 @@ import (
 // ArrClient is the subset of services.Clients that the search package needs.
 type ArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(baseURL, apiKey, path string) ([]byte, error)
-	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
+	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 }
 
 // Handler holds all dependencies for the unified search endpoints.
@@ -77,7 +78,7 @@ type indexerSearchEntry struct {
 
 const indexerSearchTTL = 2 * time.Minute
 
-func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
+func (h *Handler) cachedIndexerSearch(ctx context.Context, query string) ([]byte, error) {
 	_, _, prowlarrKey := h.Services.Keys()
 	key := strings.ToLower(strings.TrimSpace(query))
 
@@ -89,7 +90,7 @@ func (h *Handler) cachedIndexerSearch(query string) ([]byte, error) {
 	h.cache.mu.Unlock()
 
 	path := "/api/v1/search?query=" + url.QueryEscape(query) + "&type=search&limit=100"
-	data, err := h.Services.ArrGet(h.ProwlarrURL, prowlarrKey, path)
+	data, err := h.Services.ArrGet(ctx, h.ProwlarrURL, prowlarrKey, path)
 	if err != nil {
 		return nil, err
 	}
@@ -159,14 +160,14 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
+			data, err := h.Services.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
 			if err != nil {
 				slog.Error("radarr search error", "component", "search", "error", err)
 				return
 			}
 
 			// Get existing movies to check "added" status
-			existingData, _ := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie")
+			existingData, _ := h.Services.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie")
 			existingIDs := make(map[int]bool)
 			var existing []map[string]any
 			if json.Unmarshal(existingData, &existing) == nil {
@@ -205,13 +206,13 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
+			data, err := h.Services.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
 			if err != nil {
 				slog.Error("sonarr search error", "component", "search", "error", err)
 				return
 			}
 
-			existingData, _ := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series")
+			existingData, _ := h.Services.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/series")
 			existingIDs := make(map[int]bool)
 			var existing []map[string]any
 			if json.Unmarshal(existingData, &existing) == nil {
@@ -258,7 +259,7 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := h.cachedIndexerSearch(q)
+			data, err := h.cachedIndexerSearch(r.Context(), q)
 			if err != nil {
 				slog.Warn("prowlarr search unavailable, degrading to unfiltered results", "component", "search", "error", err)
 				return // nil maps = no filtering
@@ -355,13 +356,13 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch req.Type {
 	case "movie":
-		arrID, err = h.addMovieInternal(req.TmdbID, radarrProfileID, radarrRoot)
+		arrID, err = h.addMovieInternal(r.Context(), req.TmdbID, radarrProfileID, radarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	case "series":
-		arrID, err = h.addSeriesInternal(req.TvdbID, sonarrProfileID, sonarrRoot)
+		arrID, err = h.addSeriesInternal(r.Context(), req.TvdbID, sonarrProfileID, sonarrRoot)
 		if err != nil {
 			httputil.WriteError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
 			return
@@ -377,9 +378,9 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 // addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.
 // If profileID is 0 the first available quality profile is used.
 // If rootPath is "" the first radarr library's container path is used.
-func (h *Handler) addMovieInternal(tmdbID, profileID int, rootPath string) (int, error) {
+func (h *Handler) addMovieInternal(ctx context.Context, tmdbID, profileID int, rootPath string) (int, error) {
 	_, radarrKey, _ := h.Services.Keys()
-	data, err := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
+	data, err := h.Services.ArrGet(ctx, h.RadarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
 	if err != nil {
 		return 0, fmt.Errorf("look up movie: %w", err)
 	}
@@ -389,7 +390,7 @@ func (h *Handler) addMovieInternal(tmdbID, profileID int, rootPath string) (int,
 	}
 
 	if profileID == 0 {
-		profData, err := h.Services.ArrGet(h.RadarrURL, radarrKey, "/api/v3/qualityprofile")
+		profData, err := h.Services.ArrGet(ctx, h.RadarrURL, radarrKey, "/api/v3/qualityprofile")
 		if err == nil {
 			var profiles []map[string]any
 			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
@@ -416,7 +417,7 @@ func (h *Handler) addMovieInternal(tmdbID, profileID int, rootPath string) (int,
 			"searchForMovie": true,
 		},
 	}
-	resp, err := h.Services.ArrPost(h.RadarrURL, radarrKey, "/api/v3/movie", payload)
+	resp, err := h.Services.ArrPost(ctx, h.RadarrURL, radarrKey, "/api/v3/movie", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add movie: %w", err)
 	}
@@ -428,9 +429,9 @@ func (h *Handler) addMovieInternal(tmdbID, profileID int, rootPath string) (int,
 // addSeriesInternal adds a series to Sonarr and returns the Sonarr internal ID.
 // If profileID is 0 the first available quality profile is used.
 // If rootPath is "" the first sonarr library's container path is used.
-func (h *Handler) addSeriesInternal(tvdbID, profileID int, rootPath string) (int, error) {
+func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, rootPath string) (int, error) {
 	sonarrKey, _, _ := h.Services.Keys()
-	data, err := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
+	data, err := h.Services.ArrGet(ctx, h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
 	if err != nil {
 		return 0, fmt.Errorf("look up series: %w", err)
 	}
@@ -441,7 +442,7 @@ func (h *Handler) addSeriesInternal(tvdbID, profileID int, rootPath string) (int
 	show := shows[0]
 
 	if profileID == 0 {
-		profData, err := h.Services.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		profData, err := h.Services.ArrGet(ctx, h.SonarrURL, sonarrKey, "/api/v3/qualityprofile")
 		if err == nil {
 			var profiles []map[string]any
 			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
@@ -469,7 +470,7 @@ func (h *Handler) addSeriesInternal(tvdbID, profileID int, rootPath string) (int
 			"searchForMissingEpisodes": true,
 		},
 	}
-	resp, err := h.Services.ArrPost(h.SonarrURL, sonarrKey, "/api/v3/series", payload)
+	resp, err := h.Services.ArrPost(ctx, h.SonarrURL, sonarrKey, "/api/v3/series", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add series: %w", err)
 	}
@@ -501,7 +502,7 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fetchProfiles := func(baseURL, apiKey string) []profileEntry {
-		data, err := h.Services.ArrGet(baseURL, apiKey, "/api/v3/qualityprofile")
+		data, err := h.Services.ArrGet(r.Context(), baseURL, apiKey, "/api/v3/qualityprofile")
 		if err != nil {
 			return nil
 		}
@@ -519,7 +520,7 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 	fetchRoots := func(baseURL, apiKey string) []rootEntry {
-		data, err := h.Services.ArrGet(baseURL, apiKey, "/api/v3/rootfolder")
+		data, err := h.Services.ArrGet(r.Context(), baseURL, apiKey, "/api/v3/rootfolder")
 		if err != nil {
 			return nil
 		}

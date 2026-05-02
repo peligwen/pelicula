@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -813,10 +814,10 @@ func newTestHandler() *Handler {
 type stubArrClient struct{}
 
 func (s *stubArrClient) Keys() (string, string, string) { return "", "", "" }
-func (s *stubArrClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrClient) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	return []byte("[]"), nil
 }
-func (s *stubArrClient) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrClient) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return []byte("{}"), nil
 }
 
@@ -876,10 +877,10 @@ type stubArrClientWithKeys struct {
 }
 
 func (s *stubArrClientWithKeys) Keys() (string, string, string) { return s.sonarr, s.radarr, "" }
-func (s *stubArrClientWithKeys) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrClientWithKeys) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	return []byte("[]"), nil
 }
-func (s *stubArrClientWithKeys) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrClientWithKeys) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return []byte("{}"), nil
 }
 

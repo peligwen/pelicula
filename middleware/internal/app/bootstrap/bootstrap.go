@@ -196,11 +196,11 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 	arrCatalogCache := catalog.NewCatalogCache(
 		func(ctx context.Context) ([]byte, error) {
 			_, radarrKey, _ := catalogCacheSvc.Keys()
-			return catalogCacheSvc.ArrGet(urls.Radarr, radarrKey, "/api/v3/movie")
+			return catalogCacheSvc.ArrGet(ctx, urls.Radarr, radarrKey, "/api/v3/movie")
 		},
 		func(ctx context.Context) ([]byte, error) {
 			sonarrKey, _, _ := catalogCacheSvc.Keys()
-			return catalogCacheSvc.ArrGet(urls.Sonarr, sonarrKey, "/api/v3/series")
+			return catalogCacheSvc.ArrGet(ctx, urls.Sonarr, sonarrKey, "/api/v3/series")
 		},
 	)
 

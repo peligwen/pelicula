@@ -13,7 +13,7 @@ import (
 // QueueArrClient is the subset of ArrClient needed for queue polling.
 type QueueArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
+	ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
 }
 
 // RunQueuePoller polls Radarr and Sonarr's download queues every 60 seconds
@@ -45,7 +45,7 @@ func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, rada
 	anyErr := false
 
 	if radarrKey != "" {
-		records, err := svc.ArrGetAllQueueRecords(radarrURL, radarrKey, "/api/v3", "&includeUnknownMovieItems=false")
+		records, err := svc.ArrGetAllQueueRecords(ctx, radarrURL, radarrKey, "/api/v3", "&includeUnknownMovieItems=false")
 		if err != nil {
 			slog.Error("catalog poller: radarr queue fetch", "component", "catalog_poller", "error", err)
 			anyErr = true
@@ -57,7 +57,7 @@ func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, rada
 	}
 
 	if sonarrKey != "" {
-		records, err := svc.ArrGetAllQueueRecords(sonarrURL, sonarrKey, "/api/v3", "&includeUnknownSeriesItems=false")
+		records, err := svc.ArrGetAllQueueRecords(ctx, sonarrURL, sonarrKey, "/api/v3", "&includeUnknownSeriesItems=false")
 		if err != nil {
 			slog.Error("catalog poller: sonarr queue fetch", "component", "catalog_poller", "error", err)
 			anyErr = true

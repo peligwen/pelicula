@@ -1,6 +1,10 @@
 package search
 
-import "pelicula-api/clients"
+import (
+	"context"
+
+	"pelicula-api/clients"
+)
 
 // ArrFulfiller implements clients.Fulfiller backed by Sonarr/Radarr.
 // It delegates to the Handler's addMovieInternal/addSeriesInternal methods.
@@ -15,9 +19,11 @@ func NewArrFulfiller(handler *Handler) clients.Fulfiller {
 }
 
 func (f *ArrFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
-	return f.handler.addMovieInternal(tmdbID, profileID, rootPath)
+	// Phase 4 will thread the caller's ctx through Fulfiller.AddMovie.
+	return f.handler.addMovieInternal(context.Background(), tmdbID, profileID, rootPath)
 }
 
 func (f *ArrFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
-	return f.handler.addSeriesInternal(tvdbID, profileID, rootPath)
+	// Phase 4 will thread the caller's ctx through Fulfiller.AddSeries.
+	return f.handler.addSeriesInternal(context.Background(), tvdbID, profileID, rootPath)
 }

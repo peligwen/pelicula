@@ -222,7 +222,7 @@ func (h *Handler) HandleLibraryResub(w http.ResponseWriter, r *http.Request) {
 
 	// Try Radarr first.
 	if radarrKey != "" {
-		data, err := h.Svc.ArrGet(h.RadarrURL, radarrKey, "/api/v3/movie?path="+url.QueryEscape(clean))
+		data, err := h.Svc.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie?path="+url.QueryEscape(clean))
 		if err == nil {
 			var movies []map[string]any
 			if json.Unmarshal(data, &movies) == nil {
@@ -238,7 +238,7 @@ func (h *Handler) HandleLibraryResub(w http.ResponseWriter, r *http.Request) {
 
 	// Fall back to Sonarr.
 	if sonarrKey != "" {
-		data, err := h.Svc.ArrGet(h.SonarrURL, sonarrKey, "/api/v3/episodefile?path="+url.QueryEscape(clean))
+		data, err := h.Svc.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/episodefile?path="+url.QueryEscape(clean))
 		if err == nil {
 			var epFiles []map[string]any
 			if json.Unmarshal(data, &epFiles) == nil {

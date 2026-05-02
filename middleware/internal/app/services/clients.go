@@ -223,7 +223,7 @@ func readAPIKey(path string) string {
 // which use the shared client pool and provide better context propagation.
 // New call sites should use arr.Client; arrDo remains for the ~145 existing
 // callers that pre-date arr.Client.
-func (c *Clients) arrDo(method, baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (c *Clients) arrDo(ctx context.Context, method, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -232,7 +232,7 @@ func (c *Clients) arrDo(method, baseURL, apiKey, path string, payload any) ([]by
 		}
 		bodyReader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequest(method, baseURL+path, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -256,18 +256,22 @@ func (c *Clients) arrDo(method, baseURL, apiKey, path string, payload any) ([]by
 }
 
 // ArrGet makes a GET request to a *arr service.
-func (c *Clients) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
-	return c.arrDo("GET", baseURL, apiKey, path, nil)
+func (c *Clients) ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error) {
+	return c.arrDo(ctx, "GET", baseURL, apiKey, path, nil)
 }
 
 // ArrPost makes a POST request to a *arr service.
-func (c *Clients) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return c.arrDo("POST", baseURL, apiKey, path, payload)
+func (c *Clients) ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return c.arrDo(ctx, "POST", baseURL, apiKey, path, payload)
 }
 
 // QbtGet makes a GET request to qBittorrent (via Docker network, auth bypass).
-func (c *Clients) QbtGet(path string) ([]byte, error) {
-	resp, err := c.client.Get(c.qbtURL + path)
+func (c *Clients) QbtGet(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.qbtURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -283,8 +287,8 @@ func (c *Clients) QbtGet(path string) ([]byte, error) {
 }
 
 // QbtPost makes a form-encoded POST request to qBittorrent.
-func (c *Clients) QbtPost(path string, form string) error {
-	req, err := http.NewRequest("POST", c.qbtURL+path, bytes.NewBufferString(form))
+func (c *Clients) QbtPost(ctx context.Context, path string, form string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.qbtURL+path, bytes.NewBufferString(form))
 	if err != nil {
 		return err
 	}
@@ -301,13 +305,13 @@ func (c *Clients) QbtPost(path string, form string) error {
 }
 
 // ArrDelete makes a DELETE request to a *arr service.
-func (c *Clients) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
-	return c.arrDo("DELETE", baseURL, apiKey, path, nil)
+func (c *Clients) ArrDelete(ctx context.Context, baseURL, apiKey, path string) ([]byte, error) {
+	return c.arrDo(ctx, "DELETE", baseURL, apiKey, path, nil)
 }
 
 // ArrPut makes a PUT request to a *arr service.
-func (c *Clients) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return c.arrDo("PUT", baseURL, apiKey, path, payload)
+func (c *Clients) ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return c.arrDo(ctx, "PUT", baseURL, apiKey, path, payload)
 }
 
 // redactedURL returns the URL string with the "apikey" query parameter value
@@ -364,13 +368,13 @@ func (c *Clients) JellyfinGet(ctx context.Context, path, apiKey string) ([]byte,
 }
 
 // ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.
-func (c *Clients) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+func (c *Clients) ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	const pageSize = 100
 	var all []map[string]any
 	page := 1
 	for {
 		path := fmt.Sprintf("%s/queue?pageSize=%d&page=%d%s", apiVer, pageSize, page, extraParams)
-		data, err := c.ArrGet(baseURL, apiKey, path)
+		data, err := c.ArrGet(ctx, baseURL, apiKey, path)
 		if err != nil {
 			return all, err
 		}

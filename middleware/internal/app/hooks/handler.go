@@ -5,6 +5,7 @@
 package hooks
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 
@@ -43,7 +44,7 @@ type Handler struct {
 
 	// ArrGet fetches a JSON endpoint from a *arr service using its API key.
 	// Signature matches ServiceClients.ArrGet.
-	ArrGet func(baseURL, apiKey, path string) ([]byte, error)
+	ArrGet func(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
 
 	// CatalogDB is the catalog SQLite handle used for UpsertFromHook.
 	CatalogDB *sql.DB

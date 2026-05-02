@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,7 +34,7 @@ type stubClient struct {
 	arrDeleteCalled bool
 }
 
-func (s *stubClient) QbtGet(path string) ([]byte, error) {
+func (s *stubClient) QbtGet(_ context.Context, path string) ([]byte, error) {
 	if s.qbtGetErr != nil {
 		return nil, s.qbtGetErr
 	}
@@ -43,7 +44,7 @@ func (s *stubClient) QbtGet(path string) ([]byte, error) {
 	return []byte("null"), nil
 }
 
-func (s *stubClient) QbtPost(path, form string) error {
+func (s *stubClient) QbtPost(_ context.Context, path, form string) error {
 	return s.qbtPostErr
 }
 
@@ -51,7 +52,7 @@ func (s *stubClient) Keys() (sonarr, radarr, prowlarr string) {
 	return s.keysRet[0], s.keysRet[1], s.keysRet[2]
 }
 
-func (s *stubClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubClient) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	if s.arrGetErr != nil {
 		return nil, s.arrGetErr
 	}
@@ -62,22 +63,22 @@ func (s *stubClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
 	return []byte("{}"), nil
 }
 
-func (s *stubClient) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubClient) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	s.arrPostCalled = true
 	return []byte("{}"), nil
 }
 
-func (s *stubClient) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubClient) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	s.arrPutCalled = true
 	return []byte("{}"), nil
 }
 
-func (s *stubClient) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubClient) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	s.arrDeleteCalled = true
 	return []byte("{}"), nil
 }
 
-func (s *stubClient) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+func (s *stubClient) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	if s.arrQueueErr != nil {
 		return nil, s.arrQueueErr
 	}

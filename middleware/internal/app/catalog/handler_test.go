@@ -17,20 +17,22 @@ type stubArrForHandler struct {
 }
 
 func (s *stubArrForHandler) Keys() (sonarr, radarr, prowlarr string) { return "sk", "rk", "" }
-func (s *stubArrForHandler) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrForHandler) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	if s.doGet != nil {
 		return s.doGet(baseURL, apiKey, path)
 	}
 	return nil, nil
 }
-func (s *stubArrForHandler) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrForHandler) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubArrForHandler) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrForHandler) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubArrForHandler) ArrDelete(baseURL, apiKey, path string) ([]byte, error) { return nil, nil }
-func (s *stubArrForHandler) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+func (s *stubArrForHandler) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
+	return nil, nil
+}
+func (s *stubArrForHandler) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	return nil, nil
 }
 
@@ -67,7 +69,7 @@ func TestFindImportHistoryID_BothUnmarshalsFail(t *testing.T) {
 		SonarrURL: srv.URL,
 	}
 
-	_, _, err := h.findImportHistoryID(srv.URL, "key", "sonarr", 1, 5)
+	_, _, err := h.findImportHistoryID(context.Background(), srv.URL, "key", "sonarr", 1, 5)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -147,8 +148,8 @@ func pickBestMatch(results []map[string]any, cleanTitle string, year int, kind s
 	return best
 }
 
-func (h *Handler) lookupMovie(apiKey, encoded, cleanTitle string, year int) *MediaMatch {
-	data, err := h.Svc.ArrGet(h.RadarrURL, apiKey, "/api/v3/movie/lookup?term="+encoded)
+func (h *Handler) lookupMovie(ctx context.Context, apiKey, encoded, cleanTitle string, year int) *MediaMatch {
+	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey, "/api/v3/movie/lookup?term="+encoded)
 	if err != nil {
 		return nil
 	}
@@ -159,8 +160,8 @@ func (h *Handler) lookupMovie(apiKey, encoded, cleanTitle string, year int) *Med
 	return pickBestMatch(results, cleanTitle, year, "movie")
 }
 
-func (h *Handler) lookupSeries(apiKey, encoded, cleanTitle string, year int) *MediaMatch {
-	data, err := h.Svc.ArrGet(h.SonarrURL, apiKey, "/api/v3/series/lookup?term="+encoded)
+func (h *Handler) lookupSeries(ctx context.Context, apiKey, encoded, cleanTitle string, year int) *MediaMatch {
+	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey, "/api/v3/series/lookup?term="+encoded)
 	if err != nil {
 		return nil
 	}
@@ -173,6 +174,7 @@ func (h *Handler) lookupSeries(apiKey, encoded, cleanTitle string, year int) *Me
 
 // matchFile resolves a single ScanFile to a MatchItem.
 func (h *Handler) matchFile(
+	ctx context.Context,
 	f ScanFile,
 	radarrKey, sonarrKey string,
 	existingMovies, existingSeries map[int]bool,
@@ -193,7 +195,7 @@ func (h *Handler) matchFile(
 
 	if isTV {
 		m := cachedLookup(cache, cacheMu, fmt.Sprintf("series:%s:%d", title, year), func() *MediaMatch {
-			return h.lookupSeries(sonarrKey, encoded, title, year)
+			return h.lookupSeries(ctx, sonarrKey, encoded, title, year)
 		})
 		if m != nil {
 			season := extractSeason(filename)
@@ -213,11 +215,11 @@ func (h *Handler) matchFile(
 	} else {
 		// Try Radarr first, fall back to Sonarr.
 		m := cachedLookup(cache, cacheMu, fmt.Sprintf("movie:%s:%d", title, year), func() *MediaMatch {
-			return h.lookupMovie(radarrKey, encoded, title, year)
+			return h.lookupMovie(ctx, radarrKey, encoded, title, year)
 		})
 		if m == nil {
 			m = cachedLookup(cache, cacheMu, fmt.Sprintf("series:%s:%d", title, year), func() *MediaMatch {
-				return h.lookupSeries(sonarrKey, encoded, title, year)
+				return h.lookupSeries(ctx, sonarrKey, encoded, title, year)
 			})
 		}
 		if m != nil {

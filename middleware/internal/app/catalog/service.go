@@ -7,15 +7,15 @@ type ArrClient interface {
 	// Keys returns API keys for Sonarr, Radarr, and Prowlarr.
 	Keys() (sonarr, radarr, prowlarr string)
 	// ArrGet makes a GET request to a *arr service.
-	ArrGet(baseURL, apiKey, path string) ([]byte, error)
+	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
 	// ArrPost makes a POST request to a *arr service.
-	ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 	// ArrPut makes a PUT request to a *arr service.
-	ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error)
+	ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
 	// ArrDelete makes a DELETE request to a *arr service.
-	ArrDelete(baseURL, apiKey, path string) ([]byte, error)
+	ArrDelete(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
 	// ArrGetAllQueueRecords paginates all records from an *arr queue endpoint.
-	ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
+	ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
 }
 
 // JellyfinMetaClient is the subset needed for Jellyfin metadata sync.

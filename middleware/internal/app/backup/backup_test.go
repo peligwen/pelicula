@@ -28,10 +28,10 @@ type stubArrClient struct {
 func (s *stubArrClient) Keys() (string, string, string) {
 	return s.sonarr, s.radarr, s.prowlarr
 }
-func (s *stubArrClient) ArrGet(_, _, _ string) ([]byte, error) {
+func (s *stubArrClient) ArrGet(_ context.Context, _, _, _ string) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubArrClient) ArrPost(_, _, _ string, _ any) ([]byte, error) {
+func (s *stubArrClient) ArrPost(_ context.Context, _, _, _ string, _ any) ([]byte, error) {
 	return nil, nil
 }
 
@@ -547,10 +547,10 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 type emptyArrClient struct{}
 
 func (e *emptyArrClient) Keys() (string, string, string) { return "sk", "rk", "" }
-func (e *emptyArrClient) ArrGet(_, _, _ string) ([]byte, error) {
+func (e *emptyArrClient) ArrGet(_ context.Context, _, _, _ string) ([]byte, error) {
 	return []byte("[]"), nil
 }
-func (e *emptyArrClient) ArrPost(_, _, _ string, _ any) ([]byte, error) {
+func (e *emptyArrClient) ArrPost(_ context.Context, _, _, _ string, _ any) ([]byte, error) {
 	return []byte("{}"), nil
 }
 

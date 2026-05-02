@@ -1,6 +1,7 @@
 package catalog_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,31 +24,31 @@ type stubArrClient struct {
 func (s *stubArrClient) Keys() (sonarr, radarr, prowlarr string) {
 	return s.sonarrKey, s.radarrKey, ""
 }
-func (s *stubArrClient) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrClient) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	if s.doGet != nil {
 		return s.doGet(baseURL, apiKey, path)
 	}
 	return nil, nil
 }
-func (s *stubArrClient) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrClient) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	if s.doPost != nil {
 		return s.doPost(baseURL, apiKey, path, payload)
 	}
 	return nil, nil
 }
-func (s *stubArrClient) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubArrClient) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	if s.doPut != nil {
 		return s.doPut(baseURL, apiKey, path, payload)
 	}
 	return nil, nil
 }
-func (s *stubArrClient) ArrDelete(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubArrClient) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	if s.doDelete != nil {
 		return s.doDelete(baseURL, apiKey, path)
 	}
 	return nil, nil
 }
-func (s *stubArrClient) ArrGetAllQueueRecords(baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
+func (s *stubArrClient) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
 	return nil, nil
 }
 

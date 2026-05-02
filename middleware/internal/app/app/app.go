@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -98,7 +99,7 @@ type IndexerCountCache struct {
 }
 
 // Get returns the cached count if fresh, or fetches it from Prowlarr.
-func (c *IndexerCountCache) Get(svc *appservices.Clients) *int {
+func (c *IndexerCountCache) Get(ctx context.Context, svc *appservices.Clients) *int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.count != nil && time.Since(c.fetchedAt) < indexerCountTTL {
@@ -108,7 +109,7 @@ func (c *IndexerCountCache) Get(svc *appservices.Clients) *int {
 	if prowlarrKey == "" {
 		return c.count
 	}
-	data, err := svc.ArrGet(c.ProwlarrURL, prowlarrKey, "/api/v1/indexer")
+	data, err := svc.ArrGet(ctx, c.ProwlarrURL, prowlarrKey, "/api/v1/indexer")
 	if err != nil {
 		return c.count
 	}
@@ -180,7 +181,7 @@ func (a *App) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	_, _, prowlarrKey := a.Svc.Keys()
 	var idxCount *int
 	if prowlarrKey != "" {
-		idxCount = a.IdxCache.Get(a.Svc)
+		idxCount = a.IdxCache.Get(r.Context(), a.Svc)
 	}
 
 	svcHealth, _ := a.StatusTTL.Get(func() (map[string]string, error) {

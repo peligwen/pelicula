@@ -2,6 +2,7 @@ package library
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,11 +113,12 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingMovies := h.loadExistingMovieIDs(radarrKey)
-	existingSeries := h.loadExistingSeriesIDs(sonarrKey)
+	ctx := r.Context()
+	existingMovies := h.loadExistingMovieIDs(ctx, radarrKey)
+	existingSeries := h.loadExistingSeriesIDs(ctx, sonarrKey)
 
-	movieProfiles, _ := h.loadProfileNameMap(h.RadarrURL, radarrKey)
-	seriesProfiles, _ := h.loadProfileNameMap(h.SonarrURL, sonarrKey)
+	movieProfiles, _ := h.loadProfileNameMap(ctx, h.RadarrURL, radarrKey)
+	seriesProfiles, _ := h.loadProfileNameMap(ctx, h.SonarrURL, sonarrKey)
 
 	// ── Filesystem operations (import / link) ────────────────────────────────
 	libs := h.GetLibraries()
@@ -197,9 +199,9 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			defer func() { <-sem }()
 			var err error
 			if it.Type == "movie" {
-				err = h.applyMovie(radarrKey, it, movieProfiles)
+				err = h.applyMovie(ctx, radarrKey, it, movieProfiles)
 			} else {
-				err = h.applySeries(sonarrKey, it, seriesProfiles)
+				err = h.applySeries(ctx, sonarrKey, it, seriesProfiles)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -275,8 +277,8 @@ func applyGroupKey(item ApplyItem) string {
 
 // ── *arr apply helpers ────────────────────────────────────────────────────────
 
-func (h *Handler) applyMovie(apiKey string, item ApplyItem, profMap map[string]int) error {
-	data, err := h.Svc.ArrGet(h.RadarrURL, apiKey,
+func (h *Handler) applyMovie(ctx context.Context, apiKey string, item ApplyItem, profMap map[string]int) error {
+	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey,
 		"/api/v3/movie/lookup/tmdb?tmdbId="+itoa(item.TmdbID))
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
@@ -299,7 +301,7 @@ func (h *Handler) applyMovie(apiKey string, item ApplyItem, profMap map[string]i
 	movie["addOptions"] = map[string]any{
 		"searchForMovie": false,
 	}
-	body, err := h.Svc.ArrPost(h.RadarrURL, apiKey, "/api/v3/movie", movie)
+	body, err := h.Svc.ArrPost(ctx, h.RadarrURL, apiKey, "/api/v3/movie", movie)
 	if err != nil {
 		if len(body) > 0 {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
@@ -309,8 +311,8 @@ func (h *Handler) applyMovie(apiKey string, item ApplyItem, profMap map[string]i
 	return nil
 }
 
-func (h *Handler) applySeries(apiKey string, item ApplyItem, profMap map[string]int) error {
-	data, err := h.Svc.ArrGet(h.SonarrURL, apiKey,
+func (h *Handler) applySeries(ctx context.Context, apiKey string, item ApplyItem, profMap map[string]int) error {
+	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey,
 		"/api/v3/series/lookup?term=tvdb:"+itoa(item.TvdbID))
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
@@ -335,7 +337,7 @@ func (h *Handler) applySeries(apiKey string, item ApplyItem, profMap map[string]
 	show["addOptions"] = map[string]any{
 		"searchForMissingEpisodes": false,
 	}
-	body, err := h.Svc.ArrPost(h.SonarrURL, apiKey, "/api/v3/series", show)
+	body, err := h.Svc.ArrPost(ctx, h.SonarrURL, apiKey, "/api/v3/series", show)
 	if err != nil {
 		if len(body) > 0 {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))

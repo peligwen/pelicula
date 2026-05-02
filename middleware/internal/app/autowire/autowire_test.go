@@ -45,15 +45,15 @@ func (s *stubSvc) SonarrRadarrKeys() (string, string) {
 }
 func (s *stubSvc) GetProwlarrKey() string { return s.prowlarrKey }
 func (s *stubSvc) SetWired(v bool)        { s.wired = v }
-func (s *stubSvc) ArrGet(baseURL, apiKey, path string) ([]byte, error) {
+func (s *stubSvc) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
 	s.captured = append(s.captured, capturedCall{"GET", baseURL + path, nil})
 	return s.lookup("GET", baseURL+path)
 }
-func (s *stubSvc) ArrPost(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubSvc) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	s.captured = append(s.captured, capturedCall{"POST", baseURL + path, payload})
 	return s.lookup("POST", baseURL+path)
 }
-func (s *stubSvc) ArrPut(baseURL, apiKey, path string, payload any) ([]byte, error) {
+func (s *stubSvc) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
 	s.captured = append(s.captured, capturedCall{"PUT", baseURL + path, payload})
 	return s.lookup("PUT", baseURL+path)
 }

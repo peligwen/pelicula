@@ -35,7 +35,7 @@ func newHandler(t *testing.T, fakeURL string) *hooks.Handler {
 		SonarrURL:  "",
 		RadarrURL:  "",
 		GetKeys:    func() (string, string, string) { return "", "", "" },
-		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+		ArrGet:     func(_ context.Context, _, _, _ string) ([]byte, error) { return nil, nil },
 	}
 }
 
@@ -357,7 +357,7 @@ func newImportHandler(fakeURL string, webhookSecret string) *hooks.Handler {
 		ProculaURL:    fakeURL,
 		WebhookSecret: webhookSecret,
 		GetKeys:       func() (string, string, string) { return "", "", "" },
-		ArrGet:        func(_, _, _ string) ([]byte, error) { return nil, nil },
+		ArrGet:        func(_ context.Context, _, _, _ string) ([]byte, error) { return nil, nil },
 	}
 }
 
@@ -475,7 +475,7 @@ func TestHandleNotificationsProxy_PassesThroughDetailAndJobID(t *testing.T) {
 		SonarrURL:  "",
 		RadarrURL:  "",
 		GetKeys:    func() (string, string, string) { return "", "", "" },
-		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+		ArrGet:     func(_ context.Context, _, _, _ string) ([]byte, error) { return nil, nil },
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/notifications", nil)
