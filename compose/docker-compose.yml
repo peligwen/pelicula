@@ -4,6 +4,16 @@
 # in 2024). To bump, verify via `docker manifest inspect <tag>` and run
 # the e2e test stack first.
 
+# Default logging driver: json-file with rotation. Apply to every service
+# via `<<: *default-logging`. 10 MB × 3 files × ~14 services ≈ 420 MB
+# stack-wide ceiling — fits Synology comfortably while preserving
+# meaningful incident debug.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   # ═══════════════════════════════════════════════════
@@ -11,6 +21,7 @@ services:
   # ═══════════════════════════════════════════════════
   gluetun:
     image: qmcgaw/gluetun:v3.41.0
+    logging: *default-logging
     profiles: [vpn]
     cap_add:
       - NET_ADMIN
@@ -50,6 +61,7 @@ services:
   # ═══════════════════════════════════════════════════
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.1.4
+    logging: *default-logging
     profiles: [vpn]
     network_mode: "service:gluetun"
     environment:
@@ -76,6 +88,7 @@ services:
   # ═══════════════════════════════════════════════════
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:2.3.0
+    logging: *default-logging
     profiles: [vpn]
     network_mode: "service:gluetun"
     depends_on:
@@ -100,6 +113,7 @@ services:
   # ═══════════════════════════════════════════════════
   sonarr:
     image: lscr.io/linuxserver/sonarr:4.0.17
+    logging: *default-logging
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -121,6 +135,7 @@ services:
   # ═══════════════════════════════════════════════════
   radarr:
     image: lscr.io/linuxserver/radarr:6.0.4
+    logging: *default-logging
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -143,6 +158,7 @@ services:
   jellyfin:
     # Pinned: bump deliberately, not on every `pelicula update` (mirrors gluetun policy).
     image: lscr.io/linuxserver/jellyfin:10.11.8
+    logging: *default-logging
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -166,6 +182,7 @@ services:
   # ═══════════════════════════════════════════════════
   procula:
     build: ./procula
+    logging: *default-logging
     restart: unless-stopped
     depends_on:
       - pelicula-api
@@ -197,6 +214,7 @@ services:
   # ═══════════════════════════════════════════════════
   bazarr:
     image: lscr.io/linuxserver/bazarr:1.5.5
+    logging: *default-logging
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -220,6 +238,7 @@ services:
   # ═══════════════════════════════════════════════════
   docker-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
+    logging: *default-logging
     restart: unless-stopped
     environment:
       - CONTAINERS=1       # GET /containers/* (inspect, logs)
@@ -247,6 +266,7 @@ services:
   # ═══════════════════════════════════════════════════
   pelicula-api:
     build: ./middleware
+    logging: *default-logging
     environment:
       - TZ=${TZ}
       - DOCKER_HOST=http://docker-proxy:2375
@@ -296,6 +316,7 @@ services:
   # ═══════════════════════════════════════════════════
   apprise:
     image: caronc/apprise:v1.3.3
+    logging: *default-logging
     profiles: [apprise]
     volumes:
       - ${CONFIG_DIR}/apprise:/config
@@ -306,6 +327,7 @@ services:
   # ═══════════════════════════════════════════════════
   nginx:
     image: nginx:1.28.3-alpine
+    logging: *default-logging
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro

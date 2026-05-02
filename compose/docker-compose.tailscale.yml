@@ -1,6 +1,11 @@
 services:
   tailscale:
     image: tailscale/tailscale:v1.96.5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
     hostname: ${TAILSCALE_HOSTNAME:-pelicula}
     environment:
