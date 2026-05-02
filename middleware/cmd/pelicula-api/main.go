@@ -42,7 +42,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		slog.Info("listening (setup mode)", "component", "main", "addr", ":8181")
-		serveWithShutdown(ctx, ":8181", mux)
+		serveWithShutdown(ctx, ":8181", httpx.RecoverMiddleware(mux))
 		return
 	}
 
@@ -84,7 +84,7 @@ func main() {
 	})
 
 	slog.Info("listening", "component", "main", "addr", ":8181")
-	serveWithShutdown(ctx, ":8181", mux)
+	serveWithShutdown(ctx, ":8181", httpx.RecoverMiddleware(mux))
 }
 
 func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {

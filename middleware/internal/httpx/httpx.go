@@ -5,8 +5,10 @@ package httpx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 
 	"pelicula-api/httputil"
 )
@@ -55,13 +57,23 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// RecoverMiddleware catches panics in handlers and returns a 500 error.
+// RecoverMiddleware catches panics in handlers and returns a JSON 500 error.
+// If the handler already started writing the response (headers sent), stdlib's
+// WriteHeader call becomes a no-op; the client sees a truncated response rather
+// than a clean JSON body, but we still log the panic and stack trace.
 func RecoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				slog.Error("handler panic", "component", "httpx", "recover", rec)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				stack := debug.Stack()
+				slog.Error("handler panic",
+					"component", "httpx",
+					"panic", fmt.Sprintf("%v", rec),
+					slog.String("stack", string(stack)),
+				)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error":"internal server error"}`)) //nolint:errcheck
 			}
 		}()
 		next.ServeHTTP(w, r)
