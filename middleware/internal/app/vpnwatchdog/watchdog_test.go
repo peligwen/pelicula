@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,29 @@ import (
 	qbtclient "pelicula-api/internal/clients/qbt"
 	"pelicula-api/internal/config"
 )
+
+type notifySpy struct {
+	calls []struct{ title, body string }
+	mu    sync.Mutex
+}
+
+func (s *notifySpy) hook(t, b string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, struct{ title, body string }{t, b})
+}
+
+func (s *notifySpy) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
+func (s *notifySpy) titleAt(i int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls[i].title
+}
 
 // Ensure test constants match the real ones defined in watchdog.go.
 const testGrace = gracePolls
@@ -191,6 +215,79 @@ func TestSyncQbtListenPort_ToleratesError(t *testing.T) {
 // TestSyncQbtListenPort_RespectsCtxCancel verifies that cancelling the context
 // mid-call causes syncQbtListenPort to return promptly rather than waiting for
 // the server to respond.
+func TestWatchdog_NotifiesOnDegradedTransition(t *testing.T) {
+	spy := &notifySpy{}
+	w := New(nil, nil, nil)
+	w.Notify = spy.hook
+
+	// unknown → synced: no notification (not the degraded transition)
+	w.notifyTransition(wdUnknown, wdSynced)
+	if spy.count() != 0 {
+		t.Fatalf("expected 0 calls after unknown→synced, got %d", spy.count())
+	}
+
+	// synced → degraded: must fire exactly once with "VPN degraded"
+	w.notifyTransition(wdSynced, wdDegraded)
+	if spy.count() != 1 {
+		t.Fatalf("expected 1 call after synced→degraded, got %d", spy.count())
+	}
+	if spy.titleAt(0) != "VPN degraded" {
+		t.Fatalf("title = %q, want %q", spy.titleAt(0), "VPN degraded")
+	}
+
+	// degraded → degraded (same state, shouldn't happen in Run but safe): no extra call
+	w.notifyTransition(wdDegraded, wdDegraded)
+	if spy.count() != 1 {
+		t.Fatalf("expected still 1 call after degraded→degraded, got %d", spy.count())
+	}
+}
+
+func TestWatchdog_NotifiesOnRecoveredTransition(t *testing.T) {
+	spy := &notifySpy{}
+	w := New(nil, nil, nil)
+	w.Notify = spy.hook
+
+	// degraded → synced: must fire exactly once with "VPN recovered"
+	w.notifyTransition(wdDegraded, wdSynced)
+	if spy.count() != 1 {
+		t.Fatalf("expected 1 call after degraded→synced, got %d", spy.count())
+	}
+	if spy.titleAt(0) != "VPN recovered" {
+		t.Fatalf("title = %q, want %q", spy.titleAt(0), "VPN recovered")
+	}
+}
+
+func TestWatchdog_NoNotifyPerTick(t *testing.T) {
+	spy := &notifySpy{}
+	w := New(nil, nil, nil)
+	w.Notify = spy.hook
+
+	// Repeated same-state transitions (as would happen each tick with no change)
+	// must never fire.
+	for i := 0; i < 10; i++ {
+		w.notifyTransition(wdSynced, wdSynced)
+		w.notifyTransition(wdGrace, wdGrace)
+		w.notifyTransition(wdRestarting, wdRestarting)
+	}
+
+	// Intermediate transitions that aren't degraded-entry or recovery must not fire.
+	w.notifyTransition(wdUnknown, wdSynced)
+	w.notifyTransition(wdSynced, wdGrace)
+	w.notifyTransition(wdGrace, wdRestarting)
+	w.notifyTransition(wdRestarting, wdGrace)
+
+	if spy.count() != 0 {
+		t.Fatalf("expected 0 notify calls for non-critical transitions, got %d", spy.count())
+	}
+}
+
+func TestWatchdog_NotifyNilSafe(t *testing.T) {
+	w := New(nil, nil, nil)
+	// w.Notify is nil — must not panic
+	w.notifyTransition(wdSynced, wdDegraded)
+	w.notifyTransition(wdDegraded, wdSynced)
+}
+
 func TestSyncQbtListenPort_RespectsCtxCancel(t *testing.T) {
 	ready := make(chan struct{})
 	unblock := make(chan struct{})

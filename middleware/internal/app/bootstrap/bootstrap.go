@@ -303,6 +303,10 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 
 	if cfg.WireguardPrivateKey != "" {
 		a.Watchdog = vpnwatchdog.New(svc, dockerCli, gluetunCli)
+		// Goroutined so a wedged Apprise container never blocks a watchdog tick.
+		a.Watchdog.Notify = func(title, body string) {
+			go appriseCli.Notify(title, body)
+		}
 	}
 
 	// Autowirer InvalidateIndexerCache captures a.IdxCache by pointer, which

@@ -75,6 +75,11 @@ type Watchdog struct {
 	Docker   *docker.Client
 	Gluetun  *gluetunclient.Client
 
+	// Notify is a nil-safe hook fired on VPN state transitions
+	// (degraded ↔ synced). Set by bootstrap from the apprise client
+	// at startup. Never called per-tick — only on transition.
+	Notify func(title, body string)
+
 	mu    sync.RWMutex
 	state State
 }
@@ -95,6 +100,21 @@ func (w *Watchdog) State() State {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.state
+}
+
+// notifyTransition fires w.Notify when the VPN state crosses a boundary the
+// user cares about (entering degraded, or recovering from degraded to synced).
+// All other transitions are silent. Safe to call with w.Notify == nil.
+func (w *Watchdog) notifyTransition(prev, curr watchdogStatus) {
+	if w.Notify == nil {
+		return
+	}
+	switch {
+	case curr == wdDegraded && prev != wdDegraded:
+		w.Notify("VPN degraded", "Port forwarding lost (port=0 after restart)")
+	case prev == wdDegraded && curr == wdSynced:
+		w.Notify("VPN recovered", "Port forwarding restored")
+	}
 }
 
 // ── Pure state machine ─────────────────────────────────────────────────────────
@@ -245,6 +265,7 @@ func (w *Watchdog) Run(ctx context.Context) {
 				"from", prevStatus,
 				"to", newInternal.status,
 				"port", port)
+			w.notifyTransition(prevStatus, newInternal.status)
 			prevStatus = newInternal.status
 		}
 
