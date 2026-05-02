@@ -4,14 +4,15 @@
 package apprise
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"pelicula-api/internal/httpx"
 )
 
 type notifConfig struct {
@@ -23,7 +24,7 @@ type notifConfig struct {
 type Client struct {
 	url       string
 	configDir string
-	http      *http.Client
+	base      *httpx.Client
 }
 
 // New constructs a Client.
@@ -34,12 +35,18 @@ func New(url, configDir string) *Client {
 	return &Client{
 		url:       url,
 		configDir: configDir,
-		http:      &http.Client{Timeout: 10 * time.Second},
+		base:      httpx.New(url, "", "", 10*time.Second),
 	}
 }
 
+// configPath returns the path to the notifications config file.
+// It is a package-level variable so tests can override it.
+var configPath = func(configDir string) string {
+	return filepath.Join(configDir, "procula", "notifications.json")
+}
+
 func (c *Client) loadConfig() *notifConfig {
-	data, err := os.ReadFile(filepath.Join(c.configDir, "procula", "notifications.json"))
+	data, err := os.ReadFile(configPath(c.configDir))
 	if err != nil {
 		return &notifConfig{Mode: "internal"}
 	}
@@ -51,23 +58,30 @@ func (c *Client) loadConfig() *notifConfig {
 }
 
 // Notify sends a notification via the Apprise container if configured.
+// Each configured URL receives its own POST so one bad URL does not abort the batch.
 // Non-fatal: logs on error and returns.
 func (c *Client) Notify(title, body string) {
 	cfg := c.loadConfig()
 	if cfg.Mode != "apprise" || len(cfg.AppriseURLs) == 0 {
 		return
 	}
-	payload := map[string]any{
-		"title": title,
-		"body":  body,
-		"type":  "info",
-		"urls":  strings.Join(cfg.AppriseURLs, ","),
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var errs []error
+	for _, u := range cfg.AppriseURLs {
+		payload := map[string]any{
+			"title": title,
+			"body":  body,
+			"type":  "info",
+			"urls":  u,
+		}
+		if err := c.base.PostJSON(ctx, "", payload, nil); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	data, _ := json.Marshal(payload)
-	resp, err := c.http.Post(c.url, "application/json", bytes.NewReader(data))
-	if err != nil {
+	if err := errors.Join(errs...); err != nil {
 		slog.Warn("apprise notification failed", "component", "requests", "error", err)
-		return
 	}
-	resp.Body.Close()
 }
