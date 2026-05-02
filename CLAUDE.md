@@ -55,7 +55,7 @@ nginx (:7354) ─── /                → dashboard (static HTML)
                ── /jellyfin/       → Jellyfin (NOT behind VPN)
 ```
 
-Services not behind nginx: `pelicula-docker-proxy` (tecnativa/docker-socket-proxy, exposes only container restart/logs to pelicula-api — the real Docker socket is never mounted into pelicula-api).
+Services not behind nginx: `docker-proxy` (tecnativa/docker-socket-proxy, exposes only container restart/logs to pelicula-api — the real Docker socket is never mounted into pelicula-api).
 
 **pelicula-api** auto-wires the *arr stack on startup and serves the dashboard API. **procula** handles post-import processing (validate → transcode → catalog). **qBittorrent and Prowlarr run on gluetun's network namespace** — reachable at `gluetun:8080` and `gluetun:9696` respectively, not their own container names.
 

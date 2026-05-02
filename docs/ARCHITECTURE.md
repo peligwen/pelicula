@@ -19,14 +19,19 @@ The stack is assembled from several Compose files depending on context:
 
 Remote access mode is selected via `REMOTE_MODE` in `.env`. See [PELIGROSA.md — Alternative Remote Access Modes](PELIGROSA.md#alternative-remote-access-modes) for setup instructions and security notes for each mode.
 
+**Log rotation:** The base file uses an `x-logging` YAML anchor (`&default-logging`) applied to every service via `<<: *default-logging`. This sets the `json-file` driver with a 10 MB max size and 3 rotating files (~420 MB ceiling across all services).
+
+**Graceful drain:** `pelicula-api` has `stop_grace_period: 8s` and `procula` has `stop_grace_period: 15s` — giving each service time to drain in-flight requests before Docker force-kills them.
+
 ## Data Layer
 
 Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no CGO) for all mutable state. Config files (XML, INI) remain file-based.
 
 | Service | Database | Tables |
 |---------|----------|--------|
-| middleware | `/config/pelicula/pelicula.db` | roles, invites, redemptions, requests, request_events, sessions, rate_limits |
-| procula | `/config/procula/procula.db` | jobs, settings, catalog_flags, dualsub_profiles, blocked_releases |
+| middleware | `/config/pelicula/pelicula.db` | roles, invites, redemptions, requests, request_events, sessions, rate_limits, migrated_json_files |
+| middleware | `/config/pelicula/catalog.db` | catalog_items (separate file — media catalog records, written by the catalog sync path) |
+| procula | `/config/procula/procula.db` | jobs, settings, catalog_flags, dualsub_profiles, blocked_releases, notifications, migrated_json_files |
 
 **Schema versioning:** `PRAGMA user_version` tracks the current migration level. Migrations run in transactions on startup. WAL mode + `MaxOpenConns(1)` for safe concurrent access.
 
@@ -49,6 +54,8 @@ Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no C
    - Probe and apply Jellyfin hardware acceleration (see below)
 5. Start the missing content watcher (10-minute interval) — auto-searches monitored items with no files
 6. Serve the HTTP API
+
+**Bootstrap:** `bootstrap.New(ctx, cfg, genPassword)` accepts a context so all startup goroutines are tied to it. On shutdown: `Auth.Stop()` drains in-flight Peligrosa rate-limit state, `App.Close()` closes the database, and `supervisor.Run` returns a `*sync.WaitGroup` that the caller waits on before exit.
 
 ## Jellyfin Hardware Acceleration
 
@@ -102,6 +109,14 @@ Platform affects:
 ```
 nginx/
   nginx.conf              reverse proxy config, path-based routing, no-cache on dashboard
+  snippets/
+    proxy_common.conf     single source of truth for upstream proxy headers (Host, X-Real-IP,
+                          X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host); included by every
+                          proxied location block
+    auth_gate.conf        Peligrosa auth enforcement
+    webhook_allowlist.conf  restrict webhook endpoints to internal callers
+    arr_theme.conf        inject *arr theme header
+    jellyfin-proxy.conf   Jellyfin-specific proxy settings
   index.html              dashboard: search, pipeline/monitoring, settings tab, job drawer, event log
   dashboard.js            dashboard logic: search, pipeline, settings, registration, user management
   styles.css              dashboard styles
@@ -111,4 +126,29 @@ nginx/
   remote.conf.template    envsubst template for the Peligrosa remote vhost — full mode (hostname + Let's Encrypt / BYO cert)
   remote-simple.conf.template  static config for simple mode (no hostname, self-signed cert); written verbatim, no substitution
 ```
-(selected — not exhaustive)
+
+Dashboard JS modules (all served from `/nginx/`):
+
+| Module | Purpose |
+|--------|---------|
+| `api.js` | fetch helpers and API client |
+| `framework.js` | lightweight UI framework |
+| `format.js` | date/size/duration formatting helpers |
+| `sse.js` | server-sent event subscription |
+| `notif-helpers.js` | in-page notification rendering |
+| `dashboard.js` | search, pipeline, settings, user management |
+| `catalog.js` | catalog browser and detail views |
+| `downloads.js` | download queue management |
+| `jobs.js` | job drawer and job history |
+| `activity.js` | activity/event log |
+| `network.js` | network status and VPN indicators |
+| `notifications.js` | push notification settings |
+| `services.js` | service health cards |
+| `search.js` | search results page |
+| `settings.js` | settings page |
+| `users.js` | user and invite management |
+| `register.js` | invite redemption / open registration |
+| `import.js` | local media import wizard |
+| `logs.js` | service log viewer |
+| `native_apps.js` | native app pairing (QR codes) |
+| `qr.js` | QR code rendering helper |
