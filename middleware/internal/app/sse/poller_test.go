@@ -10,23 +10,29 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
-// stubSvc is a minimal ServiceQuerier for tests.
+// stubSvc is a minimal ServiceQuerier for tests backed by a real httptest.Server
+// for qBittorrent. Use newStubSvc to construct.
 type stubSvc struct {
-	qbtHandler http.Handler
+	qbtSrv *httptest.Server
 }
 
 func (s *stubSvc) CheckHealth() map[string]string { return map[string]string{} }
 func (s *stubSvc) IsWired() bool                  { return false }
-func (s *stubSvc) QbtGet(_ context.Context, path string) ([]byte, error) {
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	rec := httptest.NewRecorder()
-	s.qbtHandler.ServeHTTP(rec, req)
-	if rec.Code >= 400 {
-		return nil, &httpStatusError{Code: rec.Code, URL: path}
-	}
-	return rec.Body.Bytes(), nil
+func (s *stubSvc) QbtClient() *qbtclient.Client {
+	return qbtclient.New(s.qbtSrv.URL)
+}
+
+// newStubSvc starts an httptest.Server wrapping qbtHandler and registers its
+// Close via t.Cleanup. Pass http.NewServeMux() for tests that don't hit qbt.
+func newStubSvc(t *testing.T, qbtHandler http.Handler) *stubSvc {
+	t.Helper()
+	srv := httptest.NewServer(qbtHandler)
+	t.Cleanup(srv.Close)
+	return &stubSvc{qbtSrv: srv}
 }
 
 // newTestClient registers a buffered client against hub and returns it.
@@ -88,7 +94,7 @@ func TestPollerBroadcastsOnChange(t *testing.T) {
 	})
 
 	hub := NewHub()
-	svc := &stubSvc{qbtHandler: qbtMux}
+	svc := newStubSvc(t, qbtMux)
 	poller := NewPoller(hub, svc, procula.URL, func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
@@ -153,7 +159,7 @@ func TestPollerTriggerImmediate(t *testing.T) {
 	defer procula.Close()
 
 	hub := NewHub()
-	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	svc := newStubSvc(t, http.NewServeMux())
 	poller := NewPoller(hub, svc, procula.URL, func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
@@ -201,7 +207,7 @@ func TestFetchLogsTimestampedAndSorted(t *testing.T) {
 	t.Parallel()
 
 	hub := NewHub()
-	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	svc := newStubSvc(t, http.NewServeMux())
 	poller := NewPoller(hub, svc, "", func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		if !ts {
 			t.Errorf("fetchLogs should pass timestamps=true, got false for %q", name)
@@ -260,7 +266,7 @@ func TestProculaGet_RespectsCtxCancel(t *testing.T) {
 	}()
 
 	hub := NewHub()
-	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	svc := newStubSvc(t, http.NewServeMux())
 	poller := NewPoller(hub, svc, procula.URL, func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
@@ -300,7 +306,7 @@ func TestPollerUnknownEventType(t *testing.T) {
 	t.Parallel()
 
 	hub := NewHub()
-	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	svc := newStubSvc(t, http.NewServeMux())
 	poller := NewPoller(hub, svc, "", func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
 		return []byte{}, nil
 	})
@@ -315,3 +321,6 @@ func TestPollerUnknownEventType(t *testing.T) {
 		t.Errorf("expected 0 broadcasts for unknown event type, got %d", len(c.events))
 	}
 }
+
+// Compile-time check that stubSvc implements ServiceQuerier.
+var _ ServiceQuerier = (*stubSvc)(nil)

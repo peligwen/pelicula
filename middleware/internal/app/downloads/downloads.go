@@ -7,22 +7,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"pelicula-api/httputil"
+	arr "pelicula-api/internal/clients/arr"
+	qbt "pelicula-api/internal/clients/qbt"
 )
 
-// QbtClient is the subset of ServiceClients that the downloads package needs.
-type QbtClient interface {
-	QbtGet(ctx context.Context, path string) ([]byte, error)
-	QbtPost(ctx context.Context, path, form string) error
+// Svc is the subset of ServiceClients that the downloads package needs.
+type Svc interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
-	ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
-	ArrDelete(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
+	SonarrClient() *arr.Client
+	RadarrClient() *arr.Client
+	QbtClient() *qbt.Client
 }
 
 // Torrent represents a qBittorrent torrent.
@@ -54,7 +51,7 @@ type Response struct {
 
 // Handler holds injected dependencies for the downloads handlers.
 type Handler struct {
-	Svc       QbtClient
+	Svc       Svc
 	SonarrURL string
 	RadarrURL string
 }
@@ -65,35 +62,28 @@ func (h *Handler) HandleDownloads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := h.Svc.QbtGet(r.Context(), "/api/v2/torrents/info")
+	torrents, err := h.Svc.QbtClient().ListTorrents(r.Context())
 	if err != nil {
 		httputil.WriteError(w, "failed to reach qBittorrent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	var rawTorrents []map[string]any
-	if err := json.Unmarshal(data, &rawTorrents); err != nil {
-		httputil.WriteError(w, "failed to parse torrent data", http.StatusInternalServerError)
-		return
-	}
-
-	torrents := make([]Torrent, 0, len(rawTorrents))
+	out := make([]Torrent, 0, len(torrents))
 	active := 0
 	queued := 0
 
-	for _, rt := range rawTorrents {
-		t := Torrent{
-			Hash:     strVal(rt, "hash"),
-			Name:     strVal(rt, "name"),
-			Progress: floatVal(rt, "progress"),
-			DLSpeed:  intVal(rt, "dlspeed"),
-			UPSpeed:  intVal(rt, "upspeed"),
-			ETA:      intVal(rt, "eta"),
-			State:    strVal(rt, "state"),
-			Size:     intVal(rt, "size"),
-			Category: strVal(rt, "category"),
-		}
-		torrents = append(torrents, t)
+	for _, t := range torrents {
+		out = append(out, Torrent{
+			Hash:     t.Hash,
+			Name:     t.Name,
+			Progress: t.Progress,
+			DLSpeed:  t.DLSpeed,
+			UPSpeed:  t.UPSpeed,
+			ETA:      t.ETA,
+			State:    t.State,
+			Size:     t.Size,
+			Category: t.Category,
+		})
 
 		switch t.State {
 		case "downloading", "uploading", "stalledDL", "stalledUP", "forcedDL", "forcedUP":
@@ -103,21 +93,14 @@ func (h *Handler) HandleDownloads(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	statsData, err := h.Svc.QbtGet(r.Context(), "/api/v2/transfer/info")
-	var stats DownloadStats
-	stats.Active = active
-	stats.Queued = queued
-
-	if err == nil {
-		var rawStats map[string]any
-		if json.Unmarshal(statsData, &rawStats) == nil {
-			stats.DLSpeed = intVal(rawStats, "dl_info_speed")
-			stats.UPSpeed = intVal(rawStats, "up_info_speed")
-		}
+	stats := DownloadStats{Active: active, Queued: queued}
+	if info, err := h.Svc.QbtClient().GetTransferInfo(r.Context()); err == nil {
+		stats.DLSpeed = info.DLSpeed
+		stats.UPSpeed = info.UPSpeed
 	}
 
 	httputil.WriteJSON(w, Response{
-		Torrents: torrents,
+		Torrents: out,
 		Stats:    stats,
 	})
 }
@@ -128,23 +111,16 @@ func (h *Handler) HandleDownloadStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statsData, err := h.Svc.QbtGet(r.Context(), "/api/v2/transfer/info")
+	info, err := h.Svc.QbtClient().GetTransferInfo(r.Context())
 	if err != nil {
 		httputil.WriteError(w, "failed to reach qBittorrent", http.StatusBadGateway)
 		return
 	}
 
-	var rawStats map[string]any
-	if err := json.Unmarshal(statsData, &rawStats); err != nil {
-		httputil.WriteError(w, "failed to parse stats", http.StatusInternalServerError)
-		return
-	}
-
-	stats := DownloadStats{
-		DLSpeed: intVal(rawStats, "dl_info_speed"),
-		UPSpeed: intVal(rawStats, "up_info_speed"),
-	}
-	httputil.WriteJSON(w, stats)
+	httputil.WriteJSON(w, DownloadStats{
+		DLSpeed: info.DLSpeed,
+		UPSpeed: info.UPSpeed,
+	})
 }
 
 func (h *Handler) HandleDownloadPause(w http.ResponseWriter, r *http.Request) {
@@ -163,15 +139,13 @@ func (h *Handler) HandleDownloadPause(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// qBittorrent v5+ renamed pause/resume to stop/start
-	var endpoint string
+	var err error
 	if req.Paused {
-		endpoint = "/api/v2/torrents/stop"
+		err = h.Svc.QbtClient().StopTorrent(r.Context(), req.Hash)
 	} else {
-		endpoint = "/api/v2/torrents/start"
+		err = h.Svc.QbtClient().StartTorrent(r.Context(), req.Hash)
 	}
-
-	if err := h.Svc.QbtPost(r.Context(), endpoint, "hashes="+url.QueryEscape(req.Hash)); err != nil {
+	if err != nil {
 		httputil.WriteError(w, "qBittorrent error: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -203,25 +177,26 @@ func (h *Handler) HandleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sonarrKey, radarrKey, _ := h.Svc.Keys()
-	var baseURL, apiKey, apiVer string
+	var arrClient *arr.Client
+	var apiKey, apiVer string
 	switch req.Category {
 	case "radarr":
-		baseURL, apiKey, apiVer = h.RadarrURL, radarrKey, "/api/v3"
+		arrClient, apiKey, apiVer = h.Svc.RadarrClient(), radarrKey, "/api/v3"
 	case "sonarr":
-		baseURL, apiKey, apiVer = h.SonarrURL, sonarrKey, "/api/v3"
+		arrClient, apiKey, apiVer = h.Svc.SonarrClient(), sonarrKey, "/api/v3"
 	default:
 		httputil.WriteError(w, "unknown download category", http.StatusUnprocessableEntity)
 		return
 	}
 
-	if baseURL != "" && apiKey != "" {
+	if apiKey != "" {
 		if !req.Blocklist {
-			h.unmonitorArrItem(r.Context(), baseURL, apiKey, apiVer, req.Category, req.Hash)
+			h.unmonitorArrItem(r.Context(), arrClient, apiVer, req.Category, req.Hash)
 		}
-		h.removeFromArrQueue(r.Context(), baseURL, apiKey, apiVer, req.Hash, req.Blocklist)
+		h.removeFromArrQueue(r.Context(), arrClient, apiVer, req.Category, req.Hash, req.Blocklist)
 	}
 
-	if err := h.Svc.QbtPost(r.Context(), "/api/v2/torrents/delete", "hashes="+url.QueryEscape(req.Hash)+"&deleteFiles=true"); err != nil {
+	if err := h.Svc.QbtClient().DeleteTorrent(r.Context(), req.Hash); err != nil {
 		slog.Error("failed to delete torrent from qBittorrent", "component", "downloads", "error", err)
 	}
 
@@ -235,10 +210,10 @@ func (h *Handler) HandleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, map[string]string{"status": "removed"})
 }
 
-func (h *Handler) removeFromArrQueue(ctx context.Context, baseURL, apiKey, apiVer, hash string, blocklist bool) {
-	records, err := h.Svc.ArrGetAllQueueRecords(ctx, baseURL, apiKey, apiVer, "&includeUnknownMovieItems=true&includeUnknownSeriesItems=true")
+func (h *Handler) removeFromArrQueue(ctx context.Context, arrClient *arr.Client, apiVer, category, hash string, blocklist bool) {
+	records, err := arrClient.GetAllQueueRecords(ctx, apiVer, "&includeUnknownMovieItems=true&includeUnknownSeriesItems=true")
 	if err != nil {
-		slog.Error("failed to fetch arr queue", "component", "downloads", "url", baseURL, "error", err)
+		slog.Error("failed to fetch arr queue", "component", "downloads", "service", category, "error", err)
 		return
 	}
 
@@ -253,19 +228,18 @@ func (h *Handler) removeFromArrQueue(ctx context.Context, baseURL, apiKey, apiVe
 			blockParam = "true"
 		}
 		path := fmt.Sprintf("%s/queue/%d?removeFromClient=true&blocklist=%s", apiVer, queueID, blockParam)
-		_, err := h.Svc.ArrDelete(ctx, baseURL, apiKey, path)
-		if err != nil {
+		if err := arrClient.Delete(ctx, path); err != nil {
 			slog.Error("failed to remove arr queue item", "component", "downloads", "queue_id", queueID, "error", err)
 		} else {
-			slog.Info("removed arr queue item", "component", "downloads", "queue_id", queueID, "url", baseURL, "blocklist", blockParam)
+			slog.Info("removed arr queue item", "component", "downloads", "queue_id", queueID, "service", category, "blocklist", blockParam)
 		}
 		return
 	}
-	slog.Warn("hash not found in arr queue", "component", "downloads", "hash", shortHash(hash), "url", baseURL)
+	slog.Warn("hash not found in arr queue", "component", "downloads", "hash", shortHash(hash), "service", category)
 }
 
-func (h *Handler) unmonitorArrItem(ctx context.Context, baseURL, apiKey, apiVer, category, hash string) {
-	records, err := h.Svc.ArrGetAllQueueRecords(ctx, baseURL, apiKey, apiVer, "")
+func (h *Handler) unmonitorArrItem(ctx context.Context, arrClient *arr.Client, apiVer, category, hash string) {
+	records, err := arrClient.GetAllQueueRecords(ctx, apiVer, "")
 	if err != nil {
 		return
 	}
@@ -279,46 +253,38 @@ func (h *Handler) unmonitorArrItem(ctx context.Context, baseURL, apiKey, apiVer,
 		case "radarr":
 			movieID := int(floatVal(rec, "movieId"))
 			if movieID > 0 {
-				h.unmonitorMovie(ctx, baseURL, apiKey, apiVer, movieID)
+				h.unmonitorMovie(ctx, arrClient, apiVer, movieID)
 			}
 		case "sonarr":
 			episodeID := int(floatVal(rec, "episodeId"))
 			if episodeID > 0 {
-				h.unmonitorEpisode(ctx, baseURL, apiKey, apiVer, episodeID)
+				h.unmonitorEpisode(ctx, arrClient, apiVer, episodeID)
 			}
 		}
 		return
 	}
 }
 
-func (h *Handler) unmonitorMovie(ctx context.Context, baseURL, apiKey, apiVer string, movieID int) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, fmt.Sprintf("%s/movie/%d", apiVer, movieID))
+func (h *Handler) unmonitorMovie(ctx context.Context, arrClient *arr.Client, apiVer string, movieID int) {
+	movie, err := arrClient.GetMovie(ctx, apiVer, movieID)
 	if err != nil {
 		return
 	}
-	var movie map[string]any
-	if json.Unmarshal(data, &movie) != nil {
-		return
-	}
 	movie["monitored"] = false
-	if _, err := h.Svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/movie/%d", apiVer, movieID), movie); err != nil {
+	if err := arrClient.UpdateMovie(ctx, apiVer, movieID, movie); err != nil {
 		slog.Error("failed to unmonitor movie", "component", "downloads", "movie_id", movieID, "error", err)
 	} else {
 		slog.Info("unmonitored movie", "component", "downloads", "movie_id", movieID)
 	}
 }
 
-func (h *Handler) unmonitorEpisode(ctx context.Context, baseURL, apiKey, apiVer string, episodeID int) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, fmt.Sprintf("%s/episode/%d", apiVer, episodeID))
+func (h *Handler) unmonitorEpisode(ctx context.Context, arrClient *arr.Client, apiVer string, episodeID int) {
+	episode, err := arrClient.GetEpisode(ctx, apiVer, episodeID)
 	if err != nil {
 		return
 	}
-	var episode map[string]any
-	if json.Unmarshal(data, &episode) != nil {
-		return
-	}
 	episode["monitored"] = false
-	if _, err := h.Svc.ArrPut(ctx, baseURL, apiKey, fmt.Sprintf("%s/episode/%d", apiVer, episodeID), episode); err != nil {
+	if err := arrClient.UpdateEpisode(ctx, apiVer, episodeID, episode); err != nil {
 		slog.Error("failed to unmonitor episode", "component", "downloads", "episode_id", episodeID, "error", err)
 	} else {
 		slog.Info("unmonitored episode", "component", "downloads", "episode_id", episodeID)
@@ -337,14 +303,6 @@ func strVal(m map[string]any, key string) string {
 func floatVal(m map[string]any, key string) float64 {
 	if v, ok := m[key].(float64); ok {
 		return v
-	}
-	return 0
-}
-
-// intVal extracts an int64 from map[string]any (where JSON numbers are float64).
-func intVal(m map[string]any, key string) int64 {
-	if v, ok := m[key].(float64); ok {
-		return int64(v)
 	}
 	return 0
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"pelicula-api/internal/app/util"
+	qbt "pelicula-api/internal/clients/qbt"
 )
 
 // backoff limits for SSE fetchers: skip at most 5 ticks after consecutive errors.
@@ -34,7 +35,7 @@ type StatusCache interface {
 type ServiceQuerier interface {
 	CheckHealth() map[string]string
 	IsWired() bool
-	QbtGet(ctx context.Context, path string) ([]byte, error)
+	QbtClient() *qbt.Client
 }
 
 // DockerLogsFunc is a function that fetches container logs.
@@ -285,7 +286,7 @@ func (p *Poller) fetchServices(ctx context.Context) ([]byte, error) {
 
 // fetchDownloads fetches raw torrent list and transfer stats from qBittorrent.
 func (p *Poller) fetchDownloads(ctx context.Context) ([]byte, error) {
-	torrentData, err := p.svc.QbtGet(ctx, "/api/v2/torrents/info")
+	torrentData, err := p.svc.QbtClient().RawGet(ctx, "/api/v2/torrents/info")
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +297,7 @@ func (p *Poller) fetchDownloads(ctx context.Context) ([]byte, error) {
 	}
 	out := combined{Torrents: torrentData}
 
-	if statsData, err := p.svc.QbtGet(ctx, "/api/v2/transfer/info"); err == nil {
+	if statsData, err := p.svc.QbtClient().RawGet(ctx, "/api/v2/transfer/info"); err == nil {
 		out.Stats = statsData
 	}
 
