@@ -125,8 +125,8 @@ func (w *Watcher) Run(ctx context.Context, interval time.Duration) {
 				slog.Debug("watcher: skipping iteration (backoff)", "component", "watcher")
 				continue
 			}
-			radarrErr := w.searchMissingMovies()
-			sonarrErr := w.searchMissingSeries()
+			radarrErr := w.searchMissingMovies(ctx)
+			sonarrErr := w.searchMissingSeries(ctx)
 			if radarrErr || sonarrErr {
 				skip.RecordFailure()
 			} else {
@@ -140,7 +140,7 @@ func (w *Watcher) Run(ctx context.Context, interval time.Duration) {
 
 // searchMissingMovies fetches Radarr's movie list and triggers searches for
 // monitored movies without files. Returns true if an arr fetch error occurred.
-func (w *Watcher) searchMissingMovies() bool {
+func (w *Watcher) searchMissingMovies(ctx context.Context) bool {
 	_, radarrKey, _ := w.Services.Keys()
 	if radarrKey == "" {
 		return false
@@ -149,7 +149,7 @@ func (w *Watcher) searchMissingMovies() bool {
 	var data []byte
 	var err error
 	if w.CatalogCache != nil {
-		data, err = w.CatalogCache.GetMovies(context.Background())
+		data, err = w.CatalogCache.GetMovies(ctx)
 	} else {
 		data, err = w.Services.ArrGet(w.RadarrURL, radarrKey, "/api/v3/movie")
 	}
@@ -173,7 +173,21 @@ func (w *Watcher) searchMissingMovies() bool {
 		available, _ := m["isAvailable"].(bool)
 		id := int(floatVal(m, "id"))
 
-		if monitored && !hasFile && available && !queuedIDs[id] && w.movie.shouldSearch(id) {
+		if !monitored {
+			continue
+		}
+		if hasFile {
+			w.movie.clear(id)
+			continue
+		}
+		if queuedIDs[id] {
+			w.movie.clear(id)
+			continue
+		}
+		if !available {
+			continue
+		}
+		if w.movie.shouldSearch(id) {
 			missing = append(missing, id)
 		}
 	}
@@ -211,7 +225,9 @@ func (w *Watcher) radarrQueuedMovieIDs() map[int]bool {
 
 // searchMissingSeries fetches Sonarr's missing episodes and triggers searches.
 // Returns true if an arr fetch error occurred.
-func (w *Watcher) searchMissingSeries() bool {
+// Note: the /wanted/missing endpoint already excludes episodes with files, so
+// a hasFile check here is not needed — absence from the response is the implicit reset.
+func (w *Watcher) searchMissingSeries(ctx context.Context) bool {
 	sonarrKey, _, _ := w.Services.Keys()
 	if sonarrKey == "" {
 		return false
@@ -237,7 +253,14 @@ func (w *Watcher) searchMissingSeries() bool {
 	for _, ep := range wanted.Records {
 		monitored, _ := ep["monitored"].(bool)
 		id := int(floatVal(ep, "id"))
-		if monitored && !queuedEpisodes[id] && w.episode.shouldSearch(id) {
+		if !monitored {
+			continue
+		}
+		if queuedEpisodes[id] {
+			w.episode.clear(id)
+			continue
+		}
+		if w.episode.shouldSearch(id) {
 			missing = append(missing, id)
 		}
 	}
