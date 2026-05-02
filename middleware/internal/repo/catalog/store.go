@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -90,10 +91,13 @@ func scanItem(s scanner) (*Item, error) {
 		&it.Tier, &it.ArtworkURL, &it.Synopsis, &it.MetadataSyncedAt,
 		&it.ProculaJobID, &it.FilePath, &it.CreatedAt, &it.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if err == nil {
+		return &it, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return &it, err
+	return nil, err
 }
 
 // tierRank returns a numeric rank for a tier (higher = more advanced).
@@ -118,10 +122,15 @@ func coalesce(a, b string) string {
 	return b
 }
 
-// findExisting looks up an item by natural key. Returns nil, nil if not found.
-func (s *Store) findExisting(ctx context.Context, item Item) (*Item, error) {
-	tryRow := func(q string, args ...any) (*Item, error) {
-		return scanItem(s.db.QueryRowContext(ctx, q, args...))
+// querier is satisfied by both *sql.DB and *sql.Tx.
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// findExisting looks up an item by natural key using q. Returns nil, nil if not found.
+func findExisting(ctx context.Context, q querier, item Item) (*Item, error) {
+	tryRow := func(query string, args ...any) (*Item, error) {
+		return scanItem(q.QueryRowContext(ctx, query, args...))
 	}
 
 	var row *sql.Row
@@ -134,7 +143,7 @@ func (s *Store) findExisting(ctx context.Context, item Item) (*Item, error) {
 			}
 		}
 		if item.ArrID != 0 {
-			row = s.db.QueryRowContext(ctx, selectItem+` WHERE type='movie' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
+			row = q.QueryRowContext(ctx, selectItem+` WHERE type='movie' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
 		}
 	case "series":
 		if item.TvdbID != 0 {
@@ -150,17 +159,17 @@ func (s *Store) findExisting(ctx context.Context, item Item) (*Item, error) {
 			}
 		}
 		if item.ArrID != 0 {
-			row = s.db.QueryRowContext(ctx, selectItem+` WHERE type='series' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
+			row = q.QueryRowContext(ctx, selectItem+` WHERE type='series' AND arr_id=? AND arr_type=?`, item.ArrID, item.ArrType)
 		}
 	case "season":
 		if item.ParentID != "" {
-			row = s.db.QueryRowContext(ctx, selectItem+` WHERE type='season' AND parent_id=? AND season_number=?`, item.ParentID, item.SeasonNumber)
+			row = q.QueryRowContext(ctx, selectItem+` WHERE type='season' AND parent_id=? AND season_number=?`, item.ParentID, item.SeasonNumber)
 		}
 	case "episode":
 		if item.EpisodeID != 0 {
-			row = s.db.QueryRowContext(ctx, selectItem+` WHERE type='episode' AND episode_id=?`, item.EpisodeID)
+			row = q.QueryRowContext(ctx, selectItem+` WHERE type='episode' AND episode_id=?`, item.EpisodeID)
 		} else if item.ParentID != "" {
-			row = s.db.QueryRowContext(ctx, selectItem+` WHERE type='episode' AND parent_id=? AND episode_number=?`, item.ParentID, item.EpisodeNumber)
+			row = q.QueryRowContext(ctx, selectItem+` WHERE type='episode' AND parent_id=? AND episode_number=?`, item.ParentID, item.EpisodeNumber)
 		}
 	}
 	if row == nil {
@@ -173,10 +182,20 @@ func (s *Store) findExisting(ctx context.Context, item Item) (*Item, error) {
 
 // Upsert finds an existing item by natural key and updates it, or inserts a
 // new record. Tier is never downgraded. Returns the ID of the upserted item.
+//
+// Upsert is atomic against concurrent callers with the same natural key:
+// the find + update/insert run inside a single BeginTx/Commit, so SQLite's
+// writer-serialization prevents duplicate inserts.
 func (s *Store) Upsert(ctx context.Context, item Item) (string, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	existing, err := s.findExisting(ctx, item)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin catalog upsert tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck — safe no-op after Commit
+
+	existing, err := findExisting(ctx, tx, item)
 	if err != nil {
 		return "", fmt.Errorf("find catalog item: %w", err)
 	}
@@ -218,7 +237,7 @@ func (s *Store) Upsert(ctx context.Context, item Item) (string, error) {
 			year = existing.Year
 		}
 
-		_, err = s.db.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			UPDATE catalog_items SET
 				title=?, year=?, tmdb_id=?, tvdb_id=?,
 				tier=?, artwork_url=?, synopsis=?,
@@ -234,13 +253,16 @@ func (s *Store) Upsert(ctx context.Context, item Item) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("update catalog item %s: %w", existing.ID, err)
 		}
+		if err := tx.Commit(); err != nil {
+			return "", fmt.Errorf("commit catalog update %s: %w", existing.ID, err)
+		}
 		return existing.ID, nil
 	}
 
 	if item.ID == "" {
 		item.ID = newID()
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO catalog_items (
 			id, type, parent_id, tmdb_id, tvdb_id, arr_id, arr_type,
 			jellyfin_id, episode_id, season_number, episode_number,
@@ -254,6 +276,9 @@ func (s *Store) Upsert(ctx context.Context, item Item) (string, error) {
 		item.ProculaJobID, item.FilePath, now, now)
 	if err != nil {
 		return "", fmt.Errorf("insert catalog item: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit catalog insert: %w", err)
 	}
 	return item.ID, nil
 }

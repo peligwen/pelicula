@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -432,5 +433,84 @@ func TestUpsert_BackfillsTmdbID(t *testing.T) {
 	}
 	if got.TmdbID != 329865 {
 		t.Errorf("expected TmdbID=329865, got %d", got.TmdbID)
+	}
+}
+
+// ── Concurrent upsert regression ─────────────────────────────────────────────
+
+// TestUpsert_ConcurrentSameKey verifies that N concurrent callers with the
+// same natural key produce exactly one row. This is the regression test for
+// the find-then-insert race that existed before Upsert was wrapped in a
+// transaction.
+func TestUpsert_ConcurrentSameKey(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	item := repocat.Item{
+		Type:    "movie",
+		TmdbID:  999001,
+		ArrID:   501,
+		ArrType: "radarr",
+		Title:   "Concurrent Movie",
+		Year:    2024,
+		Tier:    "queue",
+	}
+
+	const N = 20
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for range N {
+		go func() {
+			defer wg.Done()
+			<-start
+			s.Upsert(ctx, item) //nolint:errcheck — only row count matters here
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_items WHERE tmdb_id=?`, item.TmdbID).Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 row, got %d — duplicate insert race still present", count)
+	}
+}
+
+// ── scanItem error contract ───────────────────────────────────────────────────
+
+// TestScanItem_ErrorReturnsNilItem verifies that scanItem (exercised via Get)
+// returns (nil, non-nil-err) when the row cannot be scanned, rather than a
+// half-populated Item alongside an error.
+func TestScanItem_ErrorReturnsNilItem(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	// Insert a row with 'year' set to a non-numeric string via raw SQL,
+	// bypassing Go-level type checking. modernc/sqlite stores it as TEXT;
+	// scanning into *int will fail.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO catalog_items
+			(id, type, parent_id, tmdb_id, tvdb_id, arr_id, arr_type,
+			 jellyfin_id, episode_id, season_number, episode_number,
+			 title, year, tier, artwork_url, synopsis,
+			 metadata_synced_at, procula_job_id, file_path, created_at, updated_at)
+		VALUES ('cat_scantest','movie','',0,0,0,'','',0,0,0,'Bad Year','not-a-number',
+		        'queue','','','','','','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed bad row: %v", err)
+	}
+
+	item, err := s.Get(ctx, "cat_scantest")
+	if err == nil {
+		t.Fatal("expected scan error, got nil")
+	}
+	if item != nil {
+		t.Errorf("expected nil Item on scan error, got %+v", item)
 	}
 }
