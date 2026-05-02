@@ -26,6 +26,17 @@ type Handler struct {
 	ProculaURL string
 	APIKey     string // pre-resolved from env at construction; not re-read per request
 	cache      actionCache
+
+	// now is injectable for tests; production code leaves it nil (falls back to time.Now).
+	now func() time.Time
+}
+
+// timeNow returns the current time using the injectable clock or time.Now in production.
+func (h *Handler) timeNow() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
 }
 
 // New constructs a Handler. apiKey should be resolved from the environment at
@@ -47,13 +58,18 @@ func (h *Handler) HandleRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	h.cache.mu.Lock()
 	defer h.cache.mu.Unlock()
-	if len(h.cache.body) > 0 && time.Since(h.cache.lastFetch) < registryTTL {
+	if len(h.cache.body) > 0 && h.timeNow().Sub(h.cache.lastFetch) < registryTTL {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Cache", "hit")
 		w.Write(h.cache.body) //nolint:errcheck
 		return
 	}
-	resp, err := h.HTTPClient.Get(h.ProculaURL + "/api/procula/actions/registry")
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, h.ProculaURL+"/api/procula/actions/registry", nil)
+	if err != nil {
+		httputil.WriteError(w, "build request", http.StatusInternalServerError)
+		return
+	}
+	resp, err := h.HTTPClient.Do(req)
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -62,7 +78,7 @@ func (h *Handler) HandleRegistry(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusOK {
 		h.cache.body = body
-		h.cache.lastFetch = time.Now()
+		h.cache.lastFetch = h.timeNow()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
@@ -86,7 +102,7 @@ func (h *Handler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.RawQuery; q != "" {
 		target += "?" + q
 	}
-	upstream, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(body))
+	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		httputil.WriteError(w, "build request", http.StatusInternalServerError)
 		return
