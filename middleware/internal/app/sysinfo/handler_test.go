@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,6 +73,181 @@ func TestSortedLogEntries(t *testing.T) {
 	}
 	if got[0].Line != "new" || got[1].Line != "old" {
 		t.Errorf("wrong order: got %v %v", got[0].Line, got[1].Line)
+	}
+}
+
+// TestSpeedTest_ConcurrentReturnsBusy fires two concurrent speedtest requests
+// against a slow httptest server and expects exactly one 200 (the winner) and
+// one 429 (busy) — no mutex held across the I/O.
+func TestSpeedTest_ConcurrentReturnsBusy(t *testing.T) {
+	// Slow server: holds the connection open for 200ms to ensure concurrency.
+	started := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(make([]byte, 1024))
+	}))
+	defer ts.Close()
+
+	sysinfo.ResetSpeedTestState()
+	sysinfo.SetSpeedTestURL(ts.URL)
+	sysinfo.SetSpeedTestProxyDirect()
+	defer func() {
+		sysinfo.ResetSpeedTestState()
+		sysinfo.SetSpeedTestURL("https://speed.cloudflare.com/__down?bytes=10000000")
+		sysinfo.ClearSpeedTestProxyOverride()
+	}()
+
+	h := &sysinfo.Handler{}
+
+	var (
+		mu    sync.Mutex
+		codes []int
+		wg    sync.WaitGroup
+	)
+
+	fire := func() {
+		defer wg.Done()
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/speedtest", nil)
+		w := httptest.NewRecorder()
+		h.ServeSpeedtest(w, req)
+		mu.Lock()
+		codes = append(codes, w.Code)
+		mu.Unlock()
+	}
+
+	wg.Add(1)
+	go fire()
+	// Wait until the slow server has accepted the first request before firing
+	// the second, so the inflight flag is definitely set.
+	<-started
+	wg.Add(1)
+	go fire()
+
+	wg.Wait()
+
+	got200, got429 := 0, 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusOK:
+			got200++
+		case http.StatusTooManyRequests:
+			got429++
+		}
+	}
+	if got200 != 1 || got429 != 1 {
+		t.Errorf("want 1×200 and 1×429; got codes %v", codes)
+	}
+}
+
+// TestSpeedTest_RespectsCtx cancels the request context after 50ms and
+// confirms the handler returns promptly rather than waiting for the full
+// slow server response.
+func TestSpeedTest_RespectsCtx(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hold for longer than the context deadline.
+		time.Sleep(500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(make([]byte, 1024))
+	}))
+	defer ts.Close()
+
+	sysinfo.ResetSpeedTestState()
+	sysinfo.SetSpeedTestURL(ts.URL)
+	sysinfo.SetSpeedTestProxyDirect()
+	defer func() {
+		sysinfo.ResetSpeedTestState()
+		sysinfo.SetSpeedTestURL("https://speed.cloudflare.com/__down?bytes=10000000")
+		sysinfo.ClearSpeedTestProxyOverride()
+	}()
+
+	h := &sysinfo.Handler{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/speedtest", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	h.ServeSpeedtest(w, req)
+	elapsed := time.Since(start)
+
+	// Handler should return well before the server's 500ms sleep.
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("handler took %v; expected prompt return on ctx cancellation", elapsed)
+	}
+
+	// Response must be JSON with an error field.
+	var result struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v — body: %s", err, w.Body.String())
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error in result on ctx cancellation")
+	}
+}
+
+// TestSpeedTest_CachedResultWithinCooldown verifies that a second request
+// within the cooldown window returns the cached result without hitting upstream.
+func TestSpeedTest_CachedResultWithinCooldown(t *testing.T) {
+	hits := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(make([]byte, 1024))
+	}))
+	defer ts.Close()
+
+	sysinfo.ResetSpeedTestState()
+	sysinfo.SetSpeedTestURL(ts.URL)
+	sysinfo.SetSpeedTestProxyDirect()
+	defer func() {
+		sysinfo.ResetSpeedTestState()
+		sysinfo.SetSpeedTestURL("https://speed.cloudflare.com/__down?bytes=10000000")
+		sysinfo.ClearSpeedTestProxyOverride()
+	}()
+
+	h := &sysinfo.Handler{}
+
+	call := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/pelicula/speedtest", nil)
+		w := httptest.NewRecorder()
+		h.ServeSpeedtest(w, req)
+		return w
+	}
+
+	w1 := call()
+	if w1.Code != http.StatusOK {
+		t.Fatalf("first call: code = %d, body = %s", w1.Code, w1.Body.String())
+	}
+
+	w2 := call()
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second call: code = %d, body = %s", w2.Code, w2.Body.String())
+	}
+
+	if hits != 1 {
+		t.Errorf("upstream hit %d times; want 1 (second call should use cache)", hits)
+	}
+
+	// Both responses should decode to a valid result with no error.
+	for i, w := range []*httptest.ResponseRecorder{w1, w2} {
+		var result struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatalf("call %d: unmarshal: %v", i+1, err)
+		}
+		if result.Error != "" {
+			t.Errorf("call %d: unexpected error: %s", i+1, result.Error)
+		}
 	}
 }
 
