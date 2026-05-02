@@ -6,7 +6,10 @@ Pelicula's core phases (A–F) are shipped. This file tracks what's next, what's
 
 ## Active
 
-_Nothing in active development — v0.1 scope is complete._
+Rolling section-review sweeps are the active work mode — each round picks
+one cohesive surface, audits for drift / latent defects / hardening gaps,
+and ships 3-6 phases as logical commits with tests. The per-round entries
+in `## Shipped` capture each pass.
 
 ---
 
@@ -20,6 +23,14 @@ _Nothing in active development — v0.1 scope is complete._
 ---
 
 ## Shipped
+
+### 2026-05-02 — documentation alignment sweep (R17, final round)
+- ARCHITECTURE.md + CLAUDE.md aligned (P1) — fixed `pelicula-docker-proxy` → `docker-proxy` drift; added catalog.db (catalog_items) + migrated_json_files + notifications to schema rows; expanded middleware startup section to reflect R8's bootstrap.New(ctx) + Auth.Stop + App.Close + supervisor wg-drain; added x-logging anchor + stop_grace_period notes; nginx file map now lists snippets/proxy_common.conf as the R15 P3 source of truth + all 21 dashboard JS modules.
+- API.md endpoint catalog rebuilt from router ground truth (P2) — old doc had ~38 endpoints; actual surface is ~116. Walked router.go + peligrosa/routes.go + cmd/pelicula-api/main.go and emitted one row per registration. Fixed wrong paths (POST /login → POST /auth/login; POST /users/:id → POST /users/{id}/password). Added entire missing surfaces (catalog ~13 handlers, libraries CRUD, transcode/profiles, action bus, admin/container control, network/speedtest, operators CRUD). New "Rate-limited endpoints (nginx layer)" subsection with R15 P2 zones.
+- PELIGROSA.md + PROCULA.md aligned (P3) — added R16.5 ctx-propagation invariant note + missing operators_http.go/roles.go to PELIGROSA Reading the Code table; PROCULA.md gained 4 missing env vars in Container Definition + R14 P3 startup-loaded env note + notifications/migrated_json_files in schema list + 20 missing /api/procula/* endpoints (10 → 30).
+- README + CONTRIBUTING + SECURITY (P4) — fixed missing-watcher interval drift "2 minutes" → "10 minutes"; added missing /register and doctor refs. CONTRIBUTING and SECURITY spot-checked clean.
+- CHANGELOG + ROADMAP Active (P5) — Unreleased entries added for user-facing changes (rate limits, VERSION ldflags, Apprise notify, bazarr timeout, missingwatcher cooldown, catalog atomicity); Active section now describes rolling-sweep work mode.
+- Final regression gate: `go test ./...` from middleware/ green.
 
 ### 2026-05-02 — services.Clients + JellyfinClient + Fulfiller ctx sweep (R16.5)
 - Cross-cutting refactor scheduled across R6/R9/R10/R11/R13 — three surfaces all bridged with `context.Background()` because their helper interfaces predated the R8 ctx-everywhere standard. All landed in this round.
