@@ -1,3 +1,9 @@
+# Image pinning policy:
+# All images are pinned to specific tags. The :latest tag tracks unstable
+# upstream changes (gluetun's :latest broke port-forwarding multiple times
+# in 2024). To bump, verify via `docker manifest inspect <tag>` and run
+# the e2e test stack first.
+
 services:
 
   # ═══════════════════════════════════════════════════
@@ -43,7 +49,7 @@ services:
   # Torrent Client — all traffic through VPN
   # ═══════════════════════════════════════════════════
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:5.1.4
     profiles: [vpn]
     network_mode: "service:gluetun"
     environment:
@@ -69,7 +75,7 @@ services:
   # Indexer Manager
   # ═══════════════════════════════════════════════════
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
+    image: lscr.io/linuxserver/prowlarr:2.3.0
     profiles: [vpn]
     network_mode: "service:gluetun"
     depends_on:
@@ -93,7 +99,7 @@ services:
   # TV Show Manager
   # ═══════════════════════════════════════════════════
   sonarr:
-    image: lscr.io/linuxserver/sonarr:latest
+    image: lscr.io/linuxserver/sonarr:4.0.17
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -114,7 +120,7 @@ services:
   # Movie Manager
   # ═══════════════════════════════════════════════════
   radarr:
-    image: lscr.io/linuxserver/radarr:latest
+    image: lscr.io/linuxserver/radarr:6.0.4
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -190,7 +196,7 @@ services:
   # Subtitles — downloads subtitles for movies & TV
   # ═══════════════════════════════════════════════════
   bazarr:
-    image: lscr.io/linuxserver/bazarr:latest
+    image: lscr.io/linuxserver/bazarr:1.5.5
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -289,7 +295,7 @@ services:
   # Supports ntfy, Gotify, email, Pushover, Telegram, etc.
   # ═══════════════════════════════════════════════════
   apprise:
-    image: caronc/apprise:latest
+    image: caronc/apprise:v1.3.3
     profiles: [apprise]
     volumes:
       - ${CONFIG_DIR}/apprise:/config
@@ -299,7 +305,7 @@ services:
   # Reverse Proxy — single entry point (HTTPS)
   # ═══════════════════════════════════════════════════
   nginx:
-    image: nginx:alpine
+    image: nginx:1.28.3-alpine
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
