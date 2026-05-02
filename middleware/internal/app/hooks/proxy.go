@@ -2,6 +2,7 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -154,11 +155,20 @@ func (h *Handler) proxyProcula(path string, forwardQuery ...bool) http.HandlerFu
 // proxyProculaMutate returns an http.HandlerFunc that forwards the request
 // (method, body, Content-Type) to the given Procula path, injecting
 // X-API-Key if PROCULA_API_KEY is set.
+//
+// Body is capped at 1 MiB (defense-in-depth: settings/scan payloads are tiny;
+// an unbounded body should never stream through to Procula even under admin auth).
 func (h *Handler) proxyProculaMutate(path string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body io.Reader
 		if r.Body != nil {
-			body = r.Body
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			buf, err := io.ReadAll(r.Body)
+			if err != nil {
+				httputil.WriteError(w, "request body too large", http.StatusBadRequest)
+				return
+			}
+			body = bytes.NewReader(buf)
 		}
 		req, err := http.NewRequestWithContext(r.Context(), r.Method, h.ProculaURL+path, body)
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -500,5 +501,64 @@ func TestHandleNotificationsProxy_PassesThroughDetailAndJobID(t *testing.T) {
 	}
 	if events[0].JobID != "abc12345" {
 		t.Errorf("JobID = %q, want %q", events[0].JobID, "abc12345")
+	}
+}
+
+// TestProxyProculaMutate_MaxBytesReader verifies that proxyProculaMutate rejects
+// bodies exceeding 1 MiB with 400 and never forwards the request to Procula.
+func TestProxyProculaMutate_MaxBytesReader(t *testing.T) {
+	t.Parallel()
+
+	var hit int32
+	fakeProcula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hit, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer fakeProcula.Close()
+
+	h := newHandler(t, fakeProcula.URL)
+
+	// Body just over the 1 MiB cap.
+	oversized := make([]byte, (1<<20)+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/storage/scan", bytes.NewReader(oversized))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	w := httptest.NewRecorder()
+	h.HandleStorageScanProxy(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for oversized body", w.Code)
+	}
+	if n := atomic.LoadInt32(&hit); n != 0 {
+		t.Errorf("fake Procula received %d request(s), want 0 — oversized body should not reach upstream", n)
+	}
+}
+
+// TestProxyProculaMutate_AcceptsBodyUnderLimit verifies that bodies within the
+// 1 MiB cap are forwarded to Procula successfully.
+func TestProxyProculaMutate_AcceptsBodyUnderLimit(t *testing.T) {
+	t.Parallel()
+
+	var hit int32
+	fakeProcula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hit, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`)) //nolint:errcheck
+	}))
+	defer fakeProcula.Close()
+
+	h := newHandler(t, fakeProcula.URL)
+
+	// Body well within the 1 MiB cap.
+	smallBody := []byte(`{"enabled":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/storage/scan", bytes.NewReader(smallBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleStorageScanProxy(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for body within limit", w.Code)
+	}
+	if n := atomic.LoadInt32(&hit); n != 1 {
+		t.Errorf("fake Procula received %d request(s), want 1", n)
 	}
 }

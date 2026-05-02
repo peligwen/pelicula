@@ -21,6 +21,13 @@ _Nothing in active development — v0.1 scope is complete._
 
 ## Shipped
 
+### 2026-05-02 — middleware action layer sweep (R11)
+- backup ctx threading (P1) — 4 sites in `app/backup/{export,restore}.go` used `context.Background()` for handler-path repo calls; threaded `r.Context()` through `importRoles/importInvites/importRequests` and the export path. importMovies/importSeries also accept ctx (held with `_ = ctx`) so the wiring is in place when ArrClient ctx propagation lands in R16.5. Two new tests pin cancellation propagation.
+- actions package ctx + first tests (P2) — central action-bus router had zero tests today; threaded ctx through HandleRegistry and HandleCreate via `http.NewRequestWithContext`. Added `now func() time.Time` testability hook (mirrors catalog/cache.go and search/handler.go). 9 new tests cover cache miss/hit, TTL expiry via injected clock, MethodNotAllowed, upstream-unavailable 502, body+APIKey forwarding, query-string forwarding, MaxBytesReader.
+- hooks env-lift + proxyProcula ctx (P3) — receive.go read `os.Getenv("SEEDING_REMOVE_ON_COMPLETE")` on every webhook hot path; the same R8 P2 anti-pattern. Lifted to `hooks.Handler.SeedingRemoveOnComplete` field populated from cfg at startup. proxyProcula (GET variant) switched from ctxless `Get` to `NewRequestWithContext`. 3 new tests.
+- hooks mutate proxy MaxBytesReader (P4) — `proxyProculaMutate` was reading r.Body without a body-size cap. Wrapped at 1 MiB; body is pre-buffered before forwarding so an oversized body is rejected before any bytes reach Procula. Defense-in-depth — admin-gated today, but consistent with the R10 P4 HandleSearchAdd pattern. 2 new tests (`TestProxyProculaMutate_MaxBytesReader`, `TestProxyProculaMutate_AcceptsBodyUnderLimit`) plus `TestRateLimiter_AllowsThenBlocks` pinning the 10/min adminops threshold.
+- ~14 new tests across the round, including the actions package's first tests.
+
 ### 2026-05-02 — middleware library/catalog/search domain sweep (R10)
 - library/apply: EXDEV + Lstat semantics (P1) — cross-device move falls back to copy+remove via `os.Link`/`io.Copy`; `os.Lstat` used for symlink-safe stat before rename so symlinks inside the library are not dereferenced mid-move.
 - missingwatcher cooldown reset (P2) — the real availability win: watcher now resets its per-item cooldown on every successful import webhook so a newly-available item is re-queued for the next scan cycle instead of waiting out the original backoff. Eliminates the most common "title grabbed but never became available in Jellyfin" report.

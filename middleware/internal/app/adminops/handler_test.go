@@ -112,3 +112,34 @@ func TestHandleStackRestart_NoFlushFallback(t *testing.T) {
 		t.Errorf("body does not contain ok:true: %s", w.body.String())
 	}
 }
+
+// TestRateLimiter_AllowsThenBlocks verifies that the adminops rate limiter
+// allows exactly 10 requests per key, then returns 429 on the 11th.
+// Threshold is pinned here so a change to ratelimit.go's const limit breaks
+// this test loudly rather than silently regressing.
+func TestRateLimiter_AllowsThenBlocks(t *testing.T) {
+	const limit = 10
+
+	docker := &fakeDocker{}
+	h := adminops.New(docker, nil)
+
+	// All requests share the same RemoteAddr so they bucket to the same rate-limit key.
+	for i := 1; i <= limit; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/pelicula/admin/logs?svc=nginx", nil)
+		req.RemoteAddr = "192.0.2.1:9999"
+		w := httptest.NewRecorder()
+		h.HandleServiceLogs(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i, w.Code)
+		}
+	}
+
+	// The (limit+1)th request must be rate-limited.
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/admin/logs?svc=nginx", nil)
+	req.RemoteAddr = "192.0.2.1:9999"
+	w := httptest.NewRecorder()
+	h.HandleServiceLogs(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("request %d: status = %d, want 429", limit+1, w.Code)
+	}
+}
