@@ -3,8 +3,10 @@ package library
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"pelicula-api/httputil"
 )
@@ -408,11 +411,18 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-// moveFile moves src to dst, falling back to copy+remove when os.Rename fails
-// across different filesystems (common on Synology bind mounts).
+// moveFile moves src to dst. Rename across filesystems returns EXDEV; only
+// that case warrants a copy+delete fallback. Other errors should surface so
+// callers see the real cause (permission denied, disk full, read-only dst,
+// etc.) rather than a confusing copy failure or a partial dst file.
 func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
+	err := os.Rename(src, dst)
+	if err == nil {
 		return nil
+	}
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) || linkErr.Err != syscall.EXDEV {
+		return err
 	}
 	if err := copyFile(src, dst); err != nil {
 		return err
@@ -528,7 +538,9 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 				results[i] = fsOpResult{op: "moved"}
 			}
 		case "hardlink":
-			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+			_, lstatErr := os.Lstat(dst)
+			switch {
+			case errors.Is(lstatErr, fs.ErrNotExist):
 				if err := os.Link(src, dst); err != nil {
 					slog.Warn("import: hardlink failed", "component", "library",
 						"src", src, "dst", dst, "error", err)
@@ -537,12 +549,21 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 					item.DestPath = dst
 					results[i] = fsOpResult{op: "hardlinked"}
 				}
-			} else {
+			case lstatErr == nil:
+				// dst already exists — idempotent success.
 				item.DestPath = dst
 				results[i] = fsOpResult{op: "hardlinked"}
+			default:
+				// Any other Lstat error (permission denied, I/O error, etc.)
+				// must not silently succeed.
+				slog.Warn("import: lstat failed before hardlink", "component", "library",
+					"dst", dst, "error", lstatErr)
+				results[i] = fsOpResult{op: "failed", err: lstatErr.Error()}
 			}
 		case "link":
-			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+			_, lstatErr := os.Lstat(dst)
+			switch {
+			case errors.Is(lstatErr, fs.ErrNotExist):
 				if err := os.Symlink(src, dst); err != nil {
 					slog.Warn("import: symlink failed", "component", "library",
 						"src", src, "dst", dst, "error", err)
@@ -551,9 +572,16 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 					item.DestPath = dst
 					results[i] = fsOpResult{op: "symlinked"}
 				}
-			} else {
+			case lstatErr == nil:
+				// dst already exists — idempotent success.
 				item.DestPath = dst
 				results[i] = fsOpResult{op: "symlinked"}
+			default:
+				// Any other Lstat error (permission denied, I/O error, etc.)
+				// must not silently succeed.
+				slog.Warn("import: lstat failed before symlink", "component", "library",
+					"dst", dst, "error", lstatErr)
+				results[i] = fsOpResult{op: "failed", err: lstatErr.Error()}
 			}
 		}
 	}

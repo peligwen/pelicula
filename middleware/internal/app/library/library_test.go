@@ -1,6 +1,7 @@
 package library
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1075,5 +1076,144 @@ func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for path outside allowed roots", w.Code)
+	}
+}
+
+// TestMoveFile_RenameErrorPropagates verifies that moveFile does NOT fall back
+// to copy+remove for non-EXDEV rename failures. When the destination directory
+// is read-only the rename fails with a *os.LinkError; the new code must return
+// that error directly rather than attempting a copy.
+func TestMoveFile_RenameErrorPropagates(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores POSIX modes")
+	}
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	dstDir := filepath.Join(dir, "readonly")
+	dst := filepath.Join(dstDir, "dst.mkv")
+
+	if err := os.WriteFile(src, []byte("video"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dstDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	// Restore permissions so t.TempDir cleanup can remove the directory.
+	t.Cleanup(func() { os.Chmod(dstDir, 0755) })
+
+	err := moveFile(src, dst)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// The error must be a *os.LinkError (from os.Rename), not a *os.PathError
+	// from copyFile. With the old blanket fallback this would be a PathError
+	// from OpenFile; with the fixed code it is the LinkError that surfaces.
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) {
+		t.Errorf("expected *os.LinkError (rename error), got %T: %v", err, err)
+	}
+	// dst must not exist — no partial copy should have been attempted.
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Error("dst must not exist after a non-EXDEV rename failure")
+	}
+}
+
+// TestApplyFSOps_LinkBranch_PermissionError verifies that an Lstat failure
+// other than ErrNotExist (e.g. EACCES on the parent directory) produces
+// op=="failed" rather than silently reporting op=="symlinked".
+func TestApplyFSOps_LinkBranch_PermissionError(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores POSIX modes")
+	}
+
+	base := t.TempDir()
+	srcRoot := filepath.Join(base, "src")
+	dstRoot := filepath.Join(base, "dst")
+	if err := os.Mkdir(srcRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dstRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(srcRoot, "movie.mkv")
+	if err := os.WriteFile(src, []byte("video"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a subdirectory under dstRoot that is unreadable so Lstat on any
+	// file inside it returns EACCES.
+	dstParent := filepath.Join(dstRoot, "Movie (2020)")
+	if err := os.Mkdir(dstParent, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dstParent, 0755) })
+
+	dst := filepath.Join(dstParent, "movie.mkv")
+	items := []ApplyItem{{
+		Type:       "movie",
+		Title:      "Movie",
+		Year:       2020,
+		SourcePath: src,
+		DestPath:   dst,
+	}}
+	results := applyFSOps(items, "symlink", []string{srcRoot}, []string{dstRoot}, "", "")
+
+	if results[0].op != "failed" {
+		t.Errorf("expected op=failed, got op=%q (err=%q)", results[0].op, results[0].err)
+	}
+	if results[0].err == "" {
+		t.Error("expected non-empty err for permission failure")
+	}
+}
+
+// TestApplyFSOps_HardlinkIdempotent_PreservesReporting verifies the idempotent
+// path: when dst already exists as a regular file, applyFSOps reports
+// op=="hardlinked" without touching dst (the existing file is unchanged).
+func TestApplyFSOps_HardlinkIdempotent_PreservesReporting(t *testing.T) {
+	t.Parallel()
+	srcRoot, dstRoot := newApplyFSOpsRoots(t)
+
+	src := filepath.Join(srcRoot, "movie.mkv")
+	dstDir := filepath.Join(dstRoot, "Movie (2020)")
+	dst := filepath.Join(dstDir, "movie.mkv")
+
+	if err := os.WriteFile(src, []byte("src-content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dstDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create dst as a regular file with distinct content — not a hardlink to src.
+	if err := os.WriteFile(dst, []byte("dst-content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []ApplyItem{{
+		Type:       "movie",
+		Title:      "Movie",
+		Year:       2020,
+		SourcePath: src,
+		DestPath:   dst,
+	}}
+	results := applyFSOps(items, "hardlink", []string{srcRoot}, []string{dstRoot}, "", "")
+
+	if results[0].op != "hardlinked" {
+		t.Errorf("expected op=hardlinked (idempotent), got op=%q", results[0].op)
+	}
+	if results[0].err != "" {
+		t.Errorf("expected empty err for idempotent path, got %q", results[0].err)
+	}
+
+	// dst must be unchanged — still the original file, not linked to src.
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("ReadFile dst: %v", err)
+	}
+	if string(got) != "dst-content" {
+		t.Errorf("dst content = %q, want %q (dst must not be overwritten)", got, "dst-content")
 	}
 }
