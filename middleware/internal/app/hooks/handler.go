@@ -65,6 +65,11 @@ type Handler struct {
 	// WebhookSecret is the shared secret verified against X-Webhook-Secret on
 	// inbound *arr import webhooks. Empty means the check is skipped.
 	WebhookSecret string
+
+	// SeedingRemoveOnComplete is read once at startup from
+	// os.Getenv("SEEDING_REMOVE_ON_COMPLETE"); per-request paths read this
+	// field instead of calling os.Getenv on the hot webhook path.
+	SeedingRemoveOnComplete bool
 }
 
 // httpClient returns the configured HTTP client or http.DefaultClient.

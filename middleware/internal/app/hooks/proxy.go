@@ -132,7 +132,12 @@ func (h *Handler) proxyProcula(path string, forwardQuery ...bool) http.HandlerFu
 				target += "?" + q
 			}
 		}
-		resp, err := h.httpClient().Get(target)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+		if err != nil {
+			httputil.WriteError(w, "proxy error", http.StatusInternalServerError)
+			return
+		}
+		resp, err := h.httpClient().Do(req)
 		if err != nil {
 			httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 			return

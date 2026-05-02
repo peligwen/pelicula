@@ -2,10 +2,12 @@ package hooks_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"pelicula-api/internal/app/hooks"
 	proculaclient "pelicula-api/internal/clients/procula"
@@ -416,6 +418,46 @@ func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 when X-Webhook-Secret header is missing", w.Code)
+	}
+}
+
+// TestProxyProcula_PropagatesCtxCancel verifies that proxyProcula threads
+// r.Context() through to the upstream request so that a cancelled context
+// aborts the in-flight call promptly.
+func TestProxyProcula_PropagatesCtxCancel(t *testing.T) {
+	t.Parallel()
+
+	// Fake Procula that blocks until its own request context is cancelled.
+	blockingProcula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done() // block until the client disconnects
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer blockingProcula.Close()
+
+	h := newHandler(t, blockingProcula.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/storage", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.HandleStorageProxy(w, req)
+	}()
+
+	// Cancel after a short delay — handler must unblock well within 100ms.
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// good — returned promptly
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("HandleStorageProxy did not return after context cancel — ctx not wired through")
+	}
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 after ctx cancel", w.Code)
 	}
 }
 
