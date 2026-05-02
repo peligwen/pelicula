@@ -21,6 +21,13 @@ _Nothing in active development — v0.1 scope is complete._
 
 ## Shipped
 
+### 2026-05-02 — middleware repo / SQLite layer robustness sweep (R7)
+- Consolidated SQLite open path into dbutil.Open; deleted dead cmd/pelicula-api/db.go duplicate. New busy_timeout=5000 pragma is defense-in-depth.
+- Threaded context.Context through repo/roles (the last repo store missing it). Found and fixed two bonus call sites in app/backup/{export,restore}.go.
+- Made catalog Upsert atomic under concurrent callers (poller, backfill goroutine, webhook). 20-goroutine regression test pinned.
+- Wrapped each migratejson file in a transaction; new migrated_json_files table closes the rename-fails-after-commit window. No more duplicate redemption / request_event rows on retry.
+- Refreshed repo/doc.go to match current package layout.
+
 ### 2026-05-02 — middleware infra robustness sweep (R6)
 - httpx.Client: inject canonical Pelicula User-Agent on every outbound call (typed clients now match services.Clients posture)
 - cryptogen.GenerateAPIKey: panic on crypto/rand failure instead of returning the all-zero key; remove the cmd/pelicula-api duplicate
