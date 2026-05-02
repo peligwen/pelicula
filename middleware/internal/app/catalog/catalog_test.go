@@ -125,7 +125,7 @@ func newTestHandler(radarrSrv, sonarrSrv, proculaSrv *httptest.Server, radarrKey
 
 	return &catalog.Handler{
 		Arr:        arr,
-		Client:     http.DefaultClient,
+		Client:     catalog.NewProxyClient(http.DefaultClient),
 		RadarrURL:  radarrURL,
 		SonarrURL:  sonarrURL,
 		ProculaURL: proculaURL,
@@ -380,7 +380,7 @@ func TestHandleCatalogReplaceValidation(t *testing.T) {
 
 	h := &catalog.Handler{
 		Arr:    &stubArrClient{},
-		Client: http.DefaultClient,
+		Client: catalog.NewProxyClient(http.DefaultClient),
 	}
 
 	// Missing arr_type → 400

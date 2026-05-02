@@ -21,7 +21,25 @@ import (
 // ProxyClient is the subset of an HTTP client needed by the catalog handler
 // to make outbound requests to Procula.
 type ProxyClient interface {
-	Get(url string) (*http.Response, error)
+	Get(ctx context.Context, url string) (*http.Response, error)
+}
+
+// ctxHTTPClient wraps *http.Client so it satisfies ProxyClient.
+type ctxHTTPClient struct {
+	c *http.Client
+}
+
+// NewProxyClient returns a ProxyClient that threads ctx through each request.
+func NewProxyClient(c *http.Client) ProxyClient {
+	return &ctxHTTPClient{c: c}
+}
+
+func (g *ctxHTTPClient) Get(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return g.c.Do(req)
 }
 
 // jellyfinCacheState is a short-lived in-process cache of Jellyfin library items.
@@ -218,7 +236,7 @@ func (h *Handler) HandleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	resp, err := h.Client.Get(h.ProculaURL + "/api/procula/catalog/flags")
+	resp, err := h.Client.Get(r.Context(), h.ProculaURL+"/api/procula/catalog/flags")
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return
@@ -246,7 +264,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		Rows []map[string]any `json:"rows"`
 	}
 	var fw flagsWrap
-	if resp, err := h.Client.Get(h.ProculaURL + "/api/procula/catalog/flags"); err == nil {
+	if resp, err := h.Client.Get(r.Context(), h.ProculaURL+"/api/procula/catalog/flags"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		// best-effort file merge; unmarshal failure degrades to empty list
@@ -271,7 +289,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var matched map[string]any
-	if resp, err := h.Client.Get(h.ProculaURL + "/api/procula/jobs"); err == nil {
+	if resp, err := h.Client.Get(r.Context(), h.ProculaURL+"/api/procula/jobs"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		var all []map[string]any
@@ -346,7 +364,7 @@ func (h *Handler) HandleCatalogItemHistory(w http.ResponseWriter, r *http.Reques
 		httputil.WriteError(w, "path required", http.StatusBadRequest)
 		return
 	}
-	resp, err := h.Client.Get(h.ProculaURL + "/api/procula/jobs")
+	resp, err := h.Client.Get(r.Context(), h.ProculaURL+"/api/procula/jobs")
 	if err != nil {
 		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
 		return

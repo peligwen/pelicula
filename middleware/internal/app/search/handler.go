@@ -311,6 +311,7 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req struct {
 		Type   string `json:"type"`
 		TmdbID int    `json:"tmdbId"`

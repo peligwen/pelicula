@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // stubArrForHandler is a minimal ArrClient for handler-internal tests.
@@ -120,7 +121,7 @@ func TestHandleCatalogDetail_WarnOnBadProculaResponse(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(orig) })
 
 	h := &Handler{
-		Client:     http.DefaultClient,
+		Client:     NewProxyClient(http.DefaultClient),
 		ProculaURL: procula.URL,
 		Arr:        &stubArrForHandler{},
 	}
@@ -178,4 +179,39 @@ func containsSubstr(s, sub string) bool {
 		}
 		return false
 	}()
+}
+
+// TestHandleCatalogDetail_RespectsRequestCtx verifies that cancelling the
+// request context aborts the outbound Procula calls promptly.
+func TestHandleCatalogDetail_RespectsRequestCtx(t *testing.T) {
+	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(500 * time.Millisecond):
+			w.Write([]byte(`{}`)) //nolint:errcheck
+		case <-r.Context().Done():
+			// Client cancelled — don't write anything.
+		}
+	}))
+	defer procula.Close()
+
+	h := &Handler{
+		Client:     NewProxyClient(http.DefaultClient),
+		ProculaURL: procula.URL,
+		Arr:        &stubArrForHandler{},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/detail?path=/media/movie.mkv", nil).
+		WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	h.HandleCatalogDetail(w, req)
+	elapsed := time.Since(start)
+
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("HandleCatalogDetail took %v with cancelled ctx; expected < 100ms", elapsed)
+	}
 }

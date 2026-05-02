@@ -267,7 +267,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			DB:         cdb,
 			Arr:        svc,
 			Jf:         svc,
-			Client:     &http.Client{Timeout: 10 * time.Second},
+			Client:     catalog.NewProxyClient(&http.Client{Timeout: 10 * time.Second}),
 			ProculaURL: urls.Procula,
 			RadarrURL:  urls.Radarr,
 			SonarrURL:  urls.Sonarr,
