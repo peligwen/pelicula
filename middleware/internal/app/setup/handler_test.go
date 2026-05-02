@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/envfile"
 )
 
 // stubGenerateAPIKey returns a fixed string for deterministic tests.
@@ -214,7 +215,7 @@ func TestWriteEnvFile_BooleanAndStringFormatting(t *testing.T) {
 		"NOTIFICATIONS_ENABLED": "false",
 		"CONFIG_DIR":            "/config",
 	}
-	if err := writeEnvFile(path, vars); err != nil {
+	if err := envfile.Write(path, vars); err != nil {
 		t.Fatalf("writeEnvFile: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -252,7 +253,7 @@ func TestWriteEnvFile_IncludesJellyfinPublishedURL(t *testing.T) {
 		"CONFIG_DIR":             "/config",
 		"JELLYFIN_PUBLISHED_URL": "http://192.168.1.42:7354/jellyfin",
 	}
-	if err := writeEnvFile(path, vars); err != nil {
+	if err := envfile.Write(path, vars); err != nil {
 		t.Fatalf("writeEnvFile: %v", err)
 	}
 	data, _ := os.ReadFile(path)
@@ -269,7 +270,7 @@ func TestWriteEnvFile_OmitsEmptyJellyfinPublishedURL(t *testing.T) {
 	vars := map[string]string{
 		"CONFIG_DIR": "/config",
 	}
-	if err := writeEnvFile(path, vars); err != nil {
+	if err := envfile.Write(path, vars); err != nil {
 		t.Fatalf("writeEnvFile: %v", err)
 	}
 	data, _ := os.ReadFile(path)
