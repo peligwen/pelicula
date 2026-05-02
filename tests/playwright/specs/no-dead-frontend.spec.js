@@ -41,6 +41,46 @@ test.describe('no dead frontend patterns', () => {
         expect(js, 'users.js must not contain inline style="color:#"').not.toMatch(/style="[^"]*color\s*:\s*#/);
     });
 
+    test('setup.html body contains no inline color/border literals', async ({ page }) => {
+        await ensureLoggedIn(page);
+        const resp = await page.request.get('/setup.html');
+        expect(resp.ok()).toBe(true);
+        const html = await resp.text();
+        expect(html, 'setup.html must not contain inline style="color:#"').not.toMatch(/style="[^"]*color\s*:\s*#[0-9a-fA-F]/);
+        // border check: exclude var(--x,#fallback) forms — bare #hex after a border property is the target
+        expect(html, 'setup.html must not contain inline style border with bare #hex').not.toMatch(/style="[^"]*border[^"]*:\s*[^"(]*#[0-9a-fA-F]/);
+    });
+
+    test('index.html body contains no inline color/border literals (except documented exception)', async ({ page }) => {
+        await ensureLoggedIn(page);
+        const resp = await page.request.get('/index.html');
+        expect(resp.ok()).toBe(true);
+        const html = await resp.text();
+        // color:#000 on dsp-update-btn is an intentional fixed foreground on --accent background — documented in HTML comment
+        const colorHits = [...html.matchAll(/style="[^"]*color\s*:\s*#[0-9a-fA-F][^"]*"/g)]
+            .map(m => m[0])
+            .filter(s => !s.includes('color:#000'));
+        expect(colorHits, 'index.html must not contain inline style="color:#" (except the documented color:#000 exception)').toHaveLength(0);
+        expect(html, 'index.html must not contain inline style border with bare #hex').not.toMatch(/style="[^"]*border[^"]*:\s*[^"(]*#[0-9a-fA-F]/);
+    });
+
+    test('setup.html loads without console errors', async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', e => errors.push(String(e)));
+        await ensureLoggedIn(page);
+        await page.goto('/setup.html');
+        await page.waitForLoadState('networkidle');
+        expect(errors, 'setup.html must load without JS errors').toEqual([]);
+    });
+
+    test('dashboard loads without console errors after inline-color reap', async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', e => errors.push(String(e)));
+        await ensureLoggedIn(page);
+        await page.waitForLoadState('networkidle');
+        expect(errors, 'dashboard must load without JS errors after inline-color reap').toEqual([]);
+    });
+
     test('notification + activity rendering produces no module-scope ReferenceErrors', async ({ page }) => {
         const errors = [];
         page.on('pageerror', e => errors.push(String(e)));

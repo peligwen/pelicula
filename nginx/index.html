@@ -1221,8 +1221,9 @@
                 </div>
                 <div style="display:flex;gap:.4rem">
                     <button id="dsp-save-new-btn" style="padding:.28rem .6rem;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.72rem;cursor:pointer">+ Save as new</button>
+                    <!-- color:#000 is intentional: fixed foreground on --accent (known-blue/pink) background, not a missed token -->
                     <button id="dsp-update-btn" style="padding:.28rem .6rem;border-radius:4px;border:none;background:var(--accent);color:#000;font-size:.72rem;font-weight:600;cursor:pointer">Update</button>
-                    <button id="dsp-delete-btn" style="margin-left:auto;padding:.28rem .6rem;border-radius:4px;border:1px solid #c0392b;background:transparent;color:#c0392b;font-size:.72rem;cursor:pointer">Delete</button>
+                    <button id="dsp-delete-btn" class="sm-btn-danger" style="margin-left:auto;padding:.28rem .6rem;border-radius:4px;border:1px solid;background:transparent;font-size:.72rem;cursor:pointer">Delete</button>
                 </div>
             </div>
 
