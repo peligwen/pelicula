@@ -1,4 +1,4 @@
-package main
+package peliculadb
 
 import (
 	"database/sql"
@@ -8,45 +8,38 @@ import (
 	"testing"
 )
 
-// currentVersion reads PRAGMA user_version from db (test helper).
-func currentVersion(db *sql.DB) (int, error) {
-	var v int
-	err := db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	return v, err
-}
-
-// testDB creates a fresh SQLite database in t.TempDir() and returns it.
-// The database is closed automatically when the test ends.
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := OpenDB(path)
+	db, err := Open(path)
 	if err != nil {
-		t.Fatalf("testDB: OpenDB: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
 }
 
-func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
+func currentVersion(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	return v
+}
+
+func TestOpen_CreatesTablesAndSetsVersion(t *testing.T) {
 	db := testDB(t)
 
-	// Verify schema version was set.
-	ver, err := currentVersion(db)
-	if err != nil {
-		t.Fatalf("currentVersion: %v", err)
-	}
-	if ver != 1 {
-		t.Errorf("user_version = %d, want 1", ver)
+	if got := currentVersion(t, db); got != 1 {
+		t.Errorf("user_version = %d, want 1", got)
 	}
 
-	// Verify all expected tables exist.
-	tables := []string{
+	for _, table := range []string{
 		"roles", "invites", "redemptions",
 		"requests", "request_events",
 		"sessions", "rate_limits",
-	}
-	for _, table := range tables {
+	} {
 		var name string
 		err := db.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
@@ -59,53 +52,45 @@ func TestOpenDB_CreatesTablesAndSetsVersion(t *testing.T) {
 	}
 }
 
-func TestOpenDB_MigratesForwardFromZero(t *testing.T) {
-	// Open raw SQLite without running migrations (user_version = 0).
+func TestOpen_MigratesForwardFromZero(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bare.db")
+
+	// Open raw SQLite without running migrations — user_version stays 0.
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}
 	raw.Close()
 
-	// Now open via OpenDB — should migrate from 0 → 1.
-	db, err := OpenDB(path)
+	// Open via peliculadb.Open — must migrate 0 → 1.
+	db, err := Open(path)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 
-	ver, err := currentVersion(db)
-	if err != nil {
-		t.Fatalf("currentVersion: %v", err)
-	}
-	if ver != 1 {
-		t.Errorf("user_version = %d, want 1", ver)
+	if got := currentVersion(t, db); got != 1 {
+		t.Errorf("user_version = %d, want 1", got)
 	}
 }
 
-func TestOpenDB_IdempotentOnSecondOpen(t *testing.T) {
+func TestOpen_IdempotentOnSecondOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "idempotent.db")
 
-	db1, err := OpenDB(path)
+	db1, err := Open(path)
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
 	db1.Close()
 
-	// Second open must not fail and must not reset the version.
-	db2, err := OpenDB(path)
+	db2, err := Open(path)
 	if err != nil {
 		t.Fatalf("second open: %v", err)
 	}
 	defer db2.Close()
 
-	ver, err := currentVersion(db2)
-	if err != nil {
-		t.Fatalf("currentVersion: %v", err)
-	}
-	if ver != 1 {
-		t.Errorf("user_version = %d after second open, want 1", ver)
+	if got := currentVersion(t, db2); got != 1 {
+		t.Errorf("user_version = %d after second open, want 1", got)
 	}
 }
 
@@ -145,11 +130,7 @@ func TestSchemaEquivalence_PeliculaDB(t *testing.T) {
 	}
 
 	// Final user_version must equal the count of migrations.
-	ver, err := currentVersion(db)
-	if err != nil {
-		t.Fatalf("currentVersion: %v", err)
-	}
-	if ver != len(migrations) {
+	if ver := currentVersion(t, db); ver != len(migrations) {
 		t.Errorf("user_version = %d, want %d (len(migrations))", ver, len(migrations))
 	}
 }

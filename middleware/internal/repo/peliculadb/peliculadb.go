@@ -6,36 +6,12 @@ import (
 	"fmt"
 
 	"pelicula-api/internal/repo/dbutil"
-
-	_ "modernc.org/sqlite"
 )
 
-// Open opens (or creates) the SQLite database at path, configures WAL mode
-// and foreign key enforcement, then runs any pending schema migrations.
+// Open opens (or creates) the SQLite database at path and runs all pending
+// schema migrations.
 func Open(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
-	}
-
-	// SQLite is not safe for concurrent writes from multiple connections without
-	// WAL mode. Use a single connection to avoid SQLITE_BUSY under load.
-	db.SetMaxOpenConns(1)
-
-	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("set WAL mode: %w", err)
-	}
-	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
-	}
-
-	if err := dbutil.Migrate(db, migrations, "db"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-	return db, nil
+	return dbutil.Open(path, migrations, "peliculadb")
 }
 
 // migrations is the ordered list of all schema migrations for pelicula.db.

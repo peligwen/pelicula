@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 
-	_ "modernc.org/sqlite"
-
 	repocatalog "pelicula-api/internal/repo/catalog"
 	"pelicula-api/internal/repo/dbutil"
 )
@@ -20,24 +18,7 @@ type CatalogFilter = repocatalog.Filter
 
 // OpenCatalogDB opens (or creates) the catalog SQLite database and runs migrations.
 func OpenCatalogDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("open catalog sqlite %s: %w", path, err)
-	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("catalog db WAL: %w", err)
-	}
-	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("catalog db foreign keys: %w", err)
-	}
-	if err := dbutil.Migrate(db, catalogMigrations, "catalog_db"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("catalog db migrations: %w", err)
-	}
-	return db, nil
+	return dbutil.Open(path, catalogMigrations, "catalog")
 }
 
 // catalogMigrations is the ordered list of all schema migrations for catalog.db.
