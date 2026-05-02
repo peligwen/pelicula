@@ -71,6 +71,7 @@ Everything runs behind nginx on one port:
 | `/setup` | Setup wizard | Browser-based first-time configuration |
 | `/settings` | Settings | Runtime configuration |
 | `/import` | Import wizard | Browse and import local media files |
+| `/register` | Register | Invite redemption / open registration (public) |
 | `/api/pelicula/` | Go middleware | Auto-wiring, search API, download actions |
 | `/api/procula/` | Procula | Media processing pipeline |
 | `/api/vpn/` | Gluetun | VPN telemetry |
@@ -101,6 +102,7 @@ pelicula import              # Open the browser-based local media import wizard
 pelicula export              # Export watchlist/library backup
 pelicula import-backup       # Restore from a backup exported by pelicula export
 pelicula test                # End-to-end integration test (isolated stack, no VPN needed)
+pelicula doctor              # Dump container status and error logs for troubleshooting
 ```
 
 ## Architecture
@@ -143,7 +145,7 @@ Progress bars are green (active), amber (paused), or blue (seeding).
 
 ## Missing Content Watcher
 
-A background process checks every 2 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
+A background process checks every 10 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
 
 ## Content Requests
 
@@ -195,7 +197,7 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | Auto-wires qBittorrent as download client in Sonarr and Radarr | ✓ e2e.sh | ☐ |
 | Connects Prowlarr indexers to Sonarr and Radarr | ✓ e2e.sh | ☐ |
 | Validates downloads (FFprobe integrity, sample detection, blocklist + re-search) | ~ partial (pipeline via import webhook; blocklist/re-search path not exercised) | ☐ |
-| Missing content watcher (2-min interval auto-search) | — | ☐ |
+| Missing content watcher (10-min interval auto-search) | — | ☐ |
 | Enforces auth bypass on every start | — | ☐ |
 | **Dashboard** | | |
 | Unified search (Sonarr + Radarr in parallel, interleaved, type filter tabs) | — | ☐ |
@@ -214,6 +216,7 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | `/setup` — Browser setup wizard | — | ☐ |
 | `/settings` — Runtime configuration | ✓ e2e.sh (protected route redirect + cookie access) | ☐ |
 | `/import` — Local media import wizard | ✓ playwright (import-play exercises full wizard) | ☐ |
+| `/register` — Invite redemption / open registration | — | ☐ |
 | `/api/pelicula/` — Go middleware | ✓ e2e.sh (health, status, auth, hooks/import) | ☐ |
 | `/api/procula/` — Procula pipeline | ✓ e2e.sh (settings + jobs polling) | ☐ |
 | `/api/vpn/` — Gluetun VPN telemetry | — | ☐ |
@@ -257,6 +260,7 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | `pelicula import` | — | ☐ |
 | `pelicula export` / `import-backup` | — | ☐ |
 | `pelicula test` | ✓ e2e.sh (this command runs the suite) | ☐ |
+| `pelicula doctor` | — | ☐ |
 | **Security** | | |
 | Peligrosa remote access (Jellyfin-only, TLS) | — | ☐ |
 
