@@ -21,6 +21,14 @@ _Nothing in active development — v0.1 scope is complete._
 
 ## Shipped
 
+### 2026-05-02 — middleware HTTP clients sweep (R9)
+- gluetun client routes through httpx (retry on 5xx, redacted error paths). Basic Auth moved to a Transport-layer RoundTripper so existing GLUETUN_HTTP_PASS deployments keep working.
+- apprise notify gains per-URL fan-out (errors.Join), httpx-backed transport (UA + retry + body drain), and an internal ctx with timeout. One bad URL no longer aborts the batch — the user-preferred notification path now degrades gracefully.
+- internal jellyfin client: every method (Get/Post/Delete/Do/AuthenticateByName) accepts ctx; ctx threaded through ~30 callsites in users/wizard/handler/wiring so HTTP handlers stop discarding `r.Context()`.
+- docker client: ctx on Restart/Logs/Stats; UA header now matches the rest of the stack (no more "Go-http-client/1.1" in socket-proxy logs).
+- bazarr defaultTimeout bumped 10s → 30s (subtitle queries are slow under load).
+- First test coverage for 7 of 8 clients (apprise/arr/bazarr/gluetun/jellyfin-internal/procula/qbt) — the test gap was itself the finding. ~50 new tests pin shape, headers, query/path escape, retry inheritance, and error redaction.
+
 ### 2026-05-02 — middleware bootstrap & lifecycle sweep (R8)
 - VERSION ldflags wiring (Dockerfile ARG + CLI `--build-arg VERSION=$(git describe)`) so deployed binaries log a real version instead of "dev"; UA header now identifies build. Includes the setup-mode `compose up --build` path.
 - bootstrap.New accepts ctx; migratejson.Run cancellable mid-startup. cfg.WebhookSecret refreshed after ensureWebhookSecret so the field matches reality; autowire and hooks/receive consume cfg directly.
