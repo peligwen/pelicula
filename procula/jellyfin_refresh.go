@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,10 @@ import (
 // before firing the actual POST to pelicula-api. A download burst (10 items in
 // 5s) produces one Jellyfin scan instead of ten.
 const defaultRefreshDebounceMs = 5000
+
+// refreshDebounceMs is the resolved debounce window, loaded once at startup
+// from JELLYFIN_REFRESH_DEBOUNCE_MS. Hot-path reads use this package var.
+var refreshDebounceMs = time.Duration(defaultRefreshDebounceMs) * time.Millisecond
 
 var (
 	refreshMu     sync.Mutex
@@ -75,8 +78,12 @@ func FlushJellyfinRefresh() {
 	}
 }
 
-func refreshDebounceDelay() time.Duration {
-	v := strings.TrimSpace(os.Getenv("JELLYFIN_REFRESH_DEBOUNCE_MS"))
+func refreshDebounceDelay() time.Duration { return refreshDebounceMs }
+
+// parseRefreshDebounceMs converts a raw env string to a Duration.
+// Empty or invalid input returns the default (5000ms).
+func parseRefreshDebounceMs(v string) time.Duration {
+	v = strings.TrimSpace(v)
 	if v == "" {
 		return time.Duration(defaultRefreshDebounceMs) * time.Millisecond
 	}
@@ -96,8 +103,8 @@ func doJellyfinRefresh(peliculaAPI string) error {
 	if err != nil {
 		return err
 	}
-	if key := strings.TrimSpace(os.Getenv("PROCULA_API_KEY")); key != "" {
-		req.Header.Set("X-API-Key", key)
+	if proculaAPIKey != "" {
+		req.Header.Set("X-API-Key", proculaAPIKey)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

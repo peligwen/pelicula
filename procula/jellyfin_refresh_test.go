@@ -38,8 +38,12 @@ func startCountingServer(t *testing.T) (string, *atomic.Int32) {
 // schedule calls collapses into a single POST after the debounce window.
 func TestScheduleJellyfinRefresh_DebouncesBurst(t *testing.T) {
 	resetRefreshState(t)
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "150")
-	t.Setenv("PROCULA_API_KEY", "")
+	old := refreshDebounceMs
+	SetRefreshDebounceForTest(150 * time.Millisecond)
+	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
+	oldKey := proculaAPIKey
+	proculaAPIKey = ""
+	t.Cleanup(func() { proculaAPIKey = oldKey })
 
 	apiURL, count := startCountingServer(t)
 
@@ -74,11 +78,15 @@ func TestScheduleJellyfinRefresh_DebouncesBurst(t *testing.T) {
 }
 
 // TestScheduleJellyfinRefresh_ZeroBypassesDebounce verifies tests can opt out
-// by setting JELLYFIN_REFRESH_DEBOUNCE_MS=0 (immediate, synchronous POST).
+// by setting the debounce package var to 0 (immediate, synchronous POST).
 func TestScheduleJellyfinRefresh_ZeroBypassesDebounce(t *testing.T) {
 	resetRefreshState(t)
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "0")
-	t.Setenv("PROCULA_API_KEY", "")
+	old := refreshDebounceMs
+	SetRefreshDebounceForTest(0)
+	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
+	oldKey := proculaAPIKey
+	proculaAPIKey = ""
+	t.Cleanup(func() { proculaAPIKey = oldKey })
 
 	apiURL, count := startCountingServer(t)
 
@@ -96,8 +104,12 @@ func TestScheduleJellyfinRefresh_ZeroBypassesDebounce(t *testing.T) {
 // is dispatched synchronously when Flush is called (e.g. on shutdown).
 func TestFlushJellyfinRefresh_FiresPending(t *testing.T) {
 	resetRefreshState(t)
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "60000") // long enough that the timer can't naturally fire during the test
-	t.Setenv("PROCULA_API_KEY", "")
+	old := refreshDebounceMs
+	SetRefreshDebounceForTest(60000 * time.Millisecond) // long enough that the timer can't naturally fire during the test
+	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
+	oldKey := proculaAPIKey
+	proculaAPIKey = ""
+	t.Cleanup(func() { proculaAPIKey = oldKey })
 
 	apiURL, count := startCountingServer(t)
 
@@ -119,8 +131,12 @@ func TestFlushJellyfinRefresh_FiresPending(t *testing.T) {
 // is queued.
 func TestFlushJellyfinRefresh_NoPendingIsNoop(t *testing.T) {
 	resetRefreshState(t)
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "5000")
-	t.Setenv("PROCULA_API_KEY", "")
+	old := refreshDebounceMs
+	SetRefreshDebounceForTest(5000 * time.Millisecond)
+	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
+	oldKey := proculaAPIKey
+	proculaAPIKey = ""
+	t.Cleanup(func() { proculaAPIKey = oldKey })
 
 	apiURL, count := startCountingServer(t)
 	_ = apiURL // server exists but no schedule call was made
@@ -132,19 +148,52 @@ func TestFlushJellyfinRefresh_NoPendingIsNoop(t *testing.T) {
 	}
 }
 
-// TestRefreshDebounceDelay_DefaultsTo5s verifies the default debounce window.
-func TestRefreshDebounceDelay_DefaultsTo5s(t *testing.T) {
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "")
-	if got := refreshDebounceDelay(); got != 5*time.Second {
+// TestParseRefreshDebounceMs_DefaultsTo5s verifies the default debounce window.
+func TestParseRefreshDebounceMs_DefaultsTo5s(t *testing.T) {
+	if got := parseRefreshDebounceMs(""); got != 5*time.Second {
 		t.Errorf("default debounce = %v, want 5s", got)
 	}
 }
 
-// TestRefreshDebounceDelay_InvalidFallsBackToDefault verifies we don't panic
+// TestParseRefreshDebounceMs_InvalidFallsBackToDefault verifies we don't panic
 // or fire immediately on a malformed env value.
-func TestRefreshDebounceDelay_InvalidFallsBackToDefault(t *testing.T) {
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "not-a-number")
-	if got := refreshDebounceDelay(); got != 5*time.Second {
+func TestParseRefreshDebounceMs_InvalidFallsBackToDefault(t *testing.T) {
+	if got := parseRefreshDebounceMs("not-a-number"); got != 5*time.Second {
 		t.Errorf("invalid debounce = %v, want 5s default", got)
+	}
+}
+
+// TestScheduleJellyfinRefresh_NoEnvOnHotPath verifies that doJellyfinRefresh
+// uses the proculaAPIKey package var and ignores PROCULA_API_KEY in the environment.
+// Setting PROCULA_API_KEY=wrong while proculaAPIKey="" (disabled) must result in
+// no X-API-Key header — confirming the env is never re-read on the hot path.
+func TestScheduleJellyfinRefresh_NoEnvOnHotPath(t *testing.T) {
+	resetRefreshState(t)
+	// Set the env to a sentinel that would cause auth failures if read.
+	t.Setenv("PROCULA_API_KEY", "env-sentinel-should-not-be-read")
+
+	// The package var is empty (auth disabled) — the server must see no key header.
+	oldKey := proculaAPIKey
+	proculaAPIKey = ""
+	t.Cleanup(func() { proculaAPIKey = oldKey })
+
+	old := refreshDebounceMs
+	SetRefreshDebounceForTest(0) // synchronous: no timer goroutines
+	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
+
+	var sawKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/pelicula/jellyfin/refresh" {
+			sawKey = r.Header.Get("X-API-Key")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+
+	if err := scheduleJellyfinRefresh(ts.URL); err != nil {
+		t.Fatalf("scheduleJellyfinRefresh: %v", err)
+	}
+	if sawKey != "" {
+		t.Errorf("X-API-Key header = %q, want empty (env value must not be read on hot path)", sawKey)
 	}
 }

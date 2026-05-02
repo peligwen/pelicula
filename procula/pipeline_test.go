@@ -412,8 +412,12 @@ func TestCatalogEarly_TriggersBeforeTranscode(t *testing.T) {
 	os.WriteFile(sourcePath, []byte("fake"), 0644)
 
 	apiURL, refreshCount := countingServer(t)
-	t.Setenv("PROCULA_API_KEY", "")               // disable key check
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "0") // immediate POST so ordering is observable
+	oldKey := proculaAPIKey
+	proculaAPIKey = "" // disable key check
+	t.Cleanup(func() { proculaAPIKey = oldKey })
+	oldDebounce := refreshDebounceMs
+	SetRefreshDebounceForTest(0) // immediate POST so ordering is observable
+	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 
 	overrideSettings(t, PipelineSettings{
 		ValidationEnabled:  false,
@@ -452,7 +456,9 @@ func TestCatalogEarly_TriggersBeforeTranscode(t *testing.T) {
 // when transcoding is disabled (no sidecar written).
 func TestCatalogLate_SkipsWhenNoSidecar(t *testing.T) {
 	cfgDir := t.TempDir()
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "0") // immediate POST for assertion
+	oldDebounce := refreshDebounceMs
+	SetRefreshDebounceForTest(0) // immediate POST for assertion
+	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 	overrideSettings(t, PipelineSettings{
 		ValidationEnabled:  false,
 		TranscodingEnabled: false,
@@ -489,7 +495,9 @@ func TestCatalogLate_SkipsOnPassthrough(t *testing.T) {
 		CatalogEnabled:     true,
 	})
 
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "0") // immediate POST for assertion
+	oldDebounce := refreshDebounceMs
+	SetRefreshDebounceForTest(0) // immediate POST for assertion
+	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 	apiURL, refreshCount := countingServer(t)
 	q := newTestQueue(t)
 	created, _ := q.Create(testSource("/fake/movie.mkv"))
@@ -994,7 +1002,9 @@ func TestCatalogLate_TriggersOnDualSubOutputs(t *testing.T) {
 		CatalogEnabled:     true, // enabled — should trigger CatalogEarly + CatalogLate
 	})
 
-	t.Setenv("JELLYFIN_REFRESH_DEBOUNCE_MS", "0") // immediate POST so each refresh is observable
+	oldDebounce := refreshDebounceMs
+	SetRefreshDebounceForTest(0) // immediate POST so each refresh is observable
+	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 	apiURL, refreshCount := countingServer(t)
 	q := newTestQueue(t)
 	created, _ := q.Create(testSource(sourcePath))

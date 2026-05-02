@@ -173,15 +173,12 @@ func resolveOutputPath(input, suffix, processingDir string) string {
 	return outputPath
 }
 
-// preferredAudioLang returns the normalized (ISO 639-1) preferred audio language
-// from PELICULA_AUDIO_LANG, defaulting to "en".
-func preferredAudioLang() string {
-	lang := strings.TrimSpace(os.Getenv("PELICULA_AUDIO_LANG"))
-	if lang == "" {
-		return "en"
-	}
-	return normalizeLangCode(lang)
-}
+// preferredAudioLangVal is the normalized preferred audio language, loaded once
+// at startup from PELICULA_AUDIO_LANG. Defaults to "en".
+var preferredAudioLangVal = "en"
+
+// preferredAudioLang returns the preferred audio language resolved at startup.
+func preferredAudioLang() string { return preferredAudioLangVal }
 
 func buildFFmpegArgs(input, output string, p *TranscodeProfile, codecs *CodecInfo) []string {
 	args := []string{

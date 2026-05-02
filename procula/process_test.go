@@ -123,7 +123,9 @@ func TestBuildFFmpegArgs(t *testing.T) {
 	})
 
 	t.Run("preferred lang matches second track: disposition set correctly", func(t *testing.T) {
-		t.Setenv("PELICULA_AUDIO_LANG", "eng")
+		old := preferredAudioLangVal
+		SetPreferredAudioLangForTest("en")
+		t.Cleanup(func() { SetPreferredAudioLangForTest(old) })
 		p := &TranscodeProfile{
 			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
 		}
@@ -139,7 +141,9 @@ func TestBuildFFmpegArgs(t *testing.T) {
 	})
 
 	t.Run("preferred lang not found: no disposition flags", func(t *testing.T) {
-		t.Setenv("PELICULA_AUDIO_LANG", "eng")
+		old := preferredAudioLangVal
+		SetPreferredAudioLangForTest("en")
+		t.Cleanup(func() { SetPreferredAudioLangForTest(old) })
 		p := &TranscodeProfile{
 			Output: TranscodeOutput{VideoCodec: "copy", AudioCodec: "copy"},
 		}
@@ -539,6 +543,26 @@ func TestProcess_CancelNotTimeout(t *testing.T) {
 	}
 	if errors.Is(err, errTranscodeTimeout) {
 		t.Errorf("user cancel should not return errTranscodeTimeout; got: %v", err)
+	}
+}
+
+// TestPreferredAudioLang_NoEnvOnHotPath verifies that preferredAudioLang() reads
+// the package var rather than the environment on every call.
+// Setting PELICULA_AUDIO_LANG to a different value after startup must have no
+// effect — the function returns the value baked into the package var.
+func TestPreferredAudioLang_NoEnvOnHotPath(t *testing.T) {
+	// Override the env to a sentinel that differs from the package var.
+	t.Setenv("PELICULA_AUDIO_LANG", "deu")
+
+	// Package var is set to "spa" — this is what the function must return.
+	old := preferredAudioLangVal
+	SetPreferredAudioLangForTest("spa")
+	t.Cleanup(func() { SetPreferredAudioLangForTest(old) })
+
+	for range 5 {
+		if got := preferredAudioLang(); got != "spa" {
+			t.Fatalf("preferredAudioLang() = %q, want %q (env value %q must be ignored on hot path)", got, "spa", "deu")
+		}
 	}
 }
 
