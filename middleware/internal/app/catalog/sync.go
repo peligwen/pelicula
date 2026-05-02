@@ -413,7 +413,7 @@ func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, a
 
 // MaybeSyncJellyfinMetadata syncs Jellyfin metadata for an item if stale (>24h) or never synced.
 // Safe to call in a goroutine — logs errors, never panics.
-func (h *Handler) MaybeSyncJellyfinMetadata(item *CatalogItem) {
+func (h *Handler) MaybeSyncJellyfinMetadata(ctx context.Context, item *CatalogItem) {
 	if item == nil {
 		return
 	}
@@ -426,19 +426,19 @@ func (h *Handler) MaybeSyncJellyfinMetadata(item *CatalogItem) {
 			return
 		}
 	}
-	if err := h.SyncJellyfinMetadata(item); err != nil {
+	if err := h.SyncJellyfinMetadata(ctx, item); err != nil {
 		slog.Error("jellyfin metadata sync", "component", "catalog_sync", "id", item.ID, "error", err)
 	}
 }
 
 // SyncJellyfinMetadata fetches artwork and synopsis from Jellyfin and persists them.
-func (h *Handler) SyncJellyfinMetadata(item *CatalogItem) error {
+func (h *Handler) SyncJellyfinMetadata(ctx context.Context, item *CatalogItem) error {
 	jellyfinID, artworkURL, synopsis, err := h.fetchJellyfinItemMeta(item)
 	if err != nil {
 		return err
 	}
 	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := UpdateCatalogMetadata(context.Background(), h.DB, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
+	if err := UpdateCatalogMetadata(ctx, h.DB, item.ID, jellyfinID, artworkURL, synopsis, syncedAt); err != nil {
 		return fmt.Errorf("persist metadata: %w", err)
 	}
 	if jellyfinID != "" {

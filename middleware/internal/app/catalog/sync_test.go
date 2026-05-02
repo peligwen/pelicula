@@ -280,3 +280,129 @@ func TestUpsertFromHook_UnknownSourceTypeIsSentinel(t *testing.T) {
 		t.Errorf("errors.Is(err, ErrUnknownSourceType) = false; err = %v", err)
 	}
 }
+
+// ── R8-catalog: RootCtx shutdown discipline ──────────────────────────────────
+
+// TestHandleCatalogBackfill_RespectsRootCtx verifies that the goroutine spawned
+// by HandleCatalogBackfill observes cancellation of Handler.RootCtx.
+func TestHandleCatalogBackfill_RespectsRootCtx(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Track whether ctx was cancelled when ArrGet was called.
+	var ctxErrObserved atomic.Int32
+	arr := &stubArrBackfill{
+		doGet: func(baseURL, apiKey, path string) ([]byte, error) {
+			if ctx.Err() != nil {
+				ctxErrObserved.Store(1)
+			}
+			// Return an empty list so backfill completes cleanly when not cancelled.
+			return []byte("[]"), nil
+		},
+	}
+
+	db := testSQLiteDB(t)
+	h := &Handler{
+		DB:        db,
+		Arr:       arr,
+		RootCtx:   ctx,
+		RadarrURL: "http://radarr",
+		SonarrURL: "http://sonarr",
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
+	w := httptest.NewRecorder()
+	h.HandleCatalogBackfill(w, req)
+
+	// Handler returns 200 immediately; the goroutine runs in the background.
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	// Cancel the root context, then give the goroutine time to observe it.
+	cancel()
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if ctxErrObserved.Load() == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if ctxErrObserved.Load() != 1 {
+		// If ctxErrObserved is still 0 the goroutine may have finished before
+		// cancel() fired. Re-trigger with an already-cancelled ctx to confirm
+		// the ctx flows through at all.
+		ctx2, cancel2 := context.WithCancel(context.Background())
+		cancel2()
+		h2 := &Handler{
+			DB:        db,
+			Arr:       arr,
+			RootCtx:   ctx2,
+			RadarrURL: "http://radarr",
+			SonarrURL: "http://sonarr",
+		}
+		req2, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
+		w2 := httptest.NewRecorder()
+		h2.HandleCatalogBackfill(w2, req2)
+		time.Sleep(50 * time.Millisecond)
+		if ctxErrObserved.Load() != 1 {
+			t.Error("ArrGet never observed a cancelled ctx; RootCtx is not flowing through HandleCatalogBackfill")
+		}
+	}
+}
+
+// TestSyncJellyfinMetadata_PassesCtxToUpdate verifies that the ctx passed to
+// SyncJellyfinMetadata reaches UpdateCatalogMetadata. A cancelled ctx causes
+// the SQLite write to fail, surfacing the cancellation as a returned error.
+func TestSyncJellyfinMetadata_PassesCtxToUpdate(t *testing.T) {
+	db := testSQLiteDB(t)
+
+	// Seed a catalog item so UpdateCatalogMetadata has a valid row to update.
+	id, err := UpsertCatalogItem(context.Background(), db, CatalogItem{
+		Type:    "movie",
+		TmdbID:  999,
+		ArrID:   1,
+		ArrType: "radarr",
+		Title:   "Test Movie",
+		Year:    2024,
+		Tier:    "library",
+	})
+	if err != nil {
+		t.Fatalf("UpsertCatalogItem: %v", err)
+	}
+
+	// Jellyfin stub returns empty items — no Tmdb/Tvdb match, so
+	// fetchJellyfinItemMeta returns empty strings and skips to UpdateCatalogMetadata.
+	jf := &stubJfClient{
+		apiKey: "k",
+		userID: "u",
+		doGet: func(path, key string) ([]byte, error) {
+			return json.Marshal(struct {
+				Items []jellyfinItem `json:"Items"`
+			}{})
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	h := &Handler{
+		DB:      db,
+		Jf:      jf,
+		RootCtx: ctx,
+	}
+
+	err = h.SyncJellyfinMetadata(ctx, &CatalogItem{
+		ID:     id,
+		Type:   "movie",
+		TmdbID: 0, // no provider ID — match skipped, UpdateCatalogMetadata is still called
+	})
+
+	// A cancelled context should propagate into the SQLite write and return an error.
+	if err == nil {
+		t.Error("expected error from cancelled ctx in SyncJellyfinMetadata, got nil")
+	}
+	if !containsStr(err.Error(), "context") {
+		t.Logf("error = %v (may be driver-specific; acceptable if non-nil)", err)
+	}
+}

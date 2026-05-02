@@ -42,7 +42,20 @@ type Handler struct {
 	RadarrURL  string
 	SonarrURL  string
 	Cache      *CatalogCache // optional shared cache; nil means fetch directly
-	jfCache    jellyfinCacheState
+	// RootCtx is the application-lifetime context used for goroutines that
+	// outlive the request (backfill, Jellyfin metadata sync). Set from the
+	// supervisor root ctx in bootstrap; nil falls back to context.Background().
+	RootCtx context.Context
+	jfCache jellyfinCacheState
+}
+
+// rootCtx returns the Handler's root context, falling back to context.Background()
+// when RootCtx is nil. This keeps existing tests working without modification.
+func (h *Handler) rootCtx() context.Context {
+	if h.RootCtx == nil {
+		return context.Background()
+	}
+	return h.RootCtx
 }
 
 type catalogResponse struct {
@@ -288,7 +301,8 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 			title = item.Title
 			metadataSyncedAt = item.MetadataSyncedAt
 			if item.Type == "movie" {
-				go h.MaybeSyncJellyfinMetadata(item)
+				// Use h.rootCtx() not r.Context() — the goroutine outlives the request.
+				go h.MaybeSyncJellyfinMetadata(h.rootCtx(), item)
 			} else if item.Type == "episode" {
 				if season, err := GetCatalogItemByID(r.Context(), h.DB, item.ParentID); err == nil && season != nil {
 					if series, err := GetCatalogItemByID(r.Context(), h.DB, season.ParentID); err == nil && series != nil {
@@ -301,7 +315,8 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 						if metadataSyncedAt == "" {
 							metadataSyncedAt = series.MetadataSyncedAt
 						}
-						go h.MaybeSyncJellyfinMetadata(series)
+						// Use h.rootCtx() not r.Context() — the goroutine outlives the request.
+						go h.MaybeSyncJellyfinMetadata(h.rootCtx(), series)
 					}
 				}
 			}
@@ -399,7 +414,8 @@ func (h *Handler) HandleCatalogItemDetail(w http.ResponseWriter, r *http.Request
 		httputil.WriteError(w, "not found", http.StatusNotFound)
 		return
 	}
-	go h.MaybeSyncJellyfinMetadata(item)
+	// Use h.rootCtx() not r.Context() — the goroutine outlives the request.
+	go h.MaybeSyncJellyfinMetadata(h.rootCtx(), item)
 	httputil.WriteJSON(w, item)
 }
 
@@ -409,7 +425,7 @@ func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) 
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go BackfillFromArr(context.Background(), h.DB, h.Arr, h.RadarrURL, h.SonarrURL) //nolint:errcheck
+	go BackfillFromArr(h.rootCtx(), h.DB, h.Arr, h.RadarrURL, h.SonarrURL) //nolint:errcheck
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 

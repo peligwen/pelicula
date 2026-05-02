@@ -272,6 +272,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			RadarrURL:  urls.Radarr,
 			SonarrURL:  urls.Sonarr,
 			Cache:      arrCatalogCache,
+			RootCtx:    ctx,
 		},
 		SearchHandler:   searchHandler,
 		SettingsHandler: newSettingsHandler(envPath, dockerCli),
