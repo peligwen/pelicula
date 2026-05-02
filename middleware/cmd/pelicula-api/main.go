@@ -50,7 +50,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	a, err := bootstrap.New(cfg, generateReadablePassword)
+	a, err := bootstrap.New(ctx, cfg, generateReadablePassword)
 	if err != nil {
 		slog.Error("bootstrap failed", "component", "main", "error", err)
 		os.Exit(1)

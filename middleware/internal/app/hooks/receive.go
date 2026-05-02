@@ -25,11 +25,11 @@ func (h *Handler) HandleImportHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify shared secret (passed via X-Webhook-Secret header by autowire).
-	// If WEBHOOK_SECRET is unset the check is skipped (backward compat with
-	// existing installs that haven't been re-run through setup/reset).
-	if secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")); secret != "" {
+	// Empty means the check is skipped (backward compat with existing installs
+	// that haven't been re-run through setup/reset).
+	if h.WebhookSecret != "" {
 		provided := r.Header.Get("X-Webhook-Secret")
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) == 0 {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(h.WebhookSecret)) == 0 {
 			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

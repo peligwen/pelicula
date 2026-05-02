@@ -91,13 +91,14 @@ func ensureWebhookSecret(envFile string) error {
 // New constructs the full App from cfg. genPassword is injected by cmd/ because
 // the passphrase wordlist lives in cmd/pelicula-api/wordlist.go. Returns an
 // error if any required resource (DB, etc.) cannot be opened.
-func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
+func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 	urls := cfg.URLs
 
 	// Ensure WEBHOOK_SECRET is set; generate and persist one when absent.
 	if err := ensureWebhookSecret(envPath); err != nil {
 		slog.Warn("could not ensure WEBHOOK_SECRET", "component", "bootstrap", "error", err)
 	}
+	cfg.WebhookSecret = strings.TrimSpace(os.Getenv("WEBHOOK_SECRET"))
 
 	// Read jellyfinKey from env file if not already in cfg.
 	jellyfinKey := cfg.JellyfinAPIKey
@@ -180,7 +181,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 		db.Close()
 		return nil, err
 	}
-	migratejson.Run(context.Background(), db, "/config/pelicula")
+	migratejson.Run(ctx, db, "/config/pelicula")
 
 	searchHandler := search.New(svc, urls.Sonarr, urls.Radarr, urls.Prowlarr, libHandler, tmdbKey, searchMode)
 
@@ -249,6 +250,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			HTTPClient:             &http.Client{Timeout: 10 * time.Second},
 			ProculaURL:             urls.Procula,
 			ProculaAPIKey:          cfg.ProculaAPIKey,
+			WebhookSecret:          cfg.WebhookSecret,
 			SonarrURL:              urls.Sonarr,
 			RadarrURL:              urls.Radarr,
 			GetKeys:                func() (string, string, string) { return svc.Keys() },
@@ -317,7 +319,7 @@ func New(cfg *config.Config, genPassword func() string) (*pelapp.App, error) {
 			PeliculaAPI: urls.PeliculaAPI,
 		},
 		VPNConfigured: cfg.WireguardPrivateKey != "",
-		WebhookSecret: strings.TrimSpace(os.Getenv("WEBHOOK_SECRET")),
+		WebhookSecret: cfg.WebhookSecret,
 		SubLangs:      cfg.SubLangs,
 		AudioLang:     cfg.AudioLang,
 		GetLibraries: func() []autowire.Library {

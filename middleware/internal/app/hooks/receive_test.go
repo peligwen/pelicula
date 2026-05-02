@@ -13,20 +13,19 @@ import (
 // TestHandleImportHook_SecretHeader exercises the X-Webhook-Secret auth check.
 // (a) correct header → 200; (b) missing header → 401; (c) wrong header → 401.
 func TestHandleImportHook_SecretHeader(t *testing.T) {
-	// t.Setenv requires sequential execution — no t.Parallel.
 	const secret = "test-webhook-secret"
-	t.Setenv("WEBHOOK_SECRET", secret)
 
 	// Fake Procula that accepts job creation.
 	fake := newFakeProcula(t, "/api/procula/jobs", `{"id":"1","status":"queued"}`)
 	defer fake.Close()
 
 	h := &hooks.Handler{
-		Procula:    proculaclient.New(fake.URL, ""),
-		HTTPClient: &http.Client{},
-		ProculaURL: fake.URL,
-		GetKeys:    func() (string, string, string) { return "", "", "" },
-		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+		Procula:       proculaclient.New(fake.URL, ""),
+		HTTPClient:    &http.Client{},
+		ProculaURL:    fake.URL,
+		WebhookSecret: secret,
+		GetKeys:       func() (string, string, string) { return "", "", "" },
+		ArrGet:        func(_, _, _ string) ([]byte, error) { return nil, nil },
 	}
 
 	validBody := []byte(`{"eventType":"Download","series":{"id":1,"title":"Test Show","tvdbId":123},"episodes":[{"id":1,"episodeNumber":1,"seasonNumber":1,"title":"Pilot"}],"episodeFile":{"path":"/media/tv/show/s01e01.mkv","quality":{"quality":{"name":"HDTV-1080p"}}},"downloadClient":"qbittorrent","downloadId":"abc123"}`)

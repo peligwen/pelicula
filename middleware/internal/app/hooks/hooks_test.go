@@ -347,22 +347,20 @@ func newRadarrPayload() []byte {
 	return b
 }
 
-func newImportHandler(fakeURL string) *hooks.Handler {
+func newImportHandler(fakeURL string, webhookSecret string) *hooks.Handler {
 	return &hooks.Handler{
-		Procula:    proculaclient.New(fakeURL, ""),
-		HTTPClient: &http.Client{},
-		ProculaURL: fakeURL,
-		GetKeys:    func() (string, string, string) { return "", "", "" },
-		ArrGet:     func(_, _, _ string) ([]byte, error) { return nil, nil },
+		Procula:       proculaclient.New(fakeURL, ""),
+		HTTPClient:    &http.Client{},
+		ProculaURL:    fakeURL,
+		WebhookSecret: webhookSecret,
+		GetKeys:       func() (string, string, string) { return "", "", "" },
+		ArrGet:        func(_, _, _ string) ([]byte, error) { return nil, nil },
 	}
 }
 
 func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
-	// t.Setenv requires sequential execution (no t.Parallel).
-	// When WEBHOOK_SECRET is unset, the check is skipped (backward compat).
-	t.Setenv("WEBHOOK_SECRET", "")
-
-	h := newImportHandler("http://127.0.0.1:1") // Procula unreachable — intentional
+	t.Parallel()
+	h := newImportHandler("http://127.0.0.1:1", "") // Procula unreachable — intentional
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
@@ -371,15 +369,13 @@ func TestHandleImportHook_NoSecret_PassesThrough(t *testing.T) {
 
 	// Will fail trying to reach Procula — but must not return 401.
 	if w.Code == http.StatusUnauthorized {
-		t.Error("expected no 401 when WEBHOOK_SECRET is empty")
+		t.Error("expected no 401 when WebhookSecret is empty")
 	}
 }
 
 func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
-	// t.Setenv requires sequential execution (no t.Parallel).
-	t.Setenv("WEBHOOK_SECRET", "correct-secret")
-
-	h := newImportHandler("http://127.0.0.1:1")
+	t.Parallel()
+	h := newImportHandler("http://127.0.0.1:1", "correct-secret")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
@@ -393,10 +389,8 @@ func TestHandleImportHook_WrongSecret_Returns401(t *testing.T) {
 }
 
 func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
-	// t.Setenv requires sequential execution (no t.Parallel).
-	t.Setenv("WEBHOOK_SECRET", "my-secret")
-
-	h := newImportHandler("http://127.0.0.1:1") // Procula unreachable — intentional
+	t.Parallel()
+	h := newImportHandler("http://127.0.0.1:1", "my-secret") // Procula unreachable — intentional
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")
@@ -411,10 +405,8 @@ func TestHandleImportHook_CorrectSecret_Passes(t *testing.T) {
 }
 
 func TestHandleImportHook_MissingSecret_Returns401(t *testing.T) {
-	// t.Setenv requires sequential execution (no t.Parallel).
-	t.Setenv("WEBHOOK_SECRET", "required-secret")
-
-	h := newImportHandler("http://127.0.0.1:1")
+	t.Parallel()
+	h := newImportHandler("http://127.0.0.1:1", "required-secret")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/hooks/import", bytes.NewReader(newRadarrPayload()))
 	req.Header.Set("Content-Type", "application/json")

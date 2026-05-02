@@ -61,6 +61,10 @@ type Handler struct {
 	// Notify is called after a request is marked available (Apprise notifications).
 	// Signature matches peligrosa.RequestStore.MarkAvailable's notify param.
 	Notify func(title, body string) error
+
+	// WebhookSecret is the shared secret verified against X-Webhook-Secret on
+	// inbound *arr import webhooks. Empty means the check is skipped.
+	WebhookSecret string
 }
 
 // httpClient returns the configured HTTP client or http.DefaultClient.
