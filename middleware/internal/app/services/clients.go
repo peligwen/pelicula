@@ -1,17 +1,12 @@
 // Package services provides the ServiceClients aggregator (now named Clients)
-// that holds typed API clients and HTTP helpers for all downstream services.
+// that holds typed API clients for all downstream services.
 package services
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/xml"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -42,10 +37,22 @@ func (t *uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(r)
 }
 
-// Clients aggregates all downstream service clients and HTTP helpers.
+// Clients aggregates all downstream service clients.
 type Clients struct {
 	configDir string
-	client    *http.Client
+
+	// client is a shared *http.Client (10s timeout, UA injection, no retry)
+	// used for backend operations that don't go through a typed client:
+	//  - CheckHealth's parallel probes against the seven backends (typed
+	//    clients would retry on 5xx, exceeding the per-probe ctx budget).
+	//  - HTTPClient() exposes it to consumers that wrap it themselves: the
+	//    Jellyfin/Procula typed clients via NewWithHTTPClient (constructed
+	//    in bootstrap), the autowire service-readiness polling loop, the
+	//    actions handler, and the cmd/pelicula-api jobs proxy.
+	// All API calls to *arr/qBittorrent go through the typed Sonarr/Radarr/
+	// Prowlarr/Qbt clients which have their own *httpx.Client backends with
+	// retry/redaction/body-drain.
+	client *http.Client
 
 	// URL fields — set from cfg.URLs in New(); never use package-level globals.
 	sonarrURL   string
@@ -65,8 +72,8 @@ type Clients struct {
 
 	// Typed clients — constructed once in New(); never reassigned.
 	// Use the SonarrClient()/RadarrClient()/etc. accessors for new call sites.
-	// API keys are updated via SetAPIKey on each client (not by replacing the pointer).
-	// The legacy ArrGet/ArrPost helpers remain for existing code until progressively replaced.
+	// API keys are updated via SetAPIKey on each client (not by replacing the
+	// pointer).
 	Sonarr   *arrclient.Client
 	Radarr   *arrclient.Client
 	Prowlarr *arrclient.Client
@@ -247,121 +254,6 @@ func readAPIKey(path string) string {
 	return cfg.ApiKey
 }
 
-// arrDo is the shared implementation for all *arr-compatible HTTP calls.
-// The apiKey is sent as X-Api-Key. For POST/PUT a JSON payload is required;
-// for GET/DELETE pass nil.
-//
-// Deprecated: prefer the typed arr.Client methods (GetMovies, GetSeries, etc.)
-// which use the shared client pool and provide better context propagation.
-// New call sites should use arr.Client; arrDo remains for the ~145 existing
-// callers that pre-date arr.Client.
-func (c *Clients) arrDo(ctx context.Context, method, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	var bodyReader io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-		bodyReader = bytes.NewReader(data)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Api-Key", apiKey)
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
-}
-
-// ArrGet makes a GET request to a *arr service.
-func (c *Clients) ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	return c.arrDo(ctx, "GET", baseURL, apiKey, path, nil)
-}
-
-// ArrPost makes a POST request to a *arr service.
-func (c *Clients) ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return c.arrDo(ctx, "POST", baseURL, apiKey, path, payload)
-}
-
-// QbtGet makes a GET request to qBittorrent (via Docker network, auth bypass).
-func (c *Clients) QbtGet(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.qbtURL+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return body, nil
-}
-
-// QbtPost makes a form-encoded POST request to qBittorrent.
-func (c *Clients) QbtPost(ctx context.Context, path string, form string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.qbtURL+path, bytes.NewBufferString(form))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return nil
-}
-
-// ArrDelete makes a DELETE request to a *arr service.
-func (c *Clients) ArrDelete(ctx context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	return c.arrDo(ctx, "DELETE", baseURL, apiKey, path, nil)
-}
-
-// ArrPut makes a PUT request to a *arr service.
-func (c *Clients) ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return c.arrDo(ctx, "PUT", baseURL, apiKey, path, payload)
-}
-
-// redactedURL returns the URL string with the "apikey" query parameter value
-// replaced by "[REDACTED]". Use this before logging any *arr service URLs.
-func redactedURL(u *url.URL) string {
-	if u == nil {
-		return ""
-	}
-	q := u.Query()
-	if q.Get("apikey") != "" {
-		q.Set("apikey", "[REDACTED]")
-		copy := *u
-		copy.RawQuery = q.Encode()
-		return copy.String()
-	}
-	return u.String()
-}
-
 // GetJellyfinAPIKey returns the cached Jellyfin API key.
 // Implements catalog.JellyfinMetaClient.
 func (c *Clients) GetJellyfinAPIKey() string {
@@ -397,33 +289,6 @@ func (c *Clients) SetJellyfinUserID(id string) {
 // Implements catalog.JellyfinMetaClient.
 func (c *Clients) JellyfinGet(ctx context.Context, path, apiKey string) ([]byte, error) {
 	return c.jellyfinGet(ctx, path, apiKey)
-}
-
-// ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.
-func (c *Clients) ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
-	const pageSize = 100
-	var all []map[string]any
-	page := 1
-	for {
-		path := fmt.Sprintf("%s/queue?pageSize=%d&page=%d%s", apiVer, pageSize, page, extraParams)
-		data, err := c.ArrGet(ctx, baseURL, apiKey, path)
-		if err != nil {
-			return all, err
-		}
-		var resp struct {
-			TotalRecords int              `json:"totalRecords"`
-			Records      []map[string]any `json:"records"`
-		}
-		if err := json.Unmarshal(data, &resp); err != nil {
-			return all, err
-		}
-		all = append(all, resp.Records...)
-		if len(all) >= resp.TotalRecords || len(resp.Records) == 0 {
-			break
-		}
-		page++
-	}
-	return all, nil
 }
 
 // CheckHealth checks if each service is reachable.
@@ -469,6 +334,3 @@ func (c *Clients) CheckHealth() map[string]string {
 	wg.Wait()
 	return results
 }
-
-// ensure redactedURL is used (it's a utility; suppress unused warning if needed)
-var _ = redactedURL

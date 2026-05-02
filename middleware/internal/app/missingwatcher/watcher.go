@@ -76,7 +76,7 @@ type Watcher struct {
 	Services     *services.Clients
 	SonarrURL    string
 	RadarrURL    string
-	CatalogCache *catalog.CatalogCache // optional; nil falls back to direct ArrGet
+	CatalogCache *catalog.CatalogCache // optional; nil falls back to a direct typed-client fetch
 	movie        *searchCooldown
 	episode      *searchCooldown
 }
