@@ -90,6 +90,12 @@ func (c *Client) AddDownloadClient(ctx context.Context, apiVer string, cfg map[s
 	return err
 }
 
+// UpdateDownloadClient replaces a download client record by ID.
+func (c *Client) UpdateDownloadClient(ctx context.Context, apiVer string, id int, payload map[string]any) error {
+	_, err := c.Put(ctx, fmt.Sprintf("%s/downloadclient/%d", apiVer, id), payload)
+	return err
+}
+
 // ListRootFolders returns the configured root folders.
 func (c *Client) ListRootFolders(ctx context.Context, apiVer string) ([]map[string]any, error) {
 	raw, err := c.Get(ctx, apiVer+"/rootfolder")
@@ -125,6 +131,12 @@ func (c *Client) ListNotifications(ctx context.Context, apiVer string) ([]map[st
 // AddNotification creates a new notification.
 func (c *Client) AddNotification(ctx context.Context, apiVer string, payload map[string]any) error {
 	_, err := c.Post(ctx, apiVer+"/notification", payload)
+	return err
+}
+
+// UpdateNotification replaces a notification record by ID.
+func (c *Client) UpdateNotification(ctx context.Context, apiVer string, id int, payload map[string]any) error {
+	_, err := c.Put(ctx, fmt.Sprintf("%s/notification/%d", apiVer, id), payload)
 	return err
 }
 
@@ -402,6 +414,134 @@ func (c *Client) GetItemByPath(ctx context.Context, endpoint, path string) ([]ma
 	var out []map[string]any
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
+	}
+	return out, nil
+}
+
+// ── Lookup ───────────────────────────────────────────────────────────────────
+
+// LookupMovie searches Radarr's movie metadata sources (TMDB) by free-form term.
+// Returns the array of candidate matches. Used for "add movie by search term" flows.
+func (c *Client) LookupMovie(ctx context.Context, apiVer, term string) ([]map[string]any, error) {
+	raw, err := c.Get(ctx, apiVer+"/movie/lookup?term="+url.QueryEscape(term))
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse lookup movie: %w", err)
+	}
+	return out, nil
+}
+
+// LookupMovieByTmdbID looks up a single movie by its TMDB ID. Returns one or
+// zero candidate(s).
+func (c *Client) LookupMovieByTmdbID(ctx context.Context, apiVer string, tmdbID int) ([]map[string]any, error) {
+	raw, err := c.Get(ctx, fmt.Sprintf("%s/movie/lookup/tmdb?tmdbId=%d", apiVer, tmdbID))
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse lookup movie by tmdb id: %w", err)
+	}
+	return out, nil
+}
+
+// LookupSeries searches Sonarr's series metadata sources (TVDB) by free-form term.
+// Term may include a "tvdb:<id>" prefix to look up by TVDB ID.
+func (c *Client) LookupSeries(ctx context.Context, apiVer, term string) ([]map[string]any, error) {
+	raw, err := c.Get(ctx, apiVer+"/series/lookup?term="+url.QueryEscape(term))
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse lookup series: %w", err)
+	}
+	return out, nil
+}
+
+// ── Queue (all pages) ─────────────────────────────────────────────────────────
+
+// GetAllQueueRecords paginates through every page of the *arr download queue
+// at the given apiVer. extraParams (if non-empty) is appended verbatim to each
+// page request, e.g. "&includeUnknownMovieItems=true".
+//
+// Iterates GetQueuePage until either the cumulative records reach the
+// reported TotalRecords, or a page returns zero records.
+func (c *Client) GetAllQueueRecords(ctx context.Context, apiVer, extraParams string) ([]map[string]any, error) {
+	const pageSize = 100
+	var all []map[string]any
+	page := 1
+	for {
+		pg, err := c.GetQueuePage(ctx, apiVer, page, pageSize, extraParams)
+		if err != nil {
+			return all, err
+		}
+		all = append(all, pg.Records...)
+		if len(all) >= pg.TotalRecords || len(pg.Records) == 0 {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
+// ── Release profiles ──────────────────────────────────────────────────────────
+
+// ListReleaseProfiles returns the configured release profiles.
+func (c *Client) ListReleaseProfiles(ctx context.Context, apiVer string) ([]map[string]any, error) {
+	raw, err := c.Get(ctx, apiVer+"/releaseprofile")
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse release profiles: %w", err)
+	}
+	return out, nil
+}
+
+// AddReleaseProfile creates a release profile.
+func (c *Client) AddReleaseProfile(ctx context.Context, apiVer string, payload map[string]any) error {
+	_, err := c.Post(ctx, apiVer+"/releaseprofile", payload)
+	return err
+}
+
+// UpdateReleaseProfile replaces a release profile by ID.
+func (c *Client) UpdateReleaseProfile(ctx context.Context, apiVer string, id int, payload map[string]any) error {
+	_, err := c.Put(ctx, fmt.Sprintf("%s/releaseprofile/%d", apiVer, id), payload)
+	return err
+}
+
+// ── History / Missing ─────────────────────────────────────────────────────────
+
+// GetHistory fetches the *arr history endpoint. extraParams (if non-empty) is
+// appended verbatim, e.g. "?pageSize=20&sortKey=date&sortDir=desc". The caller
+// is responsible for the leading "?" if non-empty (matches existing legacy shape).
+func (c *Client) GetHistory(ctx context.Context, apiVer, extraParams string) ([]byte, error) {
+	return c.Get(ctx, apiVer+"/history"+extraParams)
+}
+
+// GetMissing fetches the wanted/missing endpoint. extraParams is appended to
+// the path (must include leading "?" when non-empty).
+func (c *Client) GetMissing(ctx context.Context, apiVer, extraParams string) ([]byte, error) {
+	return c.Get(ctx, apiVer+"/wanted/missing"+extraParams)
+}
+
+// ── Indexers ──────────────────────────────────────────────────────────────────
+
+// ListIndexers returns the configured indexer list. Path format depends on
+// apiVer ("/api/v1/indexer" for Prowlarr). Caller passes apiVer.
+func (c *Client) ListIndexers(ctx context.Context, apiVer string) ([]map[string]any, error) {
+	raw, err := c.Get(ctx, apiVer+"/indexer")
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse indexers: %w", err)
 	}
 	return out, nil
 }
