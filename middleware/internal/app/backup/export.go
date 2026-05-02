@@ -70,7 +70,11 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	// Export roles (from auth middleware's rolesStore, may be nil if auth is off)
 	var roles []peligrosa.RolesEntry
 	if h.Auth != nil && h.Auth.Roles() != nil {
-		roles = h.Auth.Roles().All()
+		if entries, err := h.Auth.Roles().All(r.Context()); err != nil {
+			slog.Warn("export: failed to load roles", "component", "export", "error", err)
+		} else {
+			roles = entries
+		}
 	}
 
 	// Export invites

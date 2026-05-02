@@ -156,11 +156,11 @@ func TestMigrateRolesJSON_Inserts(t *testing.T) {
 
 	// Verify rows in DB.
 	store := peligrosa.NewRolesStore(db)
-	role, ok := store.Lookup("jf-001")
+	role, ok := store.Lookup(context.Background(), "jf-001")
 	if !ok || role != peligrosa.RoleAdmin {
 		t.Errorf("Lookup jf-001: role=%q ok=%v, want admin/true", role, ok)
 	}
-	role, ok = store.Lookup("jf-002")
+	role, ok = store.Lookup(context.Background(), "jf-002")
 	if !ok || role != peligrosa.RoleViewer {
 		t.Errorf("Lookup jf-002: role=%q ok=%v, want viewer/true", role, ok)
 	}

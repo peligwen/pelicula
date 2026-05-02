@@ -2,6 +2,7 @@ package peligrosa
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -24,7 +25,13 @@ func (a *Auth) HandleOperators(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSON(w, []RolesEntry{})
 		return
 	}
-	httputil.WriteJSON(w, store.All())
+	entries, err := store.All(r.Context())
+	if err != nil {
+		slog.Warn("operators: failed to load role entries", "component", "operators", "error", err)
+		httputil.WriteError(w, "could not load operators", http.StatusInternalServerError)
+		return
+	}
+	httputil.WriteJSON(w, entries)
 }
 
 // HandleOperatorsWithID handles POST /api/pelicula/operators/{id} (set role)
@@ -63,7 +70,7 @@ func (a *Auth) HandleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, "roles store unavailable", http.StatusInternalServerError)
 			return
 		}
-		if err := store.Upsert(id, req.Username, req.Role); err != nil {
+		if err := store.Upsert(r.Context(), id, req.Username, req.Role); err != nil {
 			httputil.WriteError(w, "could not update role", http.StatusInternalServerError)
 			return
 		}
@@ -78,7 +85,7 @@ func (a *Auth) HandleOperatorsWithID(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, "roles store unavailable", http.StatusInternalServerError)
 			return
 		}
-		if err := store.Delete(id); err != nil {
+		if err := store.Delete(r.Context(), id); err != nil {
 			httputil.WriteError(w, "could not remove role", http.StatusInternalServerError)
 			return
 		}

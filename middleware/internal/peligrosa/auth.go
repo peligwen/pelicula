@@ -273,12 +273,12 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var role UserRole
 	if result.IsAdministrator {
 		role = RoleAdmin
-	} else if stored, ok := a.rolesStore.Lookup(result.UserID); ok {
+	} else if stored, ok := a.rolesStore.Lookup(r.Context(), result.UserID); ok {
 		role = stored
 	} else {
 		role = RoleViewer
 	}
-	if err := a.rolesStore.Upsert(result.UserID, result.Username, role); err != nil {
+	if err := a.rolesStore.Upsert(r.Context(), result.UserID, result.Username, role); err != nil {
 		slog.Warn("failed to persist role", "component", "auth", "user", result.Username, "error", err)
 	}
 	// Override username to the one Jellyfin returned (canonical casing).

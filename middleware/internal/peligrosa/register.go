@@ -55,7 +55,7 @@ func (a *Auth) HandleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
 		// because this endpoint is advisory (frontend uses it to show/hide the
 		// "Create Admin Account" heading) — the actual gate is in HandleOpenRegister.
 		// Note: the pelicula-internal Jellyfin service user is never in this table.
-		initialSetup = a.rolesStore.IsEmpty()
+		initialSetup = a.rolesStore.IsEmpty(r.Context())
 	}
 	httputil.WriteJSON(w, map[string]any{
 		"open_registration": OpenRegistration,
@@ -73,7 +73,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	// Note: IsEmpty() checks Pelicula's own roles table — the pelicula-internal
 	// Jellyfin service user is never inserted there, so it doesn't affect this.
 	initialSetupMu.Lock()
-	initialSetup := a != nil && a.rolesStore != nil && a.rolesStore.IsEmpty()
+	initialSetup := a != nil && a.rolesStore != nil && a.rolesStore.IsEmpty(r.Context())
 	if !OpenRegistration && !initialSetup {
 		initialSetupMu.Unlock()
 		httputil.WriteError(w, "open registration is not enabled", http.StatusForbidden)
@@ -149,7 +149,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 		slog.Info("initial setup: first admin account created", "component", "register", "username", req.Username)
 	}
 	if a != nil && a.rolesStore != nil {
-		if err := a.rolesStore.Upsert(jellyfinID, req.Username, role); err != nil {
+		if err := a.rolesStore.Upsert(r.Context(), jellyfinID, req.Username, role); err != nil {
 			slog.Warn("failed to persist role for open-reg user", "component", "register", "username", req.Username, "error", err)
 		}
 	}

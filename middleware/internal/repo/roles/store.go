@@ -5,6 +5,7 @@
 package roles
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 )
@@ -27,10 +28,13 @@ func New(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// IsEmpty reports whether the roles table has no rows.
-func (s *Store) IsEmpty() bool {
+// IsEmpty reports whether the roles table has no rows. On query failure it
+// logs a warning and returns true (treating an unreadable store as empty is
+// the safe default — callers use this to gate first-admin registration).
+func (s *Store) IsEmpty(ctx context.Context) bool {
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM roles`).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM roles`).Scan(&count); err != nil {
+		slog.Warn("roles: IsEmpty count failed", "component", "roles", "error", err)
 		return true
 	}
 	return count == 0
@@ -38,9 +42,9 @@ func (s *Store) IsEmpty() bool {
 
 // Lookup returns the stored role string for the given Jellyfin user ID.
 // Returns ("", false) if not found or on error.
-func (s *Store) Lookup(jellyfinID string) (string, bool) {
+func (s *Store) Lookup(ctx context.Context, jellyfinID string) (string, bool) {
 	var role string
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT role FROM roles WHERE jellyfin_id = ?`, jellyfinID,
 	).Scan(&role)
 	if err == sql.ErrNoRows {
@@ -54,8 +58,8 @@ func (s *Store) Lookup(jellyfinID string) (string, bool) {
 
 // Upsert sets the role for a Jellyfin user ID, creating the entry if absent.
 // Also refreshes the stored display name.
-func (s *Store) Upsert(jellyfinID, username, role string) error {
-	_, err := s.db.Exec(
+func (s *Store) Upsert(ctx context.Context, jellyfinID, username, role string) error {
+	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO roles (jellyfin_id, username, role) VALUES (?, ?, ?)
 		 ON CONFLICT(jellyfin_id) DO UPDATE SET username=excluded.username, role=excluded.role`,
 		jellyfinID, username, role,
@@ -63,11 +67,12 @@ func (s *Store) Upsert(jellyfinID, username, role string) error {
 	return err
 }
 
-// All returns a snapshot of all role entries ordered by username.
-func (s *Store) All() []Entry {
-	rows, err := s.db.Query(`SELECT jellyfin_id, username, role FROM roles ORDER BY username`)
+// All returns a snapshot of all role entries ordered by username. Scan errors
+// are propagated; the caller receives a partial result and the first scan error.
+func (s *Store) All(ctx context.Context) ([]Entry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT jellyfin_id, username, role FROM roles ORDER BY username`)
 	if err != nil {
-		return []Entry{}
+		return []Entry{}, err
 	}
 	defer rows.Close()
 
@@ -75,22 +80,22 @@ func (s *Store) All() []Entry {
 	for rows.Next() {
 		var e Entry
 		if err := rows.Scan(&e.JellyfinID, &e.Username, &e.Role); err != nil {
-			continue
+			return result, err
 		}
 		result = append(result, e)
 	}
 	if err := rows.Err(); err != nil {
-		slog.Warn("roles: All rows iteration error", "component", "roles", "error", err)
+		return result, err
 	}
 	if result == nil {
-		return []Entry{}
+		return []Entry{}, nil
 	}
-	return result
+	return result, nil
 }
 
 // Delete removes the role entry for jellyfinID. No-ops silently if the ID is
 // not in the table.
-func (s *Store) Delete(jellyfinID string) error {
-	_, err := s.db.Exec(`DELETE FROM roles WHERE jellyfin_id = ?`, jellyfinID)
+func (s *Store) Delete(ctx context.Context, jellyfinID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM roles WHERE jellyfin_id = ?`, jellyfinID)
 	return err
 }

@@ -1,6 +1,7 @@
 package peligrosa_test
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -26,23 +27,24 @@ func newTestRolesDB(t *testing.T) *sql.DB {
 }
 
 func TestRolesStoreDelete(t *testing.T) {
+	ctx := context.Background()
 	db := newTestRolesDB(t)
 	rs := peligrosa.NewRolesStore(db)
 
-	if err := rs.Upsert("user-1", "alice", peligrosa.RoleViewer); err != nil {
+	if err := rs.Upsert(ctx, "user-1", "alice", peligrosa.RoleViewer); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, found := rs.Lookup("user-1"); !found {
+	if _, found := rs.Lookup(ctx, "user-1"); !found {
 		t.Fatal("expected entry after upsert")
 	}
-	if err := rs.Delete("user-1"); err != nil {
+	if err := rs.Delete(ctx, "user-1"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, found := rs.Lookup("user-1"); found {
+	if _, found := rs.Lookup(ctx, "user-1"); found {
 		t.Fatal("expected entry gone after delete")
 	}
 	// Deleting a non-existent ID should not error
-	if err := rs.Delete("no-such-id"); err != nil {
+	if err := rs.Delete(ctx, "no-such-id"); err != nil {
 		t.Fatalf("delete non-existent: %v", err)
 	}
 }

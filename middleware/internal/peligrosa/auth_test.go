@@ -700,7 +700,7 @@ func TestLogin_JellyfinMode_ValidCreds_DefaultsToViewer(t *testing.T) {
 		t.Errorf("role = %v, want viewer (default for new non-admin user)", m["role"])
 	}
 	// Confirm role was persisted in store
-	role, ok := a.rolesStore.Lookup("jf-user-001")
+	role, ok := a.rolesStore.Lookup(context.Background(), "jf-user-001")
 	if !ok {
 		t.Error("expected user to be persisted in roles store")
 	} else if role != RoleViewer {
@@ -730,7 +730,7 @@ func TestLogin_JellyfinMode_StoredRolePreserved(t *testing.T) {
 	_, jc := fakeJellyfinAuthServer(t, true, false)
 	store := NewRolesStore(testDB(t))
 	// Pre-seed a manager role for this user.
-	_ = store.Upsert("jf-user-001", "alice", RoleManager)
+	_ = store.Upsert(context.Background(), "jf-user-001", "alice", RoleManager)
 	a := newTestJellyfinAuth(t, store, jc)
 
 	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
@@ -1033,46 +1033,51 @@ func TestSessionPersistence_RoundTrip(t *testing.T) {
 // ── RolesStore ─────────────────────────────────────────────────────────────────
 
 func TestRolesStore_RoundTrip(t *testing.T) {
+	ctx := context.Background()
 	db := testDB(t)
 	rs := NewRolesStore(db)
 
-	if !rs.IsEmpty() {
+	if !rs.IsEmpty(ctx) {
 		t.Error("fresh store should be empty")
 	}
 
-	if err := rs.Upsert("id1", "alice", RoleViewer); err != nil {
+	if err := rs.Upsert(ctx, "id1", "alice", RoleViewer); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	if err := rs.Upsert("id2", "bob", RoleManager); err != nil {
+	if err := rs.Upsert(ctx, "id2", "bob", RoleManager); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
 
 	// Second store on same DB — same data should be visible.
 	rs2 := NewRolesStore(db)
-	role, ok := rs2.Lookup("id1")
+	role, ok := rs2.Lookup(ctx, "id1")
 	if !ok || role != RoleViewer {
 		t.Errorf("id1: got (%q, %v), want (viewer, true)", role, ok)
 	}
-	role, ok = rs2.Lookup("id2")
+	role, ok = rs2.Lookup(ctx, "id2")
 	if !ok || role != RoleManager {
 		t.Errorf("id2: got (%q, %v), want (manager, true)", role, ok)
 	}
 
 	// Upsert update
-	if err := rs2.Upsert("id1", "alice", RoleAdmin); err != nil {
+	if err := rs2.Upsert(ctx, "id1", "alice", RoleAdmin); err != nil {
 		t.Fatalf("Upsert update: %v", err)
 	}
-	role, _ = rs2.Lookup("id1")
+	role, _ = rs2.Lookup(ctx, "id1")
 	if role != RoleAdmin {
 		t.Errorf("after update: id1 role = %q, want admin", role)
 	}
 	// Entry count must not grow on update
-	if len(rs2.All()) != 2 {
-		t.Errorf("expected 2 entries after upsert-update, got %d", len(rs2.All()))
+	entries, err := rs2.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries after upsert-update, got %d", len(entries))
 	}
 
 	// Unknown ID
-	if _, ok := rs2.Lookup("unknown"); ok {
+	if _, ok := rs2.Lookup(ctx, "unknown"); ok {
 		t.Error("Lookup of unknown ID should return false")
 	}
 }

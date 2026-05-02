@@ -80,7 +80,7 @@ func (h *Handler) importRoles(roles []peligrosa.RolesEntry, result *ImportResult
 		return
 	}
 	for _, entry := range roles {
-		if err := h.Auth.Roles().Upsert(entry.JellyfinID, entry.Username, entry.Role); err != nil {
+		if err := h.Auth.Roles().Upsert(context.Background(), entry.JellyfinID, entry.Username, entry.Role); err != nil {
 			slog.Warn("failed to upsert role from backup", "component", "export",
 				"jellyfin_id", entry.JellyfinID, "error", err)
 			result.Errors = append(result.Errors, fmt.Sprintf("role %q (id:%s): %v", entry.Username, entry.JellyfinID, err))

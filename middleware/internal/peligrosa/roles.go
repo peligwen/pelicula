@@ -4,6 +4,7 @@
 package peligrosa
 
 import (
+	"context"
 	"database/sql"
 
 	"pelicula-api/internal/repo/roles"
@@ -36,13 +37,13 @@ func NewRolesStore(db *sql.DB) *RolesStore {
 }
 
 // IsEmpty reports whether the store has no user entries.
-func (rs *RolesStore) IsEmpty() bool {
-	return rs.store.IsEmpty()
+func (rs *RolesStore) IsEmpty(ctx context.Context) bool {
+	return rs.store.IsEmpty(ctx)
 }
 
 // Lookup returns the stored role for the given Jellyfin user ID.
-func (rs *RolesStore) Lookup(jellyfinID string) (UserRole, bool) {
-	role, ok := rs.store.Lookup(jellyfinID)
+func (rs *RolesStore) Lookup(ctx context.Context, jellyfinID string) (UserRole, bool) {
+	role, ok := rs.store.Lookup(ctx, jellyfinID)
 	if !ok {
 		return "", false
 	}
@@ -51,13 +52,16 @@ func (rs *RolesStore) Lookup(jellyfinID string) (UserRole, bool) {
 
 // Upsert sets the role for a Jellyfin user ID, creating the entry if absent.
 // Also refreshes the stored display name.
-func (rs *RolesStore) Upsert(jellyfinID, username string, role UserRole) error {
-	return rs.store.Upsert(jellyfinID, username, string(role))
+func (rs *RolesStore) Upsert(ctx context.Context, jellyfinID, username string, role UserRole) error {
+	return rs.store.Upsert(ctx, jellyfinID, username, string(role))
 }
 
 // All returns a snapshot of all role entries.
-func (rs *RolesStore) All() []RolesEntry {
-	entries := rs.store.All()
+func (rs *RolesStore) All(ctx context.Context) ([]RolesEntry, error) {
+	entries, err := rs.store.All(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]RolesEntry, len(entries))
 	for i, e := range entries {
 		result[i] = RolesEntry{
@@ -66,11 +70,11 @@ func (rs *RolesStore) All() []RolesEntry {
 			Role:       UserRole(e.Role),
 		}
 	}
-	return result
+	return result, nil
 }
 
 // Delete removes the role entry for jellyfinID. No-ops silently if the ID is
 // not in the table.
-func (rs *RolesStore) Delete(jellyfinID string) error {
-	return rs.store.Delete(jellyfinID)
+func (rs *RolesStore) Delete(ctx context.Context, jellyfinID string) error {
+	return rs.store.Delete(ctx, jellyfinID)
 }

@@ -1,6 +1,7 @@
 package peligrosa
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -165,7 +166,7 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 	store := NewRolesStore(db)
 	// Seed an existing admin so IsEmpty() returns false — this test verifies
 	// that subsequent registrants get viewer, not admin.
-	_ = store.Upsert("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
+	_ = store.Upsert(context.Background(), "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "admin", RoleAdmin)
 	auth := &Auth{
 		sessions:      make(map[string]session),
 		rolesStore:    store,
@@ -182,7 +183,7 @@ func TestOpenRegister_AssignsViewerRole(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	role, ok := store.Lookup("b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5")
+	role, ok := store.Lookup(context.Background(), "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5")
 	if !ok {
 		t.Fatal("expected user to be in roles store")
 	}
@@ -225,7 +226,7 @@ func TestOpenRegister_InitialSetupAssignsAdmin(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	role, ok := store.Lookup("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6")
+	role, ok := store.Lookup(context.Background(), "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6")
 	if !ok {
 		t.Fatal("expected user to be in roles store")
 	}
