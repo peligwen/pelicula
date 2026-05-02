@@ -45,8 +45,12 @@ func (s *stubLibPathResolver) FirstLibraryPath(_, defaultPath string) string {
 // stubFulfiller is a no-op Fulfiller for export tests.
 type stubFulfiller struct{}
 
-func (f *stubFulfiller) AddMovie(_, _ int, _ string) (int, error)  { return 0, nil }
-func (f *stubFulfiller) AddSeries(_, _ int, _ string) (int, error) { return 0, nil }
+func (f *stubFulfiller) AddMovie(_ context.Context, _, _ int, _ string) (int, error) {
+	return 0, nil
+}
+func (f *stubFulfiller) AddSeries(_ context.Context, _, _ int, _ string) (int, error) {
+	return 0, nil
+}
 
 // testDB creates a fresh SQLite database with the pelicula schema.
 // Mirrors the schema from db.go in the main package.

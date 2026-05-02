@@ -19,10 +19,10 @@ import (
 // migrateTestFulfiller is a no-op Fulfiller for migrate tests.
 type migrateTestFulfiller struct{}
 
-func (f *migrateTestFulfiller) AddMovie(tmdbID, profileID int, rootPath string) (int, error) {
+func (f *migrateTestFulfiller) AddMovie(_ context.Context, _, _ int, _ string) (int, error) {
 	return 0, nil
 }
-func (f *migrateTestFulfiller) AddSeries(tvdbID, profileID int, rootPath string) (int, error) {
+func (f *migrateTestFulfiller) AddSeries(_ context.Context, _, _ int, _ string) (int, error) {
 	return 0, nil
 }
 

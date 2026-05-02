@@ -505,9 +505,9 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	var addErr error
 	switch reqType {
 	case "movie":
-		arrID, addErr = rs.fulfiller.AddMovie(tmdbID, radarrProfileID, radarrRoot)
+		arrID, addErr = rs.fulfiller.AddMovie(r.Context(), tmdbID, radarrProfileID, radarrRoot)
 	case "series":
-		arrID, addErr = rs.fulfiller.AddSeries(tvdbID, sonarrProfileID, sonarrRoot)
+		arrID, addErr = rs.fulfiller.AddSeries(r.Context(), tvdbID, sonarrProfileID, sonarrRoot)
 	default:
 		httputil.WriteError(w, "unknown request type", http.StatusInternalServerError)
 		return

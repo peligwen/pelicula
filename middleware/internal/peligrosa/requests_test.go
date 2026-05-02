@@ -451,7 +451,7 @@ func TestApprove_ConcurrentRace(t *testing.T) {
 	var addMovieCalls atomic.Int32
 	// fakeFulfiller with an atomic counter and a brief sleep to widen the race window.
 	ff := &fakeFulfiller{
-		addMovieFn: func(tmdbID, profileID int, rootPath string) (int, error) {
+		addMovieFn: func(ctx context.Context, tmdbID, profileID int, rootPath string) (int, error) {
 			addMovieCalls.Add(1)
 			time.Sleep(5 * time.Millisecond) // widen race window
 			return 7, nil                    // fixed arr_id

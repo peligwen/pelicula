@@ -702,6 +702,63 @@ func TestEnrichSearchResult_FallsBackToTmdbRating(t *testing.T) {
 	}
 }
 
+// TestArrFulfiller_PassesCtx: a pre-cancelled ctx reaches the underlying ArrClient.
+// Pins that ArrFulfiller no longer uses context.Background() and that cancellation
+// propagates from the caller through AddMovie to the *arr HTTP calls.
+func TestArrFulfiller_PassesCtx(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var capturedCtxs []context.Context
+
+	capArr := &ctxCapturingArr{
+		onGet: func(ctx context.Context) {
+			mu.Lock()
+			capturedCtxs = append(capturedCtxs, ctx)
+			mu.Unlock()
+		},
+	}
+	h := New(capArr, "http://sonarr", "http://radarr", "http://prowlarr", nil, "", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel so ctx.Err() != nil on entry
+
+	fulfiller := NewArrFulfiller(h)
+	_, err := fulfiller.AddMovie(ctx, 12345, 1, "/media/movies")
+	// The underlying ArrGet will propagate the stub error.
+	if err == nil {
+		t.Fatal("expected an error from AddMovie with cancelled ctx, got nil")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(capturedCtxs) == 0 {
+		t.Fatal("ArrGet was never called — fulfiller may not have delegated to ArrClient")
+	}
+	if capturedCtxs[0].Err() == nil {
+		t.Error("ctx passed to ArrGet was not cancelled; ArrFulfiller may be using context.Background()")
+	}
+}
+
+// ctxCapturingArr is a test ArrClient that invokes onGet with each ctx received
+// by ArrGet and always returns an error so the fulfiller terminates early.
+type ctxCapturingArr struct {
+	onGet func(ctx context.Context)
+}
+
+func (c *ctxCapturingArr) Keys() (sonarr, radarr, prowlarr string) {
+	return "sk", "rk", "pk"
+}
+func (c *ctxCapturingArr) ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error) {
+	if c.onGet != nil {
+		c.onGet(ctx)
+	}
+	return nil, fmt.Errorf("ctxCapturingArr: stub error")
+}
+func (c *ctxCapturingArr) ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
+	return nil, fmt.Errorf("ctxCapturingArr: stub error")
+}
+
 // TestHandleSearch_EmptyQuery: q="" returns empty results without hitting any
 // *arr backend.
 func TestHandleSearch_EmptyQuery(t *testing.T) {
