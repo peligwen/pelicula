@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"pelicula-api/httputil"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	appsetup "pelicula-api/internal/app/setup"
 )
@@ -236,6 +238,37 @@ func TestHandleReset_RejectsEmptyOrigin(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for empty origin on reset", w.Code)
+	}
+}
+
+// TestHandleSettings_SharedEnvMu_Serialises verifies that a settings POST
+// blocks on a shared EnvMu held by another goroutine, confirming that the
+// handler uses the shared mutex rather than its private fallback.
+func TestHandleSettings_SharedEnvMu_Serialises(t *testing.T) {
+	_, h := newSettingsEnv(t)
+	var shared sync.Mutex
+	h.EnvMu = &shared
+
+	shared.Lock()
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		shared.Unlock()
+		close(released)
+	}()
+
+	body, _ := json.Marshal(settingsResponse{Country: "Netherlands"})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
+	req.Header.Set("Origin", "http://localhost:7354")
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	h.handleSettingsUpdate(w, req)
+	elapsed := time.Since(start)
+
+	<-released
+	if elapsed < 30*time.Millisecond {
+		t.Errorf("handler returned in %v — expected to block >30ms on shared EnvMu", elapsed)
 	}
 }
 

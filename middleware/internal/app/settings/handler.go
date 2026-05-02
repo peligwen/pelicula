@@ -42,7 +42,11 @@ type Handler struct {
 	// (Jellyfin published URL re-seed + restart). Other changes (compose-level
 	// — port mappings, sidecar add/remove) are always returned as pending.
 	Apply *Applier
-	mu    sync.Mutex
+	// EnvMu serializes .env reads/writes across handlers. Set by bootstrap to
+	// a shared mutex; nil-safe — falls back to a private mu if not set (test
+	// compatibility).
+	EnvMu sync.Locker
+	mu    sync.Mutex // fallback if EnvMu is nil
 }
 
 // New constructs a Handler with the given .env path and API key generator.
@@ -51,6 +55,13 @@ func New(envPath string, generateAPIKey func() string) *Handler {
 		EnvPath:        envPath,
 		GenerateAPIKey: generateAPIKey,
 	}
+}
+
+func (h *Handler) envMu() sync.Locker {
+	if h.EnvMu != nil {
+		return h.EnvMu
+	}
+	return &h.mu
 }
 
 // settingsResponse is returned by GET /api/pelicula/settings.
@@ -107,9 +118,10 @@ func (h *Handler) HandleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
+	mu := h.envMu()
+	mu.Lock()
 	vars, err := ParseEnvFile(h.EnvPath)
-	h.mu.Unlock()
+	mu.Unlock()
 
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -227,8 +239,9 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		req.WireguardKey = key
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.envMu()
+	mu.Lock()
+	defer mu.Unlock()
 
 	vars, err := ParseEnvFile(h.EnvPath)
 	if err != nil {
@@ -607,8 +620,9 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 		workDir = envOr("HOST_WORK_DIR", "~/media")
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.envMu()
+	mu.Lock()
+	defer mu.Unlock()
 
 	existing, _ := ParseEnvFile(h.EnvPath)
 	puid := envOr("HOST_PUID", orDefault(existing["PUID"], "1000"))

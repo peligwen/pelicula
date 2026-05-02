@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"net/http"
+	"sync"
 
 	"pelicula-api/httputil"
 )
@@ -15,6 +16,10 @@ type InfoHandler struct {
 	// ParseEnvFile is settings.ParseEnvFile (or any compatible reader). Injected
 	// so this package can stay free of the settings dependency cycle.
 	ParseEnvFile func(path string) (map[string]string, error)
+	// EnvMu serializes .env reads/writes across handlers. Set by bootstrap to
+	// a shared mutex; nil-safe — falls back to no-op if not set (test
+	// compatibility).
+	EnvMu sync.Locker
 }
 
 // NewInfoHandler constructs an InfoHandler.
@@ -39,6 +44,10 @@ func (h *InfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.ParseEnvFile != nil {
+		if h.EnvMu != nil {
+			h.EnvMu.Lock()
+			defer h.EnvMu.Unlock()
+		}
 		if vars, err := h.ParseEnvFile(h.EnvPath); err == nil {
 			resp.LanURL = vars["JELLYFIN_PUBLISHED_URL"]
 		}

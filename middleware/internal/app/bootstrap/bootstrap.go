@@ -260,9 +260,13 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			TriggerJellyfinRefresh:  func() error { return jfWirer.TriggerRefresh(context.Background()) },
 			Notify:                  func(t, b string) error { appriseCli.Notify(t, b); return nil },
 		},
-		LibHandler:      libHandler,
-		JFHandler:       jfHandler,
-		JFInfoHandler:   jfapp.NewInfoHandler(envPath, settings.ParseEnvFile),
+		LibHandler: libHandler,
+		JFHandler:  jfHandler,
+		JFInfoHandler: func() *jfapp.InfoHandler {
+			ih := jfapp.NewInfoHandler(envPath, settings.ParseEnvFile)
+			ih.EnvMu = &envMu
+			return ih
+		}(),
 		ArrCatalogCache: arrCatalogCache,
 		CatalogHandler: &catalog.Handler{
 			DB:         cdb,
@@ -276,7 +280,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			RootCtx:    ctx,
 		},
 		SearchHandler:   searchHandler,
-		SettingsHandler: newSettingsHandler(envPath, dockerCli),
+		SettingsHandler: newSettingsHandler(envPath, dockerCli, &envMu),
 		ActionsHandler:  actions.New(svc.HTTPClient(), urls.Procula, strings.TrimSpace(cfg.ProculaAPIKey)),
 		AdminHandler: adminops.New(dockerCli, func(r *http.Request) (string, bool) {
 			username, _, ok := auth.SessionFor(r)
@@ -360,8 +364,9 @@ const jellyfinConfigDir = "/config/jellyfin"
 // applier wired up. The applier handles the changes the dashboard can make
 // without `pelicula up`: re-seed Jellyfin's network.xml + restart the
 // Jellyfin container via the docker socket proxy.
-func newSettingsHandler(envPath string, dockerCli *docker.Client) *settings.Handler {
+func newSettingsHandler(envPath string, dockerCli *docker.Client, envMu sync.Locker) *settings.Handler {
 	h := settings.New(envPath, cryptogen.GenerateAPIKey)
+	h.EnvMu = envMu
 	h.Apply = &settings.Applier{
 		SeedJellyfinNetworkXML: func(publishedURL string) error {
 			return remoteconfig.WriteJellyfinNetworkXML(jellyfinConfigDir, publishedURL)

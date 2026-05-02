@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestInfoHandler_ReturnsLanURLAndWebURL(t *testing.T) {
@@ -89,6 +91,37 @@ func TestInfoHandler_RejectsNonGET(t *testing.T) {
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s status = %d, want 405", m, rec.Code)
 		}
+	}
+}
+
+// TestInfoHandler_LocksEnvMu verifies that ServeHTTP blocks on a shared EnvMu
+// held by another goroutine, confirming the shared mutex path is exercised.
+func TestInfoHandler_LocksEnvMu(t *testing.T) {
+	parse := func(string) (map[string]string, error) {
+		return map[string]string{"JELLYFIN_PUBLISHED_URL": "http://192.168.1.42:7354/jellyfin"}, nil
+	}
+	h := NewInfoHandler("/project/.env", parse)
+	var shared sync.Mutex
+	h.EnvMu = &shared
+
+	shared.Lock()
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		shared.Unlock()
+		close(released)
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/jellyfin/info", nil)
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	h.ServeHTTP(rec, req)
+	elapsed := time.Since(start)
+
+	<-released
+	if elapsed < 30*time.Millisecond {
+		t.Errorf("handler returned in %v — expected to block >30ms on shared EnvMu", elapsed)
 	}
 }
 
