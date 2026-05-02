@@ -21,6 +21,16 @@ _Nothing in active development — v0.1 scope is complete._
 
 ## Shipped
 
+### 2026-05-02 — middleware library/catalog/search domain sweep (R10)
+- library/apply: EXDEV + Lstat semantics (P1) — cross-device move falls back to copy+remove via `os.Link`/`io.Copy`; `os.Lstat` used for symlink-safe stat before rename so symlinks inside the library are not dereferenced mid-move.
+- missingwatcher cooldown reset (P2) — the real availability win: watcher now resets its per-item cooldown on every successful import webhook so a newly-available item is re-queued for the next scan cycle instead of waiting out the original backoff. Eliminates the most common "title grabbed but never became available in Jellyfin" report.
+- catalog goroutine RootCtx binding (P3) — `HandleCatalogBackfill` goroutine and `SyncJellyfinMetadata` now receive `Handler.RootCtx`; cancelling the root context stops background catalog work. Two tests pin the behaviour (`TestHandleCatalogBackfill_RespectsRootCtx`, `TestSyncJellyfinMetadata_PassesCtxToUpdate`).
+- ProxyClient.Get ctx widening + HandleSearchAdd MaxBytes (P4) — `catalog.ProxyClient.Get` accepts `context.Context` and threads it through to `http.NewRequestWithContext`; `HandleSearchAdd` wraps `r.Body` with `http.MaxBytesReader(64KB)` so oversized add-to-arr requests are rejected at the gateway.
+- search package first test coverage (P5) — 14 tests pinning: handler shape, both-arr fan-out, type-filter short-circuit, added-flag from existing library, indexer-mode TMDB filtering, Prowlarr-failure unfiltered degradation (with slog.Warn), cached-search TTL (time-injectable clock), lazy cache eviction, HandleSearchAdd happy path + unknown-type 400 + body-size-limit 400, HandleArrMeta profiles/roots, `enrichSearchResult` IMDb-preferred and TMDB-fallback rating.
+- `now func() time.Time` testability hook added to `search.Handler` (mirrors `catalog.CatalogCache.now`); `services.Clients` dependency narrowed to a `search.ArrClient` interface so tests can inject a stub without reading config from disk.
+- 14 new tests in search, 2 new tests in catalog — 16 tests added this round.
+- **Out of scope:** `services.Clients` `ArrGet`/`ArrPost` ctx propagation deferred to R16.5 (observability/cancellation hygiene, not a defect).
+
 ### 2026-05-02 — middleware HTTP clients sweep (R9)
 - gluetun client routes through httpx (retry on 5xx, redacted error paths). Basic Auth moved to a Transport-layer RoundTripper so existing GLUETUN_HTTP_PASS deployments keep working.
 - apprise notify gains per-URL fan-out (errors.Join), httpx-backed transport (UA + retry + body drain), and an internal ctx with timeout. One bad URL no longer aborts the batch — the user-preferred notification path now degrades gracefully.
