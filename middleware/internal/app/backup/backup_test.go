@@ -540,6 +540,129 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 	}
 }
 
+// ── Context cancellation propagation tests ────────────────────────────────
+
+// emptyArrClient is a stub ArrClient that returns empty JSON arrays and valid keys,
+// allowing HandleExport to proceed past the movies/series goroutines.
+type emptyArrClient struct{}
+
+func (e *emptyArrClient) Keys() (string, string, string) { return "sk", "rk", "" }
+func (e *emptyArrClient) ArrGet(_, _, _ string) ([]byte, error) {
+	return []byte("[]"), nil
+}
+func (e *emptyArrClient) ArrPost(_, _, _ string, _ any) ([]byte, error) {
+	return []byte("{}"), nil
+}
+
+// TestHandleExport_RequestsCtxCancelled asserts that HandleExport forwards the
+// request context to RequestStore.All. With a pre-cancelled context the SQL
+// QueryContext returns an error, All returns empty, and the export body contains
+// zero requests even though a row was seeded.
+func TestHandleExport_RequestsCtxCancelled(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+	reqStore := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
+
+	// Seed one request so the store is non-empty under a live context.
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := peligrosa.RequestExport{
+		ID:          "req_ctx_cancel_001",
+		Type:        "movie",
+		TmdbID:      11111,
+		Title:       "Cancel Test",
+		Year:        2025,
+		RequestedBy: "viewer",
+		State:       peligrosa.RequestPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		History:     []peligrosa.RequestEvent{{At: now, State: peligrosa.RequestPending, Actor: "viewer"}},
+	}
+	if err := reqStore.InsertFull(context.Background(), seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	h := backup.New(
+		&emptyArrClient{},
+		&stubLibPathResolver{},
+		nil, nil, reqStore,
+		"http://radarr:7878/radarr", "http://sonarr:8989/sonarr",
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel before issuing the request
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/export", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.HandleExport(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+
+	var got backup.BackupExport
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Requests) != 0 {
+		t.Errorf("requests = %d, want 0 (cancelled ctx should yield empty from All)", len(got.Requests))
+	}
+}
+
+// TestHandleImportBackup_PassesCtx asserts that HandleImportBackup threads its
+// request context to importRequests. With a pre-cancelled context InsertFull's
+// ExecContext fails, leaving the table empty.
+func TestHandleImportBackup_PassesCtx(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+	reqStore := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
+
+	h := backup.New(
+		&stubArrClient{sonarr: "sk", radarr: "rk"},
+		&stubLibPathResolver{},
+		nil, nil, reqStore,
+		"http://radarr:7878/radarr", "http://sonarr:8989/sonarr",
+	)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	payload := backup.BackupExport{
+		Version:  2,
+		Exported: now.Format(time.RFC3339),
+		Requests: []peligrosa.RequestExport{
+			{
+				ID:          "req_ctx_import_001",
+				Type:        "movie",
+				TmdbID:      22222,
+				Title:       "Import Ctx Test",
+				Year:        2025,
+				RequestedBy: "viewer",
+				State:       peligrosa.RequestPending,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+				History:     []peligrosa.RequestEvent{{At: now, State: peligrosa.RequestPending, Actor: "viewer"}},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel before the request lands
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/import-backup", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.HandleImportBackup(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+
+	// The cancelled ctx prevents InsertFull from writing — table must be empty.
+	all := reqStore.All(context.Background())
+	if len(all) != 0 {
+		t.Errorf("requests in db = %d, want 0 (cancelled ctx should block insert)", len(all))
+	}
+}
+
 // ── resolveProfileID warning tests ────────────────────────────────────────
 
 func TestResolveProfileIDWithWarning(t *testing.T) {

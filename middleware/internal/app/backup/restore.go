@@ -37,6 +37,7 @@ func (h *Handler) HandleImportBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	result := &ImportResult{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -44,22 +45,22 @@ func (h *Handler) HandleImportBackup(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		h.importMovies(radarrKey, bk.Movies, result, &mu)
+		h.importMovies(ctx, radarrKey, bk.Movies, result, &mu)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		h.importSeries(sonarrKey, bk.Series, result, &mu)
+		h.importSeries(ctx, sonarrKey, bk.Series, result, &mu)
 	}()
 
 	wg.Wait()
 
 	// v2+ backups may include roles, invites, and requests.
 	if bk.Version >= 2 {
-		h.importRoles(bk.Roles, result)
-		h.importInvites(bk.Invites, result)
-		h.importRequests(bk.Requests, result)
+		h.importRoles(ctx, bk.Roles, result)
+		h.importInvites(ctx, bk.Invites, result)
+		h.importRequests(ctx, bk.Requests, result)
 	}
 
 	slog.Info("import complete", "component", "export",
@@ -71,7 +72,7 @@ func (h *Handler) HandleImportBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // importRoles upserts roles from a v2 backup into the roles store.
-func (h *Handler) importRoles(roles []peligrosa.RolesEntry, result *ImportResult) {
+func (h *Handler) importRoles(ctx context.Context, roles []peligrosa.RolesEntry, result *ImportResult) {
 	if len(roles) == 0 {
 		return
 	}
@@ -80,7 +81,7 @@ func (h *Handler) importRoles(roles []peligrosa.RolesEntry, result *ImportResult
 		return
 	}
 	for _, entry := range roles {
-		if err := h.Auth.Roles().Upsert(context.Background(), entry.JellyfinID, entry.Username, entry.Role); err != nil {
+		if err := h.Auth.Roles().Upsert(ctx, entry.JellyfinID, entry.Username, entry.Role); err != nil {
 			slog.Warn("failed to upsert role from backup", "component", "export",
 				"jellyfin_id", entry.JellyfinID, "error", err)
 			result.Errors = append(result.Errors, fmt.Sprintf("role %q (id:%s): %v", entry.Username, entry.JellyfinID, err))
@@ -89,12 +90,12 @@ func (h *Handler) importRoles(roles []peligrosa.RolesEntry, result *ImportResult
 }
 
 // importInvites inserts invites from a v2 backup, skipping tokens that already exist.
-func (h *Handler) importInvites(invites []peligrosa.InviteExport, result *ImportResult) {
+func (h *Handler) importInvites(ctx context.Context, invites []peligrosa.InviteExport, result *ImportResult) {
 	if len(invites) == 0 || h.Invites == nil {
 		return
 	}
 	for _, inv := range invites {
-		if err := h.Invites.InsertFull(context.Background(), inv); err != nil {
+		if err := h.Invites.InsertFull(ctx, inv); err != nil {
 			slog.Warn("failed to insert invite from backup", "component", "export",
 				"token", fmt.Sprintf("%.8s...", inv.Token), "error", err)
 			// Don't add to errors — duplicate tokens are expected and silently skipped
@@ -103,12 +104,12 @@ func (h *Handler) importInvites(invites []peligrosa.InviteExport, result *Import
 }
 
 // importRequests inserts requests from a v2 backup, skipping IDs that already exist.
-func (h *Handler) importRequests(requests []peligrosa.RequestExport, result *ImportResult) {
+func (h *Handler) importRequests(ctx context.Context, requests []peligrosa.RequestExport, result *ImportResult) {
 	if len(requests) == 0 || h.Requests == nil {
 		return
 	}
 	for _, req := range requests {
-		if err := h.Requests.InsertFull(context.Background(), req); err != nil {
+		if err := h.Requests.InsertFull(ctx, req); err != nil {
 			slog.Warn("failed to insert request from backup", "component", "export",
 				"id", req.ID, "error", err)
 			// Don't add to errors — duplicate IDs are expected and silently skipped
@@ -117,7 +118,8 @@ func (h *Handler) importRequests(requests []peligrosa.RequestExport, result *Imp
 }
 
 // importMovies restores movies from a backup into Radarr.
-func (h *Handler) importMovies(apiKey string, movies []MovieExport, result *ImportResult, mu *sync.Mutex) {
+func (h *Handler) importMovies(ctx context.Context, apiKey string, movies []MovieExport, result *ImportResult, mu *sync.Mutex) {
+	_ = ctx // wired for when ArrClient adopts ctx (R16.5)
 	existing := h.loadExistingMovieIDs(apiKey)
 	profMap, _ := h.loadProfileNameMap(h.RadarrURL, apiKey)
 	tagMap, _ := h.ensureTags(h.RadarrURL, apiKey, collectMovieTags(movies))
@@ -170,7 +172,8 @@ func (h *Handler) importMovies(apiKey string, movies []MovieExport, result *Impo
 }
 
 // importSeries restores series from a backup into Sonarr.
-func (h *Handler) importSeries(apiKey string, series []SeriesExport, result *ImportResult, mu *sync.Mutex) {
+func (h *Handler) importSeries(ctx context.Context, apiKey string, series []SeriesExport, result *ImportResult, mu *sync.Mutex) {
+	_ = ctx // wired for when ArrClient adopts ctx (R16.5)
 	existing := h.loadExistingSeriesIDs(apiKey)
 	profMap, _ := h.loadProfileNameMap(h.SonarrURL, apiKey)
 	tagMap, _ := h.ensureTags(h.SonarrURL, apiKey, collectSeriesTags(series))

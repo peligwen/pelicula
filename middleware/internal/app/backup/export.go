@@ -1,7 +1,6 @@
 package backup
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -97,7 +96,7 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	// Export requests
 	var requests []peligrosa.RequestExport
 	if h.Requests != nil {
-		for _, req := range h.Requests.All(context.Background()) {
+		for _, req := range h.Requests.All(r.Context()) {
 			requests = append(requests, peligrosa.RequestExport{
 				ID:          req.ID,
 				Type:        req.Type,
