@@ -1,6 +1,7 @@
 package peligrosa
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -113,8 +114,13 @@ type fakeJellyfinHTTPClient struct {
 	srv *httptest.Server
 }
 
-func (c *fakeJellyfinHTTPClient) AuthenticateByName(username, password string) (*clients.JellyfinLoginResult, error) {
-	resp, err := c.srv.Client().Post(c.srv.URL+"/Users/AuthenticateByName", "application/json", nil)
+func (c *fakeJellyfinHTTPClient) AuthenticateByName(ctx context.Context, username, password string) (*clients.JellyfinLoginResult, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.srv.URL+"/Users/AuthenticateByName", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.srv.Client().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -143,13 +149,17 @@ func (c *fakeJellyfinHTTPClient) AuthenticateByName(username, password string) (
 	}, nil
 }
 
-func (c *fakeJellyfinHTTPClient) CreateUser(username, password string) (string, error) {
+func (c *fakeJellyfinHTTPClient) CreateUser(ctx context.Context, username, password string) (string, error) {
 	if password == "" {
 		return "", clients.ErrPasswordRequired
 	}
 	payload := fmt.Sprintf(`{"Name":%q,"Password":%q}`, username, password)
-	resp, err := c.srv.Client().Post(c.srv.URL+"/Users/New", "application/json",
-		strings.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.srv.URL+"/Users/New", strings.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.srv.Client().Do(req)
 	if err != nil {
 		return "", err
 	}

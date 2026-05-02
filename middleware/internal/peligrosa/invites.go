@@ -250,7 +250,7 @@ func (s *InviteStore) Redeem(ctx context.Context, token, username, password stri
 	}
 
 	// Phase 2: create Jellyfin user (outside tx — can be slow).
-	jellyfinID, err := s.jellyfin.CreateUser(username, password)
+	jellyfinID, err := s.jellyfin.CreateUser(ctx, username, password)
 	if err != nil {
 		// Release the slot so the invite can be reused.
 		if rollErr := s.repo.ReleaseSlot(ctx, token); rollErr != nil {

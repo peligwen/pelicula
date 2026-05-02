@@ -274,7 +274,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.jellyfin.AuthenticateByName(req.Username, req.Password)
+	result, err := a.jellyfin.AuthenticateByName(r.Context(), req.Username, req.Password)
 	if err != nil {
 		var httpErr *clients.JellyfinHTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {

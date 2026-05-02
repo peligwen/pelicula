@@ -316,9 +316,9 @@ func NewJellyfinHTTPClient(
 	}
 }
 
-func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*clients.JellyfinLoginResult, error) {
+func (c *jellyfinHTTPClient) AuthenticateByName(ctx context.Context, username, password string) (*clients.JellyfinLoginResult, error) {
 	jfc := jfclient.NewWithHTTPClient(c.jellyfinURL, c.httpClient)
-	result, err := jfc.AuthenticateByName(context.Background(), username, password)
+	result, err := jfc.AuthenticateByName(ctx, username, password)
 	if err != nil {
 		// Map jfclient.HTTPError → clients.JellyfinHTTPError so peligrosa sees the right type.
 		if jErr, ok := err.(*jfclient.HTTPError); ok {
@@ -334,6 +334,6 @@ func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*cli
 	}, nil
 }
 
-func (c *jellyfinHTTPClient) CreateUser(username, password string) (string, error) {
-	return c.createUser(context.Background(), username, password)
+func (c *jellyfinHTTPClient) CreateUser(ctx context.Context, username, password string) (string, error) {
+	return c.createUser(ctx, username, password)
 }

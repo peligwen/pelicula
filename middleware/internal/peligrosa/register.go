@@ -114,7 +114,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jellyfinID, err := a.jellyfin.CreateUser(req.Username, req.Password)
+	jellyfinID, err := a.jellyfin.CreateUser(r.Context(), req.Username, req.Password)
 	if err != nil {
 		// Detect username-already-taken (Jellyfin returns 400) before retrying.
 		var jErr *clients.JellyfinHTTPError
@@ -130,7 +130,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		// Jellyfin may still be initialising — retry once after a short delay.
 		time.Sleep(2 * time.Second)
-		jellyfinID, err = a.jellyfin.CreateUser(req.Username, req.Password)
+		jellyfinID, err = a.jellyfin.CreateUser(r.Context(), req.Username, req.Password)
 	}
 	if err != nil {
 		initialSetupMu.Unlock()

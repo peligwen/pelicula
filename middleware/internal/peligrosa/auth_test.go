@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"pelicula-api/internal/repo/sessions"
 )
@@ -1182,4 +1183,53 @@ func TestStop_IdempotentAndExitsGoroutine(t *testing.T) {
 	// Second Stop must not panic.
 	a.Stop()
 	a.Stop()
+}
+
+// ── Ctx propagation: JellyfinClient receives the request context ─────────────
+
+// ctxCapturingJellyfinClient is a JellyfinClient stub that records the context
+// passed to AuthenticateByName so tests can assert it was threaded correctly.
+type ctxCapturingJellyfinClient struct {
+	receivedCtx context.Context
+}
+
+func (c *ctxCapturingJellyfinClient) AuthenticateByName(ctx context.Context, username, password string) (*clients.JellyfinLoginResult, error) {
+	c.receivedCtx = ctx
+	// Return a synthetic error so HandleLogin exits early — we only care that ctx was forwarded.
+	return nil, &clients.JellyfinHTTPError{StatusCode: 503}
+}
+
+func (c *ctxCapturingJellyfinClient) CreateUser(ctx context.Context, username, password string) (string, error) {
+	c.receivedCtx = ctx
+	return "", nil
+}
+
+// TestJellyfinClient_PassesCtx verifies that HandleLogin forwards r.Context() to
+// AuthenticateByName. A pre-cancelled context is used so that ctx.Err() != nil —
+// this makes it trivial to confirm that the exact request context (not a fresh
+// context.Background()) reached the stub.
+func TestJellyfinClient_PassesCtx(t *testing.T) {
+	stub := &ctxCapturingJellyfinClient{}
+	a := &Auth{
+		sessions: make(map[string]session),
+		jellyfin: stub,
+	}
+
+	// Build a request with a pre-cancelled context so ctx.Err() != nil.
+	reqCtx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately — the stub will see ctx.Err() == context.Canceled
+
+	body := strings.NewReader(`{"username":"alice","password":"pass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/auth/login", body)
+	req = req.WithContext(reqCtx)
+
+	w := httptest.NewRecorder()
+	a.HandleLogin(w, req)
+
+	if stub.receivedCtx == nil {
+		t.Fatal("AuthenticateByName was not called — stub receivedCtx is nil")
+	}
+	if stub.receivedCtx.Err() == nil {
+		t.Error("HandleLogin did not propagate r.Context(): stub saw a live (non-cancelled) context")
+	}
 }

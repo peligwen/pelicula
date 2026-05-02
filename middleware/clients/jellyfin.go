@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,8 +22,8 @@ type JellyfinLoginResult struct {
 // helpers. Consumers depend on this interface so peligrosa can live in a
 // subpackage without importing the main package.
 type JellyfinClient interface {
-	AuthenticateByName(username, password string) (*JellyfinLoginResult, error)
-	CreateUser(username, password string) (string, error)
+	AuthenticateByName(ctx context.Context, username, password string) (*JellyfinLoginResult, error)
+	CreateUser(ctx context.Context, username, password string) (string, error)
 }
 
 // ErrPasswordRequired is returned by CreateUser when password is empty.
