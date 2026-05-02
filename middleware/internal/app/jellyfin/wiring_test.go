@@ -2,12 +2,18 @@ package jellyfin
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	jfclient "pelicula-api/internal/clients/jellyfin"
 
 	"pelicula-api/internal/app/services"
 	"pelicula-api/internal/config"
@@ -62,7 +68,7 @@ func TestAuth_NoTornReadUnderConcurrentRewrite(t *testing.T) {
 
 	var mu sync.Mutex
 	svc := services.New(&config.Config{}, "")
-	w := NewWirer(svc, "http://jellyfin:8096", envPath, func() string { return "" }, parseEnv, nil, &mu)
+	w := NewWirer(svc, "http://jellyfin:8096", envPath, "eng", func() string { return "" }, parseEnv, nil, &mu)
 
 	const goroutines = 8
 	const iters = 200
@@ -123,5 +129,117 @@ func TestAuth_NoTornReadUnderConcurrentRewrite(t *testing.T) {
 	}
 	if torn.Load() != 0 {
 		t.Fatalf("observed %d/%d torn/error reads under concurrent .env rewrite (mutex not protecting Auth())", torn.Load(), read.Load())
+	}
+}
+
+// TestSetAudioPref_UsesProvidedLang proves that SetAudioPref uses the lang
+// parameter and never reads PELICULA_AUDIO_LANG from the environment.
+func TestSetAudioPref_UsesProvidedLang(t *testing.T) {
+	t.Setenv("PELICULA_AUDIO_LANG", "deu") // misleading env value — must be ignored
+
+	const uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	var capturedBody []byte
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Users/"+uid, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"Id":"` + uid + `","Configuration":{}}`)) //nolint:errcheck
+	})
+	mux.HandleFunc("/Users/"+uid+"/Configuration", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var err error
+		capturedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
+	SetAudioPref(context.Background(), client, "token", uid, "spa")
+
+	if capturedBody == nil {
+		t.Fatal("no POST body recorded for /Configuration")
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(capturedBody, &cfg); err != nil {
+		t.Fatalf("invalid JSON in POST body: %v", err)
+	}
+	lang, _ := cfg["AudioLanguagePreference"].(string)
+	if lang != "spa" {
+		t.Errorf("AudioLanguagePreference = %q, want %q (env value 'deu' must be ignored)", lang, "spa")
+	}
+}
+
+// TestWirer_PassesAudioLangFromConfig drives Wirer.CreateUser with AudioLang="fra"
+// and asserts that "fra" reaches the /Configuration POST — not any env value.
+func TestWirer_PassesAudioLangFromConfig(t *testing.T) {
+	const uid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+	var capturedBody []byte
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"Id":"` + uid + `"}`)) //nolint:errcheck
+	})
+	mux.HandleFunc("/Users/"+uid+"/Password", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/Users/"+uid, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"Id":"` + uid + `","Configuration":{}}`)) //nolint:errcheck
+	})
+	mux.HandleFunc("/Users/"+uid+"/Configuration", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var err error
+		capturedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	var mu sync.Mutex
+	svc := services.New(&config.Config{}, "")
+	svc.SetJellyfinAPIKey("test-key")
+	w := NewWirer(svc, srv.URL, "", "fra", func() string { return "key" }, nil, nil, &mu)
+	w.Services = svc
+
+	if _, err := w.CreateUser(context.Background(), "testuser", "testpass"); err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+
+	if capturedBody == nil {
+		t.Fatal("no POST body recorded for /Configuration")
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(capturedBody, &cfg); err != nil {
+		t.Fatalf("invalid JSON in POST body: %v", err)
+	}
+	lang, _ := cfg["AudioLanguagePreference"].(string)
+	if lang != "fra" {
+		t.Errorf("AudioLanguagePreference = %q, want %q", lang, "fra")
 	}
 }

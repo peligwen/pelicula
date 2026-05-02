@@ -28,17 +28,20 @@ type Handler struct {
 	Auth func(context.Context) (string, error)
 	// ServiceUser is the name of the internal service account ("pelicula-internal").
 	ServiceUser string
+	// AudioLang is the ISO 639-2 language code set on newly created users.
+	AudioLang string
 }
 
 // NewHandler constructs a Handler.
 // auth is a function that returns a Jellyfin API key or session token for
 // the pelicula-internal service account; it is called before each
 // authenticated request.
-func NewHandler(client *jfclient.Client, auth func(context.Context) (string, error), serviceUser string) *Handler {
+func NewHandler(client *jfclient.Client, auth func(context.Context) (string, error), serviceUser, audioLang string) *Handler {
 	return &Handler{
 		Client:      client,
 		Auth:        auth,
 		ServiceUser: serviceUser,
+		AudioLang:   audioLang,
 	}
 }
 

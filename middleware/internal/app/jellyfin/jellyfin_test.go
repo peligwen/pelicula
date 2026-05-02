@@ -44,7 +44,7 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) (*httptest.Se
 	t.Cleanup(srv.Close)
 
 	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
-	h := jfapp.NewHandler(client, func(context.Context) (string, error) { return "test-token", nil }, jfapp.ServiceUser)
+	h := jfapp.NewHandler(client, func(context.Context) (string, error) { return "test-token", nil }, jfapp.ServiceUser, "eng")
 	return srv, h
 }
 

@@ -131,6 +131,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		svc,
 		urls.Jellyfin,
 		envPath,
+		cfg.AudioLang,
 		cryptogen.GenerateAPIKey,
 		func(path string) (map[string]string, error) { return settings.ParseEnvFile(path) },
 		func(path string, vars map[string]string) error { return settings.WriteEnvFile(path, vars) },
@@ -148,6 +149,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		jfclient.NewWithHTTPClient(urls.Jellyfin, svc.HTTPClient()),
 		jfWirer.Auth,
 		jfapp.ServiceUser,
+		cfg.AudioLang,
 	)
 
 	procClient := proculaclient.New(

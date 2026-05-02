@@ -22,6 +22,7 @@ type Wirer struct {
 	Services     *appservices.Clients
 	JellyfinURL  string
 	ServiceUser  string
+	AudioLang    string
 	GenAPIKey    func() string
 	ParseEnvFile func(path string) (map[string]string, error)
 	WriteEnvFile func(path string, vars map[string]string) error
@@ -32,7 +33,7 @@ type Wirer struct {
 // NewWirer constructs a Wirer with the given dependencies.
 func NewWirer(
 	svc *appservices.Clients,
-	jellyfinURL, envPath string,
+	jellyfinURL, envPath, audioLang string,
 	genKey func() string,
 	parseEnv func(string) (map[string]string, error),
 	writeEnv func(string, map[string]string) error,
@@ -42,6 +43,7 @@ func NewWirer(
 		Services:     svc,
 		JellyfinURL:  jellyfinURL,
 		ServiceUser:  ServiceUser,
+		AudioLang:    audioLang,
 		GenAPIKey:    genKey,
 		ParseEnvFile: parseEnv,
 		WriteEnvFile: writeEnv,
@@ -224,7 +226,7 @@ func (w *Wirer) Wire(ctx context.Context, lh *library.Handler) {
 	if svcUserID, err := ServiceUserID(ctx, jfc, token); err != nil {
 		slog.Warn("could not fetch users for audio pref", "component", "autowire", "error", err)
 	} else if svcUserID != "" {
-		SetAudioPref(ctx, jfc, token, svcUserID)
+		SetAudioPref(ctx, jfc, token, svcUserID, w.AudioLang)
 	}
 
 	hwType, hwDevice := HwAccelProbe(
@@ -284,6 +286,7 @@ func (w *Wirer) CreateUser(ctx context.Context, username, password string) (stri
 		Client:      w.client(),
 		Auth:        w.Auth,
 		ServiceUser: w.ServiceUser,
+		AudioLang:   w.AudioLang,
 	}
 	return h.CreateUser(ctx, username, password)
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
 	"strings"
 	"unicode"
 
@@ -186,7 +185,7 @@ func (h *Handler) CreateUser(ctx context.Context, username, password string) (st
 	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
 
 	// Set preferred audio language on the new user.
-	SetAudioPref(ctx, h.Client, token, id)
+	SetAudioPref(ctx, h.Client, token, id, h.AudioLang)
 
 	return id, nil
 }
@@ -394,12 +393,7 @@ func PromoteAdmin(ctx context.Context, client *jfclient.Client, token, userID, u
 
 // SetAudioPref sets the user's preferred audio language preference in Jellyfin.
 // Uses GET-merge-POST to avoid zeroing out other configuration fields.
-// Reads PELICULA_AUDIO_LANG env var; defaults to "eng".
-func SetAudioPref(ctx context.Context, client *jfclient.Client, token, userID string) {
-	lang := os.Getenv("PELICULA_AUDIO_LANG")
-	if lang == "" {
-		lang = "eng"
-	}
+func SetAudioPref(ctx context.Context, client *jfclient.Client, token, userID, lang string) {
 	userData, err := client.Get(ctx, "/Users/"+userID, token)
 	if err != nil {
 		slog.Warn("could not fetch user for audio pref", "component", "autowire", "userId", userID, "error", err)
