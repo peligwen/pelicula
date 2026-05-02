@@ -37,6 +37,8 @@ Auth is always on. Credentials are verified against Jellyfin's `/Users/Authentic
 
 **Guards:** `Guard` (viewer+), `GuardManager` (manager+), `GuardAdmin` (admin). Wired per-route in `main.go`.
 
+**Context propagation invariant (R16.5):** All handler-path Jellyfin and ArrFulfiller calls thread `r.Context()` through — the last `context.Background()` bridges in `clients.JellyfinClient` and `clients.Fulfiller` were closed in R16.5 P3+P4.
+
 ### Loopback Auto-Session (`middleware/internal/peligrosa/loopback.go`)
 
 Requests from the host machine are granted a transient admin session without a cookie — no login required from the box running the stack. This is the host-machine convenience path; LAN and remote clients must authenticate normally.
@@ -227,6 +229,8 @@ if the stack is exposed to the public internet.
 | `middleware/internal/peligrosa/invites.go` | Invite token lifecycle, redemption |
 | `middleware/internal/peligrosa/requests.go` | Viewer request queue, approval/denial flow |
 | `middleware/internal/peligrosa/routes.go` | `peligrosa.RegisterRoutes` — the subpackage's public API surface |
+| `middleware/internal/peligrosa/operators_http.go` | Handles `/api/pelicula/operators/*` routes |
+| `middleware/internal/peligrosa/roles.go` | `RolesStore` wrapper around the repo/roles persistence layer |
 | `middleware/internal/app/jellyfin/` | `HandleUsers`, `HandleUsersWithID`, `CreateJellyfinUser` |
 | `middleware/internal/app/hooks/` | Webhook secret validation (`X-Webhook-Secret`), path allowlist, Procula forwarding |
 | `middleware/internal/app/library/` | `HandleBrowse` folder browser + symlink escape prevention |

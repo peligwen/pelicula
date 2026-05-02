@@ -57,6 +57,10 @@ procula:
     - TZ=${TZ}
     - CONFIG_DIR=/config
     - PELICULA_API_URL=http://pelicula-api:8181
+    - PROCULA_API_KEY=${PROCULA_API_KEY:-}
+    - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
+    - PELICULA_AUDIO_LANG=${PELICULA_AUDIO_LANG:-eng}
+    - BAZARR_URL=${BAZARR_URL:-http://bazarr:6767/bazarr}
   volumes:
     - ${CONFIG_DIR}/procula:/config                  # job state, transcode profiles
     - ${CONFIG_DIR}/bazarr:/config/bazarr:ro         # Bazarr config (API key)
@@ -69,6 +73,8 @@ procula:
     timeout: 10s
     retries: 3
 ```
+
+**Startup-loaded env vars:** `PROCULA_API_KEY`, `JELLYFIN_REFRESH_DEBOUNCE_MS`, and `PELICULA_AUDIO_LANG` are read once at startup into package-level vars (R14 P3) — they are not re-read on every request.
 
 ### Dockerfile
 
@@ -98,16 +104,37 @@ No CGO — pure-Go build. FFprobe is bundled as part of the `ffmpeg` Alpine pack
 ### Procula service (port 8282)
 
 ```
-GET  /ping                          Health check
-GET  /api/procula/status            Queue summary: pending, processing, completed, failed counts
-GET  /api/procula/jobs              List jobs with state, progress, stage
-GET  /api/procula/jobs/:id          Single job detail
-POST /api/procula/jobs              Create job (called by pelicula-api)
-POST /api/procula/jobs/:id/retry    Retry a failed job
-POST /api/procula/jobs/:id/cancel   Cancel a running/pending job
-GET  /api/procula/storage           Disk usage per volume, growth rate, time-to-full
-GET  /api/procula/profiles          List transcode profiles
-POST /api/procula/profiles          Create/update transcode profile
+GET    /ping                                          Health check
+GET    /api/procula/status                            Queue summary: pending, processing, completed, failed counts
+GET    /api/procula/jobs                              List jobs with state, progress, stage
+POST   /api/procula/jobs                              Create job (called by pelicula-api) — requires X-API-Key
+GET    /api/procula/jobs/:id                          Single job detail
+POST   /api/procula/jobs/:id/retry                   Retry a failed job — requires X-API-Key
+POST   /api/procula/jobs/:id/cancel                  Cancel a running/pending job — requires X-API-Key
+POST   /api/procula/jobs/:id/resub                   Re-trigger subtitle search for a job — requires X-API-Key
+GET    /api/procula/storage                           Disk usage per volume, growth rate, time-to-full
+POST   /api/procula/storage/scan                     Trigger an on-demand storage scan — requires X-API-Key
+GET    /api/procula/updates                           Latest update check result
+GET    /api/procula/notifications                     Dashboard notification feed (paginated)
+GET    /api/procula/settings                          Read Procula settings
+POST   /api/procula/settings                         Save Procula settings — requires X-API-Key
+GET    /api/procula/profiles                          List transcode profiles
+POST   /api/procula/profiles                         Create/update transcode profile — requires X-API-Key
+DELETE /api/procula/profiles/:name                   Delete a transcode profile — requires X-API-Key
+GET    /api/procula/dualsub-profiles                 List dual-subtitle render profiles
+POST   /api/procula/dualsub-profiles                 Create dual-subtitle profile — requires X-API-Key
+PUT    /api/procula/dualsub-profiles/:name           Update dual-subtitle profile — requires X-API-Key
+DELETE /api/procula/dualsub-profiles/:name           Delete dual-subtitle profile — requires X-API-Key
+GET    /api/procula/subtitle-tracks                  List subtitle tracks for a given file path
+DELETE /api/procula/dualsub-sidecars                 Delete generated ASS sidecar files — requires X-API-Key
+POST   /api/procula/subtitles/search                 Trigger a per-language Bazarr subtitle search — requires X-API-Key
+POST   /api/procula/transcode                        Enqueue a manual transcode action — requires X-API-Key
+GET    /api/procula/events                           List pipeline SSE event log entries
+POST   /api/procula/actions                          Enqueue an action-bus job — requires X-API-Key
+GET    /api/procula/actions/registry                 List registered action handlers
+GET    /api/procula/catalog/flags                    Catalog flag summary ("Needs Attention" entries)
+GET    /api/procula/blocked-releases                 List blocked/removed releases
+DELETE /api/procula/blocked-releases/:id             Remove a blocked release record — requires X-API-Key
 ```
 
 ### New pelicula-api endpoints
@@ -427,7 +454,7 @@ All settings are also exposed in the Procula dashboard under **Settings → Dual
 
 ```
 /config/procula/
-  procula.db               # SQLite database: jobs, settings, catalog_flags, dualsub_profiles, blocked_releases
+  procula.db               # SQLite database: jobs, settings, catalog_flags, dualsub_profiles, blocked_releases, notifications, migrated_json_files
   jobs/                    # Legacy — migrated to SQLite on first startup (renamed to .json.migrated)
   profiles/                # Transcode profile JSON files
   dualsub-cache/           # Translator cue cache (SHA-256-keyed .txt files)
