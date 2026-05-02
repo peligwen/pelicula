@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // stubSvc is a minimal ServiceQuerier for tests.
@@ -234,6 +236,61 @@ func TestFetchLogsTimestampedAndSorted(t *testing.T) {
 	}
 	if resp.Entries[1].Line != "radarr middle" {
 		t.Errorf("second entry: got %q, want %q", resp.Entries[1].Line, "radarr middle")
+	}
+}
+
+// TestProculaGet_RespectsCtxCancel verifies that cancelling the context
+// causes proculaGet to return promptly with a context-canceled error.
+func TestProculaGet_RespectsCtxCancel(t *testing.T) {
+	ready := make(chan struct{})
+	unblock := make(chan struct{})
+	procula := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+		select {
+		case <-unblock:
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer func() {
+		close(unblock)
+		procula.Close()
+	}()
+
+	hub := NewHub()
+	svc := &stubSvc{qbtHandler: http.NewServeMux()}
+	poller := NewPoller(hub, svc, procula.URL, func(_ context.Context, name string, tail int, ts bool) ([]byte, error) {
+		return []byte{}, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := poller.proculaGet(ctx, procula.URL+"/api/procula/storage")
+		done <- err
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("procula stub never received a request")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error after ctx cancel, got nil")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("proculaGet did not return after ctx cancel")
 	}
 }
 

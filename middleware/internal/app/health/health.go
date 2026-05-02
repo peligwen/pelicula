@@ -3,6 +3,7 @@
 package health
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,7 +88,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vpn := h.queryVPNStatus()
+	vpn := h.queryVPNStatus(r.Context())
 	svcs := h.Services.CheckHealth()
 	wired := h.Services.IsWired()
 
@@ -128,7 +129,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // queryVPNStatus queries the Gluetun control API for VPN status, public IP,
 // and forwarded port.
-func (h *Handler) queryVPNStatus() VPNStatus {
+func (h *Handler) queryVPNStatus(ctx context.Context) VPNStatus {
 	client := h.Client
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -141,7 +142,7 @@ func (h *Handler) queryVPNStatus() VPNStatus {
 	}
 
 	gluetunGet := func(path string) ([]byte, error) {
-		return h.gluetunGet(client, gluetunURL+path)
+		return h.gluetunGet(ctx, client, gluetunURL+path)
 	}
 
 	// Public IP and country
@@ -200,8 +201,8 @@ func (h *Handler) queryVPNStatus() VPNStatus {
 }
 
 // gluetunGet makes a GET request to the Gluetun control API.
-func (h *Handler) gluetunGet(client *http.Client, url string) ([]byte, error) {
-	req, err := http.NewRequest("GET", url, nil)
+func (h *Handler) gluetunGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

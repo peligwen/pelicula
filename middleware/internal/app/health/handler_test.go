@@ -1,6 +1,7 @@
 package health
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -300,6 +301,67 @@ func TestHealthHandler_GluetunUnavailable(t *testing.T) {
 	}
 	if resp.ChecksPassed != 1 {
 		t.Errorf("checks_passed = %d, want 1", resp.ChecksPassed)
+	}
+}
+
+// TestServeHTTP_PassesRequestCtx verifies that cancelling the request context
+// causes the in-flight Gluetun HTTP calls to abort promptly, and that the
+// handler returns a VPN status of "unknown" (the zero-value when no data arrives).
+func TestServeHTTP_PassesRequestCtx(t *testing.T) {
+	ready := make(chan struct{})
+	unblock := make(chan struct{})
+	gluetun := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+		select {
+		case <-unblock:
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer func() {
+		close(unblock)
+		gluetun.Close()
+	}()
+
+	h := &Handler{
+		Services:       &stubServices{health: map[string]string{}},
+		GluetunBaseURL: gluetun.URL,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(rec, req)
+	}()
+
+	// Wait for the gluetun stub to receive the request, then cancel.
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("gluetun stub never received a request")
+	}
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ServeHTTP did not return after ctx cancel")
+	}
+
+	var resp Response
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.VPN.Status != "unknown" {
+		t.Errorf("vpn.status = %q, want \"unknown\" after ctx cancel", resp.VPN.Status)
 	}
 }
 

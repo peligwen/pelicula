@@ -159,8 +159,8 @@ func wdTick(port int, s wdInternalState) (wdInternalState, watchdogAction) {
 // ── Port sync ──────────────────────────────────────────────────────────────────
 
 // syncQbtListenPort tells qBittorrent to listen on port via the preferences API.
-func (w *Watchdog) syncQbtListenPort(port int) error {
-	if err := w.Services.Qbt.SetPreferences(context.Background(), port); err != nil {
+func (w *Watchdog) syncQbtListenPort(ctx context.Context, port int) error {
+	if err := w.Services.Qbt.SetPreferences(ctx, port); err != nil {
 		slog.Error("failed to sync qBittorrent listen port",
 			"component", "vpn_watchdog", "port", port, "error", err)
 		return err
@@ -173,14 +173,14 @@ func (w *Watchdog) syncQbtListenPort(port int) error {
 
 // fetchForwardedPort queries gluetun for the currently forwarded port.
 // Returns (port, nil) on success — port may be 0 if forwarding is inactive.
-func (w *Watchdog) fetchForwardedPort() (int, error) {
-	return w.Gluetun.GetPortForward(context.Background())
+func (w *Watchdog) fetchForwardedPort(ctx context.Context) (int, error) {
+	return w.Gluetun.GetPortForward(ctx)
 }
 
 // fetchTunnelStatus queries gluetun for the VPN tunnel connection status.
 // Returns the status string (e.g. "running", "stopped") or "" on any error.
-func (w *Watchdog) fetchTunnelStatus() string {
-	status, _ := w.Gluetun.GetTunnelStatus(context.Background())
+func (w *Watchdog) fetchTunnelStatus(ctx context.Context) string {
+	status, _ := w.Gluetun.GetTunnelStatus(ctx)
 	return status
 }
 
@@ -210,7 +210,7 @@ func (w *Watchdog) Run(ctx context.Context) {
 		case <-tick:
 		}
 
-		port, err := w.fetchForwardedPort()
+		port, err := w.fetchForwardedPort(ctx)
 		if err != nil {
 			slog.Warn("failed to query gluetun port forwarding — skipping tick",
 				"component", "vpn_watchdog", "error", err)
@@ -228,7 +228,7 @@ func (w *Watchdog) Run(ctx context.Context) {
 		// failure (tunnel up, port=0) from VPN not yet connected (tunnel down).
 		tunnelStatus := ""
 		if port == 0 {
-			tunnelStatus = w.fetchTunnelStatus()
+			tunnelStatus = w.fetchTunnelStatus(ctx)
 			if tunnelStatus != "" {
 				slog.Debug("gluetun tunnel status",
 					"component", "vpn_watchdog", "tunnel", tunnelStatus)
@@ -285,7 +285,7 @@ func (w *Watchdog) Run(ctx context.Context) {
 
 		switch action {
 		case wdActSync:
-			if err := w.syncQbtListenPort(port); err != nil {
+			if err := w.syncQbtListenPort(ctx, port); err != nil {
 				// Sync failed — revert lastKnownPort so next tick retries
 				internal.lastKnownPort = prevPort
 			} else {

@@ -74,6 +74,7 @@ type Poller struct {
 	hashes            map[string][32]byte
 	mu                sync.Mutex
 	statusCache       StatusCache
+	httpClient        *http.Client
 
 	// backoff counters: skip polling an arr/qbt service after consecutive errors.
 	statusSkip *util.SkipCounter // for fetchServices (CheckHealth / arr status)
@@ -100,6 +101,7 @@ func NewPoller(hub *Hub, svc ServiceQuerier, proculaURL string, dockerLogs Docke
 		hashes:            make(map[string][32]byte),
 		statusSkip:        util.NewSkipCounter(sseMaxSkip),
 		qbtSkip:           util.NewSkipCounter(sseMaxSkip),
+		httpClient:        &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -303,12 +305,12 @@ func (p *Poller) fetchDownloads(ctx context.Context) ([]byte, error) {
 
 // fetchStorage proxies Procula's storage report.
 func (p *Poller) fetchStorage(ctx context.Context) ([]byte, error) {
-	return proculaGet(p.proculaURL + "/api/procula/storage")
+	return p.proculaGet(ctx, p.proculaURL+"/api/procula/storage")
 }
 
 // fetchNotifications proxies Procula's notification feed.
 func (p *Poller) fetchNotifications(ctx context.Context) ([]byte, error) {
-	return proculaGet(p.proculaURL + "/api/procula/notifications")
+	return p.proculaGet(ctx, p.proculaURL+"/api/procula/notifications")
 }
 
 // fetchLogs fans out over all allowed containers, parses timestamps, sorts
@@ -385,8 +387,12 @@ func sortedLogEntries(entries []LogEntry, max int) []LogEntry {
 }
 
 // proculaGet makes a GET request and returns the body.
-func proculaGet(url string) ([]byte, error) {
-	resp, err := http.Get(url) //nolint:noctx
+func (p *Poller) proculaGet(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -1,9 +1,11 @@
 package vpnwatchdog
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	appservices "pelicula-api/internal/app/services"
 	qbtclient "pelicula-api/internal/clients/qbt"
@@ -166,7 +168,7 @@ func TestSyncQbtListenPort_CallsSetPreferences(t *testing.T) {
 	s := appservices.New(&config.Config{}, "")
 	s.Qbt = qbtclient.New(srv.URL)
 	w := New(s, nil, nil)
-	if err := w.syncQbtListenPort(51413); err != nil {
+	if err := w.syncQbtListenPort(context.Background(), 51413); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -180,8 +182,60 @@ func TestSyncQbtListenPort_ToleratesError(t *testing.T) {
 	s := appservices.New(&config.Config{}, "")
 	s.Qbt = qbtclient.New("http://127.0.0.1:0") // nothing listening
 	w := New(s, nil, nil)
-	err := w.syncQbtListenPort(51413)
+	err := w.syncQbtListenPort(context.Background(), 51413)
 	if err == nil {
 		t.Fatal("expected error when nothing is listening, got nil")
+	}
+}
+
+// TestSyncQbtListenPort_RespectsCtxCancel verifies that cancelling the context
+// mid-call causes syncQbtListenPort to return promptly rather than waiting for
+// the server to respond.
+func TestSyncQbtListenPort_RespectsCtxCancel(t *testing.T) {
+	ready := make(chan struct{})
+	unblock := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+		// Block until test signals done or the test context cancels.
+		select {
+		case <-unblock:
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer func() {
+		close(unblock)
+		srv.Close()
+	}()
+
+	s := appservices.New(&config.Config{}, "")
+	s.Qbt = qbtclient.New(srv.URL)
+	wd := New(s, nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- wd.syncQbtListenPort(ctx, 51413)
+	}()
+
+	// Wait until the server has the request in-flight, then cancel.
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server never received the request")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error after ctx cancel, got nil")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("syncQbtListenPort did not return after ctx cancel")
 	}
 }
