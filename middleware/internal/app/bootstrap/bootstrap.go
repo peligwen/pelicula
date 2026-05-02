@@ -228,8 +228,6 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		MainDB:        db,
 		Auth:          auth,
 		Deps:          deps,
-		Invites:       invites,
-		Requests:      requests,
 		StatusTTL:     pelapp.NewStatusTTLCache(5 * time.Second),
 		VPNConfigured: cfg.WireguardPrivateKey != "",
 		IdxCache:      pelapp.IndexerCountCache{ProwlarrURL: urls.Prowlarr},
@@ -307,7 +305,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 
 	// Autowirer InvalidateIndexerCache captures a.IdxCache by pointer, which
 	// is valid for the lifetime of the App.
-	autowirer, autowireState := autowire.NewAutowirer(autowire.Config{
+	autowirer, _ := autowire.NewAutowirer(autowire.Config{
 		Svc: svc,
 		URLs: autowire.URLs{
 			Sonarr:      urls.Sonarr,
@@ -339,7 +337,6 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 	})
 
 	a.Autowirer = autowirer
-	a.AutowireState = autowireState
 
 	// Wire the shared StatusTTLCache into the SSE poller so that fetchServices
 	// reuses the same cached CheckHealth result as the status HTTP endpoint.

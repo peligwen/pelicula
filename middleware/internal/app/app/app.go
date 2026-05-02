@@ -44,8 +44,6 @@ type App struct {
 	MainDB          *sql.DB
 	Auth            *peligrosa.Auth
 	Deps            *peligrosa.Deps
-	Invites         *peligrosa.InviteStore
-	Requests        *peligrosa.RequestStore
 	IdxCache        IndexerCountCache
 	StatusTTL       StatusTTLCache
 	BackupHandler   *backup.Handler
@@ -63,7 +61,6 @@ type App struct {
 	AdminHandler    *adminops.Handler
 	NetworkHandler  *network.Handler
 	VPNConfigured   bool
-	AutowireState   *autowire.AutowireState
 	Autowirer       *autowire.Autowirer
 	Watchdog        *vpnwatchdog.Watchdog
 }

@@ -29,7 +29,11 @@ func main() {
 	httpx.DefaultUserAgent = "Pelicula/" + appservices.Version + " (+https://github.com/peligwen/pelicula)"
 	cfg := config.Load()
 
-	// Setup mode: serve only the wizard endpoints then return.
+	// Setup mode: serves only the wizard endpoints. The CLI
+	// (cmd/pelicula/cmd_up.go) polls for .env existence after the wizard
+	// writes it, then runs docker compose down on the setup container —
+	// this binary is killed by docker, not by a graceful in-process
+	// shutdown.
 	if appsetup.NeedsSetup() {
 		slog.Info("starting in setup mode", "component", "main")
 		setupH := appsetup.New("/project/.env", cryptogen.GenerateAPIKey, generateReadablePassword)
