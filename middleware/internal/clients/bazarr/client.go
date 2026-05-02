@@ -36,6 +36,12 @@ func NewWithClient(base *httpx.Client) *Client {
 	return &Client{base: base}
 }
 
+// SetAPIKey updates the API key used to authenticate requests. Safe for
+// concurrent use with in-flight requests.
+func (c *Client) SetAPIKey(apiKey string) {
+	c.base.SetAPIKey(apiKey)
+}
+
 // GetSettings fetches the current Bazarr system settings.
 func (c *Client) GetSettings(ctx context.Context) (map[string]any, error) {
 	raw, err := c.base.RawGet(ctx, "/api/system/settings")

@@ -33,6 +33,12 @@ func NewWithClient(base *httpx.Client) *Client {
 	return &Client{base: base}
 }
 
+// SetAPIKey updates the API key used to authenticate requests. Safe for
+// concurrent use with in-flight requests.
+func (c *Client) SetAPIKey(apiKey string) {
+	c.base.SetAPIKey(apiKey)
+}
+
 // ── Generic raw helpers (used internally and by callers that need raw bytes) ──
 
 // Get makes a GET request and returns the raw response body.

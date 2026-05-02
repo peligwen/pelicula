@@ -59,9 +59,8 @@ func (s *stubSvc) ArrPut(_ context.Context, baseURL, apiKey, path string, payloa
 }
 func (s *stubSvc) HTTPClient() *http.Client { return s.httpClient }
 func (s *stubSvc) ConfigDir() string        { return s.configDir }
-func (s *stubSvc) SetBazarrClient(apiKey string, client *bazarrclient.Client) {
+func (s *stubSvc) SetBazarrAPIKey(apiKey string) {
 	s.bazarrKey = apiKey
-	s.bazarr = client
 }
 func (s *stubSvc) BazarrClient() *bazarrclient.Client { return s.bazarr }
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,9 +42,12 @@ type Client struct {
 	// "http://sonarr:8989/sonarr" or "http://gluetun:8000".
 	BaseURL string
 
-	// APIKey is the credential injected into each request.
-	// Leave empty for services that need no key (e.g. qBittorrent via subnet bypass).
-	APIKey string
+	// apiKey is the credential injected into each request.
+	// Access via SetAPIKey / setAuth only; protected by mu.
+	apiKey string
+
+	// mu protects apiKey for concurrent reads and writes.
+	mu sync.RWMutex
 
 	// KeyHeader is the HTTP header name used to carry the key, e.g. "X-Api-Key".
 	// If empty, no auth header is set.
@@ -128,7 +132,7 @@ func (c *Client) withRetry(ctx context.Context, fn func() (bool, error)) error {
 func New(baseURL, apiKey, keyHeader string, timeout time.Duration) *Client {
 	return &Client{
 		BaseURL:   baseURL,
-		APIKey:    apiKey,
+		apiKey:    apiKey,
 		KeyHeader: keyHeader,
 		HTTPClient: &http.Client{
 			Timeout:   timeout,
@@ -136,6 +140,15 @@ func New(baseURL, apiKey, keyHeader string, timeout time.Duration) *Client {
 		},
 		Retry: RetryPolicy{MaxAttempts: 3, Delay: 500 * time.Millisecond},
 	}
+}
+
+// SetAPIKey updates the API key used to authenticate requests. Safe for
+// concurrent use with in-flight requests; the new key takes effect on
+// subsequent requests.
+func (c *Client) SetAPIKey(key string) {
+	c.mu.Lock()
+	c.apiKey = key
+	c.mu.Unlock()
 }
 
 // httpClient returns the transport to use, defaulting to http.DefaultClient.
@@ -357,14 +370,21 @@ func (c *Client) PostForm(ctx context.Context, path string, values url.Values) (
 }
 
 // setAuth injects the configured API key into req using the configured header.
+// The key is read under RLock so concurrent SetAPIKey calls are safe.
 func (c *Client) setAuth(req *http.Request) {
-	if c.KeyHeader == "" || c.APIKey == "" {
+	if c.KeyHeader == "" {
+		return
+	}
+	c.mu.RLock()
+	key := c.apiKey
+	c.mu.RUnlock()
+	if key == "" {
 		return
 	}
 	if c.KeyScheme != "" {
-		req.Header.Set(c.KeyHeader, c.KeyScheme+" "+c.APIKey)
+		req.Header.Set(c.KeyHeader, c.KeyScheme+" "+key)
 	} else {
-		req.Header.Set(c.KeyHeader, c.APIKey)
+		req.Header.Set(c.KeyHeader, key)
 	}
 }
 

@@ -63,9 +63,10 @@ type Clients struct {
 	JellyfinAPIKey string
 	JellyfinUserID string // pelicula-internal user ID; resolved lazily on first metadata sync
 
-	// Typed clients — initialised by loadKeys() using the loaded API keys.
-	// Use these for new call sites; the legacy ArrGet/ArrPost helpers remain
-	// for existing code until progressively replaced.
+	// Typed clients — constructed once in New(); never reassigned.
+	// Use the SonarrClient()/RadarrClient()/etc. accessors for new call sites.
+	// API keys are updated via SetAPIKey on each client (not by replacing the pointer).
+	// The legacy ArrGet/ArrPost helpers remain for existing code until progressively replaced.
 	Sonarr   *arrclient.Client
 	Radarr   *arrclient.Client
 	Prowlarr *arrclient.Client
@@ -103,13 +104,17 @@ func New(cfg *config.Config, jellyfinAPIKey string) *Clients {
 		proculaURL:  cfg.URLs.Procula,
 	}
 	c.Qbt = qbtclient.New(c.qbtURL)
+	c.Sonarr = arrclient.New(c.sonarrURL, "")
+	c.Radarr = arrclient.New(c.radarrURL, "")
+	c.Prowlarr = arrclient.New(c.prowlarrURL, "")
+	c.Bazarr = bazarrclient.New(c.bazarrURL, "")
 	c.JellyfinAPIKey = jellyfinAPIKey
 	c.loadKeys()
 	return c
 }
 
 func (c *Clients) loadKeys() {
-	// Read outside the lock to avoid holding it during file I/O
+	// Read outside the lock to avoid holding it during file I/O.
 	sonarr := readAPIKey(c.configDir + "/sonarr/config.xml")
 	radarr := readAPIKey(c.configDir + "/radarr/config.xml")
 	prowlarr := readAPIKey(c.configDir + "/prowlarr/config.xml")
@@ -118,11 +123,12 @@ func (c *Clients) loadKeys() {
 	c.SonarrKey = sonarr
 	c.RadarrKey = radarr
 	c.ProwlarrKey = prowlarr
-	// (Re-)initialise typed clients so they always carry the current key.
-	c.Sonarr = arrclient.New(c.sonarrURL, sonarr)
-	c.Radarr = arrclient.New(c.radarrURL, radarr)
-	c.Prowlarr = arrclient.New(c.prowlarrURL, prowlarr)
 	c.mu.Unlock()
+
+	// Update typed-client API keys (their own mutex serialises against in-flight reads).
+	c.Sonarr.SetAPIKey(sonarr)
+	c.Radarr.SetAPIKey(radarr)
+	c.Prowlarr.SetAPIKey(prowlarr)
 
 	if sonarr != "" {
 		slog.Info("loaded API key", "component", "services", "service", "sonarr")
@@ -186,22 +192,48 @@ func (c *Clients) ConfigDir() string {
 	return c.configDir
 }
 
-// SetBazarrClient installs the Bazarr typed client and persists the key.
+// SetBazarrAPIKey updates the Bazarr API key on the existing typed client and
+// persists it. The Bazarr typed client is constructed in New() and never
+// replaced.
 // Implements autowire.ArrSvc.
-func (c *Clients) SetBazarrClient(apiKey string, client *bazarrclient.Client) {
+func (c *Clients) SetBazarrAPIKey(apiKey string) {
 	c.mu.Lock()
 	c.BazarrKey = apiKey
-	c.Bazarr = client
 	c.mu.Unlock()
+	c.Bazarr.SetAPIKey(apiKey)
 }
 
-// BazarrClient returns the current Bazarr typed client (may be nil before wiring).
+// BazarrClient returns the Bazarr typed client. The pointer is constructed
+// once in New() and never reassigned; reloading API keys mutates the client's
+// internal state via SetAPIKey rather than replacing the pointer.
+// Safe for concurrent use.
 // Implements autowire.ArrSvc.
 func (c *Clients) BazarrClient() *bazarrclient.Client {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 	return c.Bazarr
 }
+
+// SonarrClient returns the typed Sonarr client. The pointer is constructed
+// once in New() and never reassigned; reloading API keys mutates the
+// client's internal state via SetAPIKey rather than replacing the pointer.
+// Safe for concurrent use.
+func (c *Clients) SonarrClient() *arrclient.Client { return c.Sonarr }
+
+// RadarrClient returns the typed Radarr client. The pointer is constructed
+// once in New() and never reassigned; reloading API keys mutates the
+// client's internal state via SetAPIKey rather than replacing the pointer.
+// Safe for concurrent use.
+func (c *Clients) RadarrClient() *arrclient.Client { return c.Radarr }
+
+// ProwlarrClient returns the typed Prowlarr client. The pointer is constructed
+// once in New() and never reassigned; reloading API keys mutates the
+// client's internal state via SetAPIKey rather than replacing the pointer.
+// Safe for concurrent use.
+func (c *Clients) ProwlarrClient() *arrclient.Client { return c.Prowlarr }
+
+// QbtClient returns the typed qBittorrent client. The pointer is constructed
+// once in New() and never reassigned.
+// Safe for concurrent use.
+func (c *Clients) QbtClient() *qbtclient.Client { return c.Qbt }
 
 func readAPIKey(path string) string {
 	data, err := os.ReadFile(path)

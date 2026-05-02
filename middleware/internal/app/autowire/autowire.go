@@ -56,8 +56,8 @@ type ArrSvc interface {
 	HTTPClient() *http.Client
 	// ConfigDir returns the config directory root (e.g. "/config").
 	ConfigDir() string
-	// SetBazarrClient installs the Bazarr typed client and key.
-	SetBazarrClient(apiKey string, client *bazarrclient.Client)
+	// SetBazarrAPIKey updates the Bazarr API key on the existing typed client.
+	SetBazarrAPIKey(apiKey string)
 	// BazarrClient returns the current Bazarr typed client (may be nil).
 	BazarrClient() *bazarrclient.Client
 }
@@ -657,7 +657,7 @@ func (a *Autowirer) wireBazarr() {
 		slog.Warn("Bazarr API key not available yet", "component", "autowire", "error", err)
 		return
 	}
-	a.svc.SetBazarrClient(apiKey, bazarrclient.New(a.urls.Bazarr, apiKey))
+	a.svc.SetBazarrAPIKey(apiKey)
 
 	sonarrKey, radarrKey := a.svc.SonarrRadarrKeys()
 	if sonarrKey == "" || radarrKey == "" {
@@ -671,11 +671,6 @@ func (a *Autowirer) wireBazarr() {
 	}
 
 	bzClient := a.svc.BazarrClient()
-	if bzClient == nil {
-		slog.Warn("Bazarr client not available after SetBazarrClient — skipping", "component", "autowire")
-		return
-	}
-
 	if bazarrAlreadyWired(bzClient, sonarrKey, radarrKey, subLangs) {
 		slog.Info("Bazarr already wired, skipping", "component", "autowire")
 		return
