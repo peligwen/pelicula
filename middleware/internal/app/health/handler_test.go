@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"pelicula-api/internal/clients/gluetun"
 )
 
 // stubServices implements ServiceChecker for tests.
@@ -42,8 +44,8 @@ func newGluetunServer(t *testing.T, ip, country string, port int) *httptest.Serv
 // TestHealthHandler_Healthy verifies the happy path: all services up,
 // watchdog synced, VPN healthy with a forwarded port.
 func TestHealthHandler_Healthy(t *testing.T) {
-	gluetun := newGluetunServer(t, "1.2.3.4", "Netherlands", 51413)
-	defer gluetun.Close()
+	srv := newGluetunServer(t, "1.2.3.4", "Netherlands", 51413)
+	defer srv.Close()
 
 	h := &Handler{
 		Services: &stubServices{
@@ -57,7 +59,7 @@ func TestHealthHandler_Healthy(t *testing.T) {
 				LastSyncedAt:      time.Now(),
 			}
 		},
-		GluetunBaseURL: gluetun.URL,
+		Gluetun: gluetun.New(srv.URL, "", ""),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
@@ -111,16 +113,16 @@ func TestHealthHandler_Healthy(t *testing.T) {
 // TestHealthHandler_Degraded verifies that a service returning "down" is
 // reflected in checks_passed / checks_total.
 func TestHealthHandler_Degraded(t *testing.T) {
-	gluetun := newGluetunServer(t, "1.2.3.4", "Netherlands", 51413)
-	defer gluetun.Close()
+	srv := newGluetunServer(t, "1.2.3.4", "Netherlands", 51413)
+	defer srv.Close()
 
 	h := &Handler{
 		Services: &stubServices{
 			health: map[string]string{"sonarr": "up", "radarr": "down"},
 			wired:  true,
 		},
-		GetWatchdog:    nil,
-		GluetunBaseURL: gluetun.URL,
+		GetWatchdog: nil,
+		Gluetun:     gluetun.New(srv.URL, "", ""),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
@@ -154,8 +156,8 @@ func TestHealthHandler_Degraded(t *testing.T) {
 // TestHealthHandler_VPNDown verifies that a watchdog reporting "degraded"
 // surfaces the degraded port_status and watchdog object.
 func TestHealthHandler_VPNDown(t *testing.T) {
-	gluetun := newGluetunServer(t, "5.6.7.8", "Sweden", 0)
-	defer gluetun.Close()
+	srv := newGluetunServer(t, "5.6.7.8", "Sweden", 0)
+	defer srv.Close()
 
 	h := &Handler{
 		Services: &stubServices{
@@ -170,7 +172,7 @@ func TestHealthHandler_VPNDown(t *testing.T) {
 				VPNTunnelStatus:   "running",
 			}
 		},
-		GluetunBaseURL: gluetun.URL,
+		Gluetun: gluetun.New(srv.URL, "", ""),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
@@ -211,16 +213,16 @@ func TestHealthHandler_VPNDown(t *testing.T) {
 // TestHealthHandler_NoWatchdog verifies that when GetWatchdog is nil
 // the watchdog field is absent from the response.
 func TestHealthHandler_NoWatchdog(t *testing.T) {
-	gluetun := newGluetunServer(t, "9.9.9.9", "Germany", 12345)
-	defer gluetun.Close()
+	srv := newGluetunServer(t, "9.9.9.9", "Germany", 12345)
+	defer srv.Close()
 
 	h := &Handler{
 		Services: &stubServices{
 			health: map[string]string{"jellyfin": "up"},
 			wired:  false,
 		},
-		GetWatchdog:    nil,
-		GluetunBaseURL: gluetun.URL,
+		GetWatchdog: nil,
+		Gluetun:     gluetun.New(srv.URL, "", ""),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
@@ -250,7 +252,7 @@ func TestHealthHandler_MethodNotAllowed(t *testing.T) {
 		Services: &stubServices{
 			health: map[string]string{},
 		},
-		GluetunBaseURL: "http://127.0.0.1:0", // won't be reached
+		// Gluetun nil: won't be reached (method check short-circuits)
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/health", nil)
@@ -270,8 +272,8 @@ func TestHealthHandler_GluetunUnavailable(t *testing.T) {
 			health: map[string]string{"sonarr": "up"},
 			wired:  true,
 		},
-		GetWatchdog:    nil,
-		GluetunBaseURL: "http://127.0.0.1:0", // nothing listening
+		GetWatchdog: nil,
+		Gluetun:     gluetun.New("http://127.0.0.1:0", "", ""), // nothing listening
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
@@ -308,9 +310,9 @@ func TestHealthHandler_GluetunUnavailable(t *testing.T) {
 // causes the in-flight Gluetun HTTP calls to abort promptly, and that the
 // handler returns a VPN status of "unknown" (the zero-value when no data arrives).
 func TestServeHTTP_PassesRequestCtx(t *testing.T) {
-	ready := make(chan struct{})
+	ready := make(chan struct{}, 2)
 	unblock := make(chan struct{})
-	gluetun := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case ready <- struct{}{}:
 		default:
@@ -322,12 +324,12 @@ func TestServeHTTP_PassesRequestCtx(t *testing.T) {
 	}))
 	defer func() {
 		close(unblock)
-		gluetun.Close()
+		srv.Close()
 	}()
 
 	h := &Handler{
-		Services:       &stubServices{health: map[string]string{}},
-		GluetunBaseURL: gluetun.URL,
+		Services: &stubServices{health: map[string]string{}},
+		Gluetun:  gluetun.New(srv.URL, "", ""),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -342,7 +344,7 @@ func TestServeHTTP_PassesRequestCtx(t *testing.T) {
 		h.ServeHTTP(rec, req)
 	}()
 
-	// Wait for the gluetun stub to receive the request, then cancel.
+	// Wait for at least one gluetun stub request to arrive, then cancel.
 	select {
 	case <-ready:
 	case <-time.After(5 * time.Second):
@@ -365,35 +367,63 @@ func TestServeHTTP_PassesRequestCtx(t *testing.T) {
 	}
 }
 
-// TestHealthHandler_InjectedClient verifies that when Handler.Client is set
-// the injected client is used (the request reaches the server) rather than
-// creating a new one. This is the regression test for the F21 migration that
-// moved client construction out of queryVPNStatus.
-func TestHealthHandler_InjectedClient(t *testing.T) {
-	gluetun := newGluetunServer(t, "2.3.4.5", "Canada", 55000)
-	defer gluetun.Close()
+// TestQueryVPNStatus_RunsProbesInParallel verifies that GetPublicIP and
+// GetForwardedPort are called concurrently — total elapsed time must be less
+// than the sum of both probe delays.
+func TestQueryVPNStatus_RunsProbesInParallel(t *testing.T) {
+	const probeDelay = 300 * time.Millisecond
 
-	// Inject a custom client with a short timeout — must still succeed.
-	injected := &http.Client{Timeout: 5 * time.Second}
+	ipSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(probeDelay)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"public_ip": "1.2.3.4", "country": "NL"})
+	}))
+	defer ipSrv.Close()
+
+	portSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(probeDelay)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int{"port": 12345})
+	}))
+	defer portSrv.Close()
+
+	// Route /v1/publicip/ip to ipSrv and /v1/openvpn/portforwarded to portSrv
+	// via a single mux server so the gluetun.Client has one base URL.
+	mux := http.NewServeMux()
+	mux.Handle("/v1/publicip/ip", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Proxy to ipSrv
+		time.Sleep(probeDelay)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"public_ip": "1.2.3.4", "country": "NL"})
+	}))
+	mux.Handle("/v1/openvpn/portforwarded", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(probeDelay)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int{"port": 12345})
+	}))
+	combined := httptest.NewServer(mux)
+	defer combined.Close()
 
 	h := &Handler{
-		Services:       &stubServices{health: map[string]string{}},
-		GluetunBaseURL: gluetun.URL,
-		Client:         injected,
+		Services: &stubServices{health: map[string]string{}},
+		Gluetun:  gluetun.New(combined.URL, "", ""),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/health", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	start := time.Now()
+	vpn := h.queryVPNStatus(context.Background())
+	elapsed := time.Since(start)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	// Sequential would take 2 * probeDelay = 600ms; parallel should complete
+	// in roughly probeDelay plus some overhead.
+	const maxElapsed = 500 * time.Millisecond
+	if elapsed >= maxElapsed {
+		t.Errorf("queryVPNStatus took %v; want < %v (probes must run in parallel)", elapsed, maxElapsed)
 	}
-	var resp Response
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
+
+	if vpn.IP != "1.2.3.4" {
+		t.Errorf("vpn.ip = %q, want \"1.2.3.4\"", vpn.IP)
 	}
-	if resp.VPN.IP != "2.3.4.5" {
-		t.Errorf("vpn.ip = %q, want %q (injected client should reach server)", resp.VPN.IP, "2.3.4.5")
+	if vpn.Port != 12345 {
+		t.Errorf("vpn.port = %d, want 12345", vpn.Port)
 	}
 }

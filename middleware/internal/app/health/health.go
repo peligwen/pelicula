@@ -5,12 +5,12 @@ package health
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"os"
+	"sync"
 	"time"
+
+	"pelicula-api/internal/clients/gluetun"
 )
 
 // ServiceChecker is the subset of ServiceClients that health checks need.
@@ -71,14 +71,9 @@ type Response struct {
 // Handler is the health check HTTP handler. It holds injected dependencies
 // to avoid package-level globals.
 type Handler struct {
-	Services       ServiceChecker
-	GetWatchdog    WatchdogStateFunc
-	GluetunBaseURL string
-	GluetunUser    string
-	GluetunPass    string
-	// Client is the shared HTTP client used for Gluetun API requests.
-	// Callers may inject a custom client; if nil a default 5-second client is used.
-	Client *http.Client
+	Services    ServiceChecker
+	GetWatchdog WatchdogStateFunc
+	Gluetun     *gluetun.Client
 }
 
 // ServeHTTP implements http.Handler.
@@ -127,49 +122,43 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// queryVPNStatus queries the Gluetun control API for VPN status, public IP,
-// and forwarded port.
+// queryVPNStatus queries the Gluetun control API for public IP and forwarded
+// port in parallel, then annotates the result from watchdog state.
 func (h *Handler) queryVPNStatus(ctx context.Context) VPNStatus {
-	client := h.Client
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
-	}
 	vpn := VPNStatus{Status: "unknown"}
 
-	gluetunURL := h.GluetunBaseURL
-	if gluetunURL == "" {
-		gluetunURL = "http://gluetun:8000"
+	if h.Gluetun == nil {
+		return vpn
 	}
 
-	gluetunGet := func(path string) ([]byte, error) {
-		return h.gluetunGet(ctx, client, gluetunURL+path)
+	var ipResult *gluetun.VPNStatus
+	var portResult *gluetun.PortForward
+	var ipErr, portErr error
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		ipResult, ipErr = h.Gluetun.GetPublicIP(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		portResult, portErr = h.Gluetun.GetForwardedPort(ctx)
+	}()
+	wg.Wait()
+
+	if ipErr != nil {
+		slog.Debug("gluetun public IP unavailable", "component", "health", "error", ipErr)
+	} else if ipResult != nil && ipResult.PublicIP != "" {
+		vpn.IP = ipResult.PublicIP
+		vpn.Country = ipResult.Country
+		vpn.Status = "healthy"
 	}
 
-	// Public IP and country
-	if body, err := gluetunGet("/v1/publicip/ip"); err == nil {
-		var data struct {
-			PublicIP string `json:"public_ip"`
-			Country  string `json:"country"`
-		}
-		if json.Unmarshal(body, &data) == nil && data.PublicIP != "" {
-			vpn.IP = data.PublicIP
-			vpn.Country = data.Country
-			vpn.Status = "healthy"
-		}
-	} else {
-		slog.Debug("gluetun public IP unavailable", "component", "health", "error", err)
-	}
-
-	// Forwarded port
-	if body, err := gluetunGet("/v1/openvpn/portforwarded"); err == nil {
-		var data struct {
-			Port int `json:"port"`
-		}
-		if json.Unmarshal(body, &data) == nil {
-			vpn.Port = data.Port
-		}
-	} else {
-		slog.Debug("gluetun port forward status unavailable", "component", "health", "error", err)
+	if portErr != nil {
+		slog.Debug("gluetun port forward status unavailable", "component", "health", "error", portErr)
+	} else if portResult != nil {
+		vpn.Port = portResult.Port
 	}
 
 	// Annotate port_status from watchdog state.
@@ -198,41 +187,6 @@ func (h *Handler) queryVPNStatus(ctx context.Context) VPNStatus {
 	}
 
 	return vpn
-}
-
-// gluetunGet makes a GET request to the Gluetun control API.
-func (h *Handler) gluetunGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	pass := h.GluetunPass
-	if pass == "" {
-		pass = os.Getenv("GLUETUN_HTTP_PASS")
-	}
-	if pass != "" {
-		user := h.GluetunUser
-		if user == "" {
-			user = os.Getenv("GLUETUN_HTTP_USER")
-		}
-		if user == "" {
-			user = "pelicula"
-		}
-		req.SetBasicAuth(user, pass)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	return body, nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -298,7 +298,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			}
 			return pelapp.WatchdogStateAdapter(a.Watchdog.State())
 		},
-		GluetunBaseURL: urls.Gluetun,
+		Gluetun: gluetunCli,
 	}
 
 	if cfg.WireguardPrivateKey != "" {
