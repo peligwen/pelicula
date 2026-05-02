@@ -54,7 +54,33 @@ func WriteJellyfinNetworkXML(jellyfinConfigDir, publishedURL string) error {
 	content := header + middle + knownProxies + footer
 
 	path := filepath.Join(jellyfinConfigDir, "network.xml")
-	return os.WriteFile(path, []byte(content), 0644)
+	tmp, err := os.CreateTemp(jellyfinConfigDir, "network-*.xml")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write([]byte(content)); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	renamed = true
+	return nil
 }
 
 // jellyfinKnownProxiesXML returns the <KnownProxies> XML fragment.

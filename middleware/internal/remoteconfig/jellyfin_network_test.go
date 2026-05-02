@@ -7,6 +7,48 @@ import (
 	"testing"
 )
 
+func TestWriteJellyfinNetworkXML_AtomicReplace(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := "OLD"
+	if err := os.WriteFile(filepath.Join(dir, "network.xml"), []byte(sentinel), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := WriteJellyfinNetworkXML(dir, "http://10.0.0.1:7354/jellyfin"); err != nil {
+		t.Fatalf("WriteJellyfinNetworkXML: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "network.xml"))
+	if err != nil {
+		t.Fatalf("read network.xml: %v", err)
+	}
+	got := string(data)
+	if strings.Contains(got, sentinel) {
+		t.Errorf("sentinel %q still present after write: %s", sentinel, got)
+	}
+	if !strings.Contains(got, "<BaseUrl>/jellyfin</BaseUrl>") {
+		t.Errorf("new content missing BaseUrl: %s", got)
+	}
+}
+
+func TestWriteJellyfinNetworkXML_LeavesNoTempOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteJellyfinNetworkXML(dir, "http://10.0.0.1:7354/jellyfin"); err != nil {
+		t.Fatalf("WriteJellyfinNetworkXML: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Errorf("expected exactly 1 file in config dir, got %d: %v", len(entries), names)
+	} else if entries[0].Name() != "network.xml" {
+		t.Errorf("expected network.xml, got %q", entries[0].Name())
+	}
+}
+
 func TestWriteJellyfinNetworkXML_WithPublishedURL(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteJellyfinNetworkXML(dir, "http://192.168.1.42:7354/jellyfin"); err != nil {
