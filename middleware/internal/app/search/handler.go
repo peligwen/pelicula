@@ -16,14 +16,16 @@ import (
 
 	"pelicula-api/httputil"
 	"pelicula-api/internal/app/library"
+	arr "pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/config"
 )
 
 // ArrClient is the subset of services.Clients that the search package needs.
 type ArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
+	SonarrClient() *arr.Client
+	RadarrClient() *arr.Client
+	ProwlarrClient() *arr.Client
 }
 
 // Handler holds all dependencies for the unified search endpoints.
@@ -89,8 +91,11 @@ func (h *Handler) cachedIndexerSearch(ctx context.Context, query string) ([]byte
 	}
 	h.cache.mu.Unlock()
 
+	if prowlarrKey == "" {
+		return nil, fmt.Errorf("prowlarr not configured")
+	}
 	path := "/api/v1/search?query=" + url.QueryEscape(query) + "&type=search&limit=100"
-	data, err := h.Services.ArrGet(ctx, h.ProwlarrURL, prowlarrKey, path)
+	data, err := h.Services.ProwlarrClient().Get(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +152,6 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	typeFilter := r.URL.Query().Get("type") // "movie", "series", or "" for both
 
-	encoded := url.QueryEscape(q)
 	var movies, series []SearchResult
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -156,31 +160,24 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	_ = prowlarrKey // used below in indexer mode
 
 	// Search Radarr (movies)
-	if typeFilter != "series" {
+	if typeFilter != "series" && radarrKey != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := h.Services.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie/lookup?term="+encoded)
+			rawMovies, err := h.Services.RadarrClient().LookupMovie(r.Context(), "/api/v3", q)
 			if err != nil {
 				slog.Error("radarr search error", "component", "search", "error", err)
 				return
 			}
 
 			// Get existing movies to check "added" status
-			existingData, _ := h.Services.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie")
 			existingIDs := make(map[int]bool)
-			var existing []map[string]any
-			if json.Unmarshal(existingData, &existing) == nil {
+			if existing, err := h.Services.RadarrClient().GetMovies(r.Context(), "/api/v3"); err == nil {
 				for _, m := range existing {
 					if id, ok := m["tmdbId"].(float64); ok {
 						existingIDs[int(id)] = true
 					}
 				}
-			}
-
-			var rawMovies []map[string]any
-			if json.Unmarshal(data, &rawMovies) != nil {
-				return
 			}
 
 			mu.Lock()
@@ -202,30 +199,23 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Search Sonarr (series)
-	if typeFilter != "movie" {
+	if typeFilter != "movie" && sonarrKey != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := h.Services.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term="+encoded)
+			shows, err := h.Services.SonarrClient().LookupSeries(r.Context(), "/api/v3", q)
 			if err != nil {
 				slog.Error("sonarr search error", "component", "search", "error", err)
 				return
 			}
 
-			existingData, _ := h.Services.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/series")
 			existingIDs := make(map[int]bool)
-			var existing []map[string]any
-			if json.Unmarshal(existingData, &existing) == nil {
+			if existing, err := h.Services.SonarrClient().GetSeries(r.Context(), "/api/v3"); err == nil {
 				for _, s := range existing {
 					if id, ok := s["tvdbId"].(float64); ok {
 						existingIDs[int(id)] = true
 					}
 				}
-			}
-
-			var shows []map[string]any
-			if json.Unmarshal(data, &shows) != nil {
-				return
 			}
 
 			mu.Lock()
@@ -380,7 +370,11 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 // If rootPath is "" the first radarr library's container path is used.
 func (h *Handler) addMovieInternal(ctx context.Context, tmdbID, profileID int, rootPath string) (int, error) {
 	_, radarrKey, _ := h.Services.Keys()
-	data, err := h.Services.ArrGet(ctx, h.RadarrURL, radarrKey, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
+	if radarrKey == "" {
+		return 0, fmt.Errorf("radarr not configured")
+	}
+	// Radarr's /movie/lookup/tmdb returns a single object, not an array.
+	data, err := h.Services.RadarrClient().Get(ctx, "/api/v3/movie/lookup/tmdb?tmdbId="+itoa(tmdbID))
 	if err != nil {
 		return 0, fmt.Errorf("look up movie: %w", err)
 	}
@@ -390,13 +384,9 @@ func (h *Handler) addMovieInternal(ctx context.Context, tmdbID, profileID int, r
 	}
 
 	if profileID == 0 {
-		profData, err := h.Services.ArrGet(ctx, h.RadarrURL, radarrKey, "/api/v3/qualityprofile")
-		if err == nil {
-			var profiles []map[string]any
-			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
-				if id, ok := profiles[0]["id"].(float64); ok {
-					profileID = int(id)
-				}
+		if profiles, err := h.Services.RadarrClient().GetQualityProfiles(ctx, "/api/v3"); err == nil && len(profiles) > 0 {
+			if id, ok := profiles[0]["id"].(float64); ok {
+				profileID = int(id)
 			}
 		}
 		if profileID == 0 {
@@ -417,12 +407,10 @@ func (h *Handler) addMovieInternal(ctx context.Context, tmdbID, profileID int, r
 			"searchForMovie": true,
 		},
 	}
-	resp, err := h.Services.ArrPost(ctx, h.RadarrURL, radarrKey, "/api/v3/movie", payload)
+	added, err := h.Services.RadarrClient().AddMovie(ctx, "/api/v3", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add movie: %w", err)
 	}
-	var added map[string]any
-	json.Unmarshal(resp, &added) //nolint:errcheck
 	return int(floatVal(added, "id")), nil
 }
 
@@ -431,24 +419,22 @@ func (h *Handler) addMovieInternal(ctx context.Context, tmdbID, profileID int, r
 // If rootPath is "" the first sonarr library's container path is used.
 func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, rootPath string) (int, error) {
 	sonarrKey, _, _ := h.Services.Keys()
-	data, err := h.Services.ArrGet(ctx, h.SonarrURL, sonarrKey, "/api/v3/series/lookup?term=tvdb:"+itoa(tvdbID))
+	if sonarrKey == "" {
+		return 0, fmt.Errorf("sonarr not configured")
+	}
+	shows, err := h.Services.SonarrClient().LookupSeries(ctx, "/api/v3", "tvdb:"+itoa(tvdbID))
 	if err != nil {
 		return 0, fmt.Errorf("look up series: %w", err)
 	}
-	var shows []map[string]any
-	if err := json.Unmarshal(data, &shows); err != nil || len(shows) == 0 {
+	if len(shows) == 0 {
 		return 0, fmt.Errorf("series not found")
 	}
 	show := shows[0]
 
 	if profileID == 0 {
-		profData, err := h.Services.ArrGet(ctx, h.SonarrURL, sonarrKey, "/api/v3/qualityprofile")
-		if err == nil {
-			var profiles []map[string]any
-			if json.Unmarshal(profData, &profiles) == nil && len(profiles) > 0 {
-				if id, ok := profiles[0]["id"].(float64); ok {
-					profileID = int(id)
-				}
+		if profiles, err := h.Services.SonarrClient().GetQualityProfiles(ctx, "/api/v3"); err == nil && len(profiles) > 0 {
+			if id, ok := profiles[0]["id"].(float64); ok {
+				profileID = int(id)
 			}
 		}
 		if profileID == 0 {
@@ -470,12 +456,10 @@ func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, 
 			"searchForMissingEpisodes": true,
 		},
 	}
-	resp, err := h.Services.ArrPost(ctx, h.SonarrURL, sonarrKey, "/api/v3/series", payload)
+	added, err := h.Services.SonarrClient().AddSeries(ctx, "/api/v3", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add series: %w", err)
 	}
-	var added map[string]any
-	json.Unmarshal(resp, &added) //nolint:errcheck
 	return int(floatVal(added, "id")), nil
 }
 
@@ -501,13 +485,9 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		RootFolders     []rootEntry    `json:"rootFolders"`
 	}
 
-	fetchProfiles := func(baseURL, apiKey string) []profileEntry {
-		data, err := h.Services.ArrGet(r.Context(), baseURL, apiKey, "/api/v3/qualityprofile")
+	fetchProfiles := func(client *arr.Client) []profileEntry {
+		raw, err := client.GetQualityProfiles(r.Context(), "/api/v3")
 		if err != nil {
-			return nil
-		}
-		var raw []map[string]any
-		if json.Unmarshal(data, &raw) != nil {
 			return nil
 		}
 		var out []profileEntry
@@ -519,13 +499,9 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		}
 		return out
 	}
-	fetchRoots := func(baseURL, apiKey string) []rootEntry {
-		data, err := h.Services.ArrGet(r.Context(), baseURL, apiKey, "/api/v3/rootfolder")
+	fetchRoots := func(client *arr.Client) []rootEntry {
+		raw, err := client.ListRootFolders(r.Context(), "/api/v3")
 		if err != nil {
-			return nil
-		}
-		var raw []map[string]any
-		if json.Unmarshal(data, &raw) != nil {
 			return nil
 		}
 		var out []rootEntry
@@ -535,14 +511,17 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
+	_ = radarrKey
+	_ = sonarrKey
+
 	httputil.WriteJSON(w, map[string]any{
 		"radarr": arrMeta{
-			QualityProfiles: fetchProfiles(h.RadarrURL, radarrKey),
-			RootFolders:     fetchRoots(h.RadarrURL, radarrKey),
+			QualityProfiles: fetchProfiles(h.Services.RadarrClient()),
+			RootFolders:     fetchRoots(h.Services.RadarrClient()),
 		},
 		"sonarr": arrMeta{
-			QualityProfiles: fetchProfiles(h.SonarrURL, sonarrKey),
-			RootFolders:     fetchRoots(h.SonarrURL, sonarrKey),
+			QualityProfiles: fetchProfiles(h.Services.SonarrClient()),
+			RootFolders:     fetchRoots(h.Services.SonarrClient()),
 		},
 	})
 }

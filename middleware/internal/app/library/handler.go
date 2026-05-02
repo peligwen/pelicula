@@ -7,7 +7,6 @@
 package library
 
 import (
-	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	arr "pelicula-api/internal/clients/arr"
 	proculaclient "pelicula-api/internal/clients/procula"
 )
 
@@ -24,8 +24,8 @@ import (
 // ArrClient is the subset of ServiceClients that the library package needs.
 type ArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
+	SonarrClient() *arr.Client
+	RadarrClient() *arr.Client
 }
 
 // ForwardToProculaFunc is a callback that creates a Procula pipeline job.

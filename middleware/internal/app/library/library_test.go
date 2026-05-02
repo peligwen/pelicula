@@ -1,7 +1,6 @@
 package library
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	arrclient "pelicula-api/internal/clients/arr"
 	proculaclient "pelicula-api/internal/clients/procula"
 )
 
@@ -801,11 +801,18 @@ func TestAssignGroupKeys(t *testing.T) {
 
 // ── handleLibraryApply duplicate guard ───────────────────────────────────────
 
+// emptyArrServer is a shared httptest server that returns empty JSON lists/objects.
+// It is started lazily and shared across stubs in the same test binary.
+var emptyListSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte("[]")) //nolint:errcheck
+}))
+
 func newTestHandler() *Handler {
 	return &Handler{
 		Svc:       &stubArrClient{},
-		RadarrURL: "http://radarr:7878/radarr",
-		SonarrURL: "http://sonarr:8989/sonarr",
+		RadarrURL: emptyListSrv.URL,
+		SonarrURL: emptyListSrv.URL,
 		ConfigDir: "/config/pelicula",
 	}
 }
@@ -814,11 +821,11 @@ func newTestHandler() *Handler {
 type stubArrClient struct{}
 
 func (s *stubArrClient) Keys() (string, string, string) { return "", "", "" }
-func (s *stubArrClient) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	return []byte("[]"), nil
+func (s *stubArrClient) SonarrClient() *arrclient.Client {
+	return arrclient.New(emptyListSrv.URL, "")
 }
-func (s *stubArrClient) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return []byte("{}"), nil
+func (s *stubArrClient) RadarrClient() *arrclient.Client {
+	return arrclient.New(emptyListSrv.URL, "")
 }
 
 func TestHandleLibraryApply_DuplicateGuard(t *testing.T) {
@@ -877,11 +884,11 @@ type stubArrClientWithKeys struct {
 }
 
 func (s *stubArrClientWithKeys) Keys() (string, string, string) { return s.sonarr, s.radarr, "" }
-func (s *stubArrClientWithKeys) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	return []byte("[]"), nil
+func (s *stubArrClientWithKeys) SonarrClient() *arrclient.Client {
+	return arrclient.New(emptyListSrv.URL, s.sonarr)
 }
-func (s *stubArrClientWithKeys) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return []byte("{}"), nil
+func (s *stubArrClientWithKeys) RadarrClient() *arrclient.Client {
+	return arrclient.New(emptyListSrv.URL, s.radarr)
 }
 
 func TestInPlaceDetection(t *testing.T) {

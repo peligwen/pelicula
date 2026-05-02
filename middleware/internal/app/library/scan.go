@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"pelicula-api/httputil"
+	arr "pelicula-api/internal/clients/arr"
 )
 
 // ── Scan types ────────────────────────────────────────────────────────────────
@@ -201,8 +202,8 @@ func (h *Handler) HandleLibraryScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	existingMovies := h.loadExistingMovieIDs(ctx, radarrKey)
-	existingSeries := h.loadExistingSeriesIDs(ctx, sonarrKey)
+	existingMovies := h.loadExistingMovieIDs(ctx)
+	existingSeries := h.loadExistingSeriesIDs(ctx)
 
 	// Lookup cache to avoid hammering the *arr APIs with duplicate titles.
 	cache := make(map[string]*MediaMatch)
@@ -225,7 +226,7 @@ func (h *Handler) HandleLibraryScan(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			for j := range jobs {
 				results[j.idx] = h.matchFile(
-					ctx, j.file, radarrKey, sonarrKey,
+					ctx, j.file,
 					existingMovies, existingSeries,
 					cache, &cacheMu,
 				)
@@ -272,13 +273,9 @@ func (h *Handler) HandleLibraryScan(w http.ResponseWriter, r *http.Request) {
 // ── *arr helpers ──────────────────────────────────────────────────────────────
 
 // loadExistingMovieIDs returns a set of tmdbIds already in Radarr.
-func (h *Handler) loadExistingMovieIDs(ctx context.Context, apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey, "/api/v3/movie")
+func (h *Handler) loadExistingMovieIDs(ctx context.Context) map[int]bool {
+	movies, err := h.Svc.RadarrClient().GetMovies(ctx, "/api/v3")
 	if err != nil {
-		return nil
-	}
-	var movies []map[string]any
-	if err := json.Unmarshal(data, &movies); err != nil {
 		return nil
 	}
 	m := make(map[int]bool, len(movies))
@@ -289,13 +286,9 @@ func (h *Handler) loadExistingMovieIDs(ctx context.Context, apiKey string) map[i
 }
 
 // loadExistingSeriesIDs returns a set of tvdbIds already in Sonarr.
-func (h *Handler) loadExistingSeriesIDs(ctx context.Context, apiKey string) map[int]bool {
-	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey, "/api/v3/series")
+func (h *Handler) loadExistingSeriesIDs(ctx context.Context) map[int]bool {
+	series, err := h.Svc.SonarrClient().GetSeries(ctx, "/api/v3")
 	if err != nil {
-		return nil
-	}
-	var series []map[string]any
-	if err := json.Unmarshal(data, &series); err != nil {
 		return nil
 	}
 	m := make(map[int]bool, len(series))
@@ -305,14 +298,10 @@ func (h *Handler) loadExistingSeriesIDs(ctx context.Context, apiKey string) map[
 	return m
 }
 
-// loadProfileNameMap returns name → id for quality profiles.
-func (h *Handler) loadProfileNameMap(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
-	data, err := h.Svc.ArrGet(ctx, baseURL, apiKey, "/api/v3/qualityprofile")
+// loadProfileNameMap returns name → id for quality profiles from the given client.
+func loadProfileNameMap(ctx context.Context, client *arr.Client) (map[string]int, error) {
+	profiles, err := client.GetQualityProfiles(ctx, "/api/v3")
 	if err != nil {
-		return nil, err
-	}
-	var profiles []map[string]any
-	if err := json.Unmarshal(data, &profiles); err != nil {
 		return nil, err
 	}
 	m := make(map[string]int, len(profiles))

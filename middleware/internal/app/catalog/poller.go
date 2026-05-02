@@ -8,23 +8,25 @@ import (
 	"time"
 
 	"pelicula-api/internal/app/util"
+	arr "pelicula-api/internal/clients/arr"
 )
 
 // QueueArrClient is the subset of ArrClient needed for queue polling.
 type QueueArrClient interface {
 	Keys() (sonarr, radarr, prowlarr string)
-	ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
+	SonarrClient() *arr.Client
+	RadarrClient() *arr.Client
 }
 
 // RunQueuePoller polls Radarr and Sonarr's download queues every 60 seconds
 // (±10% jitter) and upserts queue-tier catalog records for items actively
 // downloading. Consecutive arr fetch errors engage a skip-backoff of up to 5
 // ticks to avoid hammering unavailable services.
-func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string) {
+func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient) {
 	tick := util.JitteredTicker(ctx, 60*time.Second, 0.1)
 	skip := util.NewSkipCounter(5)
 
-	pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL, skip)
+	pollDownloadQueue(ctx, db, svc, skip)
 
 	for {
 		select {
@@ -35,17 +37,17 @@ func RunQueuePoller(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrU
 				slog.Debug("catalog poller: skipping queue fetch (backoff)", "component", "catalog_poller")
 				continue
 			}
-			pollDownloadQueue(ctx, db, svc, radarrURL, sonarrURL, skip)
+			pollDownloadQueue(ctx, db, svc, skip)
 		}
 	}
 }
 
-func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, radarrURL, sonarrURL string, skip *util.SkipCounter) {
+func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, skip *util.SkipCounter) {
 	sonarrKey, radarrKey, _ := svc.Keys()
 	anyErr := false
 
 	if radarrKey != "" {
-		records, err := svc.ArrGetAllQueueRecords(ctx, radarrURL, radarrKey, "/api/v3", "&includeUnknownMovieItems=false")
+		records, err := svc.RadarrClient().GetAllQueueRecords(ctx, "/api/v3", "&includeUnknownMovieItems=false")
 		if err != nil {
 			slog.Error("catalog poller: radarr queue fetch", "component", "catalog_poller", "error", err)
 			anyErr = true
@@ -57,7 +59,7 @@ func pollDownloadQueue(ctx context.Context, db *sql.DB, svc QueueArrClient, rada
 	}
 
 	if sonarrKey != "" {
-		records, err := svc.ArrGetAllQueueRecords(ctx, sonarrURL, sonarrKey, "/api/v3", "&includeUnknownSeriesItems=false")
+		records, err := svc.SonarrClient().GetAllQueueRecords(ctx, "/api/v3", "&includeUnknownSeriesItems=false")
 		if err != nil {
 			slog.Error("catalog poller: sonarr queue fetch", "component", "catalog_poller", "error", err)
 			anyErr = true

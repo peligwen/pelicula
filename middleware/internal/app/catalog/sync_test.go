@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	arrclient "pelicula-api/internal/clients/arr"
 )
 
 // ── JellyfinMetaClient stub ───────────────────────────────────────────────────
@@ -86,31 +88,25 @@ func testSQLiteDB(t *testing.T) *sql.DB {
 }
 
 // stubArrBackfill is a minimal ArrClient for backfill tests.
+// It uses real arr.Client instances backed by httptest servers.
 type stubArrBackfill struct {
-	doGet func(baseURL, apiKey, path string) ([]byte, error)
+	sonarr   *arrclient.Client
+	radarr   *arrclient.Client
+	prowlarr *arrclient.Client
 }
 
-func (s *stubArrBackfill) Keys() (sonarr, radarr, prowlarr string) {
-	return "sk", "rk", ""
-}
-func (s *stubArrBackfill) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	if s.doGet != nil {
-		return s.doGet(baseURL, apiKey, path)
+func newStubArrBackfill(sonarrURL, radarrURL string) *stubArrBackfill {
+	return &stubArrBackfill{
+		sonarr:   arrclient.New(sonarrURL, "sk"),
+		radarr:   arrclient.New(radarrURL, "rk"),
+		prowlarr: arrclient.New("", ""),
 	}
-	return nil, fmt.Errorf("stub: unexpected ArrGet %q", path)
 }
-func (s *stubArrBackfill) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrBackfill) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrBackfill) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrBackfill) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
-	return nil, nil
-}
+
+func (s *stubArrBackfill) Keys() (sonarr, radarr, prowlarr string) { return "sk", "rk", "" }
+func (s *stubArrBackfill) SonarrClient() *arrclient.Client         { return s.sonarr }
+func (s *stubArrBackfill) RadarrClient() *arrclient.Client         { return s.radarr }
+func (s *stubArrBackfill) ProwlarrClient() *arrclient.Client       { return s.prowlarr }
 
 func TestBackfillSonarr_ContinuesOnPartialError(t *testing.T) {
 	// Three series; the middle one's episode fetch returns 500.
@@ -155,30 +151,9 @@ func TestBackfillSonarr_ContinuesOnPartialError(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(origLogger) })
 
 	db := testSQLiteDB(t)
-	svc := &stubArrBackfill{
-		doGet: func(baseURL, apiKey, path string) ([]byte, error) {
-			resp, err := http.Get(sonarrSrv.URL + path)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode >= 400 {
-				return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-			}
-			var buf []byte
-			tmp := make([]byte, 512)
-			for {
-				n, rerr := resp.Body.Read(tmp)
-				buf = append(buf, tmp[:n]...)
-				if rerr != nil {
-					break
-				}
-			}
-			return buf, nil
-		},
-	}
+	svc := newStubArrBackfill(sonarrSrv.URL, "")
 
-	err := backfillSonarr(context.Background(), db, svc, sonarrSrv.URL, "key")
+	err := backfillSonarr(context.Background(), db, svc.SonarrClient())
 	if err != nil {
 		t.Fatalf("backfillSonarr returned error: %v", err)
 	}
@@ -284,29 +259,39 @@ func TestUpsertFromHook_UnknownSourceTypeIsSentinel(t *testing.T) {
 // ── R8-catalog: RootCtx shutdown discipline ──────────────────────────────────
 
 // TestHandleCatalogBackfill_RespectsRootCtx verifies that the goroutine spawned
-// by HandleCatalogBackfill observes cancellation of Handler.RootCtx.
+// by HandleCatalogBackfill unblocks promptly when Handler.RootCtx is cancelled.
+// The server blocks until the client disconnects; if the ctx does NOT propagate,
+// the goroutine would hang until the test deadline.
 func TestHandleCatalogBackfill_RespectsRootCtx(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Track whether ctx was cancelled when ArrGet was called.
-	var ctxErrObserved atomic.Int32
-	arr := &stubArrBackfill{
-		doGet: func(baseURL, apiKey, path string) ([]byte, error) {
-			if ctx.Err() != nil {
-				ctxErrObserved.Store(1)
+	// done is closed by the server handler once it detects the client disconnected.
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Block until the client (arr.Client) disconnects due to ctx cancellation.
+		select {
+		case <-r.Context().Done():
+			// Signal that ctx propagated all the way to the HTTP request.
+			select {
+			case <-done:
+			default:
+				close(done)
 			}
-			// Return an empty list so backfill completes cleanly when not cancelled.
-			return []byte("[]"), nil
-		},
-	}
+		case <-time.After(2 * time.Second):
+			// Timed out — ctx didn't propagate.
+		}
+		// Return an empty list so any non-cancelled request can succeed cleanly.
+		w.Write([]byte("[]")) //nolint:errcheck
+	}))
+	defer srv.Close()
 
 	db := testSQLiteDB(t)
+	svc := newStubArrBackfill(srv.URL, srv.URL)
 	h := &Handler{
-		DB:        db,
-		Arr:       arr,
-		RootCtx:   ctx,
-		RadarrURL: "http://radarr",
-		SonarrURL: "http://sonarr",
+		DB:      db,
+		Arr:     svc,
+		RootCtx: ctx,
 	}
 
 	req, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
@@ -318,36 +303,15 @@ func TestHandleCatalogBackfill_RespectsRootCtx(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 
-	// Cancel the root context, then give the goroutine time to observe it.
+	// Give the goroutine a moment to start the HTTP call, then cancel the root ctx.
+	time.Sleep(10 * time.Millisecond)
 	cancel()
-	deadline := time.Now().Add(100 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if ctxErrObserved.Load() == 1 {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
 
-	if ctxErrObserved.Load() != 1 {
-		// If ctxErrObserved is still 0 the goroutine may have finished before
-		// cancel() fired. Re-trigger with an already-cancelled ctx to confirm
-		// the ctx flows through at all.
-		ctx2, cancel2 := context.WithCancel(context.Background())
-		cancel2()
-		h2 := &Handler{
-			DB:        db,
-			Arr:       arr,
-			RootCtx:   ctx2,
-			RadarrURL: "http://radarr",
-			SonarrURL: "http://sonarr",
-		}
-		req2, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
-		w2 := httptest.NewRecorder()
-		h2.HandleCatalogBackfill(w2, req2)
-		time.Sleep(50 * time.Millisecond)
-		if ctxErrObserved.Load() != 1 {
-			t.Error("ArrGet never observed a cancelled ctx; RootCtx is not flowing through HandleCatalogBackfill")
-		}
+	select {
+	case <-done:
+		// ctx cancellation propagated to the HTTP request — test passes.
+	case <-time.After(500 * time.Millisecond):
+		t.Error("RootCtx cancellation did not unblock the backfill HTTP call within 500ms; RootCtx may not be flowing through HandleCatalogBackfill")
 	}
 }
 

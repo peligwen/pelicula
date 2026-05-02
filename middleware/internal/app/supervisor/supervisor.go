@@ -30,7 +30,7 @@ func Run(ctx context.Context, a *pelapp.App) *sync.WaitGroup {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		catalog.RunQueuePoller(ctx, a.CatalogDB, a.Svc, a.URLs.Radarr, a.URLs.Sonarr)
+		catalog.RunQueuePoller(ctx, a.CatalogDB, a.Svc)
 	}()
 
 	wg.Add(1)

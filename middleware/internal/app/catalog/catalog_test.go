@@ -1,7 +1,6 @@
 package catalog_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,108 +8,30 @@ import (
 	"testing"
 
 	"pelicula-api/internal/app/catalog"
+	arrclient "pelicula-api/internal/clients/arr"
 )
 
-// stubArrClient implements catalog.ArrClient for tests.
+// stubArrClient implements catalog.ArrClient for tests using real arr.Client
+// instances pointed at httptest servers.
 type stubArrClient struct {
-	radarrKey string
 	sonarrKey string
-	doGet     func(baseURL, apiKey, path string) ([]byte, error)
-	doPost    func(baseURL, apiKey, path string, payload any) ([]byte, error)
-	doPut     func(baseURL, apiKey, path string, payload any) ([]byte, error)
-	doDelete  func(baseURL, apiKey, path string) ([]byte, error)
+	radarrKey string
+	sonarr    *arrclient.Client
+	radarr    *arrclient.Client
+	prowlarr  *arrclient.Client
 }
 
 func (s *stubArrClient) Keys() (sonarr, radarr, prowlarr string) {
 	return s.sonarrKey, s.radarrKey, ""
 }
-func (s *stubArrClient) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	if s.doGet != nil {
-		return s.doGet(baseURL, apiKey, path)
-	}
-	return nil, nil
-}
-func (s *stubArrClient) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	if s.doPost != nil {
-		return s.doPost(baseURL, apiKey, path, payload)
-	}
-	return nil, nil
-}
-func (s *stubArrClient) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	if s.doPut != nil {
-		return s.doPut(baseURL, apiKey, path, payload)
-	}
-	return nil, nil
-}
-func (s *stubArrClient) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	if s.doDelete != nil {
-		return s.doDelete(baseURL, apiKey, path)
-	}
-	return nil, nil
-}
-func (s *stubArrClient) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
-	return nil, nil
-}
+func (s *stubArrClient) SonarrClient() *arrclient.Client   { return s.sonarr }
+func (s *stubArrClient) RadarrClient() *arrclient.Client   { return s.radarr }
+func (s *stubArrClient) ProwlarrClient() *arrclient.Client { return s.prowlarr }
 
 // newTestHandler builds a catalog.Handler backed by real httptest servers.
+// Nil server args result in clients pointed at an empty base URL (calls will fail,
+// which is fine for tests that don't exercise that service path).
 func newTestHandler(radarrSrv, sonarrSrv, proculaSrv *httptest.Server, radarrKey, sonarrKey string) *catalog.Handler {
-	arr := &stubArrClient{radarrKey: radarrKey, sonarrKey: sonarrKey}
-	arr.doGet = func(baseURL, apiKey, path string) ([]byte, error) {
-		resp, err := http.Get(baseURL + path)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		buf := make([]byte, 0, 256)
-		tmp := make([]byte, 256)
-		for {
-			n, rerr := resp.Body.Read(tmp)
-			buf = append(buf, tmp[:n]...)
-			if rerr != nil {
-				break
-			}
-		}
-		return buf, nil
-	}
-	arr.doPost = func(baseURL, apiKey, path string, payload any) ([]byte, error) {
-		data, _ := json.Marshal(payload)
-		resp, err := http.Post(baseURL+path, "application/json", strings.NewReader(string(data)))
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		buf := make([]byte, 0, 256)
-		tmp := make([]byte, 256)
-		for {
-			n, rerr := resp.Body.Read(tmp)
-			buf = append(buf, tmp[:n]...)
-			if rerr != nil {
-				break
-			}
-		}
-		return buf, nil
-	}
-	arr.doPut = func(baseURL, apiKey, path string, payload any) ([]byte, error) {
-		data, _ := json.Marshal(payload)
-		req, _ := http.NewRequest(http.MethodPut, baseURL+path, strings.NewReader(string(data)))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		buf := make([]byte, 0, 256)
-		tmp := make([]byte, 256)
-		for {
-			n, rerr := resp.Body.Read(tmp)
-			buf = append(buf, tmp[:n]...)
-			if rerr != nil {
-				break
-			}
-		}
-		return buf, nil
-	}
-
 	radarrURL := ""
 	if radarrSrv != nil {
 		radarrURL = radarrSrv.URL
@@ -124,8 +45,16 @@ func newTestHandler(radarrSrv, sonarrSrv, proculaSrv *httptest.Server, radarrKey
 		proculaURL = proculaSrv.URL
 	}
 
+	svc := &stubArrClient{
+		sonarrKey: sonarrKey,
+		radarrKey: radarrKey,
+		sonarr:    arrclient.New(sonarrURL, sonarrKey),
+		radarr:    arrclient.New(radarrURL, radarrKey),
+		prowlarr:  arrclient.New("", ""),
+	}
+
 	return &catalog.Handler{
-		Arr:        arr,
+		Arr:        svc,
 		Client:     catalog.NewProxyClient(http.DefaultClient),
 		RadarrURL:  radarrURL,
 		SonarrURL:  sonarrURL,

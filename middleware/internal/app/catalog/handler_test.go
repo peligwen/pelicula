@@ -9,32 +9,30 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	arrclient "pelicula-api/internal/clients/arr"
 )
 
 // stubArrForHandler is a minimal ArrClient for handler-internal tests.
+// It uses real arr.Client instances backed by the provided server URLs.
 type stubArrForHandler struct {
-	doGet func(baseURL, apiKey, path string) ([]byte, error)
+	sonarr   *arrclient.Client
+	radarr   *arrclient.Client
+	prowlarr *arrclient.Client
+}
+
+func newStubArrForHandler(sonarrURL, radarrURL string) *stubArrForHandler {
+	return &stubArrForHandler{
+		sonarr:   arrclient.New(sonarrURL, "sk"),
+		radarr:   arrclient.New(radarrURL, "rk"),
+		prowlarr: arrclient.New("", ""),
+	}
 }
 
 func (s *stubArrForHandler) Keys() (sonarr, radarr, prowlarr string) { return "sk", "rk", "" }
-func (s *stubArrForHandler) ArrGet(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	if s.doGet != nil {
-		return s.doGet(baseURL, apiKey, path)
-	}
-	return nil, nil
-}
-func (s *stubArrForHandler) ArrPost(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrForHandler) ArrPut(_ context.Context, baseURL, apiKey, path string, payload any) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrForHandler) ArrDelete(_ context.Context, baseURL, apiKey, path string) ([]byte, error) {
-	return nil, nil
-}
-func (s *stubArrForHandler) ArrGetAllQueueRecords(_ context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error) {
-	return nil, nil
-}
+func (s *stubArrForHandler) SonarrClient() *arrclient.Client         { return s.sonarr }
+func (s *stubArrForHandler) RadarrClient() *arrclient.Client         { return s.radarr }
+func (s *stubArrForHandler) ProwlarrClient() *arrclient.Client       { return s.prowlarr }
 
 // TestFindImportHistoryID_BothUnmarshalsFail verifies that when both the array
 // and wrapped-object unmarshal attempts fail, the returned error unwraps to
@@ -51,25 +49,13 @@ func TestFindImportHistoryID_BothUnmarshalsFail(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	arr := &stubArrForHandler{
-		doGet: func(baseURL, apiKey, path string) ([]byte, error) {
-			resp, err := http.Get(baseURL + path)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-			buf := make([]byte, 512)
-			n, _ := resp.Body.Read(buf)
-			return buf[:n], nil
-		},
-	}
-
+	client := arrclient.New(srv.URL, "key")
 	h := &Handler{
-		Arr:       arr,
+		Arr:       newStubArrForHandler(srv.URL, ""),
 		SonarrURL: srv.URL,
 	}
 
-	_, _, err := h.findImportHistoryID(context.Background(), srv.URL, "key", "sonarr", 1, 5)
+	_, _, err := h.findImportHistoryID(context.Background(), client, "sonarr", 1, 5)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -125,7 +111,7 @@ func TestHandleCatalogDetail_WarnOnBadProculaResponse(t *testing.T) {
 	h := &Handler{
 		Client:     NewProxyClient(http.DefaultClient),
 		ProculaURL: procula.URL,
-		Arr:        &stubArrForHandler{},
+		Arr:        newStubArrForHandler("", ""),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog/detail?path=/media/movie.mkv", nil)
@@ -199,7 +185,7 @@ func TestHandleCatalogDetail_RespectsRequestCtx(t *testing.T) {
 	h := &Handler{
 		Client:     NewProxyClient(http.DefaultClient),
 		ProculaURL: procula.URL,
-		Arr:        &stubArrForHandler{},
+		Arr:        newStubArrForHandler("", ""),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)

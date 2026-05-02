@@ -112,7 +112,12 @@ func TestCooldown_ClearedWhenItemEntersQueue(t *testing.T) {
 // newTestWatcher builds a Watcher pointed at the given httptest server URL,
 // with a real *services.Clients that has the given API key set and is marked wired.
 func newTestWatcher(serverURL, radarrKey, sonarrKey string) *Watcher {
-	svc := services.New(&config.Config{}, "")
+	svc := services.New(&config.Config{
+		URLs: config.URLs{
+			Radarr: serverURL,
+			Sonarr: serverURL,
+		},
+	}, "")
 	svc.RadarrKey = radarrKey
 	svc.SonarrKey = sonarrKey
 	svc.SetWired(true)

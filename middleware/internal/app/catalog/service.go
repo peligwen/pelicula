@@ -1,21 +1,21 @@
 package catalog
 
-import "context"
+import (
+	"context"
+
+	arr "pelicula-api/internal/clients/arr"
+)
 
 // ArrClient is the subset of ServiceClients that the catalog package needs.
 type ArrClient interface {
 	// Keys returns API keys for Sonarr, Radarr, and Prowlarr.
 	Keys() (sonarr, radarr, prowlarr string)
-	// ArrGet makes a GET request to a *arr service.
-	ArrGet(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	// ArrPost makes a POST request to a *arr service.
-	ArrPost(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
-	// ArrPut makes a PUT request to a *arr service.
-	ArrPut(ctx context.Context, baseURL, apiKey, path string, payload any) ([]byte, error)
-	// ArrDelete makes a DELETE request to a *arr service.
-	ArrDelete(ctx context.Context, baseURL, apiKey, path string) ([]byte, error)
-	// ArrGetAllQueueRecords paginates all records from an *arr queue endpoint.
-	ArrGetAllQueueRecords(ctx context.Context, baseURL, apiKey, apiVer, extraParams string) ([]map[string]any, error)
+	// SonarrClient returns the typed Sonarr HTTP client.
+	SonarrClient() *arr.Client
+	// RadarrClient returns the typed Radarr HTTP client.
+	RadarrClient() *arr.Client
+	// ProwlarrClient returns the typed Prowlarr HTTP client.
+	ProwlarrClient() *arr.Client
 }
 
 // JellyfinMetaClient is the subset needed for Jellyfin metadata sync.

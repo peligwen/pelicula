@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	arr "pelicula-api/internal/clients/arr"
 )
 
 type jellyfinItem struct {
@@ -208,16 +210,16 @@ func UpsertFromHook(ctx context.Context, db *sql.DB, source ProculaJobSource) er
 
 // BackfillFromArr scans all movies in Radarr and all series in Sonarr,
 // upserting catalog records for items in the existing library.
-func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, sonarrURL string) error {
+func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient) error {
 	sonarrKey, radarrKey, _ := svc.Keys()
 
 	if radarrKey != "" {
-		if err := backfillRadarr(ctx, db, svc, radarrURL, radarrKey); err != nil {
+		if err := backfillRadarr(ctx, db, svc.RadarrClient()); err != nil {
 			slog.Error("backfill radarr failed", "component", "catalog_sync", "error", err)
 		}
 	}
 	if sonarrKey != "" {
-		if err := backfillSonarr(ctx, db, svc, sonarrURL, sonarrKey); err != nil {
+		if err := backfillSonarr(ctx, db, svc.SonarrClient()); err != nil {
 			slog.Error("backfill sonarr failed", "component", "catalog_sync", "error", err)
 		}
 	}
@@ -225,8 +227,8 @@ func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, 
 	return nil
 }
 
-func backfillRadarr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, apiKey string) error {
-	data, err := svc.ArrGet(ctx, radarrURL, apiKey, "/api/v3/movie")
+func backfillRadarr(ctx context.Context, db *sql.DB, client *arr.Client) error {
+	data, err := client.Get(ctx, "/api/v3/movie")
 	if err != nil {
 		return fmt.Errorf("radarr list: %w", err)
 	}
@@ -268,8 +270,8 @@ func backfillRadarr(ctx context.Context, db *sql.DB, svc ArrClient, radarrURL, a
 
 const episodeConcurrency = 10
 
-func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, apiKey string) error {
-	data, err := svc.ArrGet(ctx, sonarrURL, apiKey, "/api/v3/series")
+func backfillSonarr(ctx context.Context, db *sql.DB, client *arr.Client) error {
+	data, err := client.Get(ctx, "/api/v3/series")
 	if err != nil {
 		return fmt.Errorf("sonarr list: %w", err)
 	}
@@ -342,7 +344,7 @@ func backfillSonarr(ctx context.Context, db *sql.DB, svc ArrClient, sonarrURL, a
 			defer func() { <-sem }()
 
 			path := "/api/v3/episode?seriesId=" + strconv.Itoa(arrID)
-			epData, err := svc.ArrGet(ctx, sonarrURL, apiKey, path)
+			epData, err := client.Get(ctx, path)
 			if err != nil {
 				slog.Error("backfill: fetch episodes", "component", "catalog_sync",
 					"arr_id", arrID, "error", err)

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	arr "pelicula-api/internal/clients/arr"
 )
 
 // ProxyClient is the subset of an HTTP client needed by the catalog handler
@@ -109,7 +110,7 @@ func (h *Handler) HandleCatalogList(w http.ResponseWriter, r *http.Request) {
 		if h.Cache != nil {
 			body, err = h.Cache.GetMovies(r.Context())
 		} else {
-			body, err = h.Arr.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie")
+			body, err = h.Arr.RadarrClient().Get(r.Context(), "/api/v3/movie")
 		}
 		radarrCh <- arrFetch{data: body, err: err}
 	}()
@@ -123,7 +124,7 @@ func (h *Handler) HandleCatalogList(w http.ResponseWriter, r *http.Request) {
 		if h.Cache != nil {
 			body, err = h.Cache.GetSeries(r.Context())
 		} else {
-			body, err = h.Arr.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/series")
+			body, err = h.Arr.SonarrClient().Get(r.Context(), "/api/v3/series")
 		}
 		sonarrCh <- arrFetch{data: body, err: err}
 	}()
@@ -174,13 +175,22 @@ func (h *Handler) HandleCatalogSeriesDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	sonarrKey, _, _ := h.Arr.Keys()
-	body, err := h.Arr.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/series/"+url.PathEscape(id))
+	if sonarrKey == "" {
+		httputil.WriteError(w, "sonarr unavailable", http.StatusBadGateway)
+		return
+	}
+	body, err := h.Arr.SonarrClient().GetSeriesByID(r.Context(), "/api/v3", id)
+	if err != nil {
+		httputil.WriteError(w, "sonarr unavailable", http.StatusBadGateway)
+		return
+	}
+	out, err := json.Marshal(body)
 	if err != nil {
 		httputil.WriteError(w, "sonarr unavailable", http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(body) //nolint:errcheck
+	w.Write(out) //nolint:errcheck
 }
 
 // HandleCatalogSeason merges Sonarr episode and episodefile lists.
@@ -196,14 +206,18 @@ func (h *Handler) HandleCatalogSeason(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sonarrKey, _, _ := h.Arr.Keys()
+	if sonarrKey == "" {
+		httputil.WriteError(w, "sonarr unavailable", http.StatusBadGateway)
+		return
+	}
 
-	epData, err := h.Arr.ArrGet(r.Context(), h.SonarrURL, sonarrKey,
+	epData, err := h.Arr.SonarrClient().Get(r.Context(),
 		"/api/v3/episode?seriesId="+url.QueryEscape(seriesID)+"&seasonNumber="+url.QueryEscape(seasonNum))
 	if err != nil {
 		httputil.WriteError(w, "sonarr episode fetch failed", http.StatusBadGateway)
 		return
 	}
-	fileData, err := h.Arr.ArrGet(r.Context(), h.SonarrURL, sonarrKey,
+	fileData, err := h.Arr.SonarrClient().Get(r.Context(),
 		"/api/v3/episodefile?seriesId="+url.QueryEscape(seriesID))
 	if err != nil {
 		httputil.WriteError(w, "sonarr episodefile fetch failed", http.StatusBadGateway)
@@ -443,14 +457,12 @@ func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) 
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go BackfillFromArr(h.rootCtx(), h.DB, h.Arr, h.RadarrURL, h.SonarrURL) //nolint:errcheck
+	go BackfillFromArr(h.rootCtx(), h.DB, h.Arr) //nolint:errcheck
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 
 // arrTarget captures the per-arr-type parameters used by HandleCatalogCommand.
 type arrTarget struct {
-	baseURL      string
-	apiKey       string
 	itemPath     string
 	searchCmd    string
 	searchIDKey  string
@@ -480,12 +492,8 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "invalid arr_type", http.StatusBadRequest)
 		return
 	}
-	sonarrKey, radarrKey, _ := h.Arr.Keys()
-
 	targets := map[string]arrTarget{
 		"radarr": {
-			baseURL:      h.RadarrURL,
-			apiKey:       radarrKey,
 			itemPath:     "/api/v3/movie",
 			searchCmd:    "MoviesSearch",
 			searchIDKey:  "movieIds",
@@ -494,8 +502,6 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 			rescanIDKey:  "movieId",
 		},
 		"sonarr": {
-			baseURL:      h.SonarrURL,
-			apiKey:       sonarrKey,
 			itemPath:     "/api/v3/series",
 			searchCmd:    "SeriesSearch",
 			searchIDKey:  "seriesId",
@@ -506,6 +512,11 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	t := targets[req.ArrType]
 
+	arrClient := h.Arr.RadarrClient()
+	if req.ArrType == "sonarr" {
+		arrClient = h.Arr.SonarrClient()
+	}
+
 	switch req.Command {
 	case "search":
 		var searchID any
@@ -514,7 +525,7 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		} else {
 			searchID = req.ArrID
 		}
-		if _, err := h.Arr.ArrPost(r.Context(), t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
+		if err := arrClient.TriggerCommand(r.Context(), "/api/v3", map[string]any{
 			"name":        t.searchCmd,
 			t.searchIDKey: searchID,
 		}); err != nil {
@@ -522,7 +533,7 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "rescan":
-		if _, err := h.Arr.ArrPost(r.Context(), t.baseURL, t.apiKey, "/api/v3/command", map[string]any{
+		if err := arrClient.TriggerCommand(r.Context(), "/api/v3", map[string]any{
 			"name":        t.rescanCmd,
 			t.rescanIDKey: req.ArrID,
 		}); err != nil {
@@ -531,7 +542,7 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 		}
 	case "unmonitor":
 		itemURL := fmt.Sprintf("%s/%d", t.itemPath, req.ArrID)
-		body, err := h.Arr.ArrGet(r.Context(), t.baseURL, t.apiKey, itemURL)
+		body, err := arrClient.Get(r.Context(), itemURL)
 		if err != nil {
 			httputil.WriteError(w, req.ArrType+" fetch failed", http.StatusBadGateway)
 			return
@@ -542,7 +553,7 @@ func (h *Handler) HandleCatalogCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		item["monitored"] = false
-		if _, err := h.Arr.ArrPut(r.Context(), t.baseURL, t.apiKey, itemURL, item); err != nil {
+		if _, err := arrClient.Put(r.Context(), itemURL, item); err != nil {
 			httputil.WriteError(w, req.ArrType+" update failed", http.StatusBadGateway)
 			return
 		}
@@ -582,15 +593,12 @@ func (h *Handler) HandleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sonarrKey, radarrKey, _ := h.Arr.Keys()
-	var baseURL, apiKey string
-	if req.ArrType == "radarr" {
-		baseURL, apiKey = h.RadarrURL, radarrKey
-	} else {
-		baseURL, apiKey = h.SonarrURL, sonarrKey
+	replaceClient := h.Arr.RadarrClient()
+	if req.ArrType == "sonarr" {
+		replaceClient = h.Arr.SonarrClient()
 	}
 
-	historyID, displayTitle, err := h.findImportHistoryID(r.Context(), baseURL, apiKey, req.ArrType, req.ArrID, req.EpisodeID)
+	historyID, displayTitle, err := h.findImportHistoryID(r.Context(), replaceClient, req.ArrType, req.ArrID, req.EpisodeID)
 	if err != nil || historyID == 0 {
 		slog.Warn("replace: history lookup failed — no import history found",
 			"arr_type", req.ArrType, "arr_id", req.ArrID, "error", err)
@@ -600,11 +608,10 @@ func (h *Handler) HandleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 
 	blocklistID := 0
 	if historyID > 0 {
-		if _, err := h.Arr.ArrPost(r.Context(), baseURL, apiKey,
-			fmt.Sprintf("/api/v3/history/failed/%d", historyID), nil); err != nil {
+		if _, err := replaceClient.Post(r.Context(), fmt.Sprintf("/api/v3/history/failed/%d", historyID), nil); err != nil {
 			slog.Warn("replace: history/failed call failed", "history_id", historyID, "error", err)
 		} else {
-			blocklistID, _ = h.findBlocklistID(r.Context(), baseURL, apiKey, req.ArrType, req.ArrID)
+			blocklistID, _ = h.findBlocklistID(r.Context(), replaceClient, req.ArrType, req.ArrID)
 		}
 	}
 
@@ -614,7 +621,7 @@ func (h *Handler) HandleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rescanCmd = map[string]any{"name": "RescanSeries", "seriesId": req.ArrID}
 	}
-	if _, err := h.Arr.ArrPost(r.Context(), baseURL, apiKey, "/api/v3/command", rescanCmd); err != nil {
+	if err := replaceClient.TriggerCommand(r.Context(), "/api/v3", rescanCmd); err != nil {
 		slog.Warn("replace: rescan command failed", "arr_type", req.ArrType, "error", err)
 	}
 
@@ -626,7 +633,7 @@ func (h *Handler) HandleCatalogReplace(w http.ResponseWriter, r *http.Request) {
 	} else {
 		searchCmd = map[string]any{"name": "SeriesSearch", "seriesId": req.ArrID}
 	}
-	if _, err := h.Arr.ArrPost(r.Context(), baseURL, apiKey, "/api/v3/command", searchCmd); err != nil {
+	if err := replaceClient.TriggerCommand(r.Context(), "/api/v3", searchCmd); err != nil {
 		slog.Warn("replace: search command failed", "arr_type", req.ArrType, "error", err)
 	}
 
@@ -656,14 +663,13 @@ func (h *Handler) HandleCatalogUnblocklist(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	arrType := r.URL.Query().Get("arr_type")
-	sonarrKey, radarrKey, _ := h.Arr.Keys()
 	if arrType == "radarr" {
-		h.Arr.ArrDelete(r.Context(), h.RadarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.RadarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
 	} else if arrType == "sonarr" {
-		h.Arr.ArrDelete(r.Context(), h.SonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.SonarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
 	} else {
-		h.Arr.ArrDelete(r.Context(), h.SonarrURL, sonarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
-		h.Arr.ArrDelete(r.Context(), h.RadarrURL, radarrKey, fmt.Sprintf("/api/v3/blocklist/%d", id)) //nolint:errcheck
+		h.Arr.SonarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
+		h.Arr.RadarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -676,8 +682,6 @@ func (h *Handler) HandleCatalogQualityProfiles(w http.ResponseWriter, r *http.Re
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	sonarrKey, radarrKey, _ := h.Arr.Keys()
-
 	type fetch struct {
 		data []byte
 		err  error
@@ -685,11 +689,11 @@ func (h *Handler) HandleCatalogQualityProfiles(w http.ResponseWriter, r *http.Re
 	rCh := make(chan fetch, 1)
 	sCh := make(chan fetch, 1)
 	go func() {
-		body, err := h.Arr.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/qualityprofile")
+		body, err := h.Arr.RadarrClient().Get(r.Context(), "/api/v3/qualityprofile")
 		rCh <- fetch{body, err}
 	}()
 	go func() {
-		body, err := h.Arr.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/qualityprofile")
+		body, err := h.Arr.SonarrClient().Get(r.Context(), "/api/v3/qualityprofile")
 		sCh <- fetch{body, err}
 	}()
 
@@ -726,7 +730,7 @@ func (h *Handler) HandleCatalogQualityProfiles(w http.ResponseWriter, r *http.Re
 
 // findImportHistoryID queries *arr history for an episode/movie and returns the
 // historyId of the most recent downloadFolderImported event, plus the source title.
-func (h *Handler) findImportHistoryID(ctx context.Context, baseURL, apiKey, arrType string, arrID, episodeID int) (int, string, error) {
+func (h *Handler) findImportHistoryID(ctx context.Context, client *arr.Client, arrType string, arrID, episodeID int) (int, string, error) {
 	var path string
 	if arrType == "sonarr" {
 		if episodeID == 0 {
@@ -736,7 +740,7 @@ func (h *Handler) findImportHistoryID(ctx context.Context, baseURL, apiKey, arrT
 	} else {
 		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d&eventType=downloadFolderImported&sortKey=date&sortDirection=descending", arrID)
 	}
-	data, err := h.Arr.ArrGet(ctx, baseURL, apiKey, path)
+	data, err := client.Get(ctx, path)
 	if err != nil {
 		return 0, "", err
 	}
@@ -765,9 +769,8 @@ func (h *Handler) findImportHistoryID(ctx context.Context, baseURL, apiKey, arrT
 
 // findBlocklistID queries the *arr blocklist to find the most recently added
 // entry for the given item. Returns 0 if not found (non-fatal).
-func (h *Handler) findBlocklistID(ctx context.Context, baseURL, apiKey, arrType string, arrID int) (int, error) {
-	data, err := h.Arr.ArrGet(ctx, baseURL, apiKey,
-		"/api/v3/blocklist?pageSize=10&sortKey=date&sortDirection=descending")
+func (h *Handler) findBlocklistID(ctx context.Context, client *arr.Client, arrType string, arrID int) (int, error) {
+	data, err := client.Get(ctx, "/api/v3/blocklist?pageSize=10&sortKey=date&sortDirection=descending")
 	if err != nil {
 		return 0, err
 	}

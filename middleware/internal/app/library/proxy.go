@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"path/filepath"
 
 	"pelicula-api/httputil"
@@ -222,15 +221,12 @@ func (h *Handler) HandleLibraryResub(w http.ResponseWriter, r *http.Request) {
 
 	// Try Radarr first.
 	if radarrKey != "" {
-		data, err := h.Svc.ArrGet(r.Context(), h.RadarrURL, radarrKey, "/api/v3/movie?path="+url.QueryEscape(clean))
+		movies, err := h.Svc.RadarrClient().GetMoviesByPath(r.Context(), "/api/v3", clean)
 		if err == nil {
-			var movies []map[string]any
-			if json.Unmarshal(data, &movies) == nil {
-				for _, m := range movies {
-					if id, ok := m["id"].(float64); ok && id > 0 {
-						h.sendSubSearch(w, r, "radarr", int(id), 0)
-						return
-					}
+			for _, m := range movies {
+				if id, ok := m["id"].(float64); ok && id > 0 {
+					h.sendSubSearch(w, r, "radarr", int(id), 0)
+					return
 				}
 			}
 		}
@@ -238,18 +234,15 @@ func (h *Handler) HandleLibraryResub(w http.ResponseWriter, r *http.Request) {
 
 	// Fall back to Sonarr.
 	if sonarrKey != "" {
-		data, err := h.Svc.ArrGet(r.Context(), h.SonarrURL, sonarrKey, "/api/v3/episodefile?path="+url.QueryEscape(clean))
+		epFiles, err := h.Svc.SonarrClient().GetEpisodeFilesByPath(r.Context(), "/api/v3", clean)
 		if err == nil {
-			var epFiles []map[string]any
-			if json.Unmarshal(data, &epFiles) == nil {
-				for _, ef := range epFiles {
-					seriesID, _ := ef["seriesId"].(float64)
-					epIDs, _ := ef["episodeIds"].([]any)
-					if seriesID > 0 && len(epIDs) > 0 {
-						epID, _ := epIDs[0].(float64)
-						h.sendSubSearch(w, r, "sonarr", int(seriesID), int(epID))
-						return
-					}
+			for _, ef := range epFiles {
+				seriesID, _ := ef["seriesId"].(float64)
+				epIDs, _ := ef["episodeIds"].([]any)
+				if seriesID > 0 && len(epIDs) > 0 {
+					epID, _ := epIDs[0].(float64)
+					h.sendSubSearch(w, r, "sonarr", int(seriesID), int(epID))
+					return
 				}
 			}
 		}

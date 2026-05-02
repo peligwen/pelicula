@@ -151,7 +151,7 @@ func (w *Watcher) searchMissingMovies(ctx context.Context) bool {
 	if w.CatalogCache != nil {
 		data, err = w.CatalogCache.GetMovies(ctx)
 	} else {
-		data, err = w.Services.ArrGet(ctx, w.RadarrURL, radarrKey, "/api/v3/movie")
+		data, err = w.Services.RadarrClient().Get(ctx, "/api/v3/movie")
 	}
 	if err != nil {
 		slog.Error("failed to fetch movies", "component", "watcher", "service", "radarr", "error", err)
@@ -197,11 +197,10 @@ func (w *Watcher) searchMissingMovies(ctx context.Context) bool {
 	}
 
 	slog.Info("triggering search for missing movies", "component", "watcher", "service", "radarr", "count", len(missing))
-	_, err = w.Services.ArrPost(ctx, w.RadarrURL, radarrKey, "/api/v3/command", map[string]any{
+	if err := w.Services.RadarrClient().TriggerCommand(ctx, "/api/v3", map[string]any{
 		"name":     "MoviesSearch",
 		"movieIds": missing,
-	})
-	if err != nil {
+	}); err != nil {
 		slog.Error("search command failed", "component", "watcher", "service", "radarr", "error", err)
 		return true
 	}
@@ -209,9 +208,8 @@ func (w *Watcher) searchMissingMovies(ctx context.Context) bool {
 }
 
 func (w *Watcher) radarrQueuedMovieIDs(ctx context.Context) map[int]bool {
-	_, radarrKey, _ := w.Services.Keys()
 	ids := make(map[int]bool)
-	records, err := w.Services.ArrGetAllQueueRecords(ctx, w.RadarrURL, radarrKey, "/api/v3", "")
+	records, err := w.Services.RadarrClient().GetAllQueueRecords(ctx, "/api/v3", "")
 	if err != nil {
 		return ids
 	}
@@ -233,7 +231,7 @@ func (w *Watcher) searchMissingSeries(ctx context.Context) bool {
 		return false
 	}
 
-	data, err := w.Services.ArrGet(ctx, w.SonarrURL, sonarrKey, "/api/v3/wanted/missing?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
+	data, err := w.Services.SonarrClient().GetMissing(ctx, "/api/v3", "?pageSize=100&sortKey=airDateUtc&sortDirection=descending")
 	if err != nil {
 		slog.Error("failed to fetch missing episodes", "component", "watcher", "service", "sonarr", "error", err)
 		return true
@@ -270,11 +268,10 @@ func (w *Watcher) searchMissingSeries(ctx context.Context) bool {
 	}
 
 	slog.Info("triggering search for missing episodes", "component", "watcher", "service", "sonarr", "count", len(missing))
-	_, err = w.Services.ArrPost(ctx, w.SonarrURL, sonarrKey, "/api/v3/command", map[string]any{
+	if err := w.Services.SonarrClient().TriggerCommand(ctx, "/api/v3", map[string]any{
 		"name":       "EpisodeSearch",
 		"episodeIds": missing,
-	})
-	if err != nil {
+	}); err != nil {
 		slog.Error("search command failed", "component", "watcher", "service", "sonarr", "error", err)
 		return true
 	}
@@ -282,9 +279,8 @@ func (w *Watcher) searchMissingSeries(ctx context.Context) bool {
 }
 
 func (w *Watcher) sonarrQueuedEpisodeIDs(ctx context.Context) map[int]bool {
-	sonarrKey, _, _ := w.Services.Keys()
 	ids := make(map[int]bool)
-	records, err := w.Services.ArrGetAllQueueRecords(ctx, w.SonarrURL, sonarrKey, "/api/v3", "")
+	records, err := w.Services.SonarrClient().GetAllQueueRecords(ctx, "/api/v3", "")
 	if err != nil {
 		return ids
 	}

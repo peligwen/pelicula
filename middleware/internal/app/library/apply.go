@@ -114,11 +114,11 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	existingMovies := h.loadExistingMovieIDs(ctx, radarrKey)
-	existingSeries := h.loadExistingSeriesIDs(ctx, sonarrKey)
+	existingMovies := h.loadExistingMovieIDs(ctx)
+	existingSeries := h.loadExistingSeriesIDs(ctx)
 
-	movieProfiles, _ := h.loadProfileNameMap(ctx, h.RadarrURL, radarrKey)
-	seriesProfiles, _ := h.loadProfileNameMap(ctx, h.SonarrURL, sonarrKey)
+	movieProfiles, _ := loadProfileNameMap(ctx, h.Svc.RadarrClient())
+	seriesProfiles, _ := loadProfileNameMap(ctx, h.Svc.SonarrClient())
 
 	// ── Filesystem operations (import / link) ────────────────────────────────
 	libs := h.GetLibraries()
@@ -277,8 +277,8 @@ func applyGroupKey(item ApplyItem) string {
 
 // ── *arr apply helpers ────────────────────────────────────────────────────────
 
-func (h *Handler) applyMovie(ctx context.Context, apiKey string, item ApplyItem, profMap map[string]int) error {
-	data, err := h.Svc.ArrGet(ctx, h.RadarrURL, apiKey,
+func (h *Handler) applyMovie(ctx context.Context, _ string, item ApplyItem, profMap map[string]int) error {
+	data, err := h.Svc.RadarrClient().Get(ctx,
 		"/api/v3/movie/lookup/tmdb?tmdbId="+itoa(item.TmdbID))
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
@@ -301,7 +301,7 @@ func (h *Handler) applyMovie(ctx context.Context, apiKey string, item ApplyItem,
 	movie["addOptions"] = map[string]any{
 		"searchForMovie": false,
 	}
-	body, err := h.Svc.ArrPost(ctx, h.RadarrURL, apiKey, "/api/v3/movie", movie)
+	body, err := h.Svc.RadarrClient().Post(ctx, "/api/v3/movie", movie)
 	if err != nil {
 		if len(body) > 0 {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
@@ -311,14 +311,12 @@ func (h *Handler) applyMovie(ctx context.Context, apiKey string, item ApplyItem,
 	return nil
 }
 
-func (h *Handler) applySeries(ctx context.Context, apiKey string, item ApplyItem, profMap map[string]int) error {
-	data, err := h.Svc.ArrGet(ctx, h.SonarrURL, apiKey,
-		"/api/v3/series/lookup?term=tvdb:"+itoa(item.TvdbID))
+func (h *Handler) applySeries(ctx context.Context, _ string, item ApplyItem, profMap map[string]int) error {
+	shows, err := h.Svc.SonarrClient().LookupSeries(ctx, "/api/v3", "tvdb:"+itoa(item.TvdbID))
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
 	}
-	var shows []map[string]any
-	if err := json.Unmarshal(data, &shows); err != nil || len(shows) == 0 {
+	if len(shows) == 0 {
 		return fmt.Errorf("series not found")
 	}
 	show := shows[0]
@@ -337,7 +335,7 @@ func (h *Handler) applySeries(ctx context.Context, apiKey string, item ApplyItem
 	show["addOptions"] = map[string]any{
 		"searchForMissingEpisodes": false,
 	}
-	body, err := h.Svc.ArrPost(ctx, h.SonarrURL, apiKey, "/api/v3/series", show)
+	body, err := h.Svc.SonarrClient().Post(ctx, "/api/v3/series", show)
 	if err != nil {
 		if len(body) > 0 {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(body))
