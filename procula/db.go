@@ -56,7 +56,7 @@ type migration struct {
 }
 
 // schemaVersion is the current schema version. Bump this when adding new migrations.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // DDL shared between migrateBaseline and the corresponding incremental migrations.
 // Keeping them as named constants ensures the two paths stay in sync.
@@ -114,6 +114,13 @@ const (
 	ddlJobsIndexCreatedAt = `CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)`
 	// ddlJobsIndexActionType supports action_type filtering in List().
 	ddlJobsIndexActionType = `CREATE INDEX IF NOT EXISTS idx_jobs_action_type ON jobs(action_type)`
+
+	// ddlMigratedJsonFiles tracks which JSON migration sources have been committed to
+	// SQLite, providing idempotency across crash-restart cycles.
+	ddlMigratedJsonFiles = `CREATE TABLE IF NOT EXISTS migrated_json_files (
+		path        TEXT PRIMARY KEY,
+		migrated_at TEXT NOT NULL
+	)`
 )
 
 // migrations is the ordered list of incremental schema migrations for existing installs.
@@ -129,6 +136,7 @@ var migrations = []migration{
 	{version: 8, up: migrate8},
 	{version: 9, up: migrate9},
 	{version: 10, up: migrate10},
+	{version: 11, up: migrate11},
 }
 
 // runMigrations reads the current schema version and applies all pending migrations.
@@ -234,6 +242,7 @@ func migrateBaseline(tx *sql.Tx) error {
 		ddlJobsIndexState,
 		ddlJobsIndexCreatedAt,
 		ddlJobsIndexActionType,
+		ddlMigratedJsonFiles,
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -332,6 +341,14 @@ func migrate9(tx *sql.Tx) error {
 // transient job-level failures, so restarts don't consume retry_count budget.
 func migrate10(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN interrupt_count INTEGER NOT NULL DEFAULT 0`)
+	return err
+}
+
+// migrate11 creates the migrated_json_files table for idempotent JSON → SQLite
+// migration tracking. A committed row means the batch was fully written; missing
+// row means the migration was never attempted or rolled back mid-flight.
+func migrate11(tx *sql.Tx) error {
+	_, err := tx.Exec(ddlMigratedJsonFiles)
 	return err
 }
 
