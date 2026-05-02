@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -57,7 +58,7 @@ func (w *Wirer) client() *jfclient.Client {
 
 // Auth returns a valid Jellyfin token for the service account.
 // Uses persistent API key if available, falling back to reading from .env.
-func (w *Wirer) Auth() (string, error) {
+func (w *Wirer) Auth(ctx context.Context) (string, error) {
 	if apiKey := w.Services.GetJellyfinAPIKey(); apiKey != "" {
 		return apiKey, nil
 	}
@@ -65,7 +66,7 @@ func (w *Wirer) Auth() (string, error) {
 	// Hold EnvMu while reading .env so we don't race against Wire()'s
 	// concurrent rewrites (handover from password-based auth to API-key
 	// auth on the first wizard run, or any other env mutation). Without
-	// this, a concurrent caller could see a torn read mid-rewrite.
+	// this, a concurrent caller could see a torn read mid-write.
 	w.EnvMu.Lock()
 	vars, err := w.ParseEnvFile(w.EnvPath)
 	w.EnvMu.Unlock()
@@ -89,7 +90,7 @@ func (w *Wirer) Auth() (string, error) {
 	}
 
 	jfc := w.client()
-	data, err := jfc.Post("/Users/AuthenticateByName", "", map[string]any{
+	data, err := jfc.Post(ctx, "/Users/AuthenticateByName", "", map[string]any{
 		"Username": adminUser,
 		"Pw":       pass,
 	})
@@ -109,10 +110,10 @@ func (w *Wirer) Auth() (string, error) {
 
 // Wire auto-configures Jellyfin: completes the startup wizard (if needed)
 // and adds Movies + TV Shows libraries pointing to the same folders used elsewhere.
-func (w *Wirer) Wire(lh *library.Handler) {
+func (w *Wirer) Wire(ctx context.Context, lh *library.Handler) {
 	jfc := w.client()
 
-	info, err := SystemInfo(jfc)
+	info, err := SystemInfo(ctx, jfc)
 	if err != nil {
 		slog.Warn("Jellyfin not reachable, skipping auto-config", "component", "autowire", "error", err)
 		return
@@ -126,7 +127,7 @@ func (w *Wirer) Wire(lh *library.Handler) {
 			Client:    jfc,
 			GenAPIKey: w.GenAPIKey,
 		}
-		wizardToken, wizardErr := wiz.CompleteWizard()
+		wizardToken, wizardErr := wiz.CompleteWizard(ctx)
 		if wizardErr != nil {
 			slog.Error("Jellyfin wizard setup failed", "component", "autowire", "error", wizardErr)
 			return
@@ -135,7 +136,7 @@ func (w *Wirer) Wire(lh *library.Handler) {
 		WizardSleep()
 	} else {
 		slog.Info("Jellyfin startup wizard already completed", "component", "autowire")
-		authToken, authErr := w.Auth()
+		authToken, authErr := w.Auth(ctx)
 		if authErr != nil {
 			slog.Error("Jellyfin auth failed, skipping library setup — to recover: re-run the setup wizard or run 'pelicula reset-config jellyfin'", "component", "autowire", "error", authErr)
 			return
@@ -144,7 +145,7 @@ func (w *Wirer) Wire(lh *library.Handler) {
 	}
 
 	if w.Services.GetJellyfinAPIKey() == "" {
-		apiKey, err := CreateAPIKey(jfc, token)
+		apiKey, err := CreateAPIKey(ctx, jfc, token)
 		if err != nil {
 			slog.Error("failed to create Jellyfin API key", "component", "autowire", "error", err)
 			if !wizardDone {
@@ -164,14 +165,14 @@ func (w *Wirer) Wire(lh *library.Handler) {
 					adminPass := credVars["JELLYFIN_PASSWORD"]
 					if adminUser != "" && adminUser != w.ServiceUser && adminPass != "" {
 						createdUser := false
-						if userID, createErr := w.CreateUser(adminUser, adminPass); createErr != nil {
+						if userID, createErr := w.CreateUser(ctx, adminUser, adminPass); createErr != nil {
 							// Leave credentials in .env so the next startup can retry.
 							slog.Warn("could not create operator admin account — credentials retained for retry", "component", "autowire", "username", adminUser, "error", createErr)
 						} else {
 							createdUser = true
 							slog.Info("operator admin account created", "component", "autowire", "username", adminUser)
-							if adminToken, authErr := w.Auth(); authErr == nil {
-								PromoteAdmin(jfc, adminToken, userID, adminUser)
+							if adminToken, authErr := w.Auth(ctx); authErr == nil {
+								PromoteAdmin(ctx, jfc, adminToken, userID, adminUser)
 							}
 						}
 						if !createdUser {
@@ -216,14 +217,14 @@ func (w *Wirer) Wire(lh *library.Handler) {
 		if collectionType == "other" {
 			collectionType = "mixed"
 		}
-		WireLibrary(jfc, token, lib.Name, collectionType, lib.ContainerPath())
+		WireLibrary(ctx, jfc, token, lib.Name, collectionType, lib.ContainerPath())
 	}
 
 	// Set the service user's preferred audio language.
-	if svcUserID, err := ServiceUserID(jfc, token); err != nil {
+	if svcUserID, err := ServiceUserID(ctx, jfc, token); err != nil {
 		slog.Warn("could not fetch users for audio pref", "component", "autowire", "error", err)
 	} else if svcUserID != "" {
-		SetAudioPref(jfc, token, svcUserID)
+		SetAudioPref(ctx, jfc, token, svcUserID)
 	}
 
 	hwType, hwDevice := HwAccelProbe(
@@ -233,7 +234,7 @@ func (w *Wirer) Wire(lh *library.Handler) {
 		runtime.GOARCH,
 	)
 	if hwType != HwAccelNone {
-		wireHwAccel(jfc, token, hwType, hwDevice)
+		wireHwAccel(ctx, jfc, token, hwType, hwDevice)
 	}
 }
 
@@ -241,8 +242,8 @@ func (w *Wirer) Wire(lh *library.Handler) {
 // /System/Configuration/encoding endpoint, using GET-merge-POST so that
 // all other encoding settings are preserved. It is a no-op when the current
 // HardwareAccelerationType is already non-"none" (respects user-set config).
-func wireHwAccel(client *jfclient.Client, token string, hwType HwAccelType, vaapiDevice string) {
-	data, err := client.Get("/System/Configuration/encoding", token)
+func wireHwAccel(ctx context.Context, client *jfclient.Client, token string, hwType HwAccelType, vaapiDevice string) {
+	data, err := client.Get(ctx, "/System/Configuration/encoding", token)
 	if err != nil {
 		slog.Warn("could not read Jellyfin encoding config", "component", "autowire", "error", err)
 		return
@@ -261,7 +262,7 @@ func wireHwAccel(client *jfclient.Client, token string, hwType HwAccelType, vaap
 	if vaapiDevice != "" {
 		cfg["VaapiDevice"] = vaapiDevice
 	}
-	if _, err := client.Post("/System/Configuration/encoding", token, cfg); err != nil {
+	if _, err := client.Post(ctx, "/System/Configuration/encoding", token, cfg); err != nil {
 		slog.Warn("could not apply Jellyfin hardware acceleration config", "component", "autowire",
 			"type", hwType, "error", err)
 		return
@@ -271,20 +272,20 @@ func wireHwAccel(client *jfclient.Client, token string, hwType HwAccelType, vaap
 
 // TriggerRefresh asks Jellyfin to scan all libraries.
 // Called by the middleware's /api/pelicula/jellyfin/refresh endpoint (invoked by Procula).
-func (w *Wirer) TriggerRefresh() error {
+func (w *Wirer) TriggerRefresh(ctx context.Context) error {
 	jfc := w.client()
-	return TriggerLibraryRefresh(jfc, w.Auth)
+	return TriggerLibraryRefresh(ctx, jfc, w.Auth)
 }
 
 // CreateUser creates a new Jellyfin user with the given name and password.
 // Returns the new user's Jellyfin ID on success.
-func (w *Wirer) CreateUser(username, password string) (string, error) {
+func (w *Wirer) CreateUser(ctx context.Context, username, password string) (string, error) {
 	h := &Handler{
 		Client:      w.client(),
 		Auth:        w.Auth,
 		ServiceUser: w.ServiceUser,
 	}
-	return h.CreateUser(username, password)
+	return h.CreateUser(ctx, username, password)
 }
 
 // jellyfinHTTPClient is the production implementation of clients.JellyfinClient.
@@ -292,16 +293,16 @@ func (w *Wirer) CreateUser(username, password string) (string, error) {
 type jellyfinHTTPClient struct {
 	httpClient  *http.Client
 	jellyfinURL string
-	auth        func() (string, error)
-	createUser  func(username, password string) (string, error)
+	auth        func(context.Context) (string, error)
+	createUser  func(ctx context.Context, username, password string) (string, error)
 }
 
 // NewJellyfinHTTPClient returns a clients.JellyfinClient backed by the given
 // http.Client (for authenticate calls), auth function, and createUser function.
 func NewJellyfinHTTPClient(
 	hc *http.Client,
-	auth func() (string, error),
-	createUser func(string, string) (string, error),
+	auth func(context.Context) (string, error),
+	createUser func(context.Context, string, string) (string, error),
 	jellyfinURL string,
 ) clients.JellyfinClient {
 	return &jellyfinHTTPClient{
@@ -314,7 +315,7 @@ func NewJellyfinHTTPClient(
 
 func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*clients.JellyfinLoginResult, error) {
 	jfc := jfclient.NewWithHTTPClient(c.jellyfinURL, c.httpClient)
-	result, err := jfc.AuthenticateByName(username, password)
+	result, err := jfc.AuthenticateByName(context.Background(), username, password)
 	if err != nil {
 		// Map jfclient.HTTPError → clients.JellyfinHTTPError so peligrosa sees the right type.
 		if jErr, ok := err.(*jfclient.HTTPError); ok {
@@ -331,5 +332,5 @@ func (c *jellyfinHTTPClient) AuthenticateByName(username, password string) (*cli
 }
 
 func (c *jellyfinHTTPClient) CreateUser(username, password string) (string, error) {
-	return c.createUser(username, password)
+	return c.createUser(context.Background(), username, password)
 }

@@ -1,6 +1,7 @@
 package jellyfin_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -43,7 +44,7 @@ func newFakeJellyfin(t *testing.T, setup func(mux *http.ServeMux)) (*httptest.Se
 	t.Cleanup(srv.Close)
 
 	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
-	h := jfapp.NewHandler(client, func() (string, error) { return "test-token", nil }, jfapp.ServiceUser)
+	h := jfapp.NewHandler(client, func(context.Context) (string, error) { return "test-token", nil }, jfapp.ServiceUser)
 	return srv, h
 }
 
@@ -279,7 +280,7 @@ func TestCreateUser_PasswordSetFailsRollbackSucceeds(t *testing.T) {
 		})
 	})
 
-	_, err := h.CreateUser("alice", "secret")
+	_, err := h.CreateUser(context.Background(), "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -305,7 +306,7 @@ func TestCreateUser_PasswordSetFailsRollbackAlsoFails(t *testing.T) {
 		})
 	})
 
-	_, err := h.CreateUser("alice", "secret")
+	_, err := h.CreateUser(context.Background(), "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -333,7 +334,7 @@ func TestCreateUser_NoIdInResponse(t *testing.T) {
 		})
 	})
 
-	_, err := h.CreateUser("alice", "secret")
+	_, err := h.CreateUser(context.Background(), "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -358,7 +359,7 @@ func TestCreateUser_JellyfinCreateFailure(t *testing.T) {
 		})
 	})
 
-	_, err := h.CreateUser("alice", "secret")
+	_, err := h.CreateUser(context.Background(), "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -401,7 +402,7 @@ func TestCreateUser_NonUUIDIdRejected(t *testing.T) {
 		})
 	})
 
-	_, err := h.CreateUser("alice", "secret")
+	_, err := h.CreateUser(context.Background(), "alice", "secret")
 	if err == nil {
 		t.Fatal("expected error for non-UUID id, got nil")
 	}
@@ -454,7 +455,7 @@ func TestCreateUser_EmptyPasswordReturnsSentinel(t *testing.T) {
 	// No fake server needed — the check fires before any HTTP call.
 	_, h := newFakeJellyfin(t, nil)
 
-	_, err := h.CreateUser("alice", "")
+	_, err := h.CreateUser(context.Background(), "alice", "")
 	if !errors.Is(err, jfapp.ErrPasswordRequired) {
 		t.Errorf("expected ErrPasswordRequired, got %v", err)
 	}
@@ -507,7 +508,7 @@ func TestListUsers_FieldMapping(t *testing.T) {
 		})
 	})
 
-	users, err := h.ListUsers()
+	users, err := h.ListUsers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -549,7 +550,7 @@ func TestDeleteUser_HappyPath(t *testing.T) {
 		})
 	})
 
-	if err := h.DeleteUser(uid); err != nil {
+	if err := h.DeleteUser(context.Background(), uid); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if deleteCalls.Load() != 1 {
@@ -560,7 +561,7 @@ func TestDeleteUser_HappyPath(t *testing.T) {
 func TestDeleteUser_InvalidID(t *testing.T) {
 	t.Parallel()
 	_, h := newFakeJellyfin(t, nil)
-	err := h.DeleteUser("../etc/passwd")
+	err := h.DeleteUser(context.Background(), "../etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for invalid ID, got nil")
 	}
@@ -659,7 +660,7 @@ func TestSetUserPassword_HappyPath(t *testing.T) {
 		})
 	})
 
-	if err := h.SetUserPassword(uid, "newpassword"); err != nil {
+	if err := h.SetUserPassword(context.Background(), uid, "newpassword"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Two POSTs: step 1 clears the password (ResetPassword:true), step 2 sets the new one.
@@ -671,7 +672,7 @@ func TestSetUserPassword_HappyPath(t *testing.T) {
 func TestSetUserPassword_EmptyPassword(t *testing.T) {
 	t.Parallel()
 	_, h := newFakeJellyfin(t, nil)
-	err := h.SetUserPassword("3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", "")
+	err := h.SetUserPassword(context.Background(), "3a4d9e71-6a1b-4f2c-9d12-98b4c76e3f21", "")
 	if !errors.Is(err, jfapp.ErrPasswordRequired) {
 		t.Errorf("expected ErrPasswordRequired, got %v", err)
 	}
@@ -680,7 +681,7 @@ func TestSetUserPassword_EmptyPassword(t *testing.T) {
 func TestSetUserPassword_InvalidID(t *testing.T) {
 	t.Parallel()
 	_, h := newFakeJellyfin(t, nil)
-	err := h.SetUserPassword("not-a-uuid", "pass")
+	err := h.SetUserPassword(context.Background(), "not-a-uuid", "pass")
 	if err == nil {
 		t.Fatal("expected error for invalid ID")
 	}
@@ -749,7 +750,7 @@ func TestSetUserDisabled(t *testing.T) {
 		})
 	})
 
-	if err := h.SetUserDisabled(uid, true); err != nil {
+	if err := h.SetUserDisabled(context.Background(), uid, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if postedBody == nil {
@@ -807,7 +808,7 @@ func TestSetUserLibraryAccess(t *testing.T) {
 	})
 
 	// movies=true, tv=false → should restrict to Movies folder only
-	if err := h.SetUserLibraryAccess(uid, true, false); err != nil {
+	if err := h.SetUserLibraryAccess(context.Background(), uid, true, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if postedBody == nil {
@@ -887,7 +888,7 @@ func TestGetSessions_HappyPath(t *testing.T) {
 		})
 	})
 
-	sessions, err := h.GetSessions()
+	sessions, err := h.GetSessions(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -919,7 +920,7 @@ func TestGetSessions_SkipsSystemSessions(t *testing.T) {
 		})
 	})
 
-	sessions, err := h.GetSessions()
+	sessions, err := h.GetSessions(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

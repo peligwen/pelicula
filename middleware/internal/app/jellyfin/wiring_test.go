@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,7 +99,7 @@ func TestAuth_NoTornReadUnderConcurrentRewrite(t *testing.T) {
 			defer readerWG.Done()
 			for i := 0; i < iters; i++ {
 				svc.SetJellyfinAPIKey("") // force the .env-read path
-				token, err := w.Auth()
+				token, err := w.Auth(context.Background())
 				read.Add(1)
 				if err != nil {
 					torn.Add(1)

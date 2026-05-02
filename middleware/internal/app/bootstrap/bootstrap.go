@@ -256,7 +256,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			CatalogDB:              cdb,
 			RequestStore:           requests,
 			Qbt:                    svc.Qbt,
-			TriggerJellyfinRefresh: func() error { return jfWirer.TriggerRefresh() },
+			TriggerJellyfinRefresh: func() error { return jfWirer.TriggerRefresh(context.Background()) },
 			Notify:                 func(t, b string) error { appriseCli.Notify(t, b); return nil },
 		},
 		LibHandler:      libHandler,
@@ -332,7 +332,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			}
 			return out
 		},
-		WireJellyfin:           func() { jfWirer.Wire(libHandler) },
+		WireJellyfin:           func() { jfWirer.Wire(context.Background(), libHandler) },
 		InvalidateIndexerCache: func() { a.IdxCache.Invalidate() },
 	})
 

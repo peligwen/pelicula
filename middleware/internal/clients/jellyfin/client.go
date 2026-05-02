@@ -10,6 +10,7 @@ package jellyfin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,7 +63,7 @@ func (c *Client) httpClient() *http.Client {
 // token is appended to the Emby authorization header when non-empty.
 // payload is JSON-encoded and sent as the request body when non-nil.
 // The caller is responsible for closing the response body.
-func (c *Client) Do(method, path, token string, payload any) ([]byte, error) {
+func (c *Client) Do(ctx context.Context, method, path, token string, payload any) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -71,7 +72,7 @@ func (c *Client) Do(method, path, token string, payload any) ([]byte, error) {
 		}
 		bodyReader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -95,28 +96,28 @@ func (c *Client) Do(method, path, token string, payload any) ([]byte, error) {
 }
 
 // Get makes a GET request to Jellyfin.
-func (c *Client) Get(path, token string) ([]byte, error) {
-	return c.Do(http.MethodGet, path, token, nil)
+func (c *Client) Get(ctx context.Context, path, token string) ([]byte, error) {
+	return c.Do(ctx, http.MethodGet, path, token, nil)
 }
 
 // Post makes a POST request to Jellyfin with an optional JSON payload.
-func (c *Client) Post(path, token string, payload any) ([]byte, error) {
-	return c.Do(http.MethodPost, path, token, payload)
+func (c *Client) Post(ctx context.Context, path, token string, payload any) ([]byte, error) {
+	return c.Do(ctx, http.MethodPost, path, token, payload)
 }
 
 // Delete makes a DELETE request to Jellyfin.
-func (c *Client) Delete(path, token string) ([]byte, error) {
-	return c.Do(http.MethodDelete, path, token, nil)
+func (c *Client) Delete(ctx context.Context, path, token string) ([]byte, error) {
+	return c.Do(ctx, http.MethodDelete, path, token, nil)
 }
 
 // AuthenticateByName authenticates a username+password against Jellyfin and
 // returns the resulting session token and user details.
-func (c *Client) AuthenticateByName(username, password string) (*AuthResult, error) {
+func (c *Client) AuthenticateByName(ctx context.Context, username, password string) (*AuthResult, error) {
 	payload, err := json.Marshal(map[string]string{"Username": username, "Pw": password})
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/Users/AuthenticateByName", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/Users/AuthenticateByName", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}

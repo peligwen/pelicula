@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -49,7 +50,7 @@ func TestWireHwAccel_VaapiWhenCurrentIsNone(t *testing.T) {
 	srv, postBody, postCalls := fakeEncodingServer(t, "none")
 	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
 
-	wireHwAccel(client, "test-token", HwAccelVaapi, vaapiDevice)
+	wireHwAccel(context.Background(), client, "test-token", HwAccelVaapi, vaapiDevice)
 
 	if postCalls.Load() != 1 {
 		t.Fatalf("POST called %d times, want 1", postCalls.Load())
@@ -86,7 +87,7 @@ func TestWireHwAccel_NoGetOrPostWhenProbeIsNone(t *testing.T) {
 		t.Fatalf("probe should return none, got %q", hwType)
 	}
 	if hwType != HwAccelNone {
-		wireHwAccel(client, "test-token", hwType, hwDevice)
+		wireHwAccel(context.Background(), client, "test-token", hwType, hwDevice)
 	}
 
 	if calls.Load() != 0 {
@@ -98,7 +99,7 @@ func TestWireHwAccel_NoPostWhenAlreadySet(t *testing.T) {
 	srv, _, postCalls := fakeEncodingServer(t, "qsv")
 	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
 
-	wireHwAccel(client, "test-token", HwAccelVaapi, vaapiDevice)
+	wireHwAccel(context.Background(), client, "test-token", HwAccelVaapi, vaapiDevice)
 
 	if postCalls.Load() != 0 {
 		t.Errorf("POST called %d times, want 0 (user config respected)", postCalls.Load())
@@ -109,7 +110,7 @@ func TestWireHwAccel_VideoToolboxWhenCurrentIsNone(t *testing.T) {
 	srv, postBody, postCalls := fakeEncodingServer(t, "none")
 	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
 
-	wireHwAccel(client, "test-token", HwAccelVideoToolbox, "")
+	wireHwAccel(context.Background(), client, "test-token", HwAccelVideoToolbox, "")
 
 	if postCalls.Load() != 1 {
 		t.Fatalf("POST called %d times, want 1", postCalls.Load())
@@ -127,7 +128,7 @@ func TestWireHwAccel_OtherFieldsPreserved(t *testing.T) {
 	srv, postBody, postCalls := fakeEncodingServer(t, "none")
 	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
 
-	wireHwAccel(client, "test-token", HwAccelQSV, "")
+	wireHwAccel(context.Background(), client, "test-token", HwAccelQSV, "")
 
 	if postCalls.Load() != 1 {
 		t.Fatalf("POST called %d times, want 1", postCalls.Load())

@@ -7,6 +7,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -24,7 +25,7 @@ type Handler struct {
 	Client *jfclient.Client
 	// Auth is a function that returns a valid Jellyfin token for the service
 	// account. This is called before any authenticated Jellyfin request.
-	Auth func() (string, error)
+	Auth func(context.Context) (string, error)
 	// ServiceUser is the name of the internal service account ("pelicula-internal").
 	ServiceUser string
 }
@@ -33,7 +34,7 @@ type Handler struct {
 // auth is a function that returns a Jellyfin API key or session token for
 // the pelicula-internal service account; it is called before each
 // authenticated request.
-func NewHandler(client *jfclient.Client, auth func() (string, error), serviceUser string) *Handler {
+func NewHandler(client *jfclient.Client, auth func(context.Context) (string, error), serviceUser string) *Handler {
 	return &Handler{
 		Client:      client,
 		Auth:        auth,
@@ -45,7 +46,7 @@ func NewHandler(client *jfclient.Client, auth func() (string, error), serviceUse
 func (h *Handler) HandleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		users, err := h.ListUsers()
+		users, err := h.ListUsers(r.Context())
 		if err != nil {
 			slog.Error("list jellyfin users failed", "component", "users", "error", err)
 			httputil.WriteError(w, "could not list users", http.StatusBadGateway)
@@ -71,7 +72,7 @@ func (h *Handler) HandleUsers(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if _, err := h.CreateUser(req.Username, req.Password); err != nil {
+		if _, err := h.CreateUser(r.Context(), req.Username, req.Password); err != nil {
 			slog.Error("create jellyfin user failed", "component", "users", "username", req.Username, "error", err)
 			if errors.Is(err, ErrPasswordRequired) {
 				httputil.WriteError(w, "password is required", http.StatusBadRequest)
@@ -122,7 +123,7 @@ func (h *Handler) HandleUsersWithID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := h.SetUserDisabled(id, true); err != nil {
+		if err := h.SetUserDisabled(r.Context(), id, true); err != nil {
 			slog.Error("disable user failed", "component", "users", "userId", id, "error", err)
 			httputil.WriteError(w, "could not disable user", http.StatusBadGateway)
 			return
@@ -141,7 +142,7 @@ func (h *Handler) HandleUsersWithID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := h.SetUserDisabled(id, false); err != nil {
+		if err := h.SetUserDisabled(r.Context(), id, false); err != nil {
 			slog.Error("enable user failed", "component", "users", "userId", id, "error", err)
 			httputil.WriteError(w, "could not enable user", http.StatusBadGateway)
 			return
@@ -169,7 +170,7 @@ func (h *Handler) HandleUsersWithID(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if err := h.SetUserLibraryAccess(id, req.Movies, req.TV); err != nil {
+		if err := h.SetUserLibraryAccess(r.Context(), id, req.Movies, req.TV); err != nil {
 			slog.Error("set library access failed", "component", "users", "userId", id, "error", err)
 			httputil.WriteError(w, "could not update library access", http.StatusBadGateway)
 			return
@@ -193,7 +194,7 @@ func (h *Handler) HandleUsersWithID(w http.ResponseWriter, r *http.Request) {
 // handleUserDelete handles DELETE /api/pelicula/users/{id}.
 // It prevents deletion of the last admin account.
 func (h *Handler) handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
-	users, err := h.ListUsers()
+	users, err := h.ListUsers(r.Context())
 	if err != nil {
 		slog.Error("list users for delete check failed", "component", "users", "error", err)
 		httputil.WriteError(w, "could not verify user before deletion", http.StatusBadGateway)
@@ -221,7 +222,7 @@ func (h *Handler) handleUserDelete(w http.ResponseWriter, r *http.Request, id st
 		httputil.WriteError(w, "cannot delete the only admin account", http.StatusConflict)
 		return
 	}
-	if err := h.DeleteUser(id); err != nil {
+	if err := h.DeleteUser(r.Context(), id); err != nil {
 		slog.Error("delete jellyfin user failed", "component", "users", "userId", id, "error", err)
 		httputil.WriteError(w, "could not delete user", http.StatusBadGateway)
 		return
@@ -239,7 +240,7 @@ func (h *Handler) handleUserPassword(w http.ResponseWriter, r *http.Request, id 
 		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := h.SetUserPassword(id, req.Password); err != nil {
+	if err := h.SetUserPassword(r.Context(), id, req.Password); err != nil {
 		slog.Error("reset password failed", "component", "users", "userId", id, "error", err)
 		if errors.Is(err, ErrPasswordRequired) {
 			httputil.WriteError(w, "password is required", http.StatusBadRequest)
@@ -262,7 +263,7 @@ func (h *Handler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	sessions, err := h.GetSessions()
+	sessions, err := h.GetSessions(r.Context())
 	if err != nil {
 		slog.Error("list sessions failed", "component", "sessions", "error", err)
 		httputil.WriteError(w, "could not list sessions", http.StatusBadGateway)

@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,11 +22,11 @@ type Wizard struct {
 // CompleteWizard runs the Jellyfin startup wizard and returns a session token
 // obtained by authenticating as the service account. The throwaway password
 // is generated in memory and never written to disk.
-func (wiz *Wizard) CompleteWizard() (string, error) {
+func (wiz *Wizard) CompleteWizard(ctx context.Context) (string, error) {
 	slog.Info("completing Jellyfin startup wizard", "component", "autowire")
 
 	// Step 1: initial config
-	_, err := wiz.Client.Post("/Startup/Configuration", "", map[string]any{
+	_, err := wiz.Client.Post(ctx, "/Startup/Configuration", "", map[string]any{
 		"UICulture":           "en-US",
 		"MetadataCountryCode": "US",
 	})
@@ -39,10 +40,10 @@ func (wiz *Wizard) CompleteWizard() (string, error) {
 	pass := wiz.GenAPIKey() // random throwaway, never stored
 	adminUser := ServiceUser
 	slog.Info("creating Jellyfin service account", "component", "autowire", "username", adminUser)
-	if _, err = wiz.Client.Get("/Startup/User", ""); err != nil {
+	if _, err = wiz.Client.Get(ctx, "/Startup/User", ""); err != nil {
 		slog.Warn("could not fetch initial Jellyfin startup user", "component", "autowire", "error", err)
 	}
-	_, err = wiz.Client.Post("/Startup/User", "", map[string]any{
+	_, err = wiz.Client.Post(ctx, "/Startup/User", "", map[string]any{
 		"Name":     adminUser,
 		"Password": pass,
 	})
@@ -51,7 +52,7 @@ func (wiz *Wizard) CompleteWizard() (string, error) {
 	}
 
 	// Step 3: mark wizard done
-	_, err = wiz.Client.Post("/Startup/Complete", "", nil)
+	_, err = wiz.Client.Post(ctx, "/Startup/Complete", "", nil)
 	if err != nil {
 		return "", fmt.Errorf("complete wizard: %w", err)
 	}
@@ -59,7 +60,7 @@ func (wiz *Wizard) CompleteWizard() (string, error) {
 	slog.Info("Jellyfin wizard completed", "component", "autowire")
 
 	// Step 4: authenticate with the throwaway password to get a session token.
-	data, err := wiz.Client.Post("/Users/AuthenticateByName", "", map[string]any{
+	data, err := wiz.Client.Post(ctx, "/Users/AuthenticateByName", "", map[string]any{
 		"Username": adminUser,
 		"Pw":       pass,
 	})
@@ -79,9 +80,9 @@ func (wiz *Wizard) CompleteWizard() (string, error) {
 
 // CreateAPIKey creates a persistent Jellyfin API key via POST /Auth/Keys.
 // If a "Pelicula" key already exists it is reused to avoid duplicates on restart.
-func CreateAPIKey(client *jfclient.Client, token string) (string, error) {
+func CreateAPIKey(ctx context.Context, client *jfclient.Client, token string) (string, error) {
 	// Check for an existing key first to avoid duplicates on restart.
-	data, err := client.Get("/Auth/Keys", token)
+	data, err := client.Get(ctx, "/Auth/Keys", token)
 	if err == nil {
 		var existing struct {
 			Items []struct {
@@ -100,10 +101,10 @@ func CreateAPIKey(client *jfclient.Client, token string) (string, error) {
 
 	// No existing key — create one. Jellyfin POST /Auth/Keys returns 204 with no body,
 	// so we must fetch the key list again to get the token value.
-	if _, err := client.Post("/Auth/Keys?app=Pelicula", token, nil); err != nil {
+	if _, err := client.Post(ctx, "/Auth/Keys?app=Pelicula", token, nil); err != nil {
 		return "", fmt.Errorf("create API key: %w", err)
 	}
-	data, err = client.Get("/Auth/Keys", token)
+	data, err = client.Get(ctx, "/Auth/Keys", token)
 	if err != nil {
 		return "", fmt.Errorf("list API keys: %w", err)
 	}
@@ -126,8 +127,8 @@ func CreateAPIKey(client *jfclient.Client, token string) (string, error) {
 
 // ServiceUserID looks up the pelicula-internal user ID from Jellyfin's /Users list.
 // Returns ("", nil) if the user is not found (non-fatal).
-func ServiceUserID(client *jfclient.Client, token string) (string, error) {
-	data, err := client.Get("/Users", token)
+func ServiceUserID(ctx context.Context, client *jfclient.Client, token string) (string, error) {
+	data, err := client.Get(ctx, "/Users", token)
 	if err != nil {
 		return "", fmt.Errorf("list users: %w", err)
 	}
@@ -145,8 +146,8 @@ func ServiceUserID(client *jfclient.Client, token string) (string, error) {
 }
 
 // SystemInfo fetches /System/Info/Public and returns the raw JSON map.
-func SystemInfo(client *jfclient.Client) (map[string]any, error) {
-	data, err := client.Get("/System/Info/Public", "")
+func SystemInfo(ctx context.Context, client *jfclient.Client) (map[string]any, error) {
+	data, err := client.Get(ctx, "/System/Info/Public", "")
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +159,12 @@ func SystemInfo(client *jfclient.Client) (map[string]any, error) {
 }
 
 // TriggerLibraryRefresh asks Jellyfin to scan all libraries.
-func TriggerLibraryRefresh(client *jfclient.Client, auth func() (string, error)) error {
-	token, err := auth()
+func TriggerLibraryRefresh(ctx context.Context, client *jfclient.Client, auth func(context.Context) (string, error)) error {
+	token, err := auth(ctx)
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	_, err = client.Post("/Library/Refresh", token, nil)
+	_, err = client.Post(ctx, "/Library/Refresh", token, nil)
 	if err != nil {
 		return fmt.Errorf("refresh failed: %w", err)
 	}

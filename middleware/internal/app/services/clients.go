@@ -360,7 +360,7 @@ func (c *Clients) SetJellyfinUserID(id string) {
 // JellyfinGet makes an authenticated GET request to Jellyfin.
 // Implements catalog.JellyfinMetaClient.
 func (c *Clients) JellyfinGet(path, apiKey string) ([]byte, error) {
-	return c.jellyfinGet(path, apiKey)
+	return c.jellyfinGet(context.Background(), path, apiKey)
 }
 
 // ArrGetAllQueueRecords fetches all records from an *arr queue endpoint by paginating.

@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,12 +85,12 @@ func ValidJellyfinID(id string) bool {
 }
 
 // ListUsers returns all non-system Jellyfin users.
-func (h *Handler) ListUsers() ([]User, error) {
-	token, err := h.Auth()
+func (h *Handler) ListUsers(ctx context.Context) ([]User, error) {
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("auth failed: %w", err)
 	}
-	data, err := h.Client.Get("/Users", token)
+	data, err := h.Client.Get(ctx, "/Users", token)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -138,18 +139,18 @@ func (h *Handler) ListUsers() ([]User, error) {
 
 // CreateUser creates a new Jellyfin user with the given name and password.
 // Returns the new user's Jellyfin ID on success.
-func (h *Handler) CreateUser(username, password string) (string, error) {
+func (h *Handler) CreateUser(ctx context.Context, username, password string) (string, error) {
 	if password == "" {
 		return "", ErrPasswordRequired
 	}
 	if len(password) > 256 {
 		return "", fmt.Errorf("password too long (max 256 chars)")
 	}
-	token, err := h.Auth()
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return "", fmt.Errorf("auth failed: %w", err)
 	}
-	data, err := h.Client.Post("/Users/New", token, map[string]any{"Name": username})
+	data, err := h.Client.Post(ctx, "/Users/New", token, map[string]any{"Name": username})
 	if err != nil {
 		return "", fmt.Errorf("create user: %w", err)
 	}
@@ -166,7 +167,7 @@ func (h *Handler) CreateUser(username, password string) (string, error) {
 	}
 	// Set the password. If this fails, attempt to delete the user so the admin
 	// isn't left with a passwordless account they can't see from Pelicula.
-	pwBody, err := h.Client.Post("/Users/"+id+"/Password", token, map[string]any{
+	pwBody, err := h.Client.Post(ctx, "/Users/"+id+"/Password", token, map[string]any{
 		"CurrentPw": "",
 		"NewPw":     password,
 	})
@@ -176,7 +177,7 @@ func (h *Handler) CreateUser(username, password string) (string, error) {
 		if detail != "" {
 			msg += ": " + detail
 		}
-		if _, delErr := h.Client.Delete("/Users/"+id, token); delErr != nil {
+		if _, delErr := h.Client.Delete(ctx, "/Users/"+id, token); delErr != nil {
 			slog.Warn("password set failed and rollback delete also failed", "component", "jellyfin", "userId", id, "deleteError", delErr)
 			return "", fmt.Errorf("%s (rollback failed — delete user %q manually in Jellyfin): %w", msg, username, err)
 		}
@@ -185,21 +186,21 @@ func (h *Handler) CreateUser(username, password string) (string, error) {
 	slog.Info("created Jellyfin user", "component", "jellyfin", "username", username)
 
 	// Set preferred audio language on the new user.
-	SetAudioPref(h.Client, token, id)
+	SetAudioPref(ctx, h.Client, token, id)
 
 	return id, nil
 }
 
 // DeleteUser deletes a Jellyfin user by ID.
-func (h *Handler) DeleteUser(id string) error {
+func (h *Handler) DeleteUser(ctx context.Context, id string) error {
 	if !ValidJellyfinID(id) {
 		return fmt.Errorf("invalid user ID format: %q", id)
 	}
-	token, err := h.Auth()
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	if _, err := h.Client.Delete("/Users/"+id, token); err != nil {
+	if _, err := h.Client.Delete(ctx, "/Users/"+id, token); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	slog.Info("deleted Jellyfin user", "component", "jellyfin", "userId", id)
@@ -208,7 +209,7 @@ func (h *Handler) DeleteUser(id string) error {
 
 // SetUserPassword sets a new password for a Jellyfin user using a two-step
 // clear-then-set flow.
-func (h *Handler) SetUserPassword(id, newPw string) error {
+func (h *Handler) SetUserPassword(ctx context.Context, id, newPw string) error {
 	if newPw == "" {
 		return ErrPasswordRequired
 	}
@@ -218,16 +219,16 @@ func (h *Handler) SetUserPassword(id, newPw string) error {
 	if !ValidJellyfinID(id) {
 		return fmt.Errorf("invalid user ID format: %q", id)
 	}
-	token, err := h.Auth()
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	if _, resetErr := h.Client.Post("/Users/"+id+"/Password", token, map[string]any{
+	if _, resetErr := h.Client.Post(ctx, "/Users/"+id+"/Password", token, map[string]any{
 		"ResetPassword": true,
 	}); resetErr != nil {
 		slog.Error("password reset step failed", "component", "jellyfin", "userId", id, "error", resetErr)
 	}
-	body, err := h.Client.Post("/Users/"+id+"/Password", token, map[string]any{
+	body, err := h.Client.Post(ctx, "/Users/"+id+"/Password", token, map[string]any{
 		"CurrentPw": "",
 		"NewPw":     newPw,
 	})
@@ -244,15 +245,15 @@ func (h *Handler) SetUserPassword(id, newPw string) error {
 
 // SetUserDisabled enables or disables a Jellyfin user account.
 // Uses GET-merge-POST to avoid zeroing out other policy fields.
-func (h *Handler) SetUserDisabled(id string, disabled bool) error {
+func (h *Handler) SetUserDisabled(ctx context.Context, id string, disabled bool) error {
 	if !ValidJellyfinID(id) {
 		return fmt.Errorf("invalid user ID format: %q", id)
 	}
-	token, err := h.Auth()
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	userData, err := h.Client.Get("/Users/"+id, token)
+	userData, err := h.Client.Get(ctx, "/Users/"+id, token)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
@@ -265,7 +266,7 @@ func (h *Handler) SetUserDisabled(id string, disabled bool) error {
 		policy = map[string]any{}
 	}
 	policy["IsDisabled"] = disabled
-	if _, err := h.Client.Post("/Users/"+id+"/Policy", token, policy); err != nil {
+	if _, err := h.Client.Post(ctx, "/Users/"+id+"/Policy", token, policy); err != nil {
 		return fmt.Errorf("post policy: %w", err)
 	}
 	action := "disabled"
@@ -277,15 +278,15 @@ func (h *Handler) SetUserDisabled(id string, disabled bool) error {
 }
 
 // SetUserLibraryAccess patches the user's policy to control access to libraries.
-func (h *Handler) SetUserLibraryAccess(id string, movies, tv bool) error {
+func (h *Handler) SetUserLibraryAccess(ctx context.Context, id string, movies, tv bool) error {
 	if !ValidJellyfinID(id) {
 		return fmt.Errorf("invalid user ID format: %q", id)
 	}
-	token, err := h.Auth()
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
-	userData, err := h.Client.Get("/Users/"+id, token)
+	userData, err := h.Client.Get(ctx, "/Users/"+id, token)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
@@ -302,7 +303,7 @@ func (h *Handler) SetUserLibraryAccess(id string, movies, tv bool) error {
 		policy["EnableAllFolders"] = true
 		policy["EnabledFolders"] = []string{}
 	} else {
-		libIDs, err := h.libraryIDs(token)
+		libIDs, err := h.libraryIDs(ctx, token)
 		if err != nil {
 			return fmt.Errorf("get library IDs: %w", err)
 		}
@@ -321,7 +322,7 @@ func (h *Handler) SetUserLibraryAccess(id string, movies, tv bool) error {
 		policy["EnabledFolders"] = folders
 	}
 
-	if _, err := h.Client.Post("/Users/"+id+"/Policy", token, policy); err != nil {
+	if _, err := h.Client.Post(ctx, "/Users/"+id+"/Policy", token, policy); err != nil {
 		return fmt.Errorf("post policy: %w", err)
 	}
 	slog.Info("updated library access", "component", "jellyfin", "userId", id, "movies", movies, "tv", tv)
@@ -329,12 +330,12 @@ func (h *Handler) SetUserLibraryAccess(id string, movies, tv bool) error {
 }
 
 // GetSessions returns active/recent Jellyfin sessions for the now-playing card.
-func (h *Handler) GetSessions() ([]Session, error) {
-	token, err := h.Auth()
+func (h *Handler) GetSessions(ctx context.Context) ([]Session, error) {
+	token, err := h.Auth(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("auth failed: %w", err)
 	}
-	data, err := h.Client.Get("/Sessions", token)
+	data, err := h.Client.Get(ctx, "/Sessions", token)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -368,8 +369,8 @@ func (h *Handler) GetSessions() ([]Session, error) {
 
 // PromoteAdmin promotes userID to Jellyfin administrator using GET-merge-POST
 // to avoid zeroing out other policy fields.
-func PromoteAdmin(client *jfclient.Client, token, userID, username string) {
-	userData, getErr := client.Get("/Users/"+userID, token)
+func PromoteAdmin(ctx context.Context, client *jfclient.Client, token, userID, username string) {
+	userData, getErr := client.Get(ctx, "/Users/"+userID, token)
 	if getErr != nil {
 		slog.Warn("could not fetch user for admin promotion", "component", "autowire", "username", username, "error", getErr)
 		return
@@ -384,7 +385,7 @@ func PromoteAdmin(client *jfclient.Client, token, userID, username string) {
 		policy = map[string]any{}
 	}
 	policy["IsAdministrator"] = true
-	if _, polErr := client.Post("/Users/"+userID+"/Policy", token, policy); polErr != nil {
+	if _, polErr := client.Post(ctx, "/Users/"+userID+"/Policy", token, policy); polErr != nil {
 		slog.Warn("could not promote operator admin to Jellyfin admin", "component", "autowire", "username", username, "error", polErr)
 		return
 	}
@@ -394,12 +395,12 @@ func PromoteAdmin(client *jfclient.Client, token, userID, username string) {
 // SetAudioPref sets the user's preferred audio language preference in Jellyfin.
 // Uses GET-merge-POST to avoid zeroing out other configuration fields.
 // Reads PELICULA_AUDIO_LANG env var; defaults to "eng".
-func SetAudioPref(client *jfclient.Client, token, userID string) {
+func SetAudioPref(ctx context.Context, client *jfclient.Client, token, userID string) {
 	lang := os.Getenv("PELICULA_AUDIO_LANG")
 	if lang == "" {
 		lang = "eng"
 	}
-	userData, err := client.Get("/Users/"+userID, token)
+	userData, err := client.Get(ctx, "/Users/"+userID, token)
 	if err != nil {
 		slog.Warn("could not fetch user for audio pref", "component", "autowire", "userId", userID, "error", err)
 		return
@@ -415,7 +416,7 @@ func SetAudioPref(client *jfclient.Client, token, userID string) {
 	}
 	config["AudioLanguagePreference"] = lang
 	config["PlayDefaultAudioTrack"] = false // honour AudioLanguagePreference, not just "first track"
-	if _, cfgErr := client.Post("/Users/"+userID+"/Configuration", token, config); cfgErr != nil {
+	if _, cfgErr := client.Post(ctx, "/Users/"+userID+"/Configuration", token, config); cfgErr != nil {
 		slog.Warn("could not set Jellyfin audio language preference", "component", "autowire", "userId", userID, "lang", lang, "error", cfgErr)
 		return
 	}
@@ -423,8 +424,8 @@ func SetAudioPref(client *jfclient.Client, token, userID string) {
 }
 
 // WireLibrary creates a Jellyfin virtual library if it doesn't already exist.
-func WireLibrary(client *jfclient.Client, token, name, collectionType, path string) {
-	data, err := client.Get("/Library/VirtualFolders", token)
+func WireLibrary(ctx context.Context, client *jfclient.Client, token, name, collectionType, path string) {
+	data, err := client.Get(ctx, "/Library/VirtualFolders", token)
 	if err != nil {
 		slog.Error("failed to list Jellyfin libraries", "component", "autowire", "error", err)
 		return
@@ -448,7 +449,7 @@ func WireLibrary(client *jfclient.Client, token, name, collectionType, path stri
 			},
 		},
 	}
-	_, err = client.Post(endpoint, token, body)
+	_, err = client.Post(ctx, endpoint, token, body)
 	if err != nil {
 		slog.Error("failed to create Jellyfin library", "component", "autowire", "library", name, "error", err)
 		return
@@ -457,8 +458,8 @@ func WireLibrary(client *jfclient.Client, token, name, collectionType, path stri
 }
 
 // libraryIDs returns a map of library name → Jellyfin folder ID.
-func (h *Handler) libraryIDs(token string) (map[string]string, error) {
-	data, err := h.Client.Get("/Library/VirtualFolders", token)
+func (h *Handler) libraryIDs(ctx context.Context, token string) (map[string]string, error) {
+	data, err := h.Client.Get(ctx, "/Library/VirtualFolders", token)
 	if err != nil {
 		return nil, err
 	}
