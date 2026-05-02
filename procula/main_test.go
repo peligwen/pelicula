@@ -2,11 +2,13 @@ package procula
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -356,5 +358,31 @@ func TestHandleCatalogFlagsReturnsAll(t *testing.T) {
 	}
 	if len(resp.Rows) != 1 || resp.Rows[0].Path != "/movies/A/A.mkv" {
 		t.Fatalf("rows = %+v", resp.Rows)
+	}
+}
+
+// TestRunArchiveLoop_StopsOnCtxCancel verifies that runArchiveLoop exits when
+// ctx is cancelled, without waiting for the next 24-hour tick.
+func TestRunArchiveLoop_StopsOnCtxCancel(t *testing.T) {
+	db := testDB(t)
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runArchiveLoop(ctx, q)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("runArchiveLoop did not exit within 1s after ctx cancel")
 	}
 }

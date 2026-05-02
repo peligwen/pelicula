@@ -1013,3 +1013,33 @@ func TestCatalogLate_TriggersOnDualSubOutputs(t *testing.T) {
 		t.Errorf("expected ≥2 Jellyfin refreshes (early + late for dual-sub), got %d", n)
 	}
 }
+
+// TestRunWorker_StopsOnCtxCancel verifies that RunWorker exits when ctx is
+// cancelled, even when q.pending is never signalled.
+func TestRunWorker_StopsOnCtxCancel(t *testing.T) {
+	db := testDB(t)
+	old := appDB
+	appDB = db
+	t.Cleanup(func() { appDB = old })
+
+	q, err := NewQueue(db)
+	if err != nil {
+		t.Fatalf("NewQueue: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunWorker(ctx, q, t.TempDir(), "http://localhost:0")
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("RunWorker did not exit within 1s after ctx cancel")
+	}
+}

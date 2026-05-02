@@ -93,3 +93,23 @@ func fetchLibrariesWithRetryDelay(ctx context.Context, peliculaAPI string, delay
 	}
 	return nil, false
 }
+
+// TestRefreshLibrariesGoroutine_StopsOnCtxCancel verifies that runLibraryRefresh
+// exits when ctx is cancelled, without waiting for the next 5-minute tick.
+func TestRefreshLibrariesGoroutine_StopsOnCtxCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runLibraryRefresh(ctx, "http://localhost:0")
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("runLibraryRefresh did not exit within 1s after ctx cancel")
+	}
+}

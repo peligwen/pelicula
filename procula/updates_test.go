@@ -1,6 +1,7 @@
 package procula
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -139,5 +140,40 @@ func TestUpdateCacheThreadSafety(t *testing.T) {
 	updateMu.RUnlock()
 	if final == nil {
 		t.Fatal("cachedUpdate should be non-nil after concurrent writes")
+	}
+}
+
+// TestRunUpdateChecker_StopsOnCtxCancelDuringSleep verifies that the ctx-aware
+// select replacing the bare time.Sleep(30s) returns promptly on cancellation.
+// The test forces the sleep branch by resetting cachedUpdate to nil and using a
+// configDir with no on-disk cache file.
+func TestRunUpdateChecker_StopsOnCtxCancelDuringSleep(t *testing.T) {
+	// Reset in-memory cache so the "cached == nil || stale" branch is taken.
+	updateMu.Lock()
+	orig := cachedUpdate
+	cachedUpdate = nil
+	updateMu.Unlock()
+	t.Cleanup(func() {
+		updateMu.Lock()
+		cachedUpdate = orig
+		updateMu.Unlock()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Empty dir → no on-disk cache file; cachedUpdate stays nil → sleep branch.
+		RunUpdateChecker(ctx, t.TempDir())
+	}()
+
+	// Cancel while the goroutine is sleeping in the ctx-aware select.
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("RunUpdateChecker did not exit within 1s after ctx cancel during sleep")
 	}
 }

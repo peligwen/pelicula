@@ -1,6 +1,7 @@
 package procula
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -120,7 +121,7 @@ func parseSemver(s string) [3]int {
 // RunUpdateChecker starts a background loop that checks for updates on startup
 // (after a short delay) and then every 24 hours. Results are cached in memory
 // and persisted to disk so they survive Procula restarts.
-func RunUpdateChecker(configDir string) {
+func RunUpdateChecker(ctx context.Context, configDir string) {
 	cachePath := filepath.Join(configDir, "procula", "update_check.json")
 
 	// Load cached result from disk so we can surface it immediately.
@@ -165,13 +166,22 @@ func RunUpdateChecker(configDir string) {
 
 	if cached == nil || time.Since(cached.CheckedAt) >= 24*time.Hour {
 		// Delay slightly so Procula is fully booted before hitting the network.
-		time.Sleep(30 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
 		doCheck()
 	}
 
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	for range ticker.C {
-		doCheck()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			doCheck()
+		}
 	}
 }

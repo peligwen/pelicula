@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -103,13 +104,25 @@ func Run() {
 	// (movies + tv) if the API is not yet reachable.
 	loadLibraries(peliculaAPI)
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var wg sync.WaitGroup
+
 	// Single worker processes jobs sequentially
 	registerBuiltinActions()
-	go RunWorker(q, configDir, peliculaAPI)
-	go RunStorageMonitor(configDir)
-	go RunUpdateChecker(configDir)
+	wg.Add(1)
+	go func() { defer wg.Done(); RunWorker(ctx, q, configDir, peliculaAPI) }()
+	wg.Add(1)
+	go func() { defer wg.Done(); RunStorageMonitor(ctx, configDir) }()
+	wg.Add(1)
+	go func() { defer wg.Done(); RunUpdateChecker(ctx, configDir) }()
 	// Archive terminal jobs older than 30 days, every 24 hours.
-	go runArchiveLoop(q)
+	wg.Add(1)
+	go func() { defer wg.Done(); runArchiveLoop(ctx, q) }()
+	// Refresh library cache every 5 minutes so dashboard changes are picked up.
+	wg.Add(1)
+	go func() { defer wg.Done(); runLibraryRefresh(ctx, peliculaAPI) }()
 
 	srv := &Server{queue: q, db: db, configDir: configDir, peliculaAPI: peliculaAPI}
 
@@ -148,13 +161,26 @@ func Run() {
 	mux.HandleFunc("DELETE /api/procula/blocked-releases/{id}", requireAPIKey(srv.handleDeleteBlockedRelease))
 
 	slog.Info("listening", "component", "main", "addr", ":8282")
-	serveWithShutdown(":8282", mux)
+	serveWithShutdown(ctx, ":8282", mux)
+
+	// Drain background goroutines before closing resources. The 10s cap
+	// prevents a misbehaving goroutine from blocking the process indefinitely.
+	shutdownDone := make(chan struct{})
+	go func() { wg.Wait(); close(shutdownDone) }()
+	t := time.NewTimer(10 * time.Second)
+	defer t.Stop()
+	select {
+	case <-shutdownDone:
+	case <-t.C:
+		slog.Warn("background goroutines did not exit within 10s", "component", "main")
+	}
+
+	FlushJellyfinRefresh()
+	appDB.Close()
 }
 
-func serveWithShutdown(addr string, handler http.Handler) {
+func serveWithShutdown(ctx context.Context, addr string, handler http.Handler) {
 	srv := &http.Server{Addr: addr, Handler: handler}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -165,9 +191,6 @@ func serveWithShutdown(addr string, handler http.Handler) {
 
 	<-ctx.Done()
 	slog.Info("shutdown signal received", "component", "main")
-	// Force any pending debounced Jellyfin refresh to fire so a final import
-	// burst isn't lost on shutdown.
-	FlushJellyfinRefresh()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -206,25 +229,29 @@ func env(key, fallback string) string {
 
 // runArchiveLoop deletes terminal jobs older than 30 days and prunes the
 // notifications table every 24 hours.
-// Runs as a background goroutine; exits when the process is killed.
-func runArchiveLoop(q *Queue) {
+func runArchiveLoop(ctx context.Context, q *Queue) {
 	const retention = 30 * 24 * time.Hour
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	for range ticker.C {
-		n, err := q.ArchiveOldJobs(retention)
-		if err != nil {
-			slog.Warn("archive: failed to delete old jobs", "component", "archive", "error", err)
-		} else if n > 0 {
-			slog.Info("archive: deleted old terminal jobs", "component", "archive", "count", n)
-		}
-
-		if appDB != nil {
-			pn, err := pruneNotifications(appDB)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := q.ArchiveOldJobs(retention)
 			if err != nil {
-				slog.Warn("archive: failed to prune notifications", "component", "archive", "error", err)
-			} else if pn > 0 {
-				slog.Info("archive: pruned notifications", "component", "archive", "count", pn)
+				slog.Warn("archive: failed to delete old jobs", "component", "archive", "error", err)
+			} else if n > 0 {
+				slog.Info("archive: deleted old terminal jobs", "component", "archive", "count", n)
+			}
+
+			if appDB != nil {
+				pn, err := pruneNotifications(appDB)
+				if err != nil {
+					slog.Warn("archive: failed to prune notifications", "component", "archive", "error", err)
+				} else if pn > 0 {
+					slog.Info("archive: pruned notifications", "component", "archive", "count", pn)
+				}
 			}
 		}
 	}

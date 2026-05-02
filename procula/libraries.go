@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+// runLibraryRefresh refreshes the library cache every 5 minutes until ctx is
+// cancelled. It must be launched after loadLibraries returns successfully.
+func runLibraryRefresh(ctx context.Context, peliculaAPI string) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshLibraries(peliculaAPI)
+		}
+	}
+}
+
 // ProculaLibrary is a minimal view of a pelicula-api Library used inside procula.
 // Field names match the JSON returned by GET /api/pelicula/libraries.
 type ProculaLibrary struct {
@@ -30,7 +45,6 @@ var (
 	libraryMu    sync.RWMutex
 	cachedLibs   []ProculaLibrary
 	libraryReady bool
-	refreshOnce  sync.Once
 )
 
 // defaultLibraries returns the two built-in libraries used as a fallback when
@@ -68,20 +82,6 @@ func loadLibraries(peliculaAPI string) {
 
 	slog.Info("loaded libraries from pelicula-api", "component", "libraries", "count", len(libs))
 	setLibraries(libs)
-
-	// Start a background goroutine to refresh the library cache every 5 minutes
-	// so that library changes made via the dashboard are picked up without a restart.
-	// refreshOnce ensures we never start more than one ticker even if loadLibraries
-	// were somehow called multiple times.
-	refreshOnce.Do(func() {
-		go func() {
-			ticker := time.NewTicker(5 * time.Minute)
-			defer ticker.Stop()
-			for range ticker.C {
-				refreshLibraries(peliculaAPI)
-			}
-		}()
-	})
 }
 
 // fetchLibrariesWithRetry attempts to fetch the library list up to

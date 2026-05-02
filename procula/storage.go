@@ -1,6 +1,7 @@
 package procula
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -413,7 +414,7 @@ func buildStorageReport() StorageReport {
 // It also maintains the package-level storageState atomic with hysteresis:
 // once critical, the state stays critical until usage drops below the warning
 // threshold (not just the critical threshold).
-func RunStorageMonitor(configDir string) {
+func RunStorageMonitor(ctx context.Context, configDir string) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
@@ -474,7 +475,12 @@ func RunStorageMonitor(configDir string) {
 
 	// Run once immediately at startup, then on ticker.
 	check()
-	for range ticker.C {
-		check()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			check()
+		}
 	}
 }

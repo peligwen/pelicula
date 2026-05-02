@@ -1,6 +1,7 @@
 package procula
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -323,5 +324,36 @@ func TestBuildEvent_SetsJobIDAndDetail(t *testing.T) {
 	}
 	if ev2.JobID != "abc12345" {
 		t.Errorf("content_ready JobID = %q, want %q", ev2.JobID, "abc12345")
+	}
+}
+
+// TestRunStorageMonitor_StopsOnCtxCancel verifies that RunStorageMonitor exits
+// when ctx is cancelled, without waiting for the next 5-minute tick.
+func TestRunStorageMonitor_StopsOnCtxCancel(t *testing.T) {
+	dir := t.TempDir()
+	monitoredVolumesOverride = []monitoredVolume{
+		{label: "Test", path: dir, registered: true},
+	}
+	t.Cleanup(func() { monitoredVolumesOverride = nil })
+
+	db := testDB(t)
+	old := appDB
+	appDB = db
+	t.Cleanup(func() { appDB = old })
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunStorageMonitor(ctx, dir)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("RunStorageMonitor did not exit within 1s after ctx cancel")
 	}
 }

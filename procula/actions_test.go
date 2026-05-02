@@ -106,7 +106,7 @@ func TestHandleCreateActionSync(t *testing.T) {
 	srv := &Server{queue: q, db: q.db, configDir: t.TempDir()}
 
 	// Need a background worker so the action actually runs.
-	go RunWorker(q, t.TempDir(), "http://localhost:0")
+	go RunWorker(context.Background(), q, t.TempDir(), "http://localhost:0")
 
 	body := `{"action":"subtitle_search","target":{"arr_type":"radarr","arr_id":1},"params":{"arr_type":"radarr","arr_id":1,"languages":["en"]}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/procula/actions?wait=3", strings.NewReader(body))

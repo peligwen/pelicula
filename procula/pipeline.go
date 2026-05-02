@@ -19,36 +19,46 @@ import (
 //
 // A background ticker fires every minute to re-check deferred jobs whose
 // next_attempt_at has elapsed since the last wake.
-func RunWorker(q *Queue, configDir, peliculaAPI string) {
+func RunWorker(ctx context.Context, q *Queue, configDir, peliculaAPI string) {
 	slog.Info("worker started", "component", "pipeline")
 
 	// Periodic wake: re-check for deferred (backoff) jobs once per minute.
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
+		for {
 			select {
-			case q.pending <- struct{}{}:
-			default:
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case q.pending <- struct{}{}:
+				default:
+				}
 			}
 		}
 	}()
 
-	for range q.pending {
-		for {
-			ids := q.nextQueued()
-			if len(ids) == 0 {
-				break
-			}
-			for _, id := range ids {
-				func(id string) {
-					defer func() {
-						if r := recover(); r != nil {
-							slog.Error("panic in job — worker continuing", "component", "pipeline", "job_id", id, "panic", r)
-						}
-					}()
-					processJob(q, id, configDir, peliculaAPI)
-				}(id)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-q.pending:
+			for {
+				ids := q.nextQueued()
+				if len(ids) == 0 {
+					break
+				}
+				for _, id := range ids {
+					func(id string) {
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("panic in job — worker continuing", "component", "pipeline", "job_id", id, "panic", r)
+							}
+						}()
+						processJob(q, id, configDir, peliculaAPI)
+					}(id)
+				}
 			}
 		}
 	}
