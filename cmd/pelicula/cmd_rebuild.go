@@ -69,7 +69,7 @@ func cmdRebuild(ctx *Context, args []string) {
 
 		case "procula":
 			info("Rebuilding procula...")
-			if err := c.Run("build", "procula"); err != nil {
+			if err := c.Run("build", "--build-arg", "VERSION="+gitDescribe(), "procula"); err != nil {
 				fatal("build procula failed: " + err.Error())
 			}
 			if err := c.Run("up", "-d", "--no-deps", "procula"); err != nil {

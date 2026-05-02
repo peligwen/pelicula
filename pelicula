@@ -18,6 +18,7 @@ if [[ $DEBUG -eq 1 ]]; then
 fi
 
 BIN=./bin/pelicula
+GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 if [[ ! -d "cmd/pelicula" ]]; then
     echo "error: cmd/pelicula/ not found — are you running from the pelicula directory?" >&2
@@ -29,7 +30,7 @@ if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
     echo "Building pelicula CLI..." >&2
     mkdir -p bin
     if command -v go &>/dev/null; then
-        ( cd cmd/pelicula && go build -o ../../bin/pelicula . ) || {
+        ( cd cmd/pelicula && go build -ldflags "-X main.version=$GIT_VERSION" -o ../../bin/pelicula . ) || {
             echo "error: Go build failed" >&2
             exit 1
         }
@@ -45,7 +46,7 @@ if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
             -v "$(pwd):/src" \
             -w /src/cmd/pelicula \
             golang:1.23-alpine \
-            go build -o /src/bin/pelicula . || {
+            go build -ldflags "-X main.version=$GIT_VERSION" -o /src/bin/pelicula . || {
             echo "error: Docker-based Go build failed" >&2
             exit 1
         }
