@@ -21,15 +21,15 @@ import (
 type stubJfClient struct {
 	apiKey string
 	userID string
-	doGet  func(path, key string) ([]byte, error)
+	doGet  func(ctx context.Context, path, key string) ([]byte, error)
 }
 
 func (s *stubJfClient) GetJellyfinAPIKey() string   { return s.apiKey }
 func (s *stubJfClient) GetJellyfinUserID() string   { return s.userID }
 func (s *stubJfClient) SetJellyfinUserID(id string) { s.userID = id }
-func (s *stubJfClient) JellyfinGet(path, apiKey string) ([]byte, error) {
+func (s *stubJfClient) JellyfinGet(ctx context.Context, path, apiKey string) ([]byte, error) {
 	if s.doGet != nil {
-		return s.doGet(path, apiKey)
+		return s.doGet(ctx, path, apiKey)
 	}
 	return json.Marshal(struct {
 		Items []jellyfinItem `json:"Items"`
@@ -46,7 +46,7 @@ func TestFetchJellyfinLibrary_SingleFlightOnConcurrentMiss(t *testing.T) {
 	jf := &stubJfClient{
 		apiKey: "key",
 		userID: "user1",
-		doGet: func(path, key string) ([]byte, error) {
+		doGet: func(ctx context.Context, path, key string) ([]byte, error) {
 			calls.Add(1)
 			time.Sleep(fetchDelay)
 			return json.Marshal(struct {
@@ -62,7 +62,7 @@ func TestFetchJellyfinLibrary_SingleFlightOnConcurrentMiss(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			h.fetchJellyfinLibrary(jf) //nolint:errcheck
+			h.fetchJellyfinLibrary(context.Background(), jf) //nolint:errcheck
 		}()
 	}
 	wg.Wait()
@@ -376,7 +376,7 @@ func TestSyncJellyfinMetadata_PassesCtxToUpdate(t *testing.T) {
 	jf := &stubJfClient{
 		apiKey: "k",
 		userID: "u",
-		doGet: func(path, key string) ([]byte, error) {
+		doGet: func(ctx context.Context, path, key string) ([]byte, error) {
 			return json.Marshal(struct {
 				Items []jellyfinItem `json:"Items"`
 			}{})
@@ -404,5 +404,36 @@ func TestSyncJellyfinMetadata_PassesCtxToUpdate(t *testing.T) {
 	}
 	if !containsStr(err.Error(), "context") {
 		t.Logf("error = %v (may be driver-specific; acceptable if non-nil)", err)
+	}
+}
+
+// ── R13: JellyfinGet ctx propagation ─────────────────────────────────────────
+
+// TestJellyfinMetaClient_PassesCtx verifies that a cancelled ctx passed to
+// fetchJellyfinLibrary reaches JellyfinGet inside the stub, confirming the
+// context.Background() bridge has been removed from the call path.
+func TestJellyfinMetaClient_PassesCtx(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	var ctxSeen atomic.Int32
+	jf := &stubJfClient{
+		apiKey: "key",
+		userID: "user1",
+		doGet: func(ctx context.Context, path, key string) ([]byte, error) {
+			if ctx.Err() != nil {
+				ctxSeen.Store(1)
+			}
+			return json.Marshal(struct {
+				Items []jellyfinItem `json:"Items"`
+			}{})
+		},
+	}
+
+	h := &Handler{}
+	h.fetchJellyfinLibrary(ctx, jf) //nolint:errcheck
+
+	if ctxSeen.Load() != 1 {
+		t.Error("JellyfinGet did not receive the cancelled ctx; context.Background() bridge may still be present")
 	}
 }

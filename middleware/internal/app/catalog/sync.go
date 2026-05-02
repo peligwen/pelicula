@@ -55,7 +55,7 @@ func floatVal(m map[string]any, key string) float64 {
 // fetchJellyfinLibrary fetches all Movie/Series items from Jellyfin and caches them.
 // The write lock is held for the entire fetch-and-write-back sequence so that
 // concurrent cache misses serialize rather than fan-out to Jellyfin.
-func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, error) {
+func (h *Handler) fetchJellyfinLibrary(ctx context.Context, jf JellyfinMetaClient) ([]jellyfinItem, error) {
 	h.jfCache.mu.Lock()
 	if time.Since(h.jfCache.fetchedAt) < jellyfinCacheTTL {
 		items := h.jfCache.items
@@ -68,7 +68,7 @@ func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, e
 	userID := jf.GetJellyfinUserID()
 	if userID == "" {
 		// Try to resolve from the API
-		body, err := jf.JellyfinGet("/Users", jf.GetJellyfinAPIKey())
+		body, err := jf.JellyfinGet(ctx, "/Users", jf.GetJellyfinAPIKey())
 		if err != nil {
 			return nil, fmt.Errorf("jellyfin users list: %w", err)
 		}
@@ -102,7 +102,7 @@ func (h *Handler) fetchJellyfinLibrary(jf JellyfinMetaClient) ([]jellyfinItem, e
 	}
 
 	path := fmt.Sprintf("/Users/%s/Items?IncludeItemTypes=Movie,Series&Fields=Overview,ImageTags,ProviderIds&Recursive=true&Limit=%d", userID, jellyfinLibraryCap)
-	body, err := jf.JellyfinGet(path, jf.GetJellyfinAPIKey())
+	body, err := jf.JellyfinGet(ctx, path, jf.GetJellyfinAPIKey())
 	if err != nil {
 		return nil, fmt.Errorf("jellyfin library fetch: %w", err)
 	}
@@ -433,7 +433,7 @@ func (h *Handler) MaybeSyncJellyfinMetadata(ctx context.Context, item *CatalogIt
 
 // SyncJellyfinMetadata fetches artwork and synopsis from Jellyfin and persists them.
 func (h *Handler) SyncJellyfinMetadata(ctx context.Context, item *CatalogItem) error {
-	jellyfinID, artworkURL, synopsis, err := h.fetchJellyfinItemMeta(item)
+	jellyfinID, artworkURL, synopsis, err := h.fetchJellyfinItemMeta(ctx, item)
 	if err != nil {
 		return err
 	}
@@ -448,8 +448,8 @@ func (h *Handler) SyncJellyfinMetadata(ctx context.Context, item *CatalogItem) e
 }
 
 // fetchJellyfinItemMeta looks up a catalog item in the cached Jellyfin library.
-func (h *Handler) fetchJellyfinItemMeta(item *CatalogItem) (string, string, string, error) {
-	items, err := h.fetchJellyfinLibrary(h.Jf)
+func (h *Handler) fetchJellyfinItemMeta(ctx context.Context, item *CatalogItem) (string, string, string, error) {
+	items, err := h.fetchJellyfinLibrary(ctx, h.Jf)
 	if err != nil {
 		return "", "", "", err
 	}

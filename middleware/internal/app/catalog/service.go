@@ -1,5 +1,7 @@
 package catalog
 
+import "context"
+
 // ArrClient is the subset of ServiceClients that the catalog package needs.
 type ArrClient interface {
 	// Keys returns API keys for Sonarr, Radarr, and Prowlarr.
@@ -26,5 +28,5 @@ type JellyfinMetaClient interface {
 	// SetJellyfinUserID caches the resolved user ID.
 	SetJellyfinUserID(id string)
 	// JellyfinGet makes a GET request to Jellyfin.
-	JellyfinGet(path, apiKey string) ([]byte, error)
+	JellyfinGet(ctx context.Context, path, apiKey string) ([]byte, error)
 }
