@@ -2,6 +2,7 @@ package procula
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,8 +120,34 @@ func saveProfile(dir string, p TranscodeProfile) error {
 	if err != nil {
 		return err
 	}
-	filename := profileFilename(p.Name)
-	return os.WriteFile(filepath.Join(dir, filename), data, 0644)
+	dst := filepath.Join(dir, profileFilename(p.Name))
+	tmp, err := os.CreateTemp(dir, "profile-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	renamed = true
+	return nil
 }
 
 // DeleteProfile removes a profile JSON file by name. Returns nil if not found.

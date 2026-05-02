@@ -224,7 +224,7 @@ func appendToFeedFile(configDir string, event NotificationEvent) {
 }
 
 // migrateFeedIfLegacy rewrites a legacy JSON-array feed to JSONL in place.
-// Caller must hold feedMu.
+// Idempotent: returns immediately when the file is absent or already JSONL.
 func migrateFeedIfLegacy(feedPath string) {
 	f, err := os.Open(feedPath)
 	if err != nil {

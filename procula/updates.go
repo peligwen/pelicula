@@ -3,6 +3,7 @@ package procula
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -141,8 +142,9 @@ func RunUpdateChecker(ctx context.Context, configDir string) {
 		updateMu.Unlock()
 
 		if data, err := json.MarshalIndent(info, "", "  "); err == nil {
-			if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err == nil {
-				os.WriteFile(cachePath, data, 0644) //nolint:errcheck
+			cacheDir := filepath.Dir(cachePath)
+			if err := os.MkdirAll(cacheDir, 0755); err == nil {
+				writeUpdateCache(cachePath, cacheDir, data)
 			}
 		}
 
@@ -184,4 +186,39 @@ func RunUpdateChecker(ctx context.Context, configDir string) {
 			doCheck()
 		}
 	}
+}
+
+// writeUpdateCache atomically writes data to cachePath via a temp file in cacheDir.
+func writeUpdateCache(cachePath, cacheDir string, data []byte) {
+	tmp, err := os.CreateTemp(cacheDir, "update_check-*.json.tmp")
+	if err != nil {
+		slog.Warn("update cache: create temp failed", "component", "updates", "error", fmt.Sprintf("%v", err))
+		return
+	}
+	tmpPath := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		slog.Warn("update cache: write temp failed", "component", "updates", "error", fmt.Sprintf("%v", err))
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		slog.Warn("update cache: sync temp failed", "component", "updates", "error", fmt.Sprintf("%v", err))
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		slog.Warn("update cache: close temp failed", "component", "updates", "error", fmt.Sprintf("%v", err))
+		return
+	}
+	if err := os.Rename(tmpPath, cachePath); err != nil {
+		slog.Warn("update cache: rename failed", "component", "updates", "error", fmt.Sprintf("%v", err))
+		return
+	}
+	renamed = true
 }

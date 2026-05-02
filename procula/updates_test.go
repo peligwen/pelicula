@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -140,6 +141,52 @@ func TestUpdateCacheThreadSafety(t *testing.T) {
 	updateMu.RUnlock()
 	if final == nil {
 		t.Fatal("cachedUpdate should be non-nil after concurrent writes")
+	}
+}
+
+// TestUpdateCheckCache_Atomic_NoPartialFile confirms writeUpdateCache uses
+// CreateTemp + Rename (atomic write). It verifies the destination file is valid
+// JSON after a successful write and no .tmp files linger in the directory.
+func TestUpdateCheckCache_Atomic_NoPartialFile(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "procula")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cachePath := filepath.Join(cacheDir, "update_check.json")
+
+	info := UpdateInfo{
+		CurrentVersion: "v1.0.0",
+		LatestVersion:  "v1.1.0",
+		UpdateAvail:    true,
+		CheckedAt:      time.Now().UTC(),
+	}
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeUpdateCache(cachePath, cacheDir, data)
+
+	// File must exist and be valid JSON.
+	raw, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("read cache file: %v", err)
+	}
+	var got UpdateInfo
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("cache file is not valid JSON: %v", err)
+	}
+	if got.LatestVersion != info.LatestVersion {
+		t.Errorf("LatestVersion = %q, want %q", got.LatestVersion, info.LatestVersion)
+	}
+
+	// No temp files must remain.
+	entries, _ := os.ReadDir(cacheDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
 	}
 }
 

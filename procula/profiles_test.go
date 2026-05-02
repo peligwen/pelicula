@@ -1,8 +1,10 @@
 package procula
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -279,6 +281,57 @@ func TestSeededProfileDefaults(t *testing.T) {
 	for _, name := range wantNames {
 		if _, ok := byName2[name]; !ok {
 			t.Errorf("after second seed: missing profile %q", name)
+		}
+	}
+}
+
+// TestSaveProfile_Atomic_NoPartialFile confirms saveProfile uses CreateTemp + Rename
+// (atomic write) so the destination file is never partially written. It verifies:
+// - the final file is valid JSON that round-trips cleanly, and
+// - no .tmp files linger in the directory after a successful save.
+func TestSaveProfile_Atomic_NoPartialFile(t *testing.T) {
+	dir := t.TempDir()
+	profilesDir := filepath.Join(dir, "procula", "profiles")
+	if err := os.MkdirAll(profilesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	p := TranscodeProfile{
+		Name:    "Test Profile",
+		Enabled: true,
+		Conditions: TranscodeConditions{
+			CodecsInclude: []string{"hevc"},
+		},
+		Output: TranscodeOutput{
+			VideoCodec: "libx264",
+			AudioCodec: "aac",
+			Suffix:     "-test",
+		},
+	}
+
+	if err := saveProfile(profilesDir, p); err != nil {
+		t.Fatalf("saveProfile: %v", err)
+	}
+
+	// Final file must be valid JSON.
+	dst := filepath.Join(profilesDir, profileFilename(p.Name))
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read final file: %v", err)
+	}
+	var got TranscodeProfile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("final file is not valid JSON: %v", err)
+	}
+	if got.Name != p.Name {
+		t.Errorf("Name = %q, want %q", got.Name, p.Name)
+	}
+
+	// No temp files must remain.
+	entries, _ := os.ReadDir(profilesDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", e.Name())
 		}
 	}
 }

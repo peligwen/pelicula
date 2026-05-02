@@ -38,9 +38,15 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if len(settings.DualSubPairs) == 0 {
 		settings.DualSubPairs = []string{"en-es"}
 	}
-	// Clamp storage thresholds to [0, 100] and ensure warning < critical.
+	// Clamp both thresholds to [0, 100], then re-apply the warning < critical invariant.
 	if settings.StorageWarningPct < 0 {
 		settings.StorageWarningPct = 0
+	}
+	if settings.StorageWarningPct > 100 {
+		settings.StorageWarningPct = 100
+	}
+	if settings.StorageCriticalPct < 0 {
+		settings.StorageCriticalPct = 0
 	}
 	if settings.StorageCriticalPct > 100 {
 		settings.StorageCriticalPct = 100
