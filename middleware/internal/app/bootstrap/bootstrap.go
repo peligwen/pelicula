@@ -361,7 +361,8 @@ const jellyfinConfigDir = "/config/jellyfin"
 // newSettingsHandler constructs the settings handler with the in-process
 // applier wired up. The applier handles the changes the dashboard can make
 // without `pelicula up`: re-seed Jellyfin's network.xml + restart the
-// Jellyfin container via the docker socket proxy.
+// Jellyfin container via the docker socket proxy, and toggling open
+// registration in-memory so /register/check reflects the change immediately.
 func newSettingsHandler(envPath string, dockerCli *docker.Client, envMu sync.Locker) *settings.Handler {
 	h := settings.New(envPath, cryptogen.GenerateAPIKey)
 	h.EnvMu = envMu
@@ -372,6 +373,7 @@ func newSettingsHandler(envPath string, dockerCli *docker.Client, envMu sync.Loc
 		RestartJellyfin: func() error {
 			return dockerCli.Restart(context.Background(), "jellyfin")
 		},
+		SetOpenRegistration: peligrosa.SetOpenRegistration,
 	}
 	return h
 }

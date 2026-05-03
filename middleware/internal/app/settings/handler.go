@@ -32,6 +32,10 @@ type Applier struct {
 	// RestartJellyfin restarts the Jellyfin container so it re-reads
 	// network.xml.
 	RestartJellyfin func() error
+	// SetOpenRegistration updates the in-memory open-registration flag in
+	// peligrosa so the change takes effect without a middleware restart. Wired
+	// in bootstrap to peligrosa.SetOpenRegistration.
+	SetOpenRegistration func(bool)
 }
 
 // Handler handles settings GET/POST and reset endpoints.
@@ -395,6 +399,13 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("settings updated via browser wizard", "component", "settings")
+
+	// Apply open_registration in-process immediately so the public
+	// /register/check endpoint reflects the change without a restart.
+	// The Applier callback is wired in bootstrap to peligrosa.SetOpenRegistration.
+	if req.OpenRegistration != "" && h.Apply != nil && h.Apply.SetOpenRegistration != nil {
+		h.Apply.SetOpenRegistration(vars["PELICULA_OPEN_REGISTRATION"] == "true")
+	}
 
 	// Compute applied/pending. .env is already on disk so the user sees their
 	// values persist on reload regardless of which bucket each change lands in.
