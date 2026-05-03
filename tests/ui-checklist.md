@@ -4,29 +4,6 @@ Manual / MCP-driven UI walkthroughs. Each entry can be executed by Claude via Ch
 
 ## Setup wizard end-to-end
 
-<!--
-Pre-fix failure observation — 2026-05-03
-
-Root cause: `setup.html` loads `framework.js` as a classic script (`<script src="/framework.js">`),
-but `framework.js` contains top-level ES module `export` statements (lines 356–365).
-Browsers refuse to execute classic scripts with `export` syntax — the script fails to load with:
-
-  SyntaxError: Unexpected token 'export'
-
-As a result, `window.PeliculaFW` is never assigned. When the user clicks "Next" on step 2,
-`goStep(3)` calls `buildSummary()`, which immediately throws:
-
-  TypeError: Cannot destructure property 'html' of undefined
-             (at setup.html, buildSummary → const { html, raw } = PeliculaFW)
-
-The panel-switching code that follows never executes, so step 3 never renders.
-Steps 1→2 work because they do not call `buildSummary()`.
-
-Confirmed by: Node.js `SyntaxError: Unexpected token 'export'` on `framework.js` as
-commonjs input; Playwright `appendChild` SyntaxError reproducing the same inline-script
-constraint; static analysis of `goStep()` code path in `nginx/setup.html`.
--->
-
 **Preconditions:**
 - Stack up via `pelicula up`.
 - Wizard in fresh-setup state: `.env` must not exist (first run), OR delete `.env` and run `pelicula up` to launch the setup container stack on port 7354.
