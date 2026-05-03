@@ -32,10 +32,15 @@ _peli_log "Step 1: seed fixture into Jellyfin library"
 DEST_PATH="$(seed_library "$FIXTURE" "$TITLE" "$YEAR")"
 _peli_ok "Seeded: $DEST_PATH"
 
+# Compute the container-internal path that Jellyfin (and catalog.db) use.
+# LIBRARY_DIR is the host path (e.g. /Users/gwen/media); inside the container it
+# is mounted at /media.  Replace the host prefix so catalog lookups match.
+CONTAINER_PATH="${DEST_PATH/#${LIBRARY_DIR}/\/media}"
+
 # ── Step 2: assert item is orphaned (in Jellyfin, absent from catalog.db and Radarr) ──
 _peli_log "Step 2: assert item is orphaned (pre-fix failure state)"
-assert_orphaned "$DEST_PATH"
-_peli_ok "Confirmed orphaned: $DEST_PATH"
+assert_orphaned "$CONTAINER_PATH"
+_peli_ok "Confirmed orphaned: $CONTAINER_PATH"
 
 # ── Step 3: POST to reconcile endpoint, assert added >= 1 ────────────────────
 _peli_log "Step 3: POST /api/pelicula/catalog/reconcile"
@@ -51,7 +56,7 @@ _peli_ok "Reconciler added $ADDED item(s)"
 
 # ── Step 4: assert item is now in catalog.db (detail returns in_catalog=true) ──
 _peli_log "Step 4: assert item is now in catalog.db"
-ENCODED_PATH="$(printf '%s' "$DEST_PATH" | jq -sRr @uri)"
+ENCODED_PATH="$(printf '%s' "$CONTAINER_PATH" | jq -sRr @uri)"
 DETAIL="$(http_json GET "/api/pelicula/catalog/detail?path=${ENCODED_PATH}" --auth pelicula)"
 _peli_ok "Detail response: $(echo "$DETAIL" | jq -c '.')"
 
@@ -63,8 +68,8 @@ fi
 _peli_ok "Item is now in catalog.db (in_catalog=true)"
 
 CATALOG_PATH="$(echo "$DETAIL" | jq -r '.path // empty')"
-if [[ "$CATALOG_PATH" != "$DEST_PATH" ]]; then
-    _peli_err "Expected path=$DEST_PATH, got: $CATALOG_PATH"
+if [[ "$CATALOG_PATH" != "$CONTAINER_PATH" ]]; then
+    _peli_err "Expected path=$CONTAINER_PATH, got: $CATALOG_PATH"
     exit 1
 fi
 _peli_ok "Catalog path matches: $CATALOG_PATH"

@@ -209,8 +209,10 @@ func UpsertFromHook(ctx context.Context, db *sql.DB, source ProculaJobSource) er
 }
 
 // BackfillFromArr scans all movies in Radarr and all series in Sonarr,
-// upserting catalog records for items in the existing library.
-func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient) error {
+// upserting catalog records for items in the existing library. It finishes
+// by running ReconcileOrphans so that Jellyfin items that bypassed the *arr
+// write paths are also cataloged on startup.
+func BackfillFromArr(ctx context.Context, db *sql.DB, jf JellyfinMetaClient, svc ArrClient) error {
 	sonarrKey, radarrKey, _ := svc.Keys()
 
 	if radarrKey != "" {
@@ -223,6 +225,16 @@ func BackfillFromArr(ctx context.Context, db *sql.DB, svc ArrClient) error {
 			slog.Error("backfill sonarr failed", "component", "catalog_sync", "error", err)
 		}
 	}
+
+	// Reconcile orphans after the *arr backfill so new arr rows are already present
+	// and the reconciler's duplicate-check skips them correctly.
+	if result, err := ReconcileOrphans(ctx, db, jf, svc); err != nil {
+		slog.Error("backfill reconcile failed", "component", "catalog_sync", "error", err)
+	} else if result.Added > 0 {
+		slog.Info("backfill reconcile: orphans recovered",
+			"component", "catalog_sync", "added", result.Added)
+	}
+
 	slog.Info("catalog backfill complete", "component", "catalog_sync")
 	return nil
 }

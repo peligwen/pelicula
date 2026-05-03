@@ -459,7 +459,7 @@ func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) 
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go BackfillFromArr(h.rootCtx(), h.DB, h.Arr) //nolint:errcheck
+	go BackfillFromArr(h.rootCtx(), h.DB, h.Jf, h.Arr) //nolint:errcheck
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 
