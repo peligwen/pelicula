@@ -24,6 +24,7 @@ func OpenCatalogDB(path string) (*sql.DB, error) {
 // catalogMigrations is the ordered list of all schema migrations for catalog.db.
 var catalogMigrations = []dbutil.Migration{
 	{Version: 1, Up: catalogMigrate1},
+	{Version: 2, Up: catalogMigrate2},
 }
 
 func catalogMigrate1(tx *sql.Tx) error {
@@ -73,6 +74,16 @@ func catalogMigrate1(tx *sql.Tx) error {
 	return nil
 }
 
+// catalogMigrate2 adds the source column that tracks which write path created
+// each catalog row. DEFAULT 'arr' backfills all pre-existing rows.
+func catalogMigrate2(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE catalog_items ADD COLUMN source TEXT NOT NULL DEFAULT 'arr'`)
+	if err != nil {
+		return fmt.Errorf("add source column: %w", err)
+	}
+	return nil
+}
+
 // ── Package-level helpers delegating to repocatalog.Store ─────────────────────
 
 func storeFor(db *sql.DB) *repocatalog.Store {
@@ -101,6 +112,12 @@ func GetCatalogItemByFilePath(ctx context.Context, db *sql.DB, filePath string) 
 // ListCatalogItems returns catalog items matching the filter, ordered by updated_at DESC.
 func ListCatalogItems(ctx context.Context, db *sql.DB, f CatalogFilter) ([]CatalogItem, error) {
 	return storeFor(db).List(ctx, f)
+}
+
+// InsertReconciledItem inserts a new catalog item with source='reconcile'.
+// The reconciler is the only caller; all other write paths use UpsertCatalogItem.
+func InsertReconciledItem(ctx context.Context, db *sql.DB, item CatalogItem) (string, error) {
+	return storeFor(db).InsertReconciled(ctx, item)
 }
 
 // UpdateCatalogMetadata sets Jellyfin-sourced fields on a catalog item.

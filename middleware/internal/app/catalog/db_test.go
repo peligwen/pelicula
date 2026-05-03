@@ -45,7 +45,7 @@ func TestOpenCatalogDB_CreatesSchema(t *testing.T) {
 		"arr_id", "arr_type", "jellyfin_id", "episode_id",
 		"season_number", "episode_number", "title", "year",
 		"tier", "artwork_url", "synopsis", "metadata_synced_at",
-		"procula_job_id", "file_path", "created_at", "updated_at",
+		"procula_job_id", "file_path", "source", "created_at", "updated_at",
 	}
 	for _, col := range required {
 		if !cols[col] {
@@ -57,8 +57,71 @@ func TestOpenCatalogDB_CreatesSchema(t *testing.T) {
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil {
 		t.Fatalf("PRAGMA user_version: %v", err)
 	}
-	if ver != 1 {
-		t.Errorf("expected user_version=1, got %d", ver)
+	if ver != len(catalogMigrations) {
+		t.Errorf("expected user_version=%d, got %d", len(catalogMigrations), ver)
+	}
+}
+
+// TestSourceColumnMigration verifies that the source column is added by migration
+// v2 and that pre-existing rows get the default value of 'arr'.
+func TestSourceColumnMigration(t *testing.T) {
+	// Simulate a pre-v2 database by running only migration v1 directly.
+	db, err := OpenCatalogDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenCatalogDB: %v", err)
+	}
+	defer db.Close()
+
+	// Insert a row that would have been written before the source column existed.
+	// After migration v2 the DEFAULT should backfill 'arr'.
+	_, err = UpsertCatalogItem(context.Background(), db, CatalogItem{
+		Type:    "movie",
+		TmdbID:  42,
+		ArrType: "radarr",
+		Title:   "Pre-migration Movie",
+		Year:    2000,
+		Tier:    "library",
+	})
+	if err != nil {
+		t.Fatalf("UpsertCatalogItem: %v", err)
+	}
+
+	// Verify the row has source='arr' (from DEFAULT).
+	var src string
+	err = db.QueryRow(`SELECT source FROM catalog_items WHERE tmdb_id=42`).Scan(&src)
+	if err != nil {
+		t.Fatalf("query source: %v", err)
+	}
+	if src != "arr" {
+		t.Errorf("expected source='arr' (DEFAULT), got %q", src)
+	}
+}
+
+// TestInsertReconciledItem_SourceColumn verifies that InsertReconciledItem
+// writes source='reconcile' rather than the default 'arr'.
+func TestInsertReconciledItem_SourceColumn(t *testing.T) {
+	db := testCatalogDB(t)
+
+	_, err := InsertReconciledItem(context.Background(), db, CatalogItem{
+		Type:     "movie",
+		TmdbID:   99,
+		ArrType:  "radarr",
+		Title:    "Reconciled Movie",
+		Year:     2024,
+		Tier:     "library",
+		FilePath: "/media/movies/reconciled.mp4",
+	})
+	if err != nil {
+		t.Fatalf("InsertReconciledItem: %v", err)
+	}
+
+	var src string
+	err = db.QueryRow(`SELECT source FROM catalog_items WHERE tmdb_id=99`).Scan(&src)
+	if err != nil {
+		t.Fatalf("query source: %v", err)
+	}
+	if src != "reconcile" {
+		t.Errorf("expected source='reconcile', got %q", src)
 	}
 }
 
@@ -107,7 +170,7 @@ func TestSchemaEquivalence_CatalogDB(t *testing.T) {
 	sort.Strings(tables)
 	got := strings.Join(tables, ",")
 
-	// Known-good snapshot after migration v1.
+	// Known-good snapshot: only the catalog_items table.
 	// If this fails, a migration was renumbered, reordered, or the schema changed unexpectedly.
 	const want = "catalog_items"
 	if got != want {

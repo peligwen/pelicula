@@ -43,6 +43,7 @@ func newTestDB(t *testing.T) *sql.DB {
 			metadata_synced_at TEXT NOT NULL DEFAULT '',
 			procula_job_id     TEXT NOT NULL DEFAULT '',
 			file_path          TEXT NOT NULL DEFAULT '',
+			source             TEXT NOT NULL DEFAULT 'arr',
 			created_at         TEXT NOT NULL,
 			updated_at         TEXT NOT NULL
 		)

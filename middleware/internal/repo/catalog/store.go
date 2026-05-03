@@ -45,6 +45,7 @@ type Item struct {
 	MetadataSyncedAt string // RFC3339 timestamp; "" = never synced
 	ProculaJobID     string // most recent procula job ID
 	FilePath         string
+	Source           string // write path: "arr" (default) | "reconcile"
 	CreatedAt        string
 	UpdatedAt        string
 }
@@ -73,7 +74,7 @@ const selectItem = `
 	SELECT id, type, parent_id, tmdb_id, tvdb_id, arr_id, arr_type,
 	       jellyfin_id, episode_id, season_number, episode_number,
 	       title, year, tier, artwork_url, synopsis,
-	       metadata_synced_at, procula_job_id, file_path, created_at, updated_at
+	       metadata_synced_at, procula_job_id, file_path, source, created_at, updated_at
 	FROM catalog_items
 `
 
@@ -89,7 +90,7 @@ func scanItem(s scanner) (*Item, error) {
 		&it.ArrID, &it.ArrType, &it.JellyfinID, &it.EpisodeID,
 		&it.SeasonNumber, &it.EpisodeNumber, &it.Title, &it.Year,
 		&it.Tier, &it.ArtworkURL, &it.Synopsis, &it.MetadataSyncedAt,
-		&it.ProculaJobID, &it.FilePath, &it.CreatedAt, &it.UpdatedAt,
+		&it.ProculaJobID, &it.FilePath, &it.Source, &it.CreatedAt, &it.UpdatedAt,
 	)
 	if err == nil {
 		return &it, nil
@@ -279,6 +280,33 @@ func (s *Store) Upsert(ctx context.Context, item Item) (string, error) {
 	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("commit catalog insert: %w", err)
+	}
+	return item.ID, nil
+}
+
+// InsertReconciled inserts a new catalog item with source='reconcile'.
+// This is the ONLY write path that may set source != 'arr'. The caller is
+// responsible for checking that no existing row covers this item before calling
+// (idempotency is enforced at the reconciler layer, not here).
+func (s *Store) InsertReconciled(ctx context.Context, item Item) (string, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if item.ID == "" {
+		item.ID = newID()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO catalog_items (
+			id, type, parent_id, tmdb_id, tvdb_id, arr_id, arr_type,
+			jellyfin_id, episode_id, season_number, episode_number,
+			title, year, tier, artwork_url, synopsis,
+			metadata_synced_at, procula_job_id, file_path, source, created_at, updated_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	`, item.ID, item.Type, item.ParentID, item.TmdbID, item.TvdbID,
+		item.ArrID, item.ArrType, item.JellyfinID, item.EpisodeID,
+		item.SeasonNumber, item.EpisodeNumber, item.Title, item.Year,
+		item.Tier, item.ArtworkURL, item.Synopsis, item.MetadataSyncedAt,
+		item.ProculaJobID, item.FilePath, "reconcile", now, now)
+	if err != nil {
+		return "", fmt.Errorf("insert reconciled catalog item: %w", err)
 	}
 	return item.ID, nil
 }
