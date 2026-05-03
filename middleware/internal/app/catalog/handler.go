@@ -323,7 +323,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	synopsis, artworkURL, title, metadataSyncedAt := "", "", "", ""
+	synopsis, artworkURL, title, metadataSyncedAt, source := "", "", "", "", ""
 	inCatalog := false
 	if h.DB != nil {
 		if item, err := GetCatalogItemByFilePath(r.Context(), h.DB, path); err == nil && item != nil {
@@ -332,6 +332,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 			artworkURL = item.ArtworkURL
 			title = item.Title
 			metadataSyncedAt = item.MetadataSyncedAt
+			source = item.Source
 			if item.Type == "movie" {
 				// Use h.rootCtx() not r.Context() — the goroutine outlives the request.
 				go h.MaybeSyncJellyfinMetadata(h.rootCtx(), item)
@@ -363,6 +364,7 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 		"artwork_url":        artworkURL,
 		"title":              title,
 		"in_catalog":         inCatalog,
+		"source":             source,
 		"metadata_synced_at": metadataSyncedAt,
 	})
 }
@@ -459,6 +461,24 @@ func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) 
 	}
 	go BackfillFromArr(h.rootCtx(), h.DB, h.Arr) //nolint:errcheck
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
+}
+
+// HandleCatalogReconcile runs ReconcileOrphans synchronously and returns the
+// ReconcileResult as JSON. POST only; 405 on other methods.
+// Auth gate: admin (same as backfill and command endpoints).
+func (h *Handler) HandleCatalogReconcile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	result, err := ReconcileOrphans(r.Context(), h.DB, h.Jf, h.Arr)
+	if err != nil {
+		slog.Error("catalog reconcile endpoint: reconcile failed",
+			"component", "catalog", "error", err)
+		httputil.WriteError(w, "reconcile failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	httputil.WriteJSON(w, result)
 }
 
 // arrTarget captures the per-arr-type parameters used by HandleCatalogCommand.

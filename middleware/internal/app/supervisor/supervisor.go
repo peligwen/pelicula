@@ -36,6 +36,12 @@ func Run(ctx context.Context, a *pelapp.App) *sync.WaitGroup {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		catalog.RunReconcileLoop(ctx, a.CatalogDB, a.Svc, a.Svc)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		if err := a.Autowirer.Run(ctx); err != nil {
 			slog.Error("autowire failed", "component", "supervisor", "error", err)
 		}

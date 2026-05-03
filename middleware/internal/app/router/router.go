@@ -152,6 +152,7 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("/api/pelicula/catalog/items", auth.Guard(http.HandlerFunc(cfg.Catalog.HandleCatalogItems)))
 	mux.Handle("/api/pelicula/catalog/items/{id}", auth.Guard(http.HandlerFunc(cfg.Catalog.HandleCatalogItemDetail)))
 	mux.Handle("/api/pelicula/catalog/backfill", auth.GuardAdmin(http.HandlerFunc(cfg.Catalog.HandleCatalogBackfill)))
+	mux.Handle("/api/pelicula/catalog/reconcile", auth.GuardAdmin(http.HandlerFunc(cfg.Catalog.HandleCatalogReconcile)))
 	mux.Handle("/api/pelicula/catalog/command", auth.GuardAdmin(http.HandlerFunc(cfg.Catalog.HandleCatalogCommand)))
 	mux.Handle("/api/pelicula/catalog/replace", auth.GuardAdmin(http.HandlerFunc(cfg.Catalog.HandleCatalogReplace)))
 	mux.Handle("/api/pelicula/catalog/blocklist/{id}", auth.GuardAdmin(http.HandlerFunc(cfg.Catalog.HandleCatalogUnblocklist)))
