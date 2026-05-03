@@ -23,8 +23,18 @@
 #                     Supports --skip-auth (skips the authenticated storage endpoint check).
 #   bug4-registration Open registration toggle round-trip  (tests/bug4-registration.sh)
 #                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
+#   sweep-catalog     Catalog tab HTTP smoke: catalog list shape, items array, quality profiles
+#                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
+#   sweep-jobs        Jobs tab HTTP smoke: pelicula/jobs groups+total, processing proxy,
+#                     procula/jobs direct. Auth-free test C runs even under --skip-auth.
+#                     Full run requires PELICULA_TEST_JELLYFIN_PASSWORD.
+#   sweep-users       Users tab HTTP smoke: users array, auth/check fields, invites array.
+#                     Auth-free test B (auth/check) runs even under --skip-auth.
+#                     Full run requires PELICULA_TEST_JELLYFIN_PASSWORD.
+#   sweep-settings    Settings tab HTTP smoke: key count, 4 safe round-trip checks.
+#                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #
-# Tests that require a running Jellyfin session (bug1, bug4 step A) need
+# Tests that require a running Jellyfin session need
 #   PELICULA_TEST_JELLYFIN_PASSWORD + PELICULA_TEST_JELLYFIN_USER.
 # Pass --skip-auth to skip those checks (or SKIP_AUTH_CHECKS=1).
 #
@@ -41,7 +51,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET=""           # empty → tests use their own defaults (localhost:7354)
 SKIP_AUTH=""        # empty → tests perform auth checks if password is present
-SUITES="bug2-storage,bug4-registration"  # comma-separated list of suites to run
+SUITES="bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"  # comma-separated list of suites to run
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 
@@ -66,7 +76,7 @@ _fail() { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
 
 # AUTH_REQUIRED_SUITES: suites that need PELICULA_TEST_JELLYFIN_PASSWORD.
 # When --skip-auth is set these suites are skipped (not counted as failures).
-AUTH_REQUIRED_SUITES="bug4-registration"
+AUTH_REQUIRED_SUITES="bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"
 
 run_suite() {
     local name="$1" script="$1"
