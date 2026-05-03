@@ -9,24 +9,29 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"pelicula-api/clients"
 	"pelicula-api/httputil"
-	"sync"
-	"time"
 )
 
-// OpenRegistration controls whether new accounts can be created without an invite.
-// Set from main via the package-level accessor SetOpenRegistration.
-var OpenRegistration bool
+// openRegistration controls whether new accounts can be created without an
+// invite. sync/atomic.Bool ensures concurrent reads (HandleOpenRegCheck,
+// HandleOpenRegister) and the settings-update write path never race.
+var openRegistration atomic.Bool
+
+// SetOpenRegistration sets the open-registration flag. Safe to call from any
+// goroutine; uses atomic store so concurrent readers see the change immediately
+// without a lock.
+func SetOpenRegistration(v bool) {
+	openRegistration.Store(v)
+}
 
 // initialSetupMu serialises the initial-setup registration so that only one
 // request can observe IsEmpty()==true and claim the admin role.
 var initialSetupMu sync.Mutex
-
-// SetOpenRegistration sets the open-registration flag from main.
-func SetOpenRegistration(v bool) {
-	OpenRegistration = v
-}
 
 // HandleGeneratePassword returns a fresh passphrase suggestion.
 // Public endpoint — no auth required; used by the registration UI.
@@ -58,7 +63,7 @@ func (a *Auth) HandleOpenRegCheck(w http.ResponseWriter, r *http.Request) {
 		initialSetup = a.rolesStore.IsEmpty(r.Context())
 	}
 	httputil.WriteJSON(w, map[string]any{
-		"open_registration": OpenRegistration,
+		"open_registration": openRegistration.Load(),
 		"initial_setup":     initialSetup,
 	})
 }
@@ -74,7 +79,7 @@ func (a *Auth) HandleOpenRegister(w http.ResponseWriter, r *http.Request) {
 	// Jellyfin service user is never inserted there, so it doesn't affect this.
 	initialSetupMu.Lock()
 	initialSetup := a != nil && a.rolesStore != nil && a.rolesStore.IsEmpty(r.Context())
-	if !OpenRegistration && !initialSetup {
+	if !openRegistration.Load() && !initialSetup {
 		initialSetupMu.Unlock()
 		httputil.WriteError(w, "open registration is not enabled", http.StatusForbidden)
 		return

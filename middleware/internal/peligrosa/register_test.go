@@ -11,12 +11,12 @@ import (
 	"pelicula-api/internal/repo/sessions"
 )
 
-// setOpenRegistration saves and restores OpenRegistration for the test duration.
+// setOpenRegistration saves and restores the open-registration flag for the test duration.
 func setOpenRegistration(t *testing.T, val bool) {
 	t.Helper()
-	orig := OpenRegistration
-	OpenRegistration = val
-	t.Cleanup(func() { OpenRegistration = orig })
+	orig := openRegistration.Load()
+	openRegistration.Store(val)
+	t.Cleanup(func() { openRegistration.Store(orig) })
 }
 
 // ── HandleOpenRegCheck ──────────────────────────────────────────────────────
