@@ -3,6 +3,9 @@
 # Spins an isolated stack on port 7399, no VPN needed.
 #
 # Usage: bash tests/e2e.sh [--keep]
+
+# TODO(phase-4): consider sourcing tests/lib.sh once name collisions are resolved
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1201,6 +1204,15 @@ assert 'Movies' in names and 'TV Shows' in names
         fi
     else
         warn "Node/Playwright not found — skipping UI tests (run: cd tests/playwright && npm install && npx playwright install chromium)"
+    fi
+
+    # ── Verify smoke against isolated stack ──────────
+
+    info "Running verify smoke against isolated stack (localhost:${test_port})..."
+    if bash "$SCRIPT_DIR/tests/verify.sh" --target "localhost:${test_port}" --skip-auth; then
+        t_pass "verify smoke passed"
+    else
+        t_fail "verify smoke failed (tests/verify.sh --skip-auth)"
     fi
 
     # ── Summary ───────────────────────────────────────
