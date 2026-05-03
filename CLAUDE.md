@@ -33,6 +33,8 @@ pelicula export [file]       # export watchlist / library backup
 pelicula import-backup file  # restore from a backup exported by pelicula export
 pelicula import [dir]        # import local media files via the browser wizard
 pelicula test                # run e2e integration test (isolated stack on port 7399)
+pelicula verify [--target H] # post-deploy regression checks against any running stack (default localhost:7354)
+                              # supports --skip-auth, --suite SUITE,...; dispatches to tests/bug*.sh via tests/verify.sh
 ```
 
 ## Architecture
