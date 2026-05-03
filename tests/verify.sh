@@ -16,7 +16,7 @@
 #     bash tests/verify.sh --target 192.168.1.143:7354
 #
 #   # Static-asset checks only (no Jellyfin auth required):
-#   bash tests/verify.sh --skip-auth --suite bug2
+#   bash tests/verify.sh --skip-auth --suite bug2-storage
 #
 # Suites (--suite is a comma-separated list; default: all):
 #   bug2-storage      Storage tab static-asset + API smoke (tests/bug2-storage.sh)
@@ -26,11 +26,10 @@
 #   sweep-catalog     Catalog tab HTTP smoke: catalog list shape, items array, quality profiles
 #                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #   sweep-jobs        Jobs tab HTTP smoke: pelicula/jobs groups+total, processing proxy,
-#                     procula/jobs direct. Auth-free test C runs even under --skip-auth.
-#                     Full run requires PELICULA_TEST_JELLYFIN_PASSWORD.
+#                     procula/jobs direct. Requires PELICULA_TEST_JELLYFIN_PASSWORD;
+#                     skipped under --skip-auth.
 #   sweep-users       Users tab HTTP smoke: users array, auth/check fields, invites array.
-#                     Auth-free test B (auth/check) runs even under --skip-auth.
-#                     Full run requires PELICULA_TEST_JELLYFIN_PASSWORD.
+#                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #   sweep-settings    Settings tab HTTP smoke: key count, 4 safe round-trip checks.
 #                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #
