@@ -104,6 +104,106 @@ if [[ -n "${_OVERRIDE_PORT:-}" ]]; then
 fi
 
 echo ""
+echo -e "${_PELI_CYAN}── Test: peli_url_encode ────────────────────────────${_PELI_NC}"
+
+run_test "peli_url_encode encodes spaces" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    result=\"\$(peli_url_encode 'hello world')\"
+    test \"\$result\" = 'hello%20world'
+"
+
+run_test "peli_url_encode encodes slashes" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    result=\"\$(peli_url_encode '/media/movies/foo')\"
+    test \"\$result\" = '%2Fmedia%2Fmovies%2Ffoo'
+"
+
+run_test "peli_url_encode passes through plain strings unchanged" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    result=\"\$(peli_url_encode 'plainstring')\"
+    test \"\$result\" = 'plainstring'
+"
+
+echo ""
+echo -e "${_PELI_CYAN}── Test: peli_container_path ────────────────────────${_PELI_NC}"
+
+run_test "peli_container_path replaces LIBRARY_DIR prefix with /media" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    result=\"\$(peli_container_path \"\${LIBRARY_DIR}/movies/Foo (2000)/Foo (2000).mp4\")\"
+    test \"\$result\" = '/media/movies/Foo (2000)/Foo (2000).mp4'
+"
+
+run_test "peli_container_path is a no-op on paths not under LIBRARY_DIR" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    result=\"\$(peli_container_path '/tmp/unrelated/path')\"
+    test \"\$result\" = '/tmp/unrelated/path'
+"
+
+echo ""
+echo -e "${_PELI_CYAN}── Test: assert_static_asset ───────────────────────${_PELI_NC}"
+
+run_test "assert_static_asset passes on /format.js (no pattern)" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_static_asset '/format.js'
+"
+
+run_test "assert_static_asset passes on /format.js (with pattern)" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_static_asset '/format.js' 'window.formatSize'
+"
+
+run_test_expect_fail "assert_static_asset fails on nonexistent path" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_static_asset '/does_not_exist_xyz.js'
+"
+
+run_test_expect_fail "assert_static_asset fails when pattern not in body" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_static_asset '/format.js' 'THIS_PATTERN_DEFINITELY_NOT_IN_FILE_XYZ'
+"
+
+echo ""
+echo -e "${_PELI_CYAN}── Test: assert_public_json_nonempty ───────────────${_PELI_NC}"
+
+run_test "assert_public_json_nonempty passes on /api/pelicula/health" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_public_json_nonempty '/api/pelicula/health' '.services'
+"
+
+run_test_expect_fail "assert_public_json_nonempty fails on missing field" bash -c "
+    source '$LIB'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_public_json_nonempty '/api/pelicula/health' '.nonexistent_field_xyz'
+"
+
+echo ""
+echo -e "${_PELI_CYAN}── Test: assert_authed_json_nonempty ───────────────${_PELI_NC}"
+
+run_test "assert_authed_json_nonempty passes on /api/pelicula/settings (--auth pelicula)" bash -c "
+    source '$LIB'
+    export PELICULA_TEST_JELLYFIN_PASSWORD='${PELICULA_TEST_JELLYFIN_PASSWORD}'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_authed_json_nonempty pelicula '/api/pelicula/settings' '.port' '.config_dir'
+"
+
+run_test_expect_fail "assert_authed_json_nonempty fails on nonexistent field" bash -c "
+    source '$LIB'
+    export PELICULA_TEST_JELLYFIN_PASSWORD='${PELICULA_TEST_JELLYFIN_PASSWORD}'
+    peli_load_env '$ENV_FILE' '$TARGET_HOST' 2>/dev/null
+    assert_authed_json_nonempty pelicula '/api/pelicula/settings' '.nonexistent_field_xyz'
+"
+
+echo ""
 echo -e "${_PELI_CYAN}── Test: peli_load_env ──────────────────────────────${_PELI_NC}"
 
 run_test "PELI_BASE_URL is set" \

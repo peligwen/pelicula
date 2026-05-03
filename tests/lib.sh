@@ -265,6 +265,143 @@ http_json() {
     return 0
 }
 
+# ── peli_url_encode ───────────────────────────────────────────────────────────
+
+# peli_url_encode STRING
+#   Percent-encode STRING using jq's @uri filter and print the result on stdout.
+#   Falls back to a minimal sed pass if jq is unavailable (should not happen in
+#   practice — jq is a hard dependency of the test harness).
+peli_url_encode() {
+    local input="${1:-}"
+    printf '%s' "$input" | jq -sRr @uri 2>/dev/null \
+        || printf '%s' "$input" | sed 's| |%20|g; s|/|%2F|g; s|&|%26|g'
+}
+
+# ── peli_container_path ───────────────────────────────────────────────────────
+
+# peli_container_path HOST_PATH
+#   Translate HOST_PATH to the container-internal equivalent path by replacing
+#   the host LIBRARY_DIR prefix with /media.
+#   Requires LIBRARY_DIR to be set (via peli_load_env).
+#   Example:
+#     HOST_PATH=/Users/gwen/media/movies/Foo/Foo.mp4
+#     → /media/movies/Foo/Foo.mp4
+peli_container_path() {
+    local host_path="${1:-}"
+    if [[ -z "$host_path" ]]; then
+        _peli_err "peli_container_path: HOST_PATH required"
+        return 1
+    fi
+    echo "${host_path/#${LIBRARY_DIR}//media}"
+}
+
+# ── assert_static_asset ───────────────────────────────────────────────────────
+
+# assert_static_asset URL [GREP_PATTERN]
+#   Fetch URL (prepended with PELI_BASE_URL if it starts with /).
+#   Assert HTTP 200 and non-empty body.
+#   If GREP_PATTERN is provided, also assert body contains the pattern (grep -q).
+#   Returns 0 on success, 1 on failure.
+assert_static_asset() {
+    local url="${1:-}"
+    local pattern="${2:-}"
+
+    if [[ -z "$url" ]]; then
+        _peli_err "assert_static_asset: URL required"
+        return 1
+    fi
+
+    # Allow caller to pass full URL or just a path
+    local full_url
+    if [[ "$url" == http://* || "$url" == https://* ]]; then
+        full_url="$url"
+    else
+        full_url="${PELI_BASE_URL}${url}"
+    fi
+
+    local body
+    body="$(curl -sf "$full_url" 2>/dev/null)" || {
+        _peli_err "assert_static_asset: GET $full_url failed (non-200 or connection error)"
+        return 1
+    }
+
+    if [[ -z "$body" ]]; then
+        _peli_err "assert_static_asset: GET $full_url returned empty body"
+        return 1
+    fi
+
+    if [[ -n "$pattern" ]]; then
+        if ! echo "$body" | grep -q "$pattern" 2>/dev/null; then
+            _peli_err "assert_static_asset: GET $full_url body does not match pattern: $pattern"
+            _peli_err "  Got: ${body:0:200}"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# ── assert_public_json_nonempty ───────────────────────────────────────────────
+
+# assert_public_json_nonempty URL JQ_FIELD [JQ_FIELD ...]
+#   Fetch URL (no auth) via http_json; assert 200 + valid JSON.
+#   Assert each JQ_FIELD expression is non-null and non-empty.
+#   URL may be a full URL or a path (prepended with PELI_BASE_URL).
+#   Returns 0 on success, 1 on first assertion failure.
+assert_public_json_nonempty() {
+    local url="${1:-}"
+    shift || true
+
+    if [[ -z "$url" ]]; then
+        _peli_err "assert_public_json_nonempty: URL required"
+        return 1
+    fi
+
+    local body
+    body="$(http_json GET "$url")" || {
+        _peli_err "assert_public_json_nonempty: GET $url failed"
+        return 1
+    }
+
+    local field
+    for field in "$@"; do
+        assert_field_nonempty "$body" "$field" || return 1
+    done
+
+    return 0
+}
+
+# ── assert_authed_json_nonempty ───────────────────────────────────────────────
+
+# assert_authed_json_nonempty AUTH PATH JQ_FIELD [JQ_FIELD ...]
+#   Fetch PATH with the given AUTH mode (pelicula|jellyfin|procula) via http_json.
+#   Assert each JQ_FIELD expression is non-null and non-empty.
+#   PATH may be a full URL or a path (prepended with PELI_BASE_URL).
+#   Returns 0 on success, 1 on first assertion failure.
+assert_authed_json_nonempty() {
+    local auth_mode="${1:-}"
+    local path="${2:-}"
+    shift 2 || true
+
+    if [[ -z "$auth_mode" || -z "$path" ]]; then
+        _peli_err "assert_authed_json_nonempty: AUTH and PATH required"
+        return 1
+    fi
+
+    local body
+    body="$(http_json GET "$path" --auth "$auth_mode")" || {
+        _peli_err "assert_authed_json_nonempty: GET $path (--auth $auth_mode) failed"
+        return 1
+    }
+
+    local field
+    for field in "$@"; do
+        assert_field_nonempty "$body" "$field" || return 1
+    done
+
+    return 0
+}
+
 # ── jellyfin_resolve_scan_task_id ─────────────────────────────────────────────
 
 # jellyfin_resolve_scan_task_id
@@ -359,8 +496,7 @@ seed_library() {
     uid="$(jellyfin_resolve_user_id)" || return 1
 
     local encoded_title
-    # URL-encode the title for the query param using jq's @uri filter
-    encoded_title="$(printf '%s' "$title" | jq -sRr @uri 2>/dev/null || printf '%s' "$title" | sed 's/ /%20/g; s/&/%26/g')"
+    encoded_title="$(peli_url_encode "$title")"
 
     # _peli_jf_poll_title UID ENCODED_TITLE TIMEOUT_SECS
     # Returns 0 and sets found=1 if the item appears within timeout.
@@ -597,7 +733,7 @@ assert_arr_traceable() {
 
     # Check (a): catalog.db via detail endpoint
     local encoded_path
-    encoded_path="$(printf '%s' "$file_path" | jq -sRr @uri 2>/dev/null || printf '%s' "$file_path" | sed 's| |%20|g; s|/|%2F|g')"
+    encoded_path="$(peli_url_encode "$file_path")"
 
     local detail
     detail="$(http_json GET "${PELI_BASE_URL}/api/pelicula/catalog/detail?path=${encoded_path}" --auth pelicula 2>/dev/null)" || true
@@ -644,7 +780,7 @@ assert_orphaned() {
 
     # Check catalog.db
     local encoded_path
-    encoded_path="$(printf '%s' "$file_path" | jq -sRr @uri 2>/dev/null || printf '%s' "$file_path" | sed 's| |%20|g; s|/|%2F|g')"
+    encoded_path="$(peli_url_encode "$file_path")"
 
     local detail
     detail="$(http_json GET "${PELI_BASE_URL}/api/pelicula/catalog/detail?path=${encoded_path}" --auth pelicula 2>/dev/null)" || true

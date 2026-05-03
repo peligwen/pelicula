@@ -33,9 +33,7 @@ DEST_PATH="$(seed_library "$FIXTURE" "$TITLE" "$YEAR")"
 _peli_ok "Seeded: $DEST_PATH"
 
 # Compute the container-internal path that Jellyfin (and catalog.db) use.
-# LIBRARY_DIR is the host path (e.g. /Users/gwen/media); inside the container it
-# is mounted at /media.  Replace the host prefix so catalog lookups match.
-CONTAINER_PATH="${DEST_PATH/#${LIBRARY_DIR}/\/media}"
+CONTAINER_PATH="$(peli_container_path "$DEST_PATH")"
 
 # ── Step 2: assert item is orphaned (in Jellyfin, absent from catalog.db and Radarr) ──
 _peli_log "Step 2: assert item is orphaned (pre-fix failure state)"
