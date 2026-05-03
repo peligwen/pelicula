@@ -77,6 +77,8 @@ func main() {
 		cmdImport(ctx, args[1:])
 	case "test":
 		cmdTest(ctx, args[1:])
+	case "verify":
+		cmdVerify(ctx, args[1:])
 	case "doctor":
 		cmdDoctor(ctx, args[1:])
 	default:
@@ -153,6 +155,7 @@ Network:
 
 Diagnostics:
   doctor              Dump container status and error logs for troubleshooting
+  verify [--target H] Run regression checks against a running stack
 
 Options:
   -v, --verbose       Verbose output
