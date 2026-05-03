@@ -2,6 +2,9 @@
 
 Manual / MCP-driven UI walkthroughs. Each entry can be executed by Claude via Chrome MCP browser tools (or Playwright MCP) at verify-time. Not part of automated CI; this is a curated regression list.
 
+**Phase 2 HTTP coverage (automated, run via `pelicula verify`):**
+Catalog, Jobs, Users, and Settings tabs are covered by HTTP-level smoke tests in `tests/sweep-catalog.sh`, `tests/sweep-jobs.sh`, `tests/sweep-users.sh`, and `tests/sweep-settings.sh`. Only the wizard walkthrough below requires a browser session.
+
 ## Setup wizard end-to-end
 
 **Preconditions:**
