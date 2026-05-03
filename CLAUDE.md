@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## CLI Commands
 
 ```
-pelicula up                  # start stack (runs setup wizard on first run), seed configs, wait for VPN
+pelicula up                  # start stack (runs setup wizard on first run), seed configs, wait for VPN, runs verify smoke
 pelicula down|status|logs [svc]|update|check-vpn
 pelicula restart [svc]       # restart service(s) without taking the whole stack down
 pelicula restart-acquire     # restart VPN + acquisition services (jellyfin and nginx stay up), re-enforces *arr auth
@@ -32,7 +32,7 @@ pelicula reset-config all    # hard reset: wipe config dir + regenerate .env (ke
 pelicula export [file]       # export watchlist / library backup
 pelicula import-backup file  # restore from a backup exported by pelicula export
 pelicula import [dir]        # import local media files via the browser wizard
-pelicula test                # run e2e integration test (isolated stack on port 7399)
+pelicula test                # run e2e integration test (isolated stack on port 7399, runs verify suite against it)
 pelicula verify [--target H] # post-deploy regression checks against any running stack (default localhost:7354)
                               # supports --skip-auth, --suite SUITE,...; dispatches to tests/bug*.sh via tests/verify.sh
 ```

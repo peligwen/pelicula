@@ -93,6 +93,14 @@ qBittorrent v5 renamed the pause/resume API to stop/start — the middleware use
 
 The `cmd/pelicula/` package compiles to a single binary per platform (macOS/Linux/Windows/Synology). Zero external dependencies — stdlib only. Handles all lifecycle commands: up, down, restart, rebuild, redeploy, reset-config, status, logs, update, export, import-backup, import, check-vpn. The `test` command delegates to `tests/e2e.sh`. A thin wrapper script at the repo root (`./pelicula`) auto-builds the Go binary on first run.
 
+## Verify Ritual
+
+Three triggers cover the full verification surface:
+
+- **Auto smoke after `pelicula up`** — after the stack is healthy, `pelicula up` shells out to `tests/verify.sh --skip-auth` against the local port. Failures print a one-line hint but never block the bring-up. Set `PELICULA_SKIP_VERIFY=1` to suppress (e.g. scripted restarts).
+- **On-demand `pelicula verify`** — the deliberate full-suite call; supports `--target HOST:PORT`, `--skip-auth`, `--suite SUITE,...`. Auth-required suites need `PELICULA_TEST_JELLYFIN_PASSWORD` + `PELICULA_TEST_JELLYFIN_USER` in the environment.
+- **Isolated `pelicula test`** — runs the full e2e stack on port 7399, then calls `tests/verify.sh --skip-auth --target localhost:7399` before teardown. A verify failure exits the test run non-zero.
+
 **Platform detection** (`detectPlatform()` in `platform.go`):
 1. Checks `/proc/syno_platform` or `/volume1` to identify Synology NAS
 2. Auto-detects whether `docker` needs `sudo` by running `sudo -n docker info`
