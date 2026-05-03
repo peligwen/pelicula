@@ -417,20 +417,54 @@ func SetAudioPref(ctx context.Context, client *jfclient.Client, token, userID, l
 	slog.Info("Jellyfin audio language preference set", "component", "autowire", "userId", userID, "lang", lang)
 }
 
-// WireLibrary creates a Jellyfin virtual library if it doesn't already exist.
+// WireLibrary creates a Jellyfin virtual library if it doesn't already exist,
+// or repairs its path if the library exists but points at a stale location.
+// A library whose name matches is checked for path consistency: if the expected
+// path is missing it is added via /Library/VirtualFolders/Paths, and any
+// previously-registered paths that differ are removed.
 func WireLibrary(ctx context.Context, client *jfclient.Client, token, name, collectionType, path string) {
 	data, err := client.Get(ctx, "/Library/VirtualFolders", token)
 	if err != nil {
 		slog.Error("failed to list Jellyfin libraries", "component", "autowire", "error", err)
 		return
 	}
-	var libraries []map[string]any
+	var libraries []struct {
+		Name      string   `json:"Name"`
+		Locations []string `json:"Locations"`
+	}
 	if json.Unmarshal(data, &libraries) == nil {
 		for _, lib := range libraries {
-			if n, _ := lib["Name"].(string); n == name {
-				slog.Info("Jellyfin library already exists, skipping", "component", "autowire", "library", name)
+			if lib.Name != name {
+				continue
+			}
+			// Library exists — check whether the correct path is already present.
+			for _, loc := range lib.Locations {
+				if loc == path {
+					slog.Info("Jellyfin library path is correct, skipping", "component", "autowire", "library", name)
+					return
+				}
+			}
+			// Correct path is absent — add it first, then clean up stale paths.
+			addEndpoint := fmt.Sprintf("/Library/VirtualFolders/Paths?name=%s&refreshLibrary=false", url.QueryEscape(name))
+			addBody := map[string]any{
+				"Name":     name,
+				"PathInfo": map[string]any{"Path": path},
+			}
+			if _, addErr := client.Post(ctx, addEndpoint, token, addBody); addErr != nil {
+				slog.Error("failed to add path to Jellyfin library", "component", "autowire", "library", name, "path", path, "error", addErr)
 				return
 			}
+			slog.Info("added correct path to Jellyfin library", "component", "autowire", "library", name, "path", path)
+			for _, stale := range lib.Locations {
+				delEndpoint := fmt.Sprintf("/Library/VirtualFolders/Paths?name=%s&path=%s&refreshLibrary=false",
+					url.QueryEscape(name), url.QueryEscape(stale))
+				if _, delErr := client.Delete(ctx, delEndpoint, token); delErr != nil {
+					slog.Warn("failed to remove stale path from Jellyfin library", "component", "autowire", "library", name, "stale", stale, "error", delErr)
+				} else {
+					slog.Info("removed stale path from Jellyfin library", "component", "autowire", "library", name, "stale", stale)
+				}
+			}
+			return
 		}
 	}
 

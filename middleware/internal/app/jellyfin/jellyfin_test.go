@@ -965,3 +965,98 @@ func TestHandleSessions_MethodNotAllowed(t *testing.T) {
 		t.Errorf("status = %d, want 405", w.Code)
 	}
 }
+
+// ── WireLibrary path repair ──────────────────────────────────────────────────
+
+// TestWireLibrary_CorrectPath verifies that WireLibrary is a no-op when the
+// library already exists with the correct path.
+func TestWireLibrary_CorrectPath(t *testing.T) {
+	t.Parallel()
+	var postCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[{"Name":"Movies","Locations":["/media/movies"]}]`)) //nolint:errcheck
+			return
+		}
+		postCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
+	jfapp.WireLibrary(t.Context(), client, "tok", "Movies", "movies", "/media/movies")
+	if postCalled {
+		t.Error("WireLibrary made a POST call when path was already correct")
+	}
+}
+
+// TestWireLibrary_StalePath verifies that WireLibrary adds the correct path
+// and removes the stale path when the library exists with a wrong path.
+func TestWireLibrary_StalePath(t *testing.T) {
+	t.Parallel()
+	var addCalled, delCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[{"Name":"TV Shows","Locations":["/data/tv"]}]`)) //nolint:errcheck
+			return
+		}
+		http.Error(w, "unexpected method on /Library/VirtualFolders", http.StatusMethodNotAllowed)
+	})
+	mux.HandleFunc("/Library/VirtualFolders/Paths", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			addCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodDelete:
+			delCalled = true
+			// Verify the stale path is in the query.
+			if got := r.URL.Query().Get("path"); got != "/data/tv" {
+				t.Errorf("DELETE path param = %q, want /data/tv", got)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
+	jfapp.WireLibrary(t.Context(), client, "tok", "TV Shows", "tvshows", "/media/tv")
+	if !addCalled {
+		t.Error("WireLibrary did not call POST /Library/VirtualFolders/Paths to add correct path")
+	}
+	if !delCalled {
+		t.Error("WireLibrary did not call DELETE /Library/VirtualFolders/Paths to remove stale path")
+	}
+}
+
+// TestWireLibrary_NewLibrary verifies that WireLibrary creates the library
+// when it does not yet exist.
+func TestWireLibrary_NewLibrary(t *testing.T) {
+	t.Parallel()
+	var createCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Library/VirtualFolders", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case http.MethodPost:
+			createCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := jfclient.NewWithHTTPClient(srv.URL, srv.Client())
+	jfapp.WireLibrary(t.Context(), client, "tok", "Movies", "movies", "/media/movies")
+	if !createCalled {
+		t.Error("WireLibrary did not call POST /Library/VirtualFolders to create new library")
+	}
+}
