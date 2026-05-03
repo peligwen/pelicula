@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -281,6 +285,11 @@ func cmdUp(ctx *Context, _ []string) {
 		openBrowser(dashURL)
 	}
 
+	// Run an auth-free verify smoke after the stack is healthy.
+	// Non-blocking: failures print a hint but never prevent 'up' from succeeding.
+	// Set PELICULA_SKIP_VERIFY=1 to suppress (e.g. pelicula test isolated stack startup).
+	runUpSmoke(ctx.ScriptDir, port)
+
 	fmt.Println()
 
 }
@@ -318,4 +327,60 @@ func lanIP() string {
 		return "localhost"
 	}
 	return ips[0].String()
+}
+
+// runUpSmoke runs tests/verify.sh --skip-auth against the local stack after
+// it becomes healthy. It is non-blocking: a smoke failure prints a clear hint
+// but never causes 'pelicula up' to exit non-zero.
+//
+// Skipped entirely when:
+//   - PELICULA_SKIP_VERIFY=1 is set in the environment
+//   - running on Windows (bash not available)
+func runUpSmoke(scriptDir, port string) {
+	if os.Getenv("PELICULA_SKIP_VERIFY") != "" {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	verifyScript := filepath.Join(scriptDir, "tests", "verify.sh")
+	if _, err := os.Stat(verifyScript); err != nil {
+		// verify.sh missing — skip silently (older checkouts, partial installs)
+		return
+	}
+
+	fmt.Println()
+	info("Running post-deploy verify smoke (auth-free)...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", verifyScript, "--skip-auth", "--target", "localhost:"+port)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	err := cmd.Run()
+
+	// Parse "Results: N passed, M failed" from verify.sh output.
+	reResults := regexp.MustCompile(`(\d+) passed, (\d+) failed`)
+	match := reResults.FindStringSubmatch(out.String())
+
+	if err == nil {
+		if match != nil {
+			pass("verify smoke: " + match[1] + " passed, 0 failed")
+		} else {
+			pass("verify smoke passed")
+		}
+		return
+	}
+
+	// Smoke failed (or timed out) — surface a hint, never block 'up'.
+	if match != nil {
+		warn("verify smoke: " + match[1] + " passed, " + match[2] + " failed")
+	} else {
+		warn("verify smoke reported failures")
+	}
+	fmt.Printf("  Run %s for details (this does not block 'up')\n", bold("pelicula verify"))
 }
