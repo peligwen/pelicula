@@ -244,10 +244,6 @@ WebUI\CSRFProtection=false
 [BitTorrent]
 Session\DefaultSavePath=/downloads/'
 
-    # nginx bind-mounts this file; without it Docker creates a directory and nginx fails to start
-    mkdir -p "$test_config_dir/nginx"
-    echo "# Remote access disabled" > "$test_config_dir/nginx/remote.conf"
-
     t_pass "Environment initialized"
 
     # ── Stage 1: Start Stack ──────────────────────────

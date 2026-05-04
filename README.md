@@ -177,10 +177,9 @@ Role capabilities: **viewer** sees the dashboard and can submit content requests
 
 ## Security
 
-Pelicula is designed for a trusted LAN. See [SECURITY.md](SECURITY.md) for
-the threat model, known limitations, and how to report a vulnerability
-privately. The opt-in Peligrosa remote access feature exposes **only
-Jellyfin** over TLS — never the admin stack.
+Pelicula is designed for a trusted LAN. Port 7354 is never intended for internet exposure. See [SECURITY.md](SECURITY.md) for the threat model, known limitations, and how to report a vulnerability privately.
+
+For external Jellyfin access, enable Jellyfin's built-in HTTPS on port 8920 and port-forward it on your router. See [docs/PELIGROSA.md](docs/PELIGROSA.md#exposing-jellyfin-externally) for details.
 
 ## Feature Coverage
 
@@ -262,12 +261,10 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | `pelicula test` | ✓ e2e.sh (this command runs the suite) | ☐ |
 | `pelicula doctor` | — | ☐ |
 | **Security** | | |
-| Peligrosa remote access (Jellyfin-only, TLS) | — | ☐ |
+| Auth + CSRF guards (LAN-only, session-cookie) | ✓ e2e.sh (login flow, session, CSRF origin check) | ☐ |
 
 > **Claimed in other docs — candidates to promote or drop from README:**
 > - Open registration toggle (`PELICULA_OPEN_REGISTRATION`, LAN-only) — [PELIGROSA.md](docs/PELIGROSA.md)
-> - Peligrosa cert modes: Let's Encrypt / BYO cert / self-signed — [PELIGROSA.md](docs/PELIGROSA.md)
-> - Remote role capping (admin forced to viewer on remote vhost) — [PELIGROSA.md](docs/PELIGROSA.md)
 > - Backup export/import v1→v2 auto-migration — [API.md](docs/API.md)
 > - Now-playing Jellyfin sessions card — [API.md](docs/API.md)
 > - Notifications feed merges Procula + *arr history — [API.md](docs/API.md)

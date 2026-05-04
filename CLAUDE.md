@@ -61,14 +61,14 @@ Services not behind nginx: `docker-proxy` (tecnativa/docker-socket-proxy, expose
 
 **pelicula-api** auto-wires the *arr stack on startup and serves the dashboard API. **procula** handles post-import processing (validate → transcode → catalog). **qBittorrent and Prowlarr run on gluetun's network namespace** — reachable at `gluetun:8080` and `gluetun:9696` respectively, not their own container names.
 
-Remote Jellyfin access (Peligrosa) is opt-in — see docs/PELIGROSA.md.
+**Pelicula is LAN-only on port 7354.** Jellyfin's built-in HTTPS on port 8920 is the only externally exposed surface; the operator handles port-forwarding. Pelicula does not orchestrate certs. See docs/PELIGROSA.md for auth, invites, and the LAN threat model.
 
 ## Key Constraints
 
 - **Gluetun** is pinned to `v3.41.0` — the `latest` tag tracks an unstable dev branch
 - **ProtonVPN requires a paid plan** (Plus or higher) — free tier lacks P2P and port forwarding
 - **Do NOT enable "Moderate NAT"** when generating the WireGuard key — incompatible with port forwarding
-- **Self-signed HTTPS breaks Chrome** — Chrome blocks JS on self-signed cert pages. Default to HTTP for LAN.
+- **Jellyfin HTTPS (8920)** — Jellyfin's built-in HTTPS uses a self-signed cert by default; browsers warn. Operator can supply a CA-signed cert via Jellyfin admin or use DSM's reverse proxy. Pelicula's LAN dashboard (7354) is HTTP-only.
 - **LinuxServer.io images are Alpine-based** — healthchecks use `wget`, not `curl`
 - **Both Go services use `modernc.org/sqlite`** — the single external dependency (pure-Go SQLite driver, no CGO). The Go CLI (`cmd/pelicula/`) is stdlib-only.
 - **qBittorrent v5** renamed pause/resume to stop/start — middleware uses the v5 endpoints
@@ -95,7 +95,7 @@ Remote Jellyfin access (Peligrosa) is opt-in — see docs/PELIGROSA.md.
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — compose overlays, middleware startup/auto-wiring, config seeding + `enforce_arr_auth()`, platform detection, nginx file map
 - [API.md](docs/API.md) — full `/api/pelicula/*` endpoint catalog with auth levels
-- [PELIGROSA.md](docs/PELIGROSA.md) — user interaction safety layer: threat model, auth, users, invites, request queue, webhook secret, CSRF, remote vhost hardening, known limitations
+- [PELIGROSA.md](docs/PELIGROSA.md) — user interaction safety layer: threat model (LAN-only + Jellyfin-direct-8920), auth, users, invites, request queue, webhook secret, CSRF, known limitations
 - [PROCULA.md](docs/PROCULA.md) — processing pipeline internals (queue, validate, transcode, catalog, storage)
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure policy (threat model and known limitations are in docs/PELIGROSA.md)
 - [ROADMAP.md](docs/ROADMAP.md) — shipped features, deferred items, and project history

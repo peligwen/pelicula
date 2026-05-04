@@ -7,8 +7,7 @@
 #        sub_langs, notifications_mode, search_mode, transcoding_enabled
 #      These are display/toggle settings that have no side effects on the
 #      running stack (no container restart, no VPN change, no port remapping).
-#      Avoids open_registration (exercised by bug4), port, remote_*, and
-#      wireguard_key.
+#      Avoids open_registration (exercised by bug4), port, and wireguard_key.
 #
 # All checks require pelicula admin session auth.
 # Run auth-free portions only:
