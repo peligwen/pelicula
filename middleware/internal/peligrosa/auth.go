@@ -201,23 +201,6 @@ func (a *Auth) GuardAdmin(next http.Handler) http.Handler {
 	return a.guardRole(next, RoleAdmin)
 }
 
-// isRemoteRequest reports whether the request arrived via the remote (Peligrosa)
-// nginx vhost. The remote vhost injects X-Pelicula-Remote: true; the LAN vhost
-// strips the header to prevent spoofing. See nginx/remote.conf.template.
-func isRemoteRequest(r *http.Request) bool {
-	return r.Header.Get("X-Pelicula-Remote") == "true"
-}
-
-// effectiveRole returns the role to enforce for this request. Remote requests
-// are capped to viewer regardless of the stored role — defense-in-depth so that
-// a compromised admin credential cannot escalate via the remote vhost.
-func effectiveRole(sess session, r *http.Request) UserRole {
-	if isRemoteRequest(r) && sess.role.atLeast(RoleManager) {
-		return RoleViewer
-	}
-	return sess.role
-}
-
 func (a *Auth) guardRole(next http.Handler, minRole UserRole) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := a.getSession(r)
@@ -230,7 +213,7 @@ func (a *Auth) guardRole(next http.Handler, minRole UserRole) http.Handler {
 			httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if !effectiveRole(sess, r).atLeast(minRole) {
+		if !sess.role.atLeast(minRole) {
 			httputil.WriteError(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -392,8 +375,7 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 		"auth":     true,
 		"valid":    true,
 		"username": sess.username,
-		"role":     string(effectiveRole(sess, r)),
-		"remote":   isRemoteRequest(r),
+		"role":     string(sess.role),
 	})
 }
 
@@ -402,7 +384,7 @@ func (a *Auth) HandleCheck(w http.ResponseWriter, r *http.Request) {
 // ("(loopback)", RoleAdmin, true); (3) otherwise ("", "", false).
 func (a *Auth) SessionFor(r *http.Request) (username string, role UserRole, ok bool) {
 	if sess, sOk := a.getSession(r); sOk {
-		return sess.username, effectiveRole(sess, r), true
+		return sess.username, sess.role, true
 	}
 	if loopbackAutoSession(r) {
 		return "(loopback)", RoleAdmin, true
