@@ -92,7 +92,6 @@ func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
 		filepath.Join(configDir, "procula", "profiles"),
 		filepath.Join(configDir, "pelicula"),
 		filepath.Join(configDir, "certs"),
-		filepath.Join(configDir, "certs", "acme-webroot"),
 		filepath.Join(workDir, "downloads"),
 		filepath.Join(workDir, "downloads", "incomplete"),
 		filepath.Join(workDir, "downloads", "radarr"),

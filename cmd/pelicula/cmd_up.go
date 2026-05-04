@@ -170,23 +170,11 @@ func cmdUp(ctx *Context, _ []string) {
 		warn("TLS cert generation failed: " + err.Error())
 	}
 
-	// Render remote configs
-	if err := RenderRemoteConfigs(ctx.ScriptDir, env); err != nil {
-		fatal(err.Error())
-	}
-
 	// Check /dev/net/tun on Linux
 	if err := CheckTUN(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s%s%s Run %s to create it.\n",
 			colorRed, err.Error(), colorReset, bold("pelicula up"))
 		os.Exit(1)
-	}
-
-	// Ensure nginx remote.conf placeholder exists (needed even when remote is disabled)
-	nginxRemoteConf := filepath.Join(configDir, "nginx", "remote.conf")
-	if _, err := os.Stat(nginxRemoteConf); err != nil {
-		_ = os.MkdirAll(filepath.Join(configDir, "nginx"), 0755)
-		_ = os.WriteFile(nginxRemoteConf, []byte("# Remote access disabled\n"), 0644)
 	}
 
 	// Seed all service configs
@@ -235,44 +223,13 @@ func cmdUp(ctx *Context, _ []string) {
 	fmt.Printf("%s%sStack is running!%s\n", colorGreen, colorBold, colorReset)
 
 	host := lanIP()
-	remoteEnabled := isRemoteEnabled(env)
 
 	fmt.Println()
-	if remoteEnabled {
-		fmt.Printf("  %sDashboard (LAN only)%s\n", colorBold, colorReset)
-	} else {
-		fmt.Printf("  %sDashboard%s\n", colorBold, colorReset)
-	}
+	fmt.Printf("  %sDashboard%s\n", colorBold, colorReset)
 	fmt.Printf("  http://%s:%s/\n", host, port)
 	fmt.Println()
 	fmt.Printf("  %sJellyfin%s\n", colorBold, colorReset)
 	fmt.Printf("  http://%s:%s/jellyfin/\n", host, port)
-
-	// Remote access section
-	if remoteEnabled {
-		rHost := env["REMOTE_HOSTNAME"]
-		rHTTPS := envDefault(env, "REMOTE_HTTPS_PORT", "8920")
-		if rHost != "" {
-			fmt.Println()
-			fmt.Printf("  %sRemote Jellyfin%s\n", colorBold, colorReset)
-			fmt.Println("  ────────────────────────────────────────────")
-			fmt.Printf("  https://%s:%s/\n", rHost, rHTTPS)
-			fmt.Println()
-			fmt.Printf("  Port forwarding: route port %s to this machine.\n", rHTTPS)
-			fmt.Printf("  Do %sNOT%s forward port %s — it exposes admin tools.\n", colorBold, colorReset, port)
-		} else {
-			fmt.Println()
-			fmt.Printf("  %sRemote Jellyfin (simple mode)%s\n", colorBold, colorReset)
-			fmt.Println("  ────────────────────────────────────────────")
-			fmt.Printf("  https://%s:%s/\n", host, rHTTPS)
-			fmt.Println()
-			fmt.Printf("  Certificate: self-signed. TV apps accept it automatically;\n")
-			fmt.Printf("  browsers will show a security warning — click through to proceed.\n")
-			fmt.Println()
-			fmt.Printf("  Port forwarding: route port %s to this machine.\n", rHTTPS)
-			fmt.Printf("  Do %sNOT%s forward port %s — it exposes admin tools.\n", colorBold, colorReset, port)
-		}
-	}
 
 	// Check if any admin has registered yet. The middleware may still be
 	// starting, so poll for up to 15 seconds before giving up quietly.

@@ -53,8 +53,8 @@ func (ctx *Context) newCompose() *Compose {
 }
 
 // composeInvocation builds a fully configured *Compose with compose profiles
-// (vpn, apprise) set from ctx.Env. Overlay files (override.yml, remote.yml,
-// libraries.yml) are detected dynamically in Compose.buildArgs() as before.
+// (vpn, apprise) set from ctx.Env. Overlay files (override.yml, libraries.yml)
+// are detected dynamically in Compose.buildArgs() as before.
 //
 // If ctx.Env is nil the returned Compose has no profiles — suitable for
 // commands that run before .env exists (e.g. the setup wizard path in up).
@@ -69,6 +69,5 @@ func composeInvocation(ctx *Context) *Compose {
 	if envDefault(ctx.Env, "NOTIFICATIONS_MODE", "internal") == "apprise" {
 		c.profiles = append(c.profiles, "apprise")
 	}
-	c.remoteMode = ctx.Env["REMOTE_MODE"] // "" means portforward (existing behaviour)
 	return c
 }

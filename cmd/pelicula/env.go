@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -29,13 +30,6 @@ var envKeyOrder = []string{
 	"TRANSCODING_ENABLED",
 	"NOTIFICATIONS_ENABLED",
 	"NOTIFICATIONS_MODE",
-	"REMOTE_MODE",
-	"REMOTE_HOSTNAME",
-	"REMOTE_HTTP_PORT",
-	"REMOTE_HTTPS_PORT",
-	"REMOTE_CERT_MODE",
-	"REMOTE_LE_EMAIL",
-	"REMOTE_LE_STAGING",
 	"CLOUDFLARE_TUNNEL_TOKEN",
 	"TAILSCALE_AUTH_KEY",
 	"TAILSCALE_HOSTNAME",
@@ -196,22 +190,52 @@ func MigrateEnv(path string) (bool, error) {
 		changed = true
 	}
 
-	// Migration 5: REMOTE_ACCESS_ENABLED → REMOTE_MODE
-	// Always drop the legacy key when present. If REMOTE_MODE is unset, seed
-	// it from the legacy value; otherwise REMOTE_MODE is already authoritative
-	// (e.g. cloudflared/tailscale, or a stale REMOTE_ACCESS_ENABLED rewritten
-	// by an older middleware that didn't know about REMOTE_MODE).
-	if oldVal, hasOld := m["REMOTE_ACCESS_ENABLED"]; hasOld {
-		if m["REMOTE_MODE"] == "" {
-			if oldVal == "true" {
-				m["REMOTE_MODE"] = "portforward"
-				info("Migrated REMOTE_ACCESS_ENABLED=true → REMOTE_MODE=portforward")
-			} else {
-				m["REMOTE_MODE"] = "disabled"
-				info("Migrated REMOTE_ACCESS_ENABLED=false → REMOTE_MODE=disabled")
+	// Migration 5: retire remote-vhost layer.
+	// Detect any legacy REMOTE_* keys and strip them on first run. Print a
+	// one-time notice explaining that Pelicula no longer manages remote vhost /
+	// certbot, and that Jellyfin's built-in HTTPS on port 8920 is the supported
+	// external surface. Cleans up generated cert directories.
+	// Idempotent: second run finds no REMOTE_* keys and is a no-op.
+	remoteKeys := []string{
+		"REMOTE_MODE",
+		"REMOTE_HOSTNAME",
+		"REMOTE_CERT_MODE",
+		"REMOTE_LE_EMAIL",
+		"REMOTE_LE_STAGING",
+		"REMOTE_HTTPS_PORT",
+		"REMOTE_HTTP_PORT",
+		"REMOTE_ACCESS_ENABLED",
+	}
+	remoteFound := false
+	for _, k := range remoteKeys {
+		if _, ok := m[k]; ok {
+			remoteFound = true
+			break
+		}
+	}
+	if remoteFound {
+		info("Pelicula no longer manages the remote vhost or certbot certificates.")
+		info("Jellyfin's built-in HTTPS on port 8920 is the supported external surface.")
+		info("LAN dashboard stays on port 7354. Port-forward 8920 via DSM / your router.")
+		info("See docs/PELIGROSA.md for the updated threat model.")
+		for _, k := range remoteKeys {
+			delete(m, k)
+		}
+		// Clean up cert directories written by the old remote-vhost layer.
+		configDir := m["CONFIG_DIR"]
+		if configDir != "" {
+			for _, d := range []string{
+				configDir + "/certs/acme-webroot",
+				configDir + "/certs/letsencrypt",
+				configDir + "/certs/remote",
+			} {
+				_ = os.RemoveAll(d)
 			}
 		}
-		delete(m, "REMOTE_ACCESS_ENABLED")
+		// Best-effort remove the generated compose overlay (may not exist).
+		// The .env lives at <scriptDir>/.env; compose overlay is at <scriptDir>/compose/docker-compose.remote.yml.
+		remoteCompose := filepath.Join(filepath.Dir(path), "compose", "docker-compose.remote.yml")
+		_ = os.Remove(remoteCompose)
 		changed = true
 	}
 
@@ -221,12 +245,12 @@ func MigrateEnv(path string) (bool, error) {
 	return false, nil
 }
 
-// isRemoteEnabled reports whether remote access is enabled in the given env.
-// It checks REMOTE_MODE (the current key) — remote is enabled when the value
-// is non-empty and is not "disabled". Returns false for an unset or empty key.
-func isRemoteEnabled(env EnvMap) bool {
-	mode := env["REMOTE_MODE"]
-	return mode != "" && mode != "disabled"
+// envDefault returns env[key] if non-empty, else defaultVal.
+func envDefault(env EnvMap, key, defaultVal string) string {
+	if v, ok := env[key]; ok && v != "" {
+		return v
+	}
+	return defaultVal
 }
 
 // sanitizeEnvValue strips characters that would break the KEY="value" .env format:

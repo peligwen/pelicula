@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -293,11 +294,12 @@ NOTIFICATIONS_MODE=internal
 	}
 }
 
-// TestMigrateEnv_RemoteAccessEnabledToRemoteMode covers Migration 5:
-// REMOTE_ACCESS_ENABLED is replaced by REMOTE_MODE and removed from the env file.
-func TestMigrateEnv_RemoteAccessEnabledToRemoteMode(t *testing.T) {
-	// baseContent is a fully-migrated env minus Migration 5 keys.
-	const baseContent = `CONFIG_DIR="/config"
+// TestMigrateEnv_RetireRemoteVhost covers Migration 5:
+// any REMOTE_* keys (and REMOTE_ACCESS_ENABLED) are stripped, cert dirs cleaned,
+// and the compose overlay removed. The migration is idempotent.
+func TestMigrateEnv_RetireRemoteVhost(t *testing.T) {
+	// baseContent is a fully-migrated env with no REMOTE_* keys.
+	const baseContent = `CONFIG_DIR="%s"
 LIBRARY_DIR="/media"
 WORK_DIR="/media"
 PUID="1000"
@@ -313,102 +315,185 @@ NOTIFICATIONS_MODE="internal"
 PELICULA_PROJECT_NAME="pelicula"
 `
 
-	cases := []struct {
-		name             string
-		extra            string // additional lines appended to baseContent
-		wantChanged      bool
-		wantRemoteMode   string
-		wantOldKeyAbsent bool
-	}{
-		{
-			name:             "old key true migrates to portforward and is removed",
-			extra:            "REMOTE_ACCESS_ENABLED=\"true\"\n",
-			wantChanged:      true,
-			wantRemoteMode:   "portforward",
-			wantOldKeyAbsent: true,
-		},
-		{
-			name:             "old key false migrates to disabled and is removed",
-			extra:            "REMOTE_ACCESS_ENABLED=\"false\"\n",
-			wantChanged:      true,
-			wantRemoteMode:   "disabled",
-			wantOldKeyAbsent: true,
-		},
-		{
-			name:           "only new key present — no change",
-			extra:          "REMOTE_MODE=\"portforward\"\n",
-			wantChanged:    false,
-			wantRemoteMode: "portforward",
-		},
-		{
-			// A stale REMOTE_ACCESS_ENABLED rewritten by an older middleware
-			// alongside an existing REMOTE_MODE: the migration must drop the
-			// legacy key, leaving REMOTE_MODE authoritative. Without this, the
-			// CLI and middleware can disagree about the remote-access state.
-			name:             "both keys present — legacy dropped, REMOTE_MODE wins",
-			extra:            "REMOTE_MODE=\"portforward\"\nREMOTE_ACCESS_ENABLED=\"false\"\n",
-			wantChanged:      true,
-			wantRemoteMode:   "portforward",
-			wantOldKeyAbsent: true,
-		},
-		{
-			name:        "both absent — no change to remote keys",
-			extra:       "",
-			wantChanged: false,
-		},
-	}
+	t.Run("strips REMOTE_MODE=portforward and all aux keys", func(t *testing.T) {
+		dir := t.TempDir()
+		configDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		envPath := filepath.Join(dir, ".env")
+		content := fmt.Sprintf(baseContent, configDir) +
+			"REMOTE_MODE=\"portforward\"\n" +
+			"REMOTE_HOSTNAME=\"media.example.com\"\n" +
+			"REMOTE_CERT_MODE=\"letsencrypt\"\n" +
+			"REMOTE_LE_EMAIL=\"admin@example.com\"\n" +
+			"REMOTE_LE_STAGING=\"false\"\n" +
+			"REMOTE_HTTPS_PORT=\"8920\"\n" +
+			"REMOTE_HTTP_PORT=\"80\"\n"
+		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, ".env")
-			if err := os.WriteFile(path, []byte(baseContent+tc.extra), 0600); err != nil {
+		changed, err := MigrateEnv(envPath)
+		if err != nil {
+			t.Fatalf("MigrateEnv error: %v", err)
+		}
+		if !changed {
+			t.Error("expected changed=true when REMOTE_* keys present")
+		}
+
+		m, err := ParseEnv(envPath)
+		if err != nil {
+			t.Fatalf("ParseEnv error: %v", err)
+		}
+		for _, k := range []string{
+			"REMOTE_MODE", "REMOTE_HOSTNAME", "REMOTE_CERT_MODE",
+			"REMOTE_LE_EMAIL", "REMOTE_LE_STAGING", "REMOTE_HTTPS_PORT",
+			"REMOTE_HTTP_PORT", "REMOTE_ACCESS_ENABLED",
+		} {
+			if _, ok := m[k]; ok {
+				t.Errorf("key %q should have been removed by migration but is still present", k)
+			}
+		}
+		// Non-remote keys must survive.
+		if m["PELICULA_PORT"] != "7354" {
+			t.Errorf("PELICULA_PORT unexpectedly missing or changed: %q", m["PELICULA_PORT"])
+		}
+	})
+
+	t.Run("cert dirs are removed", func(t *testing.T) {
+		dir := t.TempDir()
+		configDir := filepath.Join(dir, "config")
+		// Create the cert dirs the old layer would have created.
+		for _, sub := range []string{"certs/acme-webroot", "certs/letsencrypt", "certs/remote"} {
+			if err := os.MkdirAll(filepath.Join(configDir, sub), 0755); err != nil {
 				t.Fatal(err)
 			}
-
-			changed, err := MigrateEnv(path)
-			if err != nil {
-				t.Fatalf("MigrateEnv error: %v", err)
-			}
-			if changed != tc.wantChanged {
-				t.Errorf("changed=%v, want %v", changed, tc.wantChanged)
-			}
-
-			m, err := ParseEnv(path)
-			if err != nil {
-				t.Fatalf("ParseEnv error: %v", err)
-			}
-
-			if tc.wantRemoteMode != "" {
-				if got := m["REMOTE_MODE"]; got != tc.wantRemoteMode {
-					t.Errorf("REMOTE_MODE=%q, want %q", got, tc.wantRemoteMode)
-				}
-			}
-			if tc.wantOldKeyAbsent {
-				if _, ok := m["REMOTE_ACCESS_ENABLED"]; ok {
-					t.Error("REMOTE_ACCESS_ENABLED should be absent after migration but was found")
-				}
-			}
-		})
-	}
-}
-
-// TestIsRemoteEnabled verifies the isRemoteEnabled helper.
-func TestIsRemoteEnabled(t *testing.T) {
-	cases := []struct {
-		mode string
-		want bool
-	}{
-		{"portforward", true},
-		{"cloudflared", true},
-		{"tailscale", true},
-		{"disabled", false},
-		{"", false},
-	}
-	for _, c := range cases {
-		env := EnvMap{"REMOTE_MODE": c.mode}
-		if got := isRemoteEnabled(env); got != c.want {
-			t.Errorf("isRemoteEnabled(REMOTE_MODE=%q) = %v, want %v", c.mode, got, c.want)
 		}
-	}
+		envPath := filepath.Join(dir, ".env")
+		content := fmt.Sprintf(baseContent, configDir) + "REMOTE_MODE=\"portforward\"\n"
+		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := MigrateEnv(envPath); err != nil {
+			t.Fatalf("MigrateEnv error: %v", err)
+		}
+
+		for _, sub := range []string{"certs/acme-webroot", "certs/letsencrypt", "certs/remote"} {
+			p := filepath.Join(configDir, sub)
+			if _, err := os.Stat(p); !os.IsNotExist(err) {
+				t.Errorf("cert dir %q should have been removed but still exists", p)
+			}
+		}
+	})
+
+	t.Run("compose overlay is removed if present", func(t *testing.T) {
+		dir := t.TempDir()
+		configDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create compose subdirectory and stub overlay.
+		composeDir := filepath.Join(dir, "compose")
+		if err := os.MkdirAll(composeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		overlayPath := filepath.Join(composeDir, "docker-compose.remote.yml")
+		if err := os.WriteFile(overlayPath, []byte("# stub\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		envPath := filepath.Join(dir, ".env")
+		content := fmt.Sprintf(baseContent, configDir) + "REMOTE_MODE=\"portforward\"\n"
+		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := MigrateEnv(envPath); err != nil {
+			t.Fatalf("MigrateEnv error: %v", err)
+		}
+
+		if _, err := os.Stat(overlayPath); !os.IsNotExist(err) {
+			t.Errorf("docker-compose.remote.yml should have been removed but still exists")
+		}
+	})
+
+	t.Run("idempotent — second run is a no-op", func(t *testing.T) {
+		dir := t.TempDir()
+		configDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		envPath := filepath.Join(dir, ".env")
+		content := fmt.Sprintf(baseContent, configDir) + "REMOTE_MODE=\"portforward\"\n"
+		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		// First run — should apply migration.
+		if _, err := MigrateEnv(envPath); err != nil {
+			t.Fatalf("first MigrateEnv error: %v", err)
+		}
+
+		// Second run — no REMOTE_* keys remain; must return changed=false.
+		changed, err := MigrateEnv(envPath)
+		if err != nil {
+			t.Fatalf("second MigrateEnv error: %v", err)
+		}
+		if changed {
+			t.Error("second MigrateEnv returned changed=true but should be idempotent no-op")
+		}
+	})
+
+	t.Run("clean env without REMOTE keys is a no-op", func(t *testing.T) {
+		dir := t.TempDir()
+		configDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		envPath := filepath.Join(dir, ".env")
+		// Write a fully-migrated env with no REMOTE_* keys.
+		content := fmt.Sprintf(baseContent, configDir)
+		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		changed, err := MigrateEnv(envPath)
+		if err != nil {
+			t.Fatalf("MigrateEnv error: %v", err)
+		}
+		if changed {
+			t.Error("MigrateEnv returned changed=true for env with no REMOTE_* keys")
+		}
+	})
+
+	t.Run("REMOTE_ACCESS_ENABLED legacy key also stripped", func(t *testing.T) {
+		dir := t.TempDir()
+		configDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		envPath := filepath.Join(dir, ".env")
+		content := fmt.Sprintf(baseContent, configDir) + "REMOTE_ACCESS_ENABLED=\"true\"\n"
+		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		changed, err := MigrateEnv(envPath)
+		if err != nil {
+			t.Fatalf("MigrateEnv error: %v", err)
+		}
+		if !changed {
+			t.Error("expected changed=true when REMOTE_ACCESS_ENABLED present")
+		}
+
+		m, err := ParseEnv(envPath)
+		if err != nil {
+			t.Fatalf("ParseEnv error: %v", err)
+		}
+		if _, ok := m["REMOTE_ACCESS_ENABLED"]; ok {
+			t.Error("REMOTE_ACCESS_ENABLED should be absent after migration")
+		}
+	})
 }
