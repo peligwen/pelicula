@@ -85,44 +85,6 @@ func TestApply_JellyfinPublishedURL_AppliedInPlace(t *testing.T) {
 	}
 }
 
-func TestApply_RemoteHostnameChange_Pending(t *testing.T) {
-	_, h := newSettingsEnv(t)
-	applier, _, restart, _ := stubApplier()
-	h.Apply = applier
-
-	rec := postSettings(t, h, settingsResponse{
-		RemoteAccessEnabled: "true",
-		RemoteHostname:      "media.example.com",
-	})
-	resp := decodeApply(t, rec)
-
-	if !resp.RequiresPeliculaUp {
-		t.Error("requires_pelicula_up should be true for remote hostname change")
-	}
-	if !contains(resp.Pending, "Remote hostname") || !contains(resp.Pending, "Remote access enabled") {
-		t.Errorf("Pending = %v, want includes hostname + access toggle (REMOTE_MODE → enabled)", resp.Pending)
-	}
-	if restart.Load() != 0 {
-		t.Errorf("Jellyfin restart should NOT fire for remote-only changes (got %d calls)", restart.Load())
-	}
-}
-
-func TestApply_PortChange_Pending(t *testing.T) {
-	_, h := newSettingsEnv(t)
-	applier, _, _, _ := stubApplier()
-	h.Apply = applier
-
-	rec := postSettings(t, h, settingsResponse{RemoteHTTPSPort: "9443"})
-	resp := decodeApply(t, rec)
-
-	if !resp.RequiresPeliculaUp {
-		t.Error("requires_pelicula_up should be true for port change")
-	}
-	if !containsContains(resp.Pending, "9443") {
-		t.Errorf("Pending = %v, want includes new port number", resp.Pending)
-	}
-}
-
 func TestApply_NoChange_NothingApplied(t *testing.T) {
 	_, h := newSettingsEnv(t)
 	applier, seed, restart, _ := stubApplier()

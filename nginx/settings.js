@@ -58,36 +58,6 @@ function updateSubsSummary() {
     el.textContent = text;
 }
 
-function updateRemoteSummary() {
-    const el = document.getElementById('st-remote-summary-status');
-    if (!el) return;
-    const ms = _settingsData.middleware || {};
-    const dot = document.createElement('span');
-    if (ms.remote_access_enabled === 'true') {
-        dot.className = 'status-dot active';
-        el.textContent = '';
-        el.appendChild(dot);
-        if (ms.remote_hostname) {
-            const cert = ms.remote_cert_mode || 'self-signed';
-            el.appendChild(document.createTextNode(ms.remote_hostname + ' \u00b7 ' + cert));
-        } else {
-            el.appendChild(document.createTextNode('simple mode \u00b7 self-signed'));
-        }
-    } else {
-        dot.className = 'status-dot inactive';
-        el.textContent = '';
-        el.appendChild(dot);
-        el.appendChild(document.createTextNode('Disabled'));
-    }
-}
-
-function updateCertMode() {
-    const mode = document.querySelector('input[name="st-cert-mode"]:checked');
-    const leOpts = document.getElementById('st-le-opts');
-    if (!leOpts) return;
-    leOpts.style.display = (mode && mode.value === 'letsencrypt') ? '' : 'none';
-}
-
 // ── Settings load / save ──────────────────────────────────────────────────
 
 async function loadSettingsTab() {
@@ -119,23 +89,7 @@ async function loadSettingsTab() {
             setToggle('st-open-registration', ms.open_registration === 'true' || ms.open_registration === true);
             const searchMode = ms.search_mode || 'tmdb';
             document.querySelectorAll('input[name="search_mode"]').forEach(r => { r.checked = r.value === searchMode; });
-
-            // Remote access
-            setToggle('st-remote-enabled', ms.remote_access_enabled === 'true');
-            const hostname = document.getElementById('st-remote-hostname');
-            if (hostname) hostname.value = ms.remote_hostname || '';
-            const httpPort = document.getElementById('st-remote-http-port');
-            if (httpPort) httpPort.value = ms.remote_http_port || '';
-            const httpsPort = document.getElementById('st-remote-https-port');
-            if (httpsPort) httpsPort.value = ms.remote_https_port || '';
-            const certMode = ms.remote_cert_mode || 'self-signed';
-            document.querySelectorAll('input[name="st-cert-mode"]').forEach(r => { r.checked = r.value === certMode; });
-            updateCertMode();
-            const leEmail = document.getElementById('st-le-email');
-            if (leEmail) leEmail.value = ms.remote_le_email || '';
-            setToggle('st-le-staging', ms.remote_le_staging === 'true');
         }
-        updateRemoteSummary();
         updateSubsSummary();
         _settingsLoaded = true;
     } catch (e) { console.warn('[pelicula] settings load error:', e); }
@@ -194,36 +148,6 @@ async function saveSubtitlesDrawer() {
         }
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Save failed';
-    }
-}
-
-async function saveRemoteAccess() {
-    const statusEl = document.getElementById('st-remote-save-status');
-    if (statusEl) statusEl.textContent = 'Saving\u2026';
-    const certMode = document.querySelector('input[name="st-cert-mode"]:checked');
-    const body = {
-        remote_access_enabled: document.getElementById('st-remote-enabled')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
-        remote_hostname:       document.getElementById('st-remote-hostname')?.value.trim() || '',
-        remote_http_port:      document.getElementById('st-remote-http-port')?.value.trim() || '',
-        remote_https_port:     document.getElementById('st-remote-https-port')?.value.trim() || '',
-        remote_cert_mode:      certMode ? certMode.value : 'self-signed',
-        remote_le_email:       document.getElementById('st-le-email')?.value.trim() || '',
-        remote_le_staging:     document.getElementById('st-le-staging')?.getAttribute('aria-checked') === 'true' ? 'true' : 'false',
-    };
-    try {
-        const result = await post('/api/pelicula/settings', body);
-        if (result === null) {
-            if (statusEl) statusEl.textContent = 'Save failed: session expired \u2014 please reload';
-            return;
-        }
-        applySaveFeedback(statusEl, result);
-        renderPendingBanner(result);
-        _settingsLoaded = false;
-        await loadSettingsTab();
-        closeSettingsDrawer('remote');
-    } catch (e) {
-        const errMsg = (e.body && e.body.error) || e.message || 'unknown';
-        if (statusEl) statusEl.textContent = 'Save failed: ' + errMsg;
     }
 }
 
@@ -594,7 +518,6 @@ async function unblockRelease(id, btn) {
 // ── Settings drawer helpers ───────────────────────────────────────────────
 
 const _settingsDrawers = {
-    remote:   'st-remote-drawer',
     profiles: 'st-profiles-drawer',
     subs:     'st-subs-drawer',
 };
@@ -680,11 +603,6 @@ document.querySelectorAll('[name="st-notif"]').forEach(r => {
     r.addEventListener('change', updateNotifMode);
 });
 
-// Certificate mode radios
-document.querySelectorAll('[name="st-cert-mode"]').forEach(r => {
-    r.addEventListener('change', updateCertMode);
-});
-
 // Profiles drawer buttons
 document.getElementById('pf-install-defaults-btn')?.addEventListener('click', installDefaultProfiles);
 document.getElementById('pf-save-btn')?.addEventListener('click', saveProfile);
@@ -694,7 +612,6 @@ document.getElementById('pf-cancel-btn')?.addEventListener('click', clearProfile
 document.getElementById('settings-save-btn')?.addEventListener('click', saveSettingsTab);
 document.getElementById('requests-settings-save-btn')?.addEventListener('click', saveRequestsSettings);
 document.getElementById('save-subs-drawer-btn')?.addEventListener('click', saveSubtitlesDrawer);
-document.getElementById('save-remote-drawer-btn')?.addEventListener('click', saveRemoteAccess);
 
 // Wire Space-key handler on all switches present at page load
 wireSwitches();

@@ -85,17 +85,6 @@ type settingsResponse struct {
 	TZ                   string `json:"tz"`
 	PUID                 string `json:"puid"`
 	PGID                 string `json:"pgid"`
-	// Peligrosa remote access. The wire field stays a "true"/"false" string —
-	// the dashboard toggle controls the hardened nginx port-forward vhost. The
-	// .env stores it as REMOTE_MODE ("portforward" / "disabled" / alternative
-	// modes like "cloudflared" or "tailscale"); this handler is the translator.
-	RemoteAccessEnabled string `json:"remote_access_enabled"`
-	RemoteHostname      string `json:"remote_hostname"`
-	RemoteHTTPPort      string `json:"remote_http_port"`
-	RemoteHTTPSPort     string `json:"remote_https_port"`
-	RemoteCertMode      string `json:"remote_cert_mode"`
-	RemoteLEEmail       string `json:"remote_le_email"`
-	RemoteLEStaging     string `json:"remote_le_staging"`
 	// Seeding
 	SeedingRemoveOnComplete string `json:"seeding_remove_on_complete"`
 	// Request queue: per-type quality profile and root folder for approved requests
@@ -157,13 +146,6 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		TZ:                      vars["TZ"],
 		PUID:                    vars["PUID"],
 		PGID:                    vars["PGID"],
-		RemoteAccessEnabled:     remoteAccessEnabledFromMode(vars["REMOTE_MODE"]),
-		RemoteHostname:          vars["REMOTE_HOSTNAME"],
-		RemoteHTTPPort:          vars["REMOTE_HTTP_PORT"],
-		RemoteHTTPSPort:         vars["REMOTE_HTTPS_PORT"],
-		RemoteCertMode:          vars["REMOTE_CERT_MODE"],
-		RemoteLEEmail:           vars["REMOTE_LE_EMAIL"],
-		RemoteLEStaging:         vars["REMOTE_LE_STAGING"],
 		SeedingRemoveOnComplete: vars["SEEDING_REMOVE_ON_COMPLETE"],
 		RequestsRadarrProfileID: vars["REQUESTS_RADARR_PROFILE_ID"],
 		RequestsRadarrRoot:      vars["REQUESTS_RADARR_ROOT"],
@@ -202,35 +184,9 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate remote access fields if being changed
-	if req.RemoteHostname != "" {
-		if strings.ContainsAny(req.RemoteHostname, "\"/ \n\r:") {
-			httputil.WriteError(w, "remote_hostname must be a bare hostname with no scheme, port, or path", http.StatusBadRequest)
-			return
-		}
-	}
-	if req.RemoteCertMode != "" {
-		switch req.RemoteCertMode {
-		case "letsencrypt", "byo", "self-signed":
-			// valid
-		default:
-			httputil.WriteError(w, "remote_cert_mode must be one of: letsencrypt, byo, self-signed", http.StatusBadRequest)
-			return
-		}
-	}
-	if req.RemoteLEEmail != "" && !strings.Contains(req.RemoteLEEmail, "@") {
-		httputil.WriteError(w, "remote_le_email must be a valid email address", http.StatusBadRequest)
+	if err := validatePort(req.Port); err != nil {
+		httputil.WriteError(w, "port "+err.Error(), http.StatusBadRequest)
 		return
-	}
-	for _, p := range []struct{ name, val string }{
-		{"port", req.Port},
-		{"remote_http_port", req.RemoteHTTPPort},
-		{"remote_https_port", req.RemoteHTTPSPort},
-	} {
-		if err := validatePort(p.val); err != nil {
-			httputil.WriteError(w, p.name+" "+err.Error(), http.StatusBadRequest)
-			return
-		}
 	}
 
 	// Validate WireGuard key only if being changed
@@ -251,25 +207,6 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("failed to read .env for update", "error", err)
 		httputil.WriteError(w, "failed to read config", http.StatusInternalServerError)
-		return
-	}
-
-	// Reject port collisions before persisting. The dashboard listener and the
-	// remote vhost share the same nginx instance; binding the same host port
-	// twice fails opaquely at compose time.
-	effPelicula := orDefault(req.Port, vars["PELICULA_PORT"])
-	effRemoteHTTPS := orDefault(req.RemoteHTTPSPort, vars["REMOTE_HTTPS_PORT"])
-	effRemoteHTTP := orDefault(req.RemoteHTTPPort, vars["REMOTE_HTTP_PORT"])
-	if effPelicula != "" && effRemoteHTTPS == effPelicula {
-		httputil.WriteError(w, "remote_https_port must differ from the dashboard port ("+effPelicula+")", http.StatusBadRequest)
-		return
-	}
-	if effPelicula != "" && effRemoteHTTP == effPelicula {
-		httputil.WriteError(w, "remote_http_port must differ from the dashboard port ("+effPelicula+")", http.StatusBadRequest)
-		return
-	}
-	if effRemoteHTTPS != "" && effRemoteHTTP != "" && effRemoteHTTPS == effRemoteHTTP {
-		httputil.WriteError(w, "remote_https_port and remote_http_port must differ", http.StatusBadRequest)
 		return
 	}
 
@@ -326,34 +263,8 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.SubLangs != "" {
 		vars["PELICULA_SUB_LANGS"] = req.SubLangs
 	}
-	if req.RemoteAccessEnabled != "" {
-		applyRemoteModeChange(vars, req.RemoteAccessEnabled)
-	}
-	// Drop the legacy key on every write so old .env files converge to the
-	// REMOTE_MODE schema even when the user isn't toggling remote access.
+	// Drop legacy key on every write so old .env files converge without it.
 	delete(vars, "REMOTE_ACCESS_ENABLED")
-	// RemoteHostname is always written when RemoteAccessEnabled is present in
-	// the payload — an empty hostname is valid (simple mode: self-signed, no DNS).
-	if req.RemoteAccessEnabled != "" {
-		vars["REMOTE_HOSTNAME"] = req.RemoteHostname
-	} else if req.RemoteHostname != "" {
-		vars["REMOTE_HOSTNAME"] = req.RemoteHostname
-	}
-	if req.RemoteHTTPPort != "" {
-		vars["REMOTE_HTTP_PORT"] = req.RemoteHTTPPort
-	}
-	if req.RemoteHTTPSPort != "" {
-		vars["REMOTE_HTTPS_PORT"] = req.RemoteHTTPSPort
-	}
-	if req.RemoteCertMode != "" {
-		vars["REMOTE_CERT_MODE"] = req.RemoteCertMode
-	}
-	if req.RemoteLEEmail != "" {
-		vars["REMOTE_LE_EMAIL"] = req.RemoteLEEmail
-	}
-	if req.RemoteLEStaging != "" {
-		vars["REMOTE_LE_STAGING"] = req.RemoteLEStaging
-	}
 	if req.SeedingRemoveOnComplete != "" {
 		switch req.SeedingRemoveOnComplete {
 		case "true", "false":
@@ -427,25 +338,11 @@ func (h *Handler) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 // applyKeys is the subset of .env keys that the handler diffs and acts on.
 type applyKeys struct {
 	JellyfinPublishedURL string
-	RemoteMode           string
-	RemoteHostname       string
-	RemoteHTTPPort       string
-	RemoteHTTPSPort      string
-	RemoteCertMode       string
-	RemoteLEEmail        string
-	RemoteLEStaging      string
 }
 
 func snapshotApplyKeys(vars map[string]string) applyKeys {
 	return applyKeys{
 		JellyfinPublishedURL: vars["JELLYFIN_PUBLISHED_URL"],
-		RemoteMode:           vars["REMOTE_MODE"],
-		RemoteHostname:       vars["REMOTE_HOSTNAME"],
-		RemoteHTTPPort:       vars["REMOTE_HTTP_PORT"],
-		RemoteHTTPSPort:      vars["REMOTE_HTTPS_PORT"],
-		RemoteCertMode:       vars["REMOTE_CERT_MODE"],
-		RemoteLEEmail:        vars["REMOTE_LE_EMAIL"],
-		RemoteLEStaging:      vars["REMOTE_LE_STAGING"],
 	}
 }
 
@@ -455,10 +352,6 @@ func snapshotApplyKeys(vars map[string]string) applyKeys {
 //
 // In-place:
 //   - JELLYFIN_PUBLISHED_URL → re-seed network.xml + restart Jellyfin
-//
-// Pending (compose-level — needs `pelicula up` to recreate containers with
-// new ports / new sidecars):
-//   - any REMOTE_* change
 //
 // applied is "" if nothing applicable changed; pending is "" if nothing
 // compose-level changed.
@@ -486,37 +379,11 @@ func (h *Handler) applyChanges(prev, next applyKeys) (applied, pending []string)
 		}
 	}
 
-	// Remote-access changes are compose-level (port mapping, sidecar add/remove,
-	// nginx vhost generation). Middleware can't run `docker compose up -d`, so
-	// they are always pending until the user runs `pelicula up`.
-	if prev.RemoteMode != next.RemoteMode {
-		pending = append(pending, "Remote access "+remoteModeLabel(next.RemoteMode))
-	}
-	if prev.RemoteHostname != next.RemoteHostname {
-		pending = append(pending, "Remote hostname")
-	}
-	if prev.RemoteHTTPPort != next.RemoteHTTPPort {
-		pending = append(pending, "Remote HTTP port → "+next.RemoteHTTPPort)
-	}
-	if prev.RemoteHTTPSPort != next.RemoteHTTPSPort {
-		pending = append(pending, "Remote HTTPS port → "+next.RemoteHTTPSPort)
-	}
-	if prev.RemoteCertMode != next.RemoteCertMode {
-		pending = append(pending, "Remote cert mode → "+next.RemoteCertMode)
-	}
-	if prev.RemoteLEEmail != next.RemoteLEEmail {
-		pending = append(pending, "Let's Encrypt email")
-	}
-	if prev.RemoteLEStaging != next.RemoteLEStaging {
-		pending = append(pending, "Let's Encrypt staging toggle")
-	}
-
 	return applied, pending
 }
 
 // validatePort reports whether s parses as a valid TCP port number (1..65535).
-// Empty input is valid (no change requested). Mirror this rule in the CLI's
-// RenderRemoteConfigs so both surfaces reject the same way.
+// Empty input is valid (no change requested).
 func validatePort(s string) error {
 	if s == "" {
 		return nil
@@ -526,45 +393,6 @@ func validatePort(s string) error {
 		return fmt.Errorf("must be a valid port number (1-65535)")
 	}
 	return nil
-}
-
-// remoteAccessEnabledFromMode translates the REMOTE_MODE .env value into the
-// boolean wire field "remote_access_enabled" the dashboard toggle reads. The
-// toggle is specifically about the hardened nginx port-forward vhost; the
-// alternative modes (cloudflared, tailscale) report as "false" so the toggle
-// reflects "port-forward not active" — they are configured manually via .env.
-func remoteAccessEnabledFromMode(mode string) string {
-	if mode == "portforward" {
-		return "true"
-	}
-	return "false"
-}
-
-// applyRemoteModeChange writes REMOTE_MODE based on the boolean wire field
-// from the dashboard. Toggling OFF when the user is on an alternative mode
-// (cloudflared / tailscale) is a no-op — the toggle does not own those modes,
-// so we don't clobber them. Toggling ON always switches to portforward.
-func applyRemoteModeChange(vars map[string]string, remoteAccessEnabled string) {
-	switch remoteAccessEnabled {
-	case "true":
-		vars["REMOTE_MODE"] = "portforward"
-	case "false":
-		if vars["REMOTE_MODE"] == "portforward" || vars["REMOTE_MODE"] == "" {
-			vars["REMOTE_MODE"] = "disabled"
-		}
-	}
-}
-
-// remoteModeLabel renders REMOTE_MODE for the dashboard's pending banner.
-func remoteModeLabel(mode string) string {
-	switch mode {
-	case "portforward":
-		return "enabled"
-	case "disabled", "":
-		return "disabled"
-	default:
-		return "→ " + mode
-	}
 }
 
 // HandleReset handles POST /api/pelicula/settings/reset — resets .env to defaults
@@ -665,13 +493,6 @@ func (h *Handler) HandleReset(w http.ResponseWriter, r *http.Request) {
 		"NOTIFICATIONS_ENABLED":      "false",
 		"NOTIFICATIONS_MODE":         "internal",
 		"PELICULA_SUB_LANGS":         "en",
-		"REMOTE_MODE":                "disabled",
-		"REMOTE_HOSTNAME":            "",
-		"REMOTE_HTTP_PORT":           "80",
-		"REMOTE_HTTPS_PORT":          "8920",
-		"REMOTE_CERT_MODE":           "self-signed",
-		"REMOTE_LE_EMAIL":            "",
-		"REMOTE_LE_STAGING":          "false",
 		"SEEDING_REMOVE_ON_COMPLETE": "false",
 	}
 

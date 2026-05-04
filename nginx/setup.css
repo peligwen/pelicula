@@ -164,18 +164,6 @@ select { cursor: pointer; border-radius: 12px; }
 }
 .restart-notice code { background: var(--peri-l, #eaecfd); padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.8rem; color: var(--periwinkle, #7080e8); border: 1px solid rgba(112,128,232,0.3); }
 
-/* ── Remote Access section ──────── */
-.remote-ports-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.25rem; }
-.remote-ports-row label { margin-top: 1.25rem; }
-.remote-staging-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; margin-bottom: 0.25rem; }
-.remote-staging-label { font-size: 0.72rem; text-transform: none; letter-spacing: 0; color: var(--muted, #9080a8); margin: 0; font-weight: 400; }
-input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink, #f060a8); }
-.remote-byo-notice {
-    background: var(--panel2, #fdf5ff); border: 1.5px solid var(--border, rgba(180,140,220,0.25));
-    border-radius: 12px; padding: 0.75rem 1rem; font-size: 0.78rem; color: var(--muted, #9080a8);
-    margin-top: 0.75rem; line-height: 1.6;
-}
-
 /* ── New wizard elements ─────────── */
 .advanced-toggle {
     font-size: 0.8rem;
@@ -271,8 +259,4 @@ input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--pink,
     font-size: 0.65rem;  /* restore size for the number element */
   }
 
-  /* Remote ports side-by-side grid → single column */
-  .remote-ports-row {
-    grid-template-columns: 1fr;
-  }
 }

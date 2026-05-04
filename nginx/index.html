@@ -513,15 +513,6 @@
                     </label>
                 </div>
 
-                <!-- Remote Access (Peligrosa) -->
-                <div class="settings-panel settings-summary-row admin-only" data-drawer="remote">
-                    <div class="summary-row-left">
-                        <div class="settings-panel-title" style="margin-bottom:0">Remote Access</div>
-                        <div class="summary-row-status" id="st-remote-summary-status"><span class="status-dot inactive"></span>Disabled</div>
-                    </div>
-                    <button class="summary-row-action" data-drawer-btn="remote">Configure <span class="summary-row-chevron">&#8250;</span></button>
-                </div>
-
                 <!-- Pipeline toggles -->
                 <div class="settings-panel">
                     <div class="settings-panel-title">Pipeline</div>
@@ -880,68 +871,6 @@
     <!-- Settings drawers (shared backdrop) -->
     <div class="drawer-backdrop hidden" id="settings-drawer-backdrop"></div>
 
-    <!-- Remote Access settings drawer -->
-    <div class="drawer hidden" id="st-remote-drawer" role="dialog" aria-modal="true" aria-label="Remote access settings">
-        <div class="drawer-header">
-            <div>
-                <div class="drawer-title">Remote Access</div>
-                <div class="drawer-sub">Peligrosa &mdash; serve the dashboard over HTTPS from a public hostname</div>
-            </div>
-            <button class="drawer-close" data-close-drawer="remote">&times;</button>
-        </div>
-        <div class="drawer-body">
-            <label class="toggle-row">
-                <span class="toggle-label">Enable remote access</span>
-                <span class="toggle-sub">Requires a stack restart to activate.</span>
-                <button class="toggle" id="st-remote-enabled" role="switch" data-key="remote_access_enabled">
-                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                </button>
-            </label>
-            <div id="st-remote-opts">
-                <div class="settings-field-row">
-                    <label class="settings-field-label" for="st-remote-hostname">Hostname <span style="font-weight:normal;opacity:0.7">(optional)</span></label>
-                    <span class="settings-field-hint">Leave blank for <strong>simple mode</strong>: self-signed cert, no DNS needed, reachable by IP. Set a bare hostname (e.g. <code>jellyfin.example.com</code>) for full mode with Let&#x2019;s Encrypt or a BYO cert.</span>
-                    <input type="text" id="st-remote-hostname" class="settings-input" placeholder="Leave blank for simple mode">
-                </div>
-                <div class="settings-field-row">
-                    <label class="settings-field-label" for="st-remote-http-port">HTTP port</label>
-                    <input type="number" id="st-remote-http-port" class="settings-input" placeholder="80" min="1" max="65535">
-                </div>
-                <div class="settings-field-row">
-                    <label class="settings-field-label" for="st-remote-https-port">HTTPS port</label>
-                    <input type="number" id="st-remote-https-port" class="settings-input" placeholder="8920" min="1" max="65535">
-                </div>
-                <div class="settings-field-row">
-                    <label class="settings-field-label">Certificate mode</label>
-                    <span class="settings-field-hint">Ignored when hostname is blank (simple mode always uses self-signed).</span>
-                    <div class="settings-radio-row">
-                        <label><input type="radio" name="st-cert-mode" value="letsencrypt"> Let&#x2019;s Encrypt</label>
-                        <label><input type="radio" name="st-cert-mode" value="byo"> BYO certificate</label>
-                        <label><input type="radio" name="st-cert-mode" value="self-signed"> Self-signed</label>
-                    </div>
-                </div>
-                <div id="st-le-opts" style="display:none">
-                    <div class="settings-field-row">
-                        <label class="settings-field-label" for="st-le-email">Let&#x2019;s Encrypt email</label>
-                        <input type="email" id="st-le-email" class="settings-input" placeholder="you@example.com">
-                    </div>
-                    <label class="toggle-row">
-                        <span class="toggle-label">Staging certificates</span>
-                        <span class="toggle-sub">Use Let&#x2019;s Encrypt staging CA (for testing; not trusted by browsers)</span>
-                        <button class="toggle" id="st-le-staging" role="switch" data-key="remote_le_staging">
-                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                        </button>
-                    </label>
-                </div>
-            </div>
-            <p class="settings-field-hint" style="margin-top:1rem;color:var(--muted)">Changes require a stack restart: <code>pelicula restart nginx</code></p>
-        </div>
-        <div class="drawer-footer">
-            <button class="settings-save-btn" id="save-remote-drawer-btn">Save</button>
-            <button class="sm-btn" data-close-drawer="remote">Cancel</button>
-            <span class="settings-save-status" id="st-remote-save-status"></span>
-        </div>
-    </div>
 
     <!-- Transcoding Profiles settings drawer -->
     <div class="drawer hidden" id="st-profiles-drawer" role="dialog" aria-modal="true" aria-label="Transcoding profiles">

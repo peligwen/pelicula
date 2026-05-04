@@ -143,10 +143,9 @@ func TestHandleSettingsUpdate_RejectsPortShape(t *testing.T) {
 		name string
 		body settingsResponse
 	}{
-		{"non-numeric remote_https_port", settingsResponse{RemoteHTTPSPort: "abcd"}},
-		{"zero remote_https_port", settingsResponse{RemoteHTTPSPort: "0"}},
-		{"out-of-range remote_https_port", settingsResponse{RemoteHTTPSPort: "70000"}},
 		{"non-numeric port", settingsResponse{Port: "abc"}},
+		{"zero port", settingsResponse{Port: "0"}},
+		{"out-of-range port", settingsResponse{Port: "70000"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -159,26 +158,6 @@ func TestHandleSettingsUpdate_RejectsPortShape(t *testing.T) {
 				t.Errorf("status = %d, want 400 for %s", w.Code, c.name)
 			}
 		})
-	}
-}
-
-func TestHandleSettingsUpdate_RejectsPortCollision(t *testing.T) {
-	// Default test env has PELICULA_PORT=7354. Setting remote_https_port to
-	// the same value should be rejected — compose can't bind the same host
-	// port twice.
-	_, h := newSettingsEnv(t)
-
-	body, _ := json.Marshal(settingsResponse{RemoteHTTPSPort: "7354"})
-	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/settings", bytes.NewReader(body))
-	req.Header.Set("Origin", "http://localhost:7354")
-	w := httptest.NewRecorder()
-	h.handleSettingsUpdate(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for remote_https_port colliding with PELICULA_PORT", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "dashboard port") {
-		t.Errorf("error message %q should mention dashboard port collision", w.Body.String())
 	}
 }
 
