@@ -171,6 +171,7 @@ services:
       - TZ=${TZ}
     ports:
       - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
+      - "8920:8920"       # Jellyfin built-in HTTPS — operator port-forwards this for external access
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
       - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
@@ -381,8 +382,6 @@ services:
       - ./nginx/network.css:/usr/share/nginx/html/network.css:ro
       - ./nginx/fonts:/usr/share/nginx/html/fonts:ro
       - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
-      - ${CONFIG_DIR}/nginx/remote.conf:/etc/nginx/conf.d/remote.conf:ro
-      - ${CONFIG_DIR}/certs/acme-webroot:/var/www/acme:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"
     depends_on:
