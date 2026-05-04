@@ -329,7 +329,10 @@ PELICULA_PROJECT_NAME="pelicula"
 			"REMOTE_LE_EMAIL=\"admin@example.com\"\n" +
 			"REMOTE_LE_STAGING=\"false\"\n" +
 			"REMOTE_HTTPS_PORT=\"8920\"\n" +
-			"REMOTE_HTTP_PORT=\"80\"\n"
+			"REMOTE_HTTP_PORT=\"80\"\n" +
+			"CLOUDFLARE_TUNNEL_TOKEN=\"tok\"\n" +
+			"TAILSCALE_AUTH_KEY=\"tskey-xxx\"\n" +
+			"TAILSCALE_HOSTNAME=\"pelicula\"\n"
 		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -350,6 +353,7 @@ PELICULA_PROJECT_NAME="pelicula"
 			"REMOTE_MODE", "REMOTE_HOSTNAME", "REMOTE_CERT_MODE",
 			"REMOTE_LE_EMAIL", "REMOTE_LE_STAGING", "REMOTE_HTTPS_PORT",
 			"REMOTE_HTTP_PORT", "REMOTE_ACCESS_ENABLED",
+			"CLOUDFLARE_TUNNEL_TOKEN", "TAILSCALE_AUTH_KEY", "TAILSCALE_HOSTNAME",
 		} {
 			if _, ok := m[k]; ok {
 				t.Errorf("key %q should have been removed by migration but is still present", k)

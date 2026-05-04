@@ -30,9 +30,6 @@ var envKeyOrder = []string{
 	"TRANSCODING_ENABLED",
 	"NOTIFICATIONS_ENABLED",
 	"NOTIFICATIONS_MODE",
-	"CLOUDFLARE_TUNNEL_TOKEN",
-	"TAILSCALE_AUTH_KEY",
-	"TAILSCALE_HOSTNAME",
 	"PELICULA_PROJECT_NAME",
 }
 
@@ -190,12 +187,13 @@ func MigrateEnv(path string) (bool, error) {
 		changed = true
 	}
 
-	// Migration 5: retire remote-vhost layer.
-	// Detect any legacy REMOTE_* keys and strip them on first run. Print a
-	// one-time notice explaining that Pelicula no longer manages remote vhost /
-	// certbot, and that Jellyfin's built-in HTTPS on port 8920 is the supported
-	// external surface. Cleans up generated cert directories.
-	// Idempotent: second run finds no REMOTE_* keys and is a no-op.
+	// Migration 5: retire remote-access features.
+	// Detect any legacy REMOTE_* keys (Pelicula-managed remote vhost) or the
+	// CLOUDFLARE_TUNNEL_TOKEN / TAILSCALE_* keys (auto-wired overlay sidecars)
+	// and strip them on first run. Print a one-time notice explaining that
+	// Pelicula now listens LAN-only on 7354 and that Jellyfin's built-in HTTPS
+	// on 8920 is the supported external surface. Cleans up generated cert
+	// directories. Idempotent: second run finds no matching keys and is a no-op.
 	remoteKeys := []string{
 		"REMOTE_MODE",
 		"REMOTE_HOSTNAME",
@@ -205,6 +203,9 @@ func MigrateEnv(path string) (bool, error) {
 		"REMOTE_HTTPS_PORT",
 		"REMOTE_HTTP_PORT",
 		"REMOTE_ACCESS_ENABLED",
+		"CLOUDFLARE_TUNNEL_TOKEN",
+		"TAILSCALE_AUTH_KEY",
+		"TAILSCALE_HOSTNAME",
 	}
 	remoteFound := false
 	for _, k := range remoteKeys {
@@ -214,9 +215,11 @@ func MigrateEnv(path string) (bool, error) {
 		}
 	}
 	if remoteFound {
-		info("Pelicula no longer manages the remote vhost or certbot certificates.")
+		info("Pelicula no longer manages remote-access features (remote vhost,")
+		info("certbot, or the cloudflared/tailscale auto-wiring overlays).")
 		info("Jellyfin's built-in HTTPS on port 8920 is the supported external surface.")
 		info("LAN dashboard stays on port 7354. Port-forward 8920 via DSM / your router.")
+		info("For invitee dashboard remote access, install Tailscale on the host.")
 		info("See docs/PELIGROSA.md for the updated threat model.")
 		for _, k := range remoteKeys {
 			delete(m, k)
