@@ -183,6 +183,10 @@ test('deny-request inline composer: appears, submits with reason, no dialog', as
     await page.goto('/');
     await expect(page.locator('[data-testid="login-overlay"]')).toBeHidden({ timeout: 10_000 });
 
+    // Navigate to the users tab so #requests-section becomes visible.
+    await page.click('[data-tab="users"]');
+    await page.waitForFunction(() => document.body.dataset.tab === 'users', { timeout: 5_000 });
+
     // The deny button is inside the request item rendered into #requests-pending-list.
     const denyBtn = page.locator('.request-item[data-id="42"] [data-action="start-deny-request"]');
     await expect(denyBtn).toBeVisible({ timeout: 8_000 });
@@ -237,6 +241,10 @@ test('deny-request 500 → .users-error shown, no dialog', async ({ page }) => {
 
     await page.goto('/');
     await expect(page.locator('[data-testid="login-overlay"]')).toBeHidden({ timeout: 10_000 });
+
+    // Navigate to the users tab so #requests-section becomes visible.
+    await page.click('[data-tab="users"]');
+    await page.waitForFunction(() => document.body.dataset.tab === 'users', { timeout: 5_000 });
 
     const denyBtn = page.locator('.request-item[data-id="43"] [data-action="start-deny-request"]');
     await expect(denyBtn).toBeVisible({ timeout: 8_000 });
