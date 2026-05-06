@@ -19,6 +19,7 @@ docs/design-exploration/_archive/
 docs/superpowers/
 .superpowers/
 .env.bak*
+.env.test-bak*
 .worktrees/
 node_modules/
 tests/playwright/report/
