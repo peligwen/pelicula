@@ -12,6 +12,11 @@ test.describe('Logs sheet refresh button', () => {
     test('clicking #logs-sheet-refresh-btn fires a request to the aggregate logs endpoint', async ({ page }) => {
         await ensureLoggedIn(page);
 
+        // The logs-sheet-panel-row lives inside #settings-section, which is hidden by
+        // CSS until body[data-tab="settings"]. Default tab on dashboard load is "search".
+        await page.click('[data-tab="settings"]');
+        await page.waitForFunction(() => document.body.dataset.tab === 'settings', { timeout: 5_000 });
+
         // Open the logs sheet via its dedicated open button.
         await page.locator('#logs-sheet-open-btn').click();
         await expect(page.locator('#logs-sheet')).not.toHaveClass(/hidden/);
