@@ -37,11 +37,14 @@ test.describe('doLogin submit-button debounce', () => {
         // Verify button is now disabled (submit-disable fix).
         await expect(submitBtn).toBeDisabled({ timeout: 2_000 });
 
-        // A second click on a disabled button should be a no-op.
-        await submitBtn.click({ force: false }).catch(() => { /* may throw on disabled */ });
+        // Force-click the disabled button: skips Playwright's actionability
+        // wait (which would otherwise block until doLogin's 10s AbortController
+        // fires and re-enables the button — masking the test as a real second
+        // POST). The browser still respects `disabled` and won't fire submit.
+        await submitBtn.click({ force: true, timeout: 1_000 });
 
         // Wait a moment to catch any stray second request.
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(500);
 
         expect(loginPostCount).toBe(1);
     });

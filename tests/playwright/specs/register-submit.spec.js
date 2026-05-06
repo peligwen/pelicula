@@ -67,8 +67,11 @@ test.describe('register submit hardening', () => {
         // Button must be disabled while request is pending.
         await expect(submitBtn).toBeDisabled({ timeout: 2_000 });
 
-        // Second click on a disabled button is a no-op.
-        await submitBtn.click({ force: false }).catch(() => {});
+        // Force-click the disabled button: skips Playwright's actionability
+        // wait (which would otherwise block until register's 15s AbortController
+        // fires and re-enables the button — masking the test as a real second
+        // POST). The browser still respects `disabled` and won't fire submit.
+        await submitBtn.click({ force: true, timeout: 1_000 });
 
         await page.waitForTimeout(500);
         expect(postCount).toBe(1);
