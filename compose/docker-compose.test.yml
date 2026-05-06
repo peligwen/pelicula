@@ -22,16 +22,16 @@ services:
     # without !reset, compose CONCATENATES list fields across overlays rather than replacing
     # them, so a plain `ports: []` would leave 6881 bound and racing the production stack.
     ports: !reset []
+    # socat + fork (not netcat) because pelicula-api's /health handler queries
+    # gluetun's IP and port-forward endpoints in parallel — a one-connection-
+    # at-a-time listener serializes them and trips the test's curl timeout.
     entrypoint:
       - sh
       - -c
       - |
-        apk add --no-cache netcat-openbsd -q 2>/dev/null
-        while true; do
-          printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{"status":"ok"}' \
-            | nc -l -p 8000 2>/dev/null || true
-          sleep 0.05
-        done
+        apk add --no-cache socat -q 2>/dev/null
+        printf 'HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"status":"ok"}' > /tmp/resp
+        exec socat TCP-LISTEN:8000,reuseaddr,fork EXEC:'cat /tmp/resp',nofork
     environment:
       - TZ=${TZ:-UTC}
     healthcheck:
