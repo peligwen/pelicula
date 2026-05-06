@@ -278,13 +278,18 @@ Session\DefaultSavePath=/downloads/'
 
     # Validate nginx config parses cleanly (catches misplaced limit_req zone refs,
     # template substitution errors, and syntax regressions in nginx.conf).
-    if test_compose exec nginx nginx -t 2>&1 | grep -q "syntax is ok"; then
+    # Capture output before grepping: piping straight into `grep -q` lets grep
+    # exit on first match and SIGPIPE the upstream `docker compose exec`, which
+    # under `set -o pipefail` flips a real pass into a spurious failure.
+    local nginx_t_out
+    nginx_t_out="$(test_compose exec nginx nginx -t 2>&1 || true)"
+    if echo "$nginx_t_out" | grep -q "syntax is ok"; then
         t_pass "nginx -t: config syntax OK"
     else
         t_fail "nginx -t: config syntax error"
         echo ""
         warn "nginx -t output:"
-        test_compose exec nginx nginx -t 2>&1 || true
+        echo "$nginx_t_out"
         return 1
     fi
 
@@ -718,41 +723,6 @@ except Exception:
         t_pass "Dashboard has Cache-Control: no-store"
     else
         t_fail "Dashboard missing no-store cache header"
-    fi
-
-    # ── Rate-limit burst test ─────────────────────────
-    # Soft-skip when /api/pelicula/auth/login is not active (returns 404 = peligrosa
-    # auth layer not enabled).  When enabled, fire 12 bad-credential POSTs in a
-    # tight loop; the peli_auth zone allows burst=5 nodelay at 10r/m, so at least
-    # one request out of 12 must be rejected with 429.
-    # Using wrong credentials so no real sessions are created during the burst.
-    local probe_code
-    probe_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-        -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
-        -H "Content-Type: application/json" \
-        -d '{"username":"ratelimit-probe","password":"probe"}' 2>/dev/null || echo "000")"
-
-    if [[ "$probe_code" == "404" ]]; then
-        warn "Skipping rate-limit burst test: /api/pelicula/auth/login returned 404 (peligrosa not enabled)"
-    else
-        local got_429=0
-        for _i in $(seq 1 12); do
-            local burst_code
-            burst_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-                -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
-                -H "Content-Type: application/json" \
-                -d '{"username":"burst-test","password":"burst-test"}' 2>/dev/null || echo "000")"
-            if [[ "$burst_code" == "429" ]]; then
-                got_429=1
-                break
-            fi
-        done
-
-        if [[ $got_429 -eq 1 ]]; then
-            t_pass "Rate-limit burst: 429 returned before 12th login attempt"
-        else
-            t_fail "Rate-limit burst: no 429 after 12 rapid POSTs to /api/pelicula/auth/login"
-        fi
     fi
 
     # ── Stage 9: Library Registry API ────────────────
@@ -1209,6 +1179,45 @@ assert 'Movies' in names and 'TV Shows' in names
         t_pass "verify smoke passed"
     else
         t_fail "verify smoke failed (tests/verify.sh --skip-auth)"
+    fi
+
+    # ── Rate-limit burst test (LAST — pollutes auth lockout) ─────────────────
+    # Runs after every other auth-required stage because it deliberately trips
+    # peligrosa's anti-brute-force lockout (5 failed POSTs in 5 min → 429 for
+    # that IP for the remainder of the window). Stages 9/10/11 all need admin
+    # login from the same source IP and would 429 if this ran earlier.
+    #
+    # Soft-skip when /api/pelicula/auth/login is not active (returns 404 = peligrosa
+    # auth layer not enabled). When enabled, fire 12 bad-credential POSTs in a
+    # tight loop; nginx's peli_auth zone (burst=5 nodelay, 10r/m) or peligrosa's
+    # per-IP lockout will reject at least one with 429.
+    local probe_code
+    probe_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+        -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
+        -H "Content-Type: application/json" \
+        -d '{"username":"ratelimit-probe","password":"probe"}' 2>/dev/null || echo "000")"
+
+    if [[ "$probe_code" == "404" ]]; then
+        warn "Skipping rate-limit burst test: /api/pelicula/auth/login returned 404 (peligrosa not enabled)"
+    else
+        local got_429=0
+        for _i in $(seq 1 12); do
+            local burst_code
+            burst_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                -X POST "http://localhost:${test_port}/api/pelicula/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"username":"burst-test","password":"burst-test"}' 2>/dev/null || echo "000")"
+            if [[ "$burst_code" == "429" ]]; then
+                got_429=1
+                break
+            fi
+        done
+
+        if [[ $got_429 -eq 1 ]]; then
+            t_pass "Rate-limit burst: 429 returned before 12th login attempt"
+        else
+            t_fail "Rate-limit burst: no 429 after 12 rapid POSTs to /api/pelicula/auth/login"
+        fi
     fi
 
     # ── Summary ───────────────────────────────────────
