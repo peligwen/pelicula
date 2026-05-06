@@ -205,7 +205,9 @@ async function submitRequest(type, tmdbId, tvdbId, title, year, poster) {
         const requestsSection = document.getElementById('requests-section');
         if (requestsSection) requestsSection.scrollIntoView({behavior: 'smooth'});
     } catch (e) {
-        toast('Request failed: ' + (e.body && e.body.error ? e.body.error : e.message || 'Network error'), {error: true});
+        const reason = e.status === 403 ? 'not authorized'
+            : (e.body && e.body.error) || e.message || 'Network error';
+        toast('Request failed: ' + reason, {error: true});
     }
 }
 
