@@ -12,12 +12,6 @@ import (
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-// newReconcileTestDB returns an in-memory catalog DB for reconcile tests.
-func newReconcileTestDB(t *testing.T) *context.Context {
-	t.Helper()
-	return nil // just a marker; tests call testCatalogDB directly
-}
-
 // reconcileArrClient is a minimal ArrClient for reconcile tests backed by
 // real arr.Client instances pointed at httptest servers.
 type reconcileArrClient struct {

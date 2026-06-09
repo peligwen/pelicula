@@ -271,7 +271,6 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		})
 		job, _ = q.Get(id)
 		awaitSubtitles(ctx, q, job, settings, configDir)
-		job, _ = q.Get(id)
 	}
 
 	// ── Stage 3: Dual Subtitles ──────────────────────────────────────────
@@ -345,7 +344,6 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		job, _ = q.Get(id)
 		WriteTranscodeFailedNotification(job, configDir, err.Error())
 	}
-	job, _ = q.Get(id)
 	persistFlags(q, id)
 
 	// ── Stage 5: Catalog (late) ───────────────────────────────────────────

@@ -501,7 +501,6 @@ seed_library() {
     # _peli_jf_poll_title UID ENCODED_TITLE TIMEOUT_SECS
     # Returns 0 and sets found=1 if the item appears within timeout.
     local found=0
-    local count
 
     _peli_jf_poll() {
         local _uid="$1" _enc="$2" _secs="$3"
@@ -617,15 +616,12 @@ seed_setting() {
 #   - Cleans up session cookie jar
 #   Always returns 0 (safe to call in EXIT trap).
 tear_down_fixtures() {
-    local failed=0
-
     # Remove seeded media paths
     local p
     for p in "${_PELI_SEEDED_PATHS[@]+"${_PELI_SEEDED_PATHS[@]}"}"; do
         if [[ -e "$p" ]]; then
             rm -rf "$p" 2>/dev/null || {
                 _peli_warn "tear_down_fixtures: failed to remove $p"
-                failed=1
             }
         fi
     done
@@ -641,7 +637,6 @@ tear_down_fixtures() {
                 http_json POST "${PELI_BASE_URL}/api/pelicula/settings" "$body" --auth pelicula \
                     > /dev/null 2>/dev/null || {
                     _peli_warn "tear_down_fixtures: failed to restore $k=$v"
-                    failed=1
                 }
             fi
         done < "$_PELI_ORIG_SETTINGS_FILE"

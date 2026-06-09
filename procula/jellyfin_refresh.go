@@ -16,9 +16,9 @@ import (
 // 5s) produces one Jellyfin scan instead of ten.
 const defaultRefreshDebounceMs = 5000
 
-// refreshDebounceMs is the resolved debounce window, loaded once at startup
+// refreshDebounce is the resolved debounce window, loaded once at startup
 // from JELLYFIN_REFRESH_DEBOUNCE_MS. Hot-path reads use this package var.
-var refreshDebounceMs = time.Duration(defaultRefreshDebounceMs) * time.Millisecond
+var refreshDebounce = time.Duration(defaultRefreshDebounceMs) * time.Millisecond
 
 var (
 	refreshMu     sync.Mutex
@@ -78,7 +78,7 @@ func FlushJellyfinRefresh() {
 	}
 }
 
-func refreshDebounceDelay() time.Duration { return refreshDebounceMs }
+func refreshDebounceDelay() time.Duration { return refreshDebounce }
 
 // parseRefreshDebounceMs converts a raw env string to a Duration.
 // Empty or invalid input returns the default (5000ms).

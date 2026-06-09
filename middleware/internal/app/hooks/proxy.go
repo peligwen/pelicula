@@ -3,7 +3,6 @@ package hooks
 
 import (
 	"bytes"
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"io"
@@ -197,20 +196,4 @@ func (h *Handler) proxyProculaMutate(path string) http.HandlerFunc {
 			slog.Warn("failed to stream proxy response", "component", "proxy", "path", path, "error", err)
 		}
 	}
-}
-
-// proxyProculaWithContext is like proxyProcula but uses an explicit context.
-// Used by callers that need to pass a specific context.
-func (h *Handler) proxyProculaWithContext(ctx context.Context, path string) ([]byte, error) {
-	target := h.ProculaURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.httpClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
 }

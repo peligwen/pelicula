@@ -56,11 +56,7 @@ func filterTextEmbeddedTracks(streams []subStream) []EmbeddedTrack {
 	var tracks []EmbeddedTrack
 	for _, s := range streams {
 		if isTextSubCodec(s.CodecName) {
-			tracks = append(tracks, EmbeddedTrack{
-				SubIndex:  s.SubIndex,
-				Lang:      s.Lang,
-				CodecName: s.CodecName,
-			})
+			tracks = append(tracks, EmbeddedTrack(s))
 		}
 	}
 	return tracks

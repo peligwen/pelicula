@@ -2,7 +2,6 @@ package procula
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,20 +23,6 @@ func overrideSettings(t *testing.T, s PipelineSettings) {
 	old := appDB
 	appDB = db
 	t.Cleanup(func() { appDB = old })
-}
-
-// overrideSettingsDB is like overrideSettings but also returns the DB so the
-// caller can create a Queue that shares it.
-func overrideSettingsDB(t *testing.T, s PipelineSettings) *sql.DB {
-	t.Helper()
-	db := testDB(t)
-	if err := SaveSettings(db, s); err != nil {
-		t.Fatalf("overrideSettingsDB: SaveSettings: %v", err)
-	}
-	old := appDB
-	appDB = db
-	t.Cleanup(func() { appDB = old })
-	return db
 }
 
 // fakePeliculaAPI returns a test server that accepts any request (for blocklist/catalog calls).
@@ -415,7 +400,7 @@ func TestCatalogEarly_TriggersBeforeTranscode(t *testing.T) {
 	oldKey := proculaAPIKey
 	proculaAPIKey = "" // disable key check
 	t.Cleanup(func() { proculaAPIKey = oldKey })
-	oldDebounce := refreshDebounceMs
+	oldDebounce := refreshDebounce
 	SetRefreshDebounceForTest(0) // immediate POST so ordering is observable
 	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 
@@ -456,7 +441,7 @@ func TestCatalogEarly_TriggersBeforeTranscode(t *testing.T) {
 // when transcoding is disabled (no sidecar written).
 func TestCatalogLate_SkipsWhenNoSidecar(t *testing.T) {
 	cfgDir := t.TempDir()
-	oldDebounce := refreshDebounceMs
+	oldDebounce := refreshDebounce
 	SetRefreshDebounceForTest(0) // immediate POST for assertion
 	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 	overrideSettings(t, PipelineSettings{
@@ -495,7 +480,7 @@ func TestCatalogLate_SkipsOnPassthrough(t *testing.T) {
 		CatalogEnabled:     true,
 	})
 
-	oldDebounce := refreshDebounceMs
+	oldDebounce := refreshDebounce
 	SetRefreshDebounceForTest(0) // immediate POST for assertion
 	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 	apiURL, refreshCount := countingServer(t)
@@ -1002,7 +987,7 @@ func TestCatalogLate_TriggersOnDualSubOutputs(t *testing.T) {
 		CatalogEnabled:     true, // enabled — should trigger CatalogEarly + CatalogLate
 	})
 
-	oldDebounce := refreshDebounceMs
+	oldDebounce := refreshDebounce
 	SetRefreshDebounceForTest(0) // immediate POST so each refresh is observable
 	t.Cleanup(func() { SetRefreshDebounceForTest(oldDebounce) })
 	apiURL, refreshCount := countingServer(t)

@@ -199,7 +199,7 @@ func ReconcileOrphans(ctx context.Context, db *sql.DB, jf JellyfinMetaClient, ra
 		}
 
 		// Also check by tmdb_id if available.
-		jfTmdbStr, _ := jfItem.ProviderIDs["Tmdb"]
+		jfTmdbStr := jfItem.ProviderIDs["Tmdb"]
 		jfTmdbID := 0
 		if jfTmdbStr != "" {
 			fmt.Sscanf(jfTmdbStr, "%d", &jfTmdbID) //nolint:errcheck
