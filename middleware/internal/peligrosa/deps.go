@@ -41,6 +41,10 @@ func (d *Deps) genPassword() string {
 		return d.GenPassword()
 	}
 	// Fallback: 16 random hex bytes
-	token, _ := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		// crypto/rand failure is unrecoverable; never hand out a weak password.
+		panic("peligrosa: crypto/rand unavailable: " + err.Error())
+	}
 	return token[:16]
 }

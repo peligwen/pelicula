@@ -23,19 +23,30 @@ func RunWorker(ctx context.Context, q *Queue, configDir, peliculaAPI string) {
 	slog.Info("worker started", "component", "pipeline")
 
 	// Periodic wake: re-check for deferred (backoff) jobs once per minute.
+	// Restarts after a panic (mirrors the per-job recover below) so deferred
+	// jobs never silently stop being re-checked.
 	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				select {
-				case q.pending <- struct{}{}:
-				default:
+		for ctx.Err() == nil {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("panic in periodic wake — restarting ticker", "component", "pipeline", "panic", r)
+					}
+				}()
+				ticker := time.NewTicker(1 * time.Minute)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						select {
+						case q.pending <- struct{}{}:
+						default:
+						}
+					}
 				}
-			}
+			}()
 		}
 	}()
 

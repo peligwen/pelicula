@@ -224,12 +224,12 @@ func (s *RequestStore) updateRequest(ctx context.Context, req *MediaRequest) err
 
 func generateRequestID() string {
 	// Use a random token suffix; no dependency on main-package generateAPIKey.
-	t, _ := generateToken()
-	suffix := t
-	if len(suffix) > 6 {
-		suffix = suffix[:6]
+	t, err := generateToken()
+	if err != nil {
+		// crypto/rand failure is unrecoverable; an ID without entropy risks collisions.
+		panic("peligrosa: crypto/rand unavailable: " + err.Error())
 	}
-	return fmt.Sprintf("req_%d_%s", time.Now().UnixMilli(), suffix)
+	return fmt.Sprintf("req_%d_%s", time.Now().UnixMilli(), t[:6])
 }
 
 // InsertFull inserts a media request from a backup export, preserving all
