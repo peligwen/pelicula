@@ -53,9 +53,13 @@ func (h *Handler) HandleProcessingProxy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var statusData, jobsData any
-	json.Unmarshal(statusRes.body, &statusData) //nolint:errcheck
+	if err := json.Unmarshal(statusRes.body, &statusData); err != nil {
+		slog.Warn("processing proxy: invalid status JSON from procula", "component", "hooks", "error", err)
+	}
 	if jobsRes.err == nil {
-		json.Unmarshal(jobsRes.body, &jobsData) //nolint:errcheck
+		if err := json.Unmarshal(jobsRes.body, &jobsData); err != nil {
+			slog.Warn("processing proxy: invalid jobs JSON from procula", "component", "hooks", "error", err)
+		}
 	}
 
 	httputil.WriteJSON(w, map[string]any{
