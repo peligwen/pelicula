@@ -697,6 +697,17 @@ type scanner interface {
 }
 
 // scanJob reads one job row from a scanner (either *sql.Row or *sql.Rows).
+// unmarshalColumn decodes a JSON column into dst and reports success. A
+// corrupt column must be visible in logs — silently re-persisting the
+// resulting zero value would overwrite whatever data the row still holds.
+func unmarshalColumn(jobID, column, data string, dst any) bool {
+	if err := json.Unmarshal([]byte(data), dst); err != nil {
+		slog.Warn("corrupt job column — field left zero-valued", "component", "queue", "job_id", jobID, "column", column, "error", err)
+		return false
+	}
+	return true
+}
+
 func scanJob(s scanner) (*Job, error) {
 	var (
 		job                  Job
@@ -739,29 +750,29 @@ func scanJob(s scanner) (*Job, error) {
 		job.UpdatedAt = t
 	}
 
-	json.Unmarshal([]byte(sourceJSON), &job.Source) //nolint:errcheck
+	unmarshalColumn(job.ID, "source", sourceJSON, &job.Source)
 
 	if validationJSON != nil {
 		var v ValidationResult
-		if err := json.Unmarshal([]byte(*validationJSON), &v); err == nil {
+		if unmarshalColumn(job.ID, "validation", *validationJSON, &v) {
 			job.Validation = &v
 		}
 	}
 
 	if missingSubsJSON != nil {
-		json.Unmarshal([]byte(*missingSubsJSON), &job.MissingSubs) //nolint:errcheck
+		unmarshalColumn(job.ID, "missing_subs", *missingSubsJSON, &job.MissingSubs)
 	}
 
 	if subsAcquiredJSON != nil {
-		json.Unmarshal([]byte(*subsAcquiredJSON), &job.SubsAcquired) //nolint:errcheck
+		unmarshalColumn(job.ID, "subs_acquired", *subsAcquiredJSON, &job.SubsAcquired)
 	}
 
 	if dualSubOutputsJSON != nil {
-		json.Unmarshal([]byte(*dualSubOutputsJSON), &job.DualSubOutputs) //nolint:errcheck
+		unmarshalColumn(job.ID, "dual_sub_outputs", *dualSubOutputsJSON, &job.DualSubOutputs)
 	}
 
 	if transcodeOutputsJSON != nil {
-		json.Unmarshal([]byte(*transcodeOutputsJSON), &job.TranscodeOutputs) //nolint:errcheck
+		unmarshalColumn(job.ID, "transcode_outputs", *transcodeOutputsJSON, &job.TranscodeOutputs)
 	}
 
 	job.ActionType = actionType
@@ -770,20 +781,20 @@ func scanJob(s scanner) (*Job, error) {
 	}
 
 	if paramsJSON != nil {
-		json.Unmarshal([]byte(*paramsJSON), &job.Params) //nolint:errcheck
+		unmarshalColumn(job.ID, "params", *paramsJSON, &job.Params)
 	}
 	if resultJSON != nil {
-		json.Unmarshal([]byte(*resultJSON), &job.Result) //nolint:errcheck
+		unmarshalColumn(job.ID, "result", *resultJSON, &job.Result)
 	}
 	if catalogJSON != nil {
 		var c CatalogInfo
-		if err := json.Unmarshal([]byte(*catalogJSON), &c); err == nil {
+		if unmarshalColumn(job.ID, "catalog", *catalogJSON, &c) {
 			job.Catalog = &c
 		}
 	}
 
 	if flagsJSON != nil {
-		json.Unmarshal([]byte(*flagsJSON), &job.Flags) //nolint:errcheck
+		unmarshalColumn(job.ID, "flags", *flagsJSON, &job.Flags)
 	}
 
 	if nextAttemptAtStr != nil {

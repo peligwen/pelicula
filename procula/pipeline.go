@@ -75,6 +75,16 @@ func RunWorker(ctx context.Context, q *Queue, configDir, peliculaAPI string) {
 	}
 }
 
+// updateJob applies fn via q.Update and logs any persistence failure.
+// Pipeline state writes must never fail silently — a dropped write leaves the
+// job showing stale state/progress — but a logged failure shouldn't abort the
+// stage that produced it, so callers don't branch on it.
+func updateJob(q *Queue, id string, fn func(*Job)) {
+	if err := q.Update(id, fn); err != nil {
+		slog.Error("job state update failed", "component", "pipeline", "job_id", id, "error", err)
+	}
+}
+
 func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	job, ok := q.Get(id)
 	if !ok {
@@ -113,7 +123,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	procMode := processingModeForPath(job.Source.Path)
 	if procMode == "off" {
 		slog.Info("job skipped: library processing is off", "component", "pipeline", "job_id", id, "path", job.Source.Path)
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.State = StateCancelled
 			j.Error = "library processing disabled"
 		})
@@ -129,7 +139,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	slog.Info("starting job", "component", "pipeline", "job_id", id, "title", job.Source.Title, "type", job.Source.Type, "processing_mode", procMode)
 
 	// Mark as processing
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.State = StateProcessing
 		j.Stage = StageValidate
 	})
@@ -141,7 +151,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if settings.ValidationEnabled {
 		result, failReason := Validate(job)
 
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.Validation = &result
 			j.Progress = 0.33
 		})
@@ -160,7 +170,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 
 		if !result.Passed {
 			slog.Warn("validation failed", "component", "pipeline", "job_id", id, "reason", failReason)
-			_ = q.Update(id, func(j *Job) {
+			updateJob(q, id, func(j *Job) {
 				j.State = StateFailed
 				j.Stage = StageValidate
 				j.Error = failReason
@@ -218,13 +228,13 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		if result.Checks.Codecs != nil {
 			if missing := checkMissingSubtitles(result.Checks.Codecs.Subtitles); len(missing) > 0 {
 				slog.Info("missing subtitle languages", "component", "pipeline", "job_id", id, "langs", missing)
-				_ = q.Update(id, func(j *Job) { j.MissingSubs = missing })
+				updateJob(q, id, func(j *Job) { j.MissingSubs = missing })
 			}
 		}
 		persistFlags(q, id)
 	} else {
 		slog.Info("validation skipped (disabled in settings)", "component", "pipeline", "job_id", id)
-		_ = q.Update(id, func(j *Job) { j.Progress = 0.33 })
+		updateJob(q, id, func(j *Job) { j.Progress = 0.33 })
 	}
 
 	// ── Stage 2: Catalog (early) ──────────────────────────────────────────
@@ -234,14 +244,14 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.Stage = StageCatalog
 		j.Progress = 0.4
 	})
 	job, _ = q.Get(id)
 	if settings.CatalogEnabled {
 		CatalogEarly(ctx, job, configDir, peliculaAPI)
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.Catalog = &CatalogInfo{JellyfinSynced: true, NotificationSent: true}
 		})
 	} else {
@@ -255,7 +265,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		return
 	}
 	if len(job.MissingSubs) > 0 {
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.Stage = StageAwaitSubs
 			j.Progress = 0.41
 		})
@@ -271,7 +281,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.Stage = StageDualSub
 		j.Progress = 0.42
 	})
@@ -282,7 +292,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		dualSubStart := time.Now()
 		outputs, firstErr := GenerateDualSubs(ctx, job, settings, configDir)
 		if len(outputs) > 0 {
-			_ = q.Update(id, func(j *Job) {
+			updateJob(q, id, func(j *Job) {
 				j.DualSubOutputs = outputs
 			})
 			emitEvent(PipelineEvent{
@@ -301,7 +311,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 			if firstErr != nil {
 				errMsg = firstErr.Error()
 			}
-			_ = q.Update(id, func(j *Job) { j.DualSubError = errMsg })
+			updateJob(q, id, func(j *Job) { j.DualSubError = errMsg })
 			emitEvent(PipelineEvent{
 				Type:      EventDualSubFailed,
 				JobID:     id,
@@ -322,7 +332,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	if job, _ = q.Get(id); job.State == StateCancelled {
 		return
 	}
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.Stage = StageProcess
 		j.Progress = 0.5
 	})
@@ -346,7 +356,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		return
 	}
 	if settings.CatalogEnabled && (len(job.TranscodeOutputs) > 0 || len(job.DualSubOutputs) > 0 || len(job.SubsAcquired) > 0) {
-		_ = q.Update(id, func(j *Job) { j.Progress = 0.95 })
+		updateJob(q, id, func(j *Job) { j.Progress = 0.95 })
 		job, _ = q.Get(id)
 		CatalogLate(job, peliculaAPI)
 	}
@@ -357,7 +367,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 	}
 	// consecutive-interrupt streak only counts pre-process; clearing it after a
 	// successful transcode means restarts during a long-running new transcode get a fresh budget.
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.State = StateCompleted
 		j.Stage = StageDone
 		j.Progress = 1.0
@@ -377,7 +387,7 @@ func persistFlags(q *Queue, id string) {
 		return
 	}
 	flags := ComputeFlags(job)
-	_ = q.Update(id, func(j *Job) { j.Flags = flags })
+	updateJob(q, id, func(j *Job) { j.Flags = flags })
 	if job.Source.Path != "" {
 		if err := UpsertFlagsForPath(appDB, job.Source.Path, id, flags); err != nil {
 			slog.Warn("persist flags failed", "component", "pipeline", "job_id", id, "error", err)
@@ -426,7 +436,7 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 		slog.Info("transcode passthrough: source already matches profile target",
 			"component", "pipeline", "job_id", job.ID,
 			"codec", codecs.Video, "height", codecs.Height, "profile", profile.Name)
-		_ = q.Update(job.ID, func(j *Job) {
+		updateJob(q, job.ID, func(j *Job) {
 			j.TranscodeProfile = profile.Name
 			j.TranscodeDecision = "passthrough"
 		})
@@ -434,7 +444,7 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 	}
 
 	slog.Info("transcoding job", "component", "pipeline", "job_id", job.ID, "profile", profile.Name)
-	_ = q.Update(job.ID, func(j *Job) {
+	updateJob(q, job.ID, func(j *Job) {
 		j.TranscodeProfile = profile.Name
 	})
 
@@ -453,14 +463,14 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 	outputPath, err := Process(ctx, job, profile, func(pct, etaSecs float64) {
 		// Map pct (0–1) into the 50–90% progress window
 		progress := 0.5 + pct*0.4
-		q.Update(job.ID, func(j *Job) { //nolint:errcheck
+		updateJob(q, job.ID, func(j *Job) {
 			j.Progress = progress
 			j.TranscodeETA = etaSecs
 		})
 	})
 
 	if err != nil {
-		_ = q.Update(job.ID, func(j *Job) {
+		updateJob(q, job.ID, func(j *Job) {
 			j.TranscodeDecision = "failed"
 			j.TranscodeError = err.Error()
 		})
@@ -478,7 +488,7 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 		return err
 	}
 
-	_ = q.Update(job.ID, func(j *Job) {
+	updateJob(q, job.ID, func(j *Job) {
 		j.TranscodeDecision = "transcoded"
 		j.TranscodeOutputs = append(j.TranscodeOutputs, outputPath)
 	})
@@ -501,7 +511,7 @@ func maybeTranscode(ctx context.Context, q *Queue, job *Job, configDir string) e
 // the named profile, then triggers a late Jellyfin refresh so the sidecar
 // appears as an alternate version. On failure the job is marked StateFailed.
 func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAPI string) {
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.State = StateProcessing
 		j.Stage = StageProcess
 		j.Progress = 0.1
@@ -513,7 +523,7 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 	profiles, err := LoadProfiles(configDir)
 	if err != nil {
 		slog.Error("failed to load profiles", "component", "pipeline", "job_id", id, "error", err)
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.State = StateFailed
 			j.Error = "could not load profiles: " + err.Error()
 		})
@@ -523,14 +533,14 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 	profile := FindProfileByName(profiles, job.ManualProfile)
 	if profile == nil {
 		slog.Warn("profile not found for manual transcode", "component", "pipeline", "job_id", id, "profile", job.ManualProfile)
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.State = StateFailed
 			j.Error = "profile not found: " + job.ManualProfile
 		})
 		return
 	}
 
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.TranscodeProfile = profile.Name
 		j.Progress = 0.2
 	})
@@ -549,7 +559,7 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 
 	outputPath, err := Process(ctx, job, profile, func(pct, etaSecs float64) {
 		progress := 0.2 + pct*0.7
-		q.Update(id, func(j *Job) { //nolint:errcheck
+		updateJob(q, id, func(j *Job) {
 			j.Progress = progress
 			j.TranscodeETA = etaSecs
 		})
@@ -557,7 +567,7 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 
 	if err != nil {
 		slog.Warn("manual transcode failed", "component", "pipeline", "job_id", id, "error", err)
-		_ = q.Update(id, func(j *Job) {
+		updateJob(q, id, func(j *Job) {
 			j.State = StateFailed
 			j.Stage = StageProcess
 			j.TranscodeDecision = "failed"
@@ -579,7 +589,7 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 		return
 	}
 
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.TranscodeDecision = "transcoded"
 		j.TranscodeOutputs = append(j.TranscodeOutputs, outputPath)
 		j.Progress = 0.95
@@ -605,7 +615,7 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 
 	// consecutive-interrupt streak only counts pre-process; clearing it after a
 	// successful transcode means restarts during a long-running new transcode get a fresh budget.
-	_ = q.Update(id, func(j *Job) {
+	updateJob(q, id, func(j *Job) {
 		j.State = StateCompleted
 		j.Stage = StageDone
 		j.Progress = 1.0
@@ -622,17 +632,17 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 func runActionJob(ctx context.Context, q *Queue, job *Job) {
 	def := Lookup(job.ActionType)
 	if def == nil {
-		_ = q.Update(job.ID, func(j *Job) {
+		updateJob(q, job.ID, func(j *Job) {
 			j.State = StateFailed
 			j.Error = "unknown action: " + j.ActionType
 		})
 		return
 	}
-	_ = q.Update(job.ID, func(j *Job) {
+	updateJob(q, job.ID, func(j *Job) {
 		j.State = StateProcessing
 	})
 	result, err := def.Handler(ctx, q, job)
-	_ = q.Update(job.ID, func(j *Job) {
+	updateJob(q, job.ID, func(j *Job) {
 		if j.State == StateCancelled || ctx.Err() != nil {
 			j.State = StateCancelled
 			j.NextAttemptAt = nil

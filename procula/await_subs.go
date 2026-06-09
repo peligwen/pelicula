@@ -63,7 +63,7 @@ func awaitSubtitles(ctx context.Context, q *Queue, job *Job, settings PipelineSe
 		for _, lang := range remaining {
 			if path := findSubSidecar(job.Source.Path, lang); path != "" {
 				slog.Info("subtitle sidecar acquired", "component", "await_subs", "job_id", job.ID, "lang", lang, "path", path)
-				_ = q.Update(job.ID, func(j *Job) {
+				updateJob(q, job.ID, func(j *Job) {
 					// Remove from MissingSubs, add to SubsAcquired
 					j.MissingSubs = removeString(j.MissingSubs, lang)
 					j.SubsAcquired = append(j.SubsAcquired, lang)
