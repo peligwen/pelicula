@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **CSP hardening** — dropped `unsafe-eval` from the dashboard Content-Security-Policy; nothing in the frontend uses eval, so this was pure attack surface.
+- **nginx upstream timeouts** — the shared proxy snippet now sets `proxy_connect_timeout 10s` (plus explicit 60 s read/send defaults), so a wedged upstream fails fast instead of holding clients for nginx's default. SSE and Jellyfin playback keep their long-lived per-location overrides.
+- **Go services drop root** — the pelicula-api and procula containers now run as `${PUID}:${PGID}` (their volumes are already operator-owned). Memory caps added for procula, jellyfin (4 g each) and pelicula-api (512 m), overridable via `PROCULA_MEM_LIMIT` / `JELLYFIN_MEM_LIMIT` / `PELICULA_API_MEM_LIMIT`, so a runaway FFmpeg can't OOM the host.
+- **CI lint gate** — staticcheck now runs per module in CI (codebase brought to zero findings), `go test` reports coverage, and shellcheck covers all of `tests/*.sh` instead of just the e2e runner.
 - **Network dashboard drawer** — replaced the packet-capture-based connections list with a per-container bandwidth panel (Container / In / Out / Route). Backed by Docker stats through the existing docker-socket-proxy; no new container privileges. VPN-routed containers are flagged via a static membership list.
 - **Webhook secret delivery** — `WEBHOOK_SECRET` is now sent via the `X-Webhook-Secret` request header instead of a `?secret=` URL query parameter. The header is injected by `wireImportWebhook()` when auto-wiring Radarr/Sonarr; the middleware validates it with `crypto/subtle.ConstantTimeCompare`. Existing installs without `WEBHOOK_SECRET` set continue to work (check is skipped when env var is unset).
 - **Build version in logs** (R8 P1 / R16 P5) — deployed binaries now log a real `git describe` version string via build-time ldflags (`-X main.Version`). The `pelicula` bash wrapper, the middleware Dockerfile, and the procula Dockerfile all pass `--build-arg VERSION=$(git describe)`. Fresh-clone `./pelicula --version` now shows the real version instead of `"dev"`.
@@ -23,6 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`netcap` sidecar** — the raw-packet-capture container (`NET_ADMIN`/`NET_RAW`) and its `127.0.0.1:2375` host-gateway plumbing are gone. The dashboard's network view no longer shows individual connections or destination hosts; bandwidth totals replace them. The `/api/pelicula/network` endpoint keeps its path but returns a new shape (see API.md).
 
 ### Fixed
+- **Silent job-state write failures (procula)** — 32 ignored `q.Update` errors in the pipeline now log via a shared `updateJob` helper, and corrupt job-row JSON columns are logged instead of being silently re-persisted as zero values.
+- **Truncated proxy responses (middleware)** — catalog and actions proxies no longer pass truncated upstream bodies through with a 200 (the actions registry could even cache one for its full TTL); read failures now return 502, and best-effort merges log read errors distinctly from parse errors.
+- **crypto/rand error handling** — `genPassword` and `generateRequestID` no longer discard `generateToken` errors; an entropy failure now fails loudly instead of producing an empty credential or collision-prone ID.
 - **Missing-watcher cooldown reset** (R10 P2) — the per-item cooldown is now reset on every successful import webhook, so a newly-available title is re-queued for the next scan cycle instead of waiting out the original backoff. Eliminates the most common "title grabbed but never became available in Jellyfin" report.
 - **Catalog Upsert atomicity** (R7 P3) — `Upsert` is now safe under concurrent callers (poller, backfill goroutine, webhook). The previous non-atomic path could produce duplicate catalog rows visible on the dashboard.
 - **Stack-restart response flush** (closes #6) — `HandleStackRestart` now calls `http.Flusher.Flush()` before launching the self-restart goroutine, eliminating a race where the response might not reach the client before the process exits.
