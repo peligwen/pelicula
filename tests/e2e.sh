@@ -144,6 +144,36 @@ cmd_test() {
             -d "{\"username\":\"$user\",\"password\":\"$pass\"}" >/dev/null
     }
 
+    # fire_import_webhook posts a Radarr-style Download webhook to pelicula-api
+    # and echoes the response body. Sent from inside the container so nginx's
+    # RFC1918 allow-list on /api/pelicula/hooks/import passes.
+    # Usage: fire_import_webhook <movie_id> <title> <year> <filename> <size> <runtime_secs> <download_id>
+    fire_import_webhook() {
+        local id="$1" title="$2" year="$3" file="$4" size="$5" runtime="$6" dl_id="$7"
+        local folder="/media/movies/${title} (${year})"
+        $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 \
+            wget -qO- --timeout=10 \
+            --header='Content-Type: application/json' \
+            --header="X-Webhook-Secret: ${test_webhook_secret}" \
+            --post-data="{\"eventType\":\"Download\",\"movie\":{\"id\":${id},\"title\":\"${title}\",\"year\":${year},\"folderPath\":\"${folder}\"},\"movieFile\":{\"path\":\"${folder}/${file}\",\"relativePath\":\"${file}\",\"size\":${size},\"mediaInfo\":{\"runTimeSeconds\":${runtime}}},\"downloadId\":\"${dl_id}\"}" \
+            'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null
+    }
+
+    # post_procula_settings posts the standard test settings to procula and
+    # echoes the response body. POSTs directly to procula (port 8282) inside
+    # its container to bypass nginx auth_request, which gates /api/procula/
+    # with the session cookie. Only the validation/transcoding toggles vary
+    # between call sites.
+    # Usage: post_procula_settings <validation_enabled> <transcoding_enabled>
+    post_procula_settings() {
+        local validation="$1" transcoding="$2"
+        $NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
+            --header='Content-Type: application/json' \
+            --header="X-API-Key: ${test_api_key}" \
+            --post-data="{\"validation_enabled\":${validation},\"transcoding_enabled\":${transcoding},\"catalog_enabled\":true,\"notification_mode\":\"internal\",\"storage_warning_pct\":85,\"storage_critical_pct\":95,\"dual_sub_enabled\":true,\"dual_sub_pairs\":[\"en-es\"],\"dual_sub_translator\":\"none\",\"sub_acquire_timeout_min\":1}" \
+            'http://localhost:8282/api/procula/settings' 2>/dev/null
+    }
+
     cleanup_test() {
         # Always restore the original .env — the test containers have env vars baked in
         # from the initial `up -d` and are unaffected by the file on disk. Leaving the
@@ -337,11 +367,7 @@ Session\DefaultSavePath=/downloads/'
     # POST directly to procula (port 8282) inside its container to bypass
     # nginx auth_request, which gates /api/procula/ with the session cookie.
     local settings_resp
-    settings_resp="$($NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
-        --header='Content-Type: application/json' \
-        --header="X-API-Key: ${test_api_key}" \
-        --post-data='{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
-        'http://localhost:8282/api/procula/settings' 2>/dev/null || echo "error")"
+    settings_resp="$(post_procula_settings false true || echo "error")"
     if [[ "$settings_resp" == "error" ]]; then
         warn "Could not configure Procula settings (non-fatal, defaults will apply)"
     fi
@@ -416,29 +442,8 @@ EOPROFILE
 
     info "Triggering import webhook..."
     local webhook_resp
-    # Send from inside the Docker network so nginx's RFC1918 allow-list passes.
     # (On macOS Docker Desktop, host→published-port traffic is not 127.0.0.1 to nginx.)
-    webhook_resp="$($NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 \
-        wget -qO- --timeout=10 \
-        --header="Content-Type: application/json" \
-        --header="X-Webhook-Secret: ${test_webhook_secret}" \
-        --post-data="{
-            \"eventType\": \"Download\",
-            \"movie\": {
-                \"id\": 1,
-                \"title\": \"Test Movie\",
-                \"year\": 2024,
-                \"folderPath\": \"/media/movies/Test Movie (2024)\"
-            },
-            \"movieFile\": {
-                \"path\": \"/media/movies/Test Movie (2024)/Test.Movie.2024.mkv\",
-                \"relativePath\": \"Test.Movie.2024.mkv\",
-                \"size\": ${file_size},
-                \"mediaInfo\": { \"runTimeSeconds\": 10 }
-            },
-            \"downloadId\": \"test-e2e-$(date +%s)\"
-        }" \
-        "http://localhost:8181/api/pelicula/hooks/import" 2>/dev/null || echo "")"
+    webhook_resp="$(fire_import_webhook 1 "Test Movie" 2024 "Test.Movie.2024.mkv" "$file_size" 10 "test-e2e-$(date +%s)" || echo "")"
 
     if echo "$webhook_resp" | grep -q '"status":"queued"'; then
         t_pass "Import webhook accepted"
@@ -1091,11 +1096,7 @@ assert 'Movies' in names and 'TV Shows' in names
             # Playwright runs on the host and can't call it directly through nginx)
             # Path uses /media/movies so CatalogEarly's Jellyfin refresh picks it up.
             info "Pre-firing Night of the Living Dead import webhook..."
-            $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
-                --post-data='{"eventType":"Download","movie":{"id":1968,"title":"Night of the Living Dead","year":1968,"folderPath":"/media/movies/Night of the Living Dead (1968)"},"movieFile":{"path":"/media/movies/Night of the Living Dead (1968)/Night.of.the.Living.Dead.1968.mkv","relativePath":"Night.of.the.Living.Dead.1968.mkv","size":500000,"mediaInfo":{"runTimeSeconds":5760}},"downloadId":"playwright-notld-test"}' \
-                --header='Content-Type: application/json' \
-                --header="X-Webhook-Secret: ${test_webhook_secret}" \
-                'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+            fire_import_webhook 1968 "Night of the Living Dead" 1968 "Night.of.the.Living.Dead.1968.mkv" 500000 5760 "playwright-notld-test" >/dev/null || true
 
             # Pre-fire Sub Timeout webhook.
             # Temporarily re-enable validation so checkMissingSubtitles runs and
@@ -1106,47 +1107,25 @@ assert 'Movies' in names and 'TV Shows' in names
             # job start; the sleep makes the race window negligibly small).
             if [[ -f "$pw_timeout_file" ]]; then
                 info "Temporarily enabling validation for Sub Timeout fixture..."
-                # POST directly to procula (port 8282) inside its container to bypass
-                # nginx auth_request, which gates /api/procula/ with the session cookie.
-                $NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
-                    --post-data='{"validation_enabled":true,"transcoding_enabled":false,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
-                    --header='Content-Type: application/json' \
-                    --header="X-API-Key: ${test_api_key}" \
-                    'http://localhost:8282/api/procula/settings' 2>/dev/null || true
+                post_procula_settings true false >/dev/null || true
                 info "Pre-firing Sub Timeout import webhook..."
-                $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
-                    --post-data='{"eventType":"Download","movie":{"id":2099,"title":"Pelicula Timeout Fixture","year":2099,"folderPath":"/media/movies/Pelicula Timeout Fixture (2099)"},"movieFile":{"path":"/media/movies/Pelicula Timeout Fixture (2099)/Pelicula.Timeout.Fixture.2099.mkv","relativePath":"Pelicula.Timeout.Fixture.2099.mkv","size":67108864,"mediaInfo":{"runTimeSeconds":15}},"downloadId":"playwright-timeout-test"}' \
-                    --header='Content-Type: application/json' \
-                    --header="X-Webhook-Secret: ${test_webhook_secret}" \
-                    'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+                fire_import_webhook 2099 "Pelicula Timeout Fixture" 2099 "Pelicula.Timeout.Fixture.2099.mkv" 67108864 15 "playwright-timeout-test" >/dev/null || true
                 # Brief wait so the worker has picked up the job and read validation=true.
                 sleep 5
                 # Restore standard test settings (validation off, transcoding on).
-                $NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
-                    --post-data='{"validation_enabled":false,"transcoding_enabled":true,"catalog_enabled":true,"notification_mode":"internal","storage_warning_pct":85,"storage_critical_pct":95,"dual_sub_enabled":true,"dual_sub_pairs":["en-es"],"dual_sub_translator":"none","sub_acquire_timeout_min":1}' \
-                    --header='Content-Type: application/json' \
-                    --header="X-API-Key: ${test_api_key}" \
-                    'http://localhost:8282/api/procula/settings' 2>/dev/null || true
+                post_procula_settings false true >/dev/null || true
             fi
 
             # Pre-fire Dualsub Happy import webhook.
             if [[ -f "$pw_happy_file" ]]; then
                 info "Pre-firing Dualsub Happy import webhook..."
-                $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
-                    --post-data='{"eventType":"Download","movie":{"id":2024,"title":"Dualsub Happy","year":2024,"folderPath":"/media/movies/Dualsub Happy (2024)"},"movieFile":{"path":"/media/movies/Dualsub Happy (2024)/Dualsub.Happy.2024.mkv","relativePath":"Dualsub.Happy.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-happy-test"}' \
-                    --header='Content-Type: application/json' \
-                    --header="X-Webhook-Secret: ${test_webhook_secret}" \
-                    'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+                fire_import_webhook 2024 "Dualsub Happy" 2024 "Dualsub.Happy.2024.mkv" 500000 10 "playwright-dualsub-happy-test" >/dev/null || true
             fi
 
             # Pre-fire Dualsub Failed import webhook.
             if [[ -f "$pw_failed_file" ]]; then
                 info "Pre-firing Dualsub Failed import webhook..."
-                $NEEDS_SUDO docker exec pelicula-test-pelicula-api-1 wget -qO- \
-                    --post-data='{"eventType":"Download","movie":{"id":2025,"title":"Dualsub Failed","year":2024,"folderPath":"/media/movies/Dualsub Failed (2024)"},"movieFile":{"path":"/media/movies/Dualsub Failed (2024)/Dualsub.Failed.2024.mkv","relativePath":"Dualsub.Failed.2024.mkv","size":500000,"mediaInfo":{"runTimeSeconds":10}},"downloadId":"playwright-dualsub-failed-test"}' \
-                    --header='Content-Type: application/json' \
-                    --header="X-Webhook-Secret: ${test_webhook_secret}" \
-                    'http://localhost:8181/api/pelicula/hooks/import' 2>/dev/null || true
+                fire_import_webhook 2025 "Dualsub Failed" 2024 "Dualsub.Failed.2024.mkv" 500000 10 "playwright-dualsub-failed-test" >/dev/null || true
             fi
 
             info "Running Playwright UI tests..."
