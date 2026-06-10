@@ -29,7 +29,7 @@ func TestIsValidUsername(t *testing.T) {
 		{"japanese", "山田太郎", true},
 		// pins current behavior: zero-width space (U+200B) is not rejected
 		// by unicode.IsControl or strings.TrimSpace
-		{"zero-width space embedded", "a​b", true},
+		{"zero-width space embedded", "a\u200bb", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

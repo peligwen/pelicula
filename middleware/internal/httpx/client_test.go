@@ -96,7 +96,6 @@ func TestUserAgentSetByDefault(t *testing.T) {
 }
 
 func TestUserAgentRespectsCustomHTTPClient(t *testing.T) {
-	type roundTripperFunc func(*http.Request) (*http.Response, error)
 	var capturedUA string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedUA = r.Header.Get("User-Agent")

@@ -3,7 +3,6 @@ package hooks
 
 import (
 	"bytes"
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"io"
@@ -53,9 +52,13 @@ func (h *Handler) HandleProcessingProxy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var statusData, jobsData any
-	json.Unmarshal(statusRes.body, &statusData) //nolint:errcheck
+	if err := json.Unmarshal(statusRes.body, &statusData); err != nil {
+		slog.Warn("processing proxy: invalid status JSON from procula", "component", "hooks", "error", err)
+	}
 	if jobsRes.err == nil {
-		json.Unmarshal(jobsRes.body, &jobsData) //nolint:errcheck
+		if err := json.Unmarshal(jobsRes.body, &jobsData); err != nil {
+			slog.Warn("processing proxy: invalid jobs JSON from procula", "component", "hooks", "error", err)
+		}
 	}
 
 	httputil.WriteJSON(w, map[string]any{
@@ -193,20 +196,4 @@ func (h *Handler) proxyProculaMutate(path string) http.HandlerFunc {
 			slog.Warn("failed to stream proxy response", "component", "proxy", "path", path, "error", err)
 		}
 	}
-}
-
-// proxyProculaWithContext is like proxyProcula but uses an explicit context.
-// Used by callers that need to pass a specific context.
-func (h *Handler) proxyProculaWithContext(ctx context.Context, path string) ([]byte, error) {
-	target := h.ProculaURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.httpClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
 }

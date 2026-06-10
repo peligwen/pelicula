@@ -59,7 +59,7 @@ func Run() {
 	configDir = env("CONFIG_DIR", "/config")
 	peliculaAPI := env("PELICULA_API_URL", "http://pelicula-api:8181")
 	proculaAPIKey = env("PROCULA_API_KEY", "")
-	refreshDebounceMs = parseRefreshDebounceMs(os.Getenv("JELLYFIN_REFRESH_DEBOUNCE_MS"))
+	refreshDebounce = parseRefreshDebounceMs(os.Getenv("JELLYFIN_REFRESH_DEBOUNCE_MS"))
 	preferredAudioLangVal = normalizeLangCode(env("PELICULA_AUDIO_LANG", "en"))
 
 	db, err := OpenDB(filepath.Join(configDir, "procula.db"))

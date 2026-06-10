@@ -165,6 +165,8 @@ services:
     # Pinned: bump deliberately, not on every `pelicula update` (mirrors gluetun policy).
     image: lscr.io/linuxserver/jellyfin:10.11.8
     logging: *default-logging
+    # Transcode memory cap — protects the rest of the stack from OOM.
+    mem_limit: ${JELLYFIN_MEM_LIMIT:-4g}
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -192,6 +194,13 @@ services:
     logging: *default-logging
     restart: unless-stopped
     stop_grace_period: 15s
+    # Run as the operator's user so files written to the library/processing
+    # volumes match host ownership (image has no privilege-drop entrypoint).
+    user: "${PUID}:${PGID}"
+    # Cap memory so a runaway FFmpeg can't OOM the host and take down the
+    # whole stack. CPU is left unlimited — starving transcodes only slows
+    # them; memory exhaustion kills neighbours.
+    mem_limit: ${PROCULA_MEM_LIMIT:-4g}
     depends_on:
       - pelicula-api
     environment:
@@ -275,6 +284,11 @@ services:
   pelicula-api:
     build: ./middleware
     logging: *default-logging
+    # Run as the operator's user — config/jellyfin and .env mounts stay
+    # host-owned, and the API needs no root privileges (Docker access goes
+    # through docker-proxy over TCP).
+    user: "${PUID}:${PGID}"
+    mem_limit: ${PELICULA_API_MEM_LIMIT:-512m}
     environment:
       - TZ=${TZ}
       - DOCKER_HOST=http://docker-proxy:2375

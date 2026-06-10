@@ -256,7 +256,11 @@ func (h *Handler) HandleCatalogFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body) //nolint:errcheck
@@ -279,10 +283,13 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	var fw flagsWrap
 	if resp, err := h.Client.Get(r.Context(), h.ProculaURL+"/api/procula/catalog/flags"); err == nil {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		// best-effort file merge; unmarshal failure degrades to empty list
-		if err := json.Unmarshal(body, &fw); err != nil {
+		// best-effort file merge; read/unmarshal failure degrades to empty list
+		if readErr != nil {
+			slog.Warn("catalog detail: failed to read procula flags response",
+				"component", "catalog", "error", readErr)
+		} else if err := json.Unmarshal(body, &fw); err != nil {
 			slog.Warn("catalog detail: failed to parse procula flags response",
 				"component", "catalog", "error", err)
 		}
@@ -304,11 +311,14 @@ func (h *Handler) HandleCatalogDetail(w http.ResponseWriter, r *http.Request) {
 
 	var matched map[string]any
 	if resp, err := h.Client.Get(r.Context(), h.ProculaURL+"/api/procula/jobs"); err == nil {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		var all []map[string]any
-		// best-effort file merge; unmarshal failure degrades to empty list
-		if err := json.Unmarshal(body, &all); err != nil {
+		// best-effort file merge; read/unmarshal failure degrades to empty list
+		if readErr != nil {
+			slog.Warn("catalog detail: failed to read procula jobs response",
+				"component", "catalog", "error", readErr)
+		} else if err := json.Unmarshal(body, &all); err != nil {
 			slog.Warn("catalog detail: failed to parse procula jobs response",
 				"component", "catalog", "error", err)
 		}
@@ -386,7 +396,11 @@ func (h *Handler) HandleCatalogItemHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
 
 	var all []map[string]any
 	// best-effort file merge; unmarshal failure degrades to empty list

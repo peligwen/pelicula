@@ -103,15 +103,14 @@ func cmdUp(ctx *Context, _ []string) {
 
 	// Load and migrate .env
 	progress("Loading configuration...")
-	env, err := ParseEnv(ctx.EnvFile)
-	if err != nil {
+	if _, err := ParseEnv(ctx.EnvFile); err != nil {
 		fatal("Failed to read .env: " + err.Error())
 	}
 	if _, err := MigrateEnv(ctx.EnvFile); err != nil {
 		warn("Failed to migrate .env: " + err.Error())
 	}
 	// Re-read after migration
-	env, err = ParseEnv(ctx.EnvFile)
+	env, err := ParseEnv(ctx.EnvFile)
 	if err != nil {
 		fatal("Failed to read .env after migration: " + err.Error())
 	}

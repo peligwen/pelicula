@@ -75,7 +75,12 @@ func (h *Handler) HandleRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		// Never cache or serve a truncated registry body.
+		httputil.WriteError(w, "procula unavailable", http.StatusBadGateway)
+		return
+	}
 	if resp.StatusCode == http.StatusOK {
 		h.cache.body = body
 		h.cache.lastFetch = h.timeNow()

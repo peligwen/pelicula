@@ -3,7 +3,6 @@ package downloads
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,8 +67,6 @@ func newStubSvc(t *testing.T, sonarrMux, radarrMux, qbtMux http.Handler) *stubSv
 	return s
 }
 
-// downstreamDown returns an error that simulates a refused connection.
-var downstreamDown = fmt.Errorf("connection refused")
 
 // --- HandleDownloads ---
 

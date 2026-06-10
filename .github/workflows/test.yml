@@ -20,9 +20,12 @@ jobs:
       - name: go vet
         working-directory: ${{ matrix.module }}
         run: go vet ./...
-      - name: go test
+      - name: staticcheck
         working-directory: ${{ matrix.module }}
-        run: go test ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...
+      - name: go test (with coverage)
+        working-directory: ${{ matrix.module }}
+        run: go test -cover ./...
       - name: go test -race
         working-directory: ${{ matrix.module }}
         run: go test -race ./...
@@ -31,8 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: shellcheck e2e test runner
-        run: shellcheck -S warning tests/e2e.sh
+      - name: shellcheck test scripts
+        run: shellcheck -S warning tests/*.sh
       - name: shellcheck wrapper
         run: shellcheck -S warning pelicula
 

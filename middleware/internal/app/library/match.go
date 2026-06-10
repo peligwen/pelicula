@@ -388,9 +388,7 @@ func scoreMatch(cleanedTitle string, year int, matchTitle string, matchYear int)
 func normalizeTitle(s string) string {
 	s = strings.ToLower(s)
 	for _, pfx := range []string{"the ", "a ", "an "} {
-		if strings.HasPrefix(s, pfx) {
-			s = s[len(pfx):]
-		}
+		s = strings.TrimPrefix(s, pfx)
 	}
 	var b strings.Builder
 	for _, r := range s {

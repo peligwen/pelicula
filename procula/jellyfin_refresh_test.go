@@ -38,7 +38,7 @@ func startCountingServer(t *testing.T) (string, *atomic.Int32) {
 // schedule calls collapses into a single POST after the debounce window.
 func TestScheduleJellyfinRefresh_DebouncesBurst(t *testing.T) {
 	resetRefreshState(t)
-	old := refreshDebounceMs
+	old := refreshDebounce
 	SetRefreshDebounceForTest(150 * time.Millisecond)
 	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
 	oldKey := proculaAPIKey
@@ -81,7 +81,7 @@ func TestScheduleJellyfinRefresh_DebouncesBurst(t *testing.T) {
 // by setting the debounce package var to 0 (immediate, synchronous POST).
 func TestScheduleJellyfinRefresh_ZeroBypassesDebounce(t *testing.T) {
 	resetRefreshState(t)
-	old := refreshDebounceMs
+	old := refreshDebounce
 	SetRefreshDebounceForTest(0)
 	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
 	oldKey := proculaAPIKey
@@ -104,7 +104,7 @@ func TestScheduleJellyfinRefresh_ZeroBypassesDebounce(t *testing.T) {
 // is dispatched synchronously when Flush is called (e.g. on shutdown).
 func TestFlushJellyfinRefresh_FiresPending(t *testing.T) {
 	resetRefreshState(t)
-	old := refreshDebounceMs
+	old := refreshDebounce
 	SetRefreshDebounceForTest(60000 * time.Millisecond) // long enough that the timer can't naturally fire during the test
 	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
 	oldKey := proculaAPIKey
@@ -131,7 +131,7 @@ func TestFlushJellyfinRefresh_FiresPending(t *testing.T) {
 // is queued.
 func TestFlushJellyfinRefresh_NoPendingIsNoop(t *testing.T) {
 	resetRefreshState(t)
-	old := refreshDebounceMs
+	old := refreshDebounce
 	SetRefreshDebounceForTest(5000 * time.Millisecond)
 	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
 	oldKey := proculaAPIKey
@@ -177,7 +177,7 @@ func TestScheduleJellyfinRefresh_NoEnvOnHotPath(t *testing.T) {
 	proculaAPIKey = ""
 	t.Cleanup(func() { proculaAPIKey = oldKey })
 
-	old := refreshDebounceMs
+	old := refreshDebounce
 	SetRefreshDebounceForTest(0) // synchronous: no timer goroutines
 	t.Cleanup(func() { SetRefreshDebounceForTest(old) })
 
