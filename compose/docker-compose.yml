@@ -28,6 +28,7 @@ services:
     environment:
       - VPN_SERVICE_PROVIDER=protonvpn
       - VPN_TYPE=wireguard
+      - WIREGUARD_IMPLEMENTATION=${WIREGUARD_IMPLEMENTATION:-auto}
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - SERVER_COUNTRIES=${SERVER_COUNTRIES}
       - VPN_PORT_FORWARDING=on
@@ -55,7 +56,9 @@ services:
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider --user=${GLUETUN_HTTP_USER:-pelicula} --password=${GLUETUN_HTTP_PASS} http://localhost:8000/v1/publicip/ip || exit 1"]
+      # NOTE: gluetun's control-server auth middleware rejects HEAD requests with 401
+      # even with valid credentials (GET succeeds identically) — must not use `wget --spider`.
+      test: ["CMD-SHELL", "wget -q -O /dev/null --user=${GLUETUN_HTTP_USER:-pelicula} --password=${GLUETUN_HTTP_PASS} http://localhost:8000/v1/publicip/ip || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
