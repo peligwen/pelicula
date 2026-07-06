@@ -181,7 +181,8 @@ services:
       - ${CONFIG_DIR}/jellyfin:/config
       - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8096/health || exit 1"]
+      # linuxserver/jellyfin is Ubuntu-based (no wget) — use curl.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8096/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
