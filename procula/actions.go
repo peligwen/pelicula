@@ -134,6 +134,10 @@ func runValidateAction(ctx context.Context, q *Queue, job *Job) (map[string]any,
 	if path == "" {
 		return nil, fmt.Errorf("validate: path required")
 	}
+	path = filepath.Clean(path)
+	if !isLibraryPath(path) {
+		return nil, fmt.Errorf("validate: path must be under /media/")
+	}
 	syntheticJob := &Job{Source: JobSource{Path: path}}
 	result, failReason := Validate(syntheticJob)
 	out := map[string]any{
@@ -150,6 +154,10 @@ func runTranscodeAction(ctx context.Context, q *Queue, job *Job) (map[string]any
 	profile, _ := job.Params["profile"].(string)
 	if path == "" || profile == "" {
 		return nil, fmt.Errorf("transcode: path and profile required")
+	}
+	path = filepath.Clean(path)
+	if !isLibraryPath(path) {
+		return nil, fmt.Errorf("transcode: path must be under /media/")
 	}
 
 	fi, err := os.Stat(path)
@@ -307,6 +315,10 @@ func runDualSubAction(ctx context.Context, q *Queue, job *Job) (map[string]any, 
 	path, _ := job.Params["path"].(string)
 	if path == "" {
 		return nil, fmt.Errorf("dualsub: path required")
+	}
+	path = filepath.Clean(path)
+	if !isLibraryPath(path) {
+		return nil, fmt.Errorf("dualsub: path must be under /media/")
 	}
 
 	// Probe embedded streams (needed for sub_index resolution and lang tags)

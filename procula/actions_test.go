@@ -72,6 +72,22 @@ func TestValidateActionHandler(t *testing.T) {
 	}
 }
 
+func TestRunValidateAction_RejectsNonLibraryPath(t *testing.T) {
+	job := &Job{Params: map[string]any{"path": "/etc/passwd"}}
+	_, err := runValidateAction(context.Background(), nil, job)
+	if err == nil || !strings.Contains(err.Error(), "must be under /media/") {
+		t.Errorf("expected library-path rejection, got %v", err)
+	}
+}
+
+func TestRunTranscodeAction_RejectsNonLibraryPath(t *testing.T) {
+	job := &Job{Params: map[string]any{"path": "/etc/passwd", "profile": "Default"}}
+	_, err := runTranscodeAction(context.Background(), nil, job)
+	if err == nil || !strings.Contains(err.Error(), "must be under /media/") {
+		t.Errorf("expected library-path rejection, got %v", err)
+	}
+}
+
 func TestTranscodeActionDetectsTVFromPath(t *testing.T) {
 	// Seed the library registry with defaults so lookups work without a live API.
 	setLibraries(defaultLibraries())
@@ -174,10 +190,26 @@ func TestRunDualSubAction_MissingPairs(t *testing.T) {
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "Movie.mkv")
 	os.WriteFile(mediaPath, []byte(""), 0644)
+
+	// Override isLibraryPath so this temp-dir path clears the PRO-4 library
+	// guard — this test exercises the pairs-required validation, not the
+	// path allowlist (covered separately by TestRunDualSubAction_RejectsNonLibraryPath).
+	old := isLibraryPathFn
+	isLibraryPathFn = func(p string) bool { return strings.HasPrefix(p, dir) }
+	t.Cleanup(func() { isLibraryPathFn = old })
+
 	job := &Job{Params: map[string]any{"path": mediaPath}}
 	_, err := runDualSubAction(context.Background(), nil, job)
 	if err == nil || err.Error() != "dualsub: at least one track pair required" {
 		t.Errorf("expected pairs error, got %v", err)
+	}
+}
+
+func TestRunDualSubAction_RejectsNonLibraryPath(t *testing.T) {
+	job := &Job{Params: map[string]any{"path": "/etc/passwd"}}
+	_, err := runDualSubAction(context.Background(), nil, job)
+	if err == nil || !strings.Contains(err.Error(), "must be under /media/") {
+		t.Errorf("expected library-path rejection, got %v", err)
 	}
 }
 
