@@ -67,7 +67,6 @@ func newStubSvc(t *testing.T, sonarrMux, radarrMux, qbtMux http.Handler) *stubSv
 	return s
 }
 
-
 // --- HandleDownloads ---
 
 func TestHandleDownloads_Happy(t *testing.T) {
