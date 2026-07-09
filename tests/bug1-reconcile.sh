@@ -1,23 +1,78 @@
 #!/usr/bin/env bash
 # tests/bug1-reconcile.sh — Bug 1: catalog orphan reconciler test.
 #
-# Requires:
-#   PELICULA_TEST_JELLYFIN_PASSWORD  — Jellyfin admin password (Phase 1A hard requirement)
-#   PELICULA_TEST_JELLYFIN_USER      — Jellyfin admin username (default: gwen; .env may have stale 'admin')
+# Steps:
+#   1. Seed a fixture into the Jellyfin library (bypasses *arr, bypasses
+#      catalog write paths) so it starts out orphaned.
+#   2. Assert the item is orphaned (in Jellyfin, absent from catalog.db and
+#      Radarr) — the pre-fix failure state.
+#   3. POST /api/pelicula/catalog/reconcile, assert added >= 1.
+#   4. Assert the item is now in catalog.db (detail returns in_catalog=true).
+#   5. Idempotency: a second reconcile must return added == 0 and leave the
+#      row unchanged.
+#
+# All steps require pelicula session auth (seeding needs a Jellyfin scan
+# trigger + poll; steps 3-5 call the pelicula-authenticated catalog API).
+# There is no meaningful auth-free subset, so --skip-auth / SKIP_AUTH_CHECKS
+# skips this suite entirely, matching sweep-catalog.sh's convention for
+# wholly auth-gated suites.
+#   SKIP_AUTH_CHECKS=1 bash tests/bug1-reconcile.sh
 #
 # Usage:
 #   PELICULA_TEST_JELLYFIN_PASSWORD=<pw> PELICULA_TEST_JELLYFIN_USER=gwen \
-#     bash tests/bug1-reconcile.sh
+#     bash tests/bug1-reconcile.sh [--target HOST:PORT] [--skip-auth]
 #
-# Runs against the stack on localhost:7354 by default.
-# The stack must be up and indexed before running.
+# Works against any running Pelicula stack via --target HOST:PORT (defaults
+# to localhost using PELICULA_PORT from .env). The stack must be up and
+# indexed before running.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/../.env"
+
+# ── Arg parsing ───────────────────────────────────────────────────────────────
+
+TARGET_HOST="localhost"
+SKIP_AUTH_CHECKS="${SKIP_AUTH_CHECKS:-}"
+
+while (( $# > 0 )); do
+    case "$1" in
+        --target)
+            TARGET_HOST="${2%%:*}"
+            if [[ "${2}" == *:* ]]; then
+                _OVERRIDE_PORT="${2##*:}"
+            fi
+            shift 2
+            ;;
+        --skip-auth)
+            SKIP_AUTH_CHECKS=1
+            shift
+            ;;
+        *) shift ;;
+    esac
+done
+
+# ── Source lib ────────────────────────────────────────────────────────────────
+
+# shellcheck source=lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
-ENV_FILE="${SCRIPT_DIR}/../.env"
-peli_load_env "$ENV_FILE"
+# ── Setup ─────────────────────────────────────────────────────────────────────
+
+# Every step in this suite requires pelicula session auth — skip entirely
+# rather than partially run (there's no auth-free subset to fall back to).
+if [[ -n "$SKIP_AUTH_CHECKS" ]]; then
+    echo "bug1-reconcile: all checks skipped (auth required)" >&2
+    exit 0
+fi
+
+export PELICULA_TEST_JELLYFIN_PASSWORD="${PELICULA_TEST_JELLYFIN_PASSWORD:-}"
+peli_load_env "$ENV_FILE" "$TARGET_HOST"
+
+if [[ -n "${_OVERRIDE_PORT:-}" ]]; then
+    PELI_BASE_URL="http://${TARGET_HOST}:${_OVERRIDE_PORT}"
+    _peli_log "Port override: PELI_BASE_URL=$PELI_BASE_URL"
+fi
 
 trap tear_down_fixtures EXIT
 

@@ -19,6 +19,9 @@
 #   bash tests/verify.sh --skip-auth --suite bug2-storage
 #
 # Suites (--suite is a comma-separated list; default: all):
+#   bug1-reconcile    Catalog orphan reconciler regression (tests/bug1-reconcile.sh)
+#                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth
+#                     (every step needs an authenticated session — no partial run).
 #   bug2-storage      Storage tab static-asset + API smoke (tests/bug2-storage.sh)
 #                     Supports --skip-auth (skips the authenticated storage endpoint check).
 #   bug4-registration Open registration toggle round-trip  (tests/bug4-registration.sh)
@@ -50,7 +53,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET=""           # empty → tests use their own defaults (localhost:7354)
 SKIP_AUTH=""        # empty → tests perform auth checks if password is present
-SUITES="bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"  # comma-separated list of suites to run
+SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"  # comma-separated list of suites to run
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 
@@ -75,7 +78,7 @@ _fail() { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
 
 # AUTH_REQUIRED_SUITES: suites that need PELICULA_TEST_JELLYFIN_PASSWORD.
 # When --skip-auth is set these suites are skipped (not counted as failures).
-AUTH_REQUIRED_SUITES="bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"
+AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"
 
 run_suite() {
     local name="$1" script="$1"
