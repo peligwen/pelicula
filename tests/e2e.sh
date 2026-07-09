@@ -867,7 +867,12 @@ assert 'Movies' in names and 'TV Shows' in names
 
     # ── Stage 10: Playwright UI Tests ────────────────
 
-    if command -v npx &>/dev/null && npx playwright --version &>/dev/null 2>&1; then
+    # Check for the project's own pinned Playwright install (tests/playwright/node_modules),
+    # not just any `npx`-reachable playwright — `npx playwright --version` run from
+    # $SCRIPT_DIR (this script's cwd) can't see node_modules several directories down,
+    # so npm would silently auto-install an unpinned "latest" playwright over the network
+    # just to answer the version check. Checking the local binary directly avoids that.
+    if command -v npx &>/dev/null && [[ -x "$SCRIPT_DIR/tests/playwright/node_modules/.bin/playwright" ]]; then
         info "Seeding Playwright test fixtures..."
 
         # Fixture 1: Sintel (2010) — real TMDB title so scan produces a match
