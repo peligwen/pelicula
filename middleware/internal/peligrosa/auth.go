@@ -31,9 +31,24 @@ const (
 	RoleAdmin   UserRole = "admin"
 )
 
+// roleRank returns the ordinal rank of a role (higher = more privileged).
+// Shared by atLeast (minimum-role guard checks) and by operator role-change
+// handling, which uses it to detect downgrades — see operators_http.go.
+func roleRank(r UserRole) int {
+	switch r {
+	case RoleViewer:
+		return 1
+	case RoleManager:
+		return 2
+	case RoleAdmin:
+		return 3
+	default:
+		return 0
+	}
+}
+
 func (r UserRole) atLeast(min UserRole) bool {
-	order := map[UserRole]int{RoleViewer: 1, RoleManager: 2, RoleAdmin: 3}
-	return order[r] >= order[min]
+	return roleRank(r) >= roleRank(min)
 }
 
 type session struct {
@@ -233,6 +248,31 @@ func (a *Auth) getSession(r *http.Request) (session, bool) {
 		return session{}, false
 	}
 	return sess, true
+}
+
+// invalidateSessionsFor revokes every live session (in-memory and DB-backed)
+// belonging to username. Called after an operator's role is downgraded or
+// their operator entry is deleted, so the change takes effect immediately
+// instead of waiting out the session's TTL (MWD-1, 2026-07 audit). Promotions
+// deliberately do not call this — an upgraded user keeps their session and
+// picks up the new privileges the next time they log in.
+func (a *Auth) invalidateSessionsFor(ctx context.Context, username string) {
+	if username == "" {
+		return
+	}
+	a.mu.Lock()
+	for token, sess := range a.sessions {
+		if sess.username == username {
+			delete(a.sessions, token)
+		}
+	}
+	a.mu.Unlock()
+
+	if a.sessionsStore != nil {
+		if err := a.sessionsStore.RevokeByUsername(ctx, username); err != nil {
+			slog.Warn("failed to revoke sessions from DB", "component", "auth", "user", username, "error", err)
+		}
+	}
 }
 
 func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
