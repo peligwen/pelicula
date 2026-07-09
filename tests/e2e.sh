@@ -1154,10 +1154,15 @@ assert 'Movies' in names and 'TV Shows' in names
     # ── Verify smoke against isolated stack ──────────
 
     info "Running verify smoke against isolated stack (localhost:${test_port})..."
-    if bash "$SCRIPT_DIR/tests/verify.sh" --target "localhost:${test_port}" --skip-auth; then
+    # The isolated stack's own admin credentials (seeded into test_env above)
+    # are known here, so run verify.sh with real auth instead of --skip-auth —
+    # this unlocks the 5 authenticated suites (bug1-reconcile, bug4-registration,
+    # sweep-catalog/jobs/users/settings) instead of silently skipping them.
+    if PELICULA_TEST_JELLYFIN_USER=admin PELICULA_TEST_JELLYFIN_PASSWORD=test-jellyfin-pw \
+            bash "$SCRIPT_DIR/tests/verify.sh" --target "localhost:${test_port}"; then
         t_pass "verify smoke passed"
     else
-        t_fail "verify smoke failed (tests/verify.sh --skip-auth)"
+        t_fail "verify smoke failed (tests/verify.sh)"
     fi
 
     # ── Rate-limit burst test (LAST — pollutes auth lockout) ─────────────────
