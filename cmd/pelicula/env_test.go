@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +106,84 @@ func TestWriteEnv(t *testing.T) {
 	}
 	if fi.Mode().Perm() != 0600 {
 		t.Errorf("file mode: got %o, want 0600", fi.Mode().Perm())
+	}
+}
+
+// TestWriteEnv_NoStrayTempFilesAfterSuccess verifies WriteEnv's atomic
+// write-temp-then-rename pattern (CIT-5): after a successful write, no
+// leftover ".tmp-*" staging file remains in the target directory, and the
+// final file still has the right content and permissions.
+func TestWriteEnv_NoStrayTempFilesAfterSuccess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+
+	m := EnvMap{"CONFIG_DIR": "/test/config"}
+	if err := WriteEnv(path, m); err != nil {
+		t.Fatalf("WriteEnv error: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("stray temp file left behind: %s", e.Name())
+		}
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("file mode: got %o, want 0600", fi.Mode().Perm())
+	}
+
+	got, err := ParseEnv(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["CONFIG_DIR"] != "/test/config" {
+		t.Errorf("CONFIG_DIR = %q, want /test/config", got["CONFIG_DIR"])
+	}
+}
+
+// TestWriteEnv_RenameFailureLeavesOriginalIntactAndCleansUpTemp verifies the
+// crash-safety property the atomic-rename fix (CIT-5) exists for: if the
+// final os.Rename step fails, the pre-existing target is left completely
+// untouched (never truncated), and the temp file used to stage the new
+// content is cleaned up rather than left behind.
+func TestWriteEnv_RenameFailureLeavesOriginalIntactAndCleansUpTemp(t *testing.T) {
+	dir := t.TempDir()
+	// Force the rename to fail by making the *target* path an existing
+	// directory — os.Rename cannot replace a directory with a regular file,
+	// so this reliably exercises the post-write, pre-rename failure path.
+	path := filepath.Join(dir, ".env")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteEnv(path, EnvMap{"CONFIG_DIR": "/test/config"}); err == nil {
+		t.Fatal("expected WriteEnv to fail when target path is a directory")
+	}
+
+	fi, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatalf("target vanished after failed WriteEnv: %v", statErr)
+	}
+	if !fi.IsDir() {
+		t.Error("target should still be a directory — a failed rename must not touch it")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("stray temp file left behind after failed WriteEnv: %s", e.Name())
+		}
 	}
 }
 
