@@ -18,9 +18,9 @@ func RegisterRoutes(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("/api/pelicula/auth/check", auth.HandleCheck)
 
 	// viewer+: request queue (list own requests + create)
-	mux.Handle("/api/pelicula/requests", auth.Guard(http.HandlerFunc(d.HandleRequests)))
+	mux.Handle("/api/pelicula/requests", auth.Guard(httputil.RequireLocalOriginSoft(http.HandlerFunc(d.HandleRequests))))
 	// admin only: per-request approve/deny/delete
-	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(http.HandlerFunc(d.HandleRequestOp)))
+	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(d.HandleRequestOp))))
 
 	// Invites: list+create are admin-only; check+redeem are public (auth checked inside handler).
 	// Peligrosa: httputil.RequireLocalOriginSoft on both routes — redeem is public but invite-gated.
