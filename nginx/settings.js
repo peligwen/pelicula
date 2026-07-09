@@ -546,6 +546,12 @@ function closeSettingsDrawer(name) {
 
 component('settings', function (el) {
     function onTabChanged() {
+        // Settings is admin-only content. The tab button carries .admin-only
+        // (hidden for non-admins by dashboard.js's applyRole()), but that's a
+        // display:none guard, not a data guard — a viewer could still trigger
+        // this handler directly. document.body.dataset.role is the same role
+        // signal applyRole() uses; treat it as the source of truth here too.
+        if (document.body.dataset.role !== 'admin') return;
         if (!_settingsLoaded) loadSettingsTab();
         loadProfilesPanel();
         if (!arrMetaLoaded) { loadArrMeta(); arrMetaLoaded = true; }

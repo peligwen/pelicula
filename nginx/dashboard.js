@@ -1138,6 +1138,7 @@ document.getElementById('tabbar').addEventListener('keydown', function(e) {
                 btn.textContent = tab.textContent.trim();
                 btn.dataset.tab = tab.dataset.tab;
                 if (tab.classList.contains('active')) btn.classList.add('active');
+                if (tab.classList.contains('admin-only')) btn.classList.add('admin-only');
                 btn.addEventListener('click', function() {
                     tab.click();
                     closeMobileNav();
@@ -1153,6 +1154,12 @@ document.getElementById('tabbar').addEventListener('keydown', function(e) {
                 btn.classList.toggle('active', !!(tab && tab.classList.contains('active')));
             });
         }
+        // The list is built lazily (after applyRole's .admin-only sweep ran),
+        // so enforce role visibility on every open, not just at build time.
+        const navIsAdmin = document.body.dataset.role === 'admin';
+        mobileDrawer.querySelectorAll('.mobile-nav-list .admin-only').forEach(function(btn) {
+            btn.style.display = navIsAdmin ? '' : 'none';
+        });
         openDrawer(mobileDrawer, mobileBackdrop);
         hamburger.setAttribute('aria-expanded', 'true');
     }
