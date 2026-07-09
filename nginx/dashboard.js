@@ -1,4 +1,4 @@
-import { initStore, mount, html, raw, router, openDrawer, closeDrawer } from './framework.js';
+import { initStore, mount, html, raw, router, openDrawer, closeDrawer, toast } from './framework.js';
 import { get, post, put, del } from './api.js';
 import './search.js';
 import './catalog.js';
@@ -832,33 +832,31 @@ function renderJobCard(j) {
 
 async function retryJob(id) {
     try {
-        await post(`/api/procula/jobs/${id}/retry`);
+        const result = await post(`/api/pelicula/procula/jobs/${id}/retry`, {});
+        if (result === null) { toast('Retry failed', { error: true }); return; }
+        toast('Job queued for retry');
         setTimeout(window.checkDownloads, 500);
-    } catch (e) { console.warn('[pelicula] retry error:', e); }
+    } catch (e) { console.warn('[pelicula] retry error:', e); toast('Retry failed', { error: true }); }
 }
 
 async function cancelJob(id) {
     try {
-        await post(`/api/procula/jobs/${id}/cancel`);
+        const result = await post(`/api/pelicula/procula/jobs/${id}/cancel`, {});
+        if (result === null) { toast('Cancel failed', { error: true }); return; }
+        toast('Job cancelled');
         setTimeout(window.checkDownloads, 500);
-    } catch (e) { console.warn('[pelicula] cancel error:', e); }
+    } catch (e) { console.warn('[pelicula] cancel error:', e); toast('Cancel failed', { error: true }); }
 }
 
 function cancelJobFromBtn(btn) { cancelJob(btn.dataset.jobId); }
 
 async function resubJob(id) {
     try {
-        // Resolve arr context from the job, then dispatch via the action bus.
-        const job = await get(`/api/pelicula/procula/jobs/${id}`);
-        if (!job) { console.warn('[pelicula] resub: job fetch failed', id); return; }
-        const src = job.source || {};
-        if (!src.arr_type || !src.arr_id) { console.warn('[pelicula] resub: missing arr context on job', id); return; }
-        await post('/api/pelicula/procula/actions', {
-            action: 'subtitle_search',
-            target: {arr_type: src.arr_type, arr_id: src.arr_id, episode_id: src.episode_id || 0},
-            params: {languages: ['en']},
-        });
-    } catch (e) { console.warn('[pelicula] resub error:', e); }
+        // HandleJobResub resolves arr context server-side from the job record.
+        const result = await post(`/api/pelicula/procula/jobs/${id}/resub`, {});
+        if (result === null) { toast('Subtitle re-search failed', { error: true }); return; }
+        toast('Subtitle re-search queued');
+    } catch (e) { console.warn('[pelicula] resub error:', e); toast('Subtitle re-search failed', { error: true }); }
 }
 
 function resubFromBtn(btn) { resubJob(btn.dataset.jobId); }

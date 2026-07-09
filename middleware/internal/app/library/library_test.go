@@ -1073,6 +1073,47 @@ func TestHandleJobRetry_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestHandleJobCancel_ProxiesToProcula(t *testing.T) {
+	t.Parallel()
+	var gotPath string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer fake.Close()
+
+	proculaclient := newProculaClientForTest(fake.URL)
+	h := &Handler{
+		Svc:     &stubArrClient{},
+		Procula: proculaclient,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/procula/jobs/abc123/cancel", nil)
+	req.SetPathValue("id", "abc123")
+	w := httptest.NewRecorder()
+	h.HandleJobCancel(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if gotPath != "/api/procula/jobs/abc123/cancel" {
+		t.Errorf("proxied to %q, want /api/procula/jobs/abc123/cancel", gotPath)
+	}
+}
+
+func TestHandleJobCancel_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/procula/jobs/abc123/cancel", nil)
+	req.SetPathValue("id", "abc123")
+	w := httptest.NewRecorder()
+	h.HandleJobCancel(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
 // ── handleBrowse symlink escape ───────────────────────────────────────────────
 
 func TestHandleBrowse_RejectsOutOfBoundsResolvedPath(t *testing.T) {

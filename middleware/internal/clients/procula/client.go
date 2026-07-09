@@ -110,6 +110,15 @@ func (c *Client) RetryJob(ctx context.Context, id string) ([]byte, error) {
 	return raw, nil
 }
 
+// CancelJob cancels an in-progress or queued job.
+func (c *Client) CancelJob(ctx context.Context, id string) ([]byte, error) {
+	raw, err := c.base.RawPost(ctx, "/api/procula/jobs/"+url.PathEscape(id)+"/cancel", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cancel job %s: %w", id, err)
+	}
+	return raw, nil
+}
+
 // ── Storage & Notifications ───────────────────────────────────────────────────
 
 // GetStorage fetches the Procula storage report.

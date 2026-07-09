@@ -190,6 +190,26 @@ func (h *Handler) HandleJobRetry(w http.ResponseWriter, r *http.Request) {
 	w.Write(raw) //nolint:errcheck
 }
 
+// HandleJobCancel cancels an in-progress or queued procula job.
+func (h *Handler) HandleJobCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		httputil.WriteError(w, "job id required", http.StatusBadRequest)
+		return
+	}
+	raw, err := h.Procula.CancelJob(r.Context(), id)
+	if err != nil {
+		httputil.WriteError(w, "procula unavailable: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(raw) //nolint:errcheck
+}
+
 // HandleLibraryResub looks up a media file in Radarr/Sonarr by path and
 // triggers Bazarr subtitle search via Procula.
 // Accepts POST with body {"path": "/media/..."}.

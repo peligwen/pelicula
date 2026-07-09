@@ -141,6 +141,7 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("/api/pelicula/library/resub", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleLibraryResub)))
 	mux.Handle("/api/pelicula/procula/jobs/{id}/resub", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleJobResub)))
 	mux.Handle("/api/pelicula/procula/jobs/{id}/retry", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleJobRetry)))
+	mux.Handle("/api/pelicula/procula/jobs/{id}/cancel", auth.GuardAdmin(http.HandlerFunc(cfg.Library.HandleJobCancel)))
 
 	// viewer+: catalog
 	mux.Handle("/api/pelicula/catalog", auth.Guard(http.HandlerFunc(cfg.Catalog.HandleCatalogList)))
