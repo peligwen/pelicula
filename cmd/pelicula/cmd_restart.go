@@ -27,9 +27,25 @@ func cmdRestart(ctx *Context, args []string) {
 	pass("Restarted: " + args[0])
 }
 
+// restartAcquireCompose builds the *Compose used by cmdRestartAcquire.
+//
+// acquireServices includes gluetun/qbittorrent/prowlarr, which are gated
+// behind the "vpn" Compose profile. composeInvocation only activates that
+// profile when WIREGUARD_PRIVATE_KEY is set, but stop/start still need
+// Compose to recognize those service names even on non-VPN installs —
+// otherwise Compose rejects the whole command as "no such service" instead
+// of degrading gracefully. Force the vpn profile unconditionally, mirroring
+// cmdDown (cmd_down.go) and ensureStackDown (cmd_reset.go). "apprise" isn't
+// needed here since none of acquireServices belong to that profile.
+func restartAcquireCompose(ctx *Context) *Compose {
+	c := composeInvocation(ctx)
+	c.profiles = []string{"vpn"}
+	return c
+}
+
 func cmdRestartAcquire(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-	c := composeInvocation(ctx)
+	c := restartAcquireCompose(ctx)
 
 	info("Restarting acquisition services (jellyfin and nginx stay up)...")
 
