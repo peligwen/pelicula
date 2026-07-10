@@ -164,11 +164,6 @@ func cmdUp(ctx *Context, _ []string) {
 		fatal("Failed to create directories: " + err.Error())
 	}
 
-	// Generate TLS cert if missing
-	if err := SetupCert(configDir); err != nil {
-		warn("TLS cert generation failed: " + err.Error())
-	}
-
 	// Check /dev/net/tun on Linux
 	if err := CheckTUN(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s%s%s Run %s to create it.\n",

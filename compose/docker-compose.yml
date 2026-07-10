@@ -365,7 +365,7 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # Reverse Proxy — single entry point (HTTPS)
+  # Reverse Proxy — single entry point (HTTP, LAN-only)
   # ═══════════════════════════════════════════════════
   nginx:
     image: nginx:1.28.3-alpine
@@ -408,7 +408,6 @@ services:
       - ./nginx/network.js:/usr/share/nginx/html/network.js:ro
       - ./nginx/network.css:/usr/share/nginx/html/network.css:ro
       - ./nginx/fonts:/usr/share/nginx/html/fonts:ro
-      - ${CONFIG_DIR}/certs:/etc/nginx/certs:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"
     depends_on:

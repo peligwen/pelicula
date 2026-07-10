@@ -91,7 +91,6 @@ func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
 		filepath.Join(configDir, "procula", "jobs"),
 		filepath.Join(configDir, "procula", "profiles"),
 		filepath.Join(configDir, "pelicula"),
-		filepath.Join(configDir, "certs"),
 		filepath.Join(workDir, "downloads"),
 		filepath.Join(workDir, "downloads", "incomplete"),
 		filepath.Join(workDir, "downloads", "radarr"),
@@ -156,7 +155,10 @@ func firstExistingAncestor(path string) string {
 func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
 	wgKey, countries, port, adminUser, proculaKey, jfPass string) error {
 
-	// Back up if exists
+	// Back up if exists, under a timestamped name (survives repeated resets
+	// without being silently overwritten, unlike WriteEnv's plain ".bak").
+	// We write via writeEnvNoBackup below to avoid a second, redundant
+	// ".bak" backup of the same pre-write content.
 	if _, err := os.Stat(envPath); err == nil {
 		bak := fmt.Sprintf("%s.bak.%d", envPath, time.Now().Unix())
 		_ = copyFile(envPath, bak)
@@ -182,5 +184,5 @@ func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
 		"NOTIFICATIONS_MODE":    "internal",
 		"PELICULA_PROJECT_NAME": "pelicula",
 	}
-	return WriteEnv(envPath, m)
+	return writeEnvNoBackup(envPath, m)
 }
