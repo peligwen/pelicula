@@ -136,6 +136,7 @@ Lifecycle:
   up                  Start the stack (runs setup wizard on first run)
   down                Stop the stack
   restart [service]   Restart service(s)
+  restart-acquire     Restart VPN + acquisition services (jellyfin/nginx stay up)
   rebuild [service]   Rebuild and restart middleware/procula/nginx
   redeploy [service]  Rebuild images then do a full stack down/up
   update              Pull latest images and restart
@@ -155,6 +156,7 @@ Network:
 
 Diagnostics:
   doctor              Dump container status and error logs for troubleshooting
+  test                Run e2e integration test (isolated stack on port 7399)
   verify [--target H] Run regression checks against a running stack
 
 Options:
