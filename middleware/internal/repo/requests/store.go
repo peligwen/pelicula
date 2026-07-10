@@ -363,6 +363,53 @@ func (s *Store) ListByState(ctx context.Context, states ...State) ([]*Request, e
 	return result, nil
 }
 
+// ListActiveByKey returns non-terminal (not denied/available) requests of the
+// given type ("movie" | "series") matching key — tmdb_id for movies, tvdb_id
+// for series. History is NOT loaded (matches ListByState's contract).
+//
+// This is the targeted counterpart to All(): the request-creation dedup
+// check (findActive in internal/peligrosa) used to fetch every row in the
+// table via All() and filter in Go on every single POST /api/pelicula/requests.
+// A WHERE-clause lookup avoids that full scan + bulk history join, which grows
+// unbounded as the requests table accumulates history over the life of a
+// long-running instance (MWD-8).
+func (s *Store) ListActiveByKey(ctx context.Context, reqType string, key int) ([]*Request, error) {
+	if key == 0 {
+		return []*Request{}, nil
+	}
+	keyCol := "tmdb_id"
+	if reqType == "series" {
+		keyCol = "tvdb_id"
+	}
+	query := "SELECT id, type, tmdb_id, tvdb_id, title, year, poster, " +
+		"requested_by, state, reason, arr_id, created_at, updated_at " +
+		"FROM requests WHERE type = ? AND " + keyCol + " = ? AND state NOT IN (?, ?) " +
+		"ORDER BY created_at"
+
+	rows, err := s.db.QueryContext(ctx, query, reqType, key, string(StateDenied), string(StateAvailable))
+	if err != nil {
+		return []*Request{}, err
+	}
+	defer rows.Close()
+
+	var result []*Request
+	for rows.Next() {
+		req, err := scanRequestRow(rows)
+		if err != nil {
+			continue
+		}
+		req.History = []Event{}
+		result = append(result, req)
+	}
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+	if result == nil {
+		return []*Request{}, nil
+	}
+	return result, nil
+}
+
 // ── scan helpers ─────────────────────────────────────────────────────────────
 
 // rowScanner is satisfied by both *sql.Rows and *sql.Row.

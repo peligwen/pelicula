@@ -181,21 +181,24 @@ func (s *RequestStore) All(ctx context.Context) []*MediaRequest {
 	return result
 }
 
-// findActive returns the first non-terminal request matching type + tmdbID or tvdbID.
+// findActive returns the first non-terminal request matching type + tmdbID or
+// tvdbID. Uses a targeted query (repo.ListActiveByKey) rather than fetching
+// and filtering the entire requests table — this runs on every
+// POST /api/pelicula/requests, so it must not scale with total request count
+// (MWD-8).
 func (s *RequestStore) findActive(ctx context.Context, reqType string, tmdbID, tvdbID int) *MediaRequest {
-	all := s.All(ctx)
-	for _, r := range all {
-		if r.Type != reqType || r.isTerminal() {
-			continue
-		}
-		if reqType == "movie" && tmdbID != 0 && r.TmdbID == tmdbID {
-			return r
-		}
-		if reqType == "series" && tvdbID != 0 && r.TvdbID == tvdbID {
-			return r
-		}
+	key := tmdbID
+	if reqType == "series" {
+		key = tvdbID
 	}
-	return nil
+	if key == 0 {
+		return nil
+	}
+	rows, err := s.repo.ListActiveByKey(ctx, reqType, key)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	return toMediaRequest(rows[0])
 }
 
 func (s *RequestStore) get(ctx context.Context, id string) *MediaRequest {
