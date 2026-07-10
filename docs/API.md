@@ -99,7 +99,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `GET` | `/api/pelicula/catalog/detail` | Viewer+ | Detail for a file path: flags, active job, synopsis, artwork (`?path=…`) |
 | `GET` | `/api/pelicula/catalog/items` | Viewer+ | List catalog items with optional `?type=…&tier=…&q=…` filters |
 | `GET` | `/api/pelicula/catalog/items/{id}` | Viewer+ | Single catalog item by ID |
-| `POST` | `/api/pelicula/catalog/backfill` | Admin | Trigger background backfill from Radarr+Sonarr into the catalog DB |
+| `POST` | `/api/pelicula/catalog/backfill` | Admin | Trigger background backfill from Radarr+Sonarr into the catalog DB. A full resync: ends with the orphan reconciler and the stale-row sweep, so rows whose media left Radarr/Sonarr/Jellyfin are removed |
 | `POST` | `/api/pelicula/catalog/reconcile` | Admin | Run the orphan reconciler synchronously and return the result |
 | `POST` | `/api/pelicula/catalog/command` | Admin | Proxy force-search, rescan, or unmonitor to Radarr/Sonarr (`arr_type`, `arr_id`, `command`) |
 | `POST` | `/api/pelicula/catalog/replace` | Admin | Mark release as failed in *arr, rescan, and re-search (`arr_type`, `arr_id`, `episode_id`, `path`) |

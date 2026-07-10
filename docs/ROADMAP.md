@@ -20,12 +20,16 @@ in `## Shipped` capture each pass.
 - **Test-stack durability beyond ~24h**: a `pelicula test --keep` stack left running ~24h wedges with `SQLite Error 14: 'unable to open database file'` from Jellyfin's user store, causing `/api/pelicula/auth/login` to return 503 and blocking every authenticated Playwright spec. Targeted `docker restart pelicula-test-jellyfin-1` doesn't recover (DB returns 404 for the seeded admin after restart — likely a state-rehydration gap). Workaround today is `down -v --remove-orphans` + fresh `bash tests/e2e.sh`. Worth investigating whether the Jellyfin SQLite WAL is being corrupted by container clock drift, or whether a periodic config-seed refresh would keep the admin user pinned. No timeline.
 
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
-- **`catalog_items` has no delete/prune path** (MWD-7): removed/re-encoded media leaves permanent orphaned rows in the catalog store — no `Delete`/`DeleteByArrID` exists at the repo layer. Needs a design for when to prune (on *arr removal? on reconcile?) before it can be built. Deferred to next round.
 - **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `compose/docker-compose.nfs.yml` + `compose/docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; ``pelicula up`` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
 
 ---
 
 ## Shipped
+
+### 2026-07-10 — catalog stale-row sweep (MWD-7)
+- `catalog_items` is now explicitly a derived cache + reconcile ledger, never an independent source of truth: `SweepStale` (middleware `internal/app/catalog/sweep.go`) removes rows whose backing media no longer exists. Hook/backfill rows live by *arr membership (matched on the same natural keys `Upsert` uses); reconcile-adopted rows live by file-path presence in a complete Jellyfin scan; seasons/episodes cascade with their parent chain.
+- Runs after every reconcile-loop tick (15 min) and at the end of `BackfillFromArr` — the dashboard's manual backfill button is now a full resync, not append-only.
+- Safety valves: a sub-sweep skips when its truth-source fetch fails, returns zero items while catalog rows exist, or the Jellyfin scan hits its cap; a one-minute grace window plus an `updated_at` re-check inside the DELETE ensure concurrent hook upserts always win over the sweep.
 
 ### 2026-05-04 — retire remote-vhost layer
 - Deleted ~1,200 LOC: `cmd/pelicula/remote.go` + `remote_test.go`, `nginx/remote.conf.template`, `nginx/remote-simple.conf.template`, certbot compose overlay, remote env vars (`REMOTE_MODE`, `REMOTE_HOSTNAME`, `REMOTE_CERT_MODE`, `REMOTE_LE_EMAIL`, `REMOTE_LE_STAGING`), settings handler remote-mode logic, settings UI remote-access tab, and `tests/playwright/specs/remote-wizard.spec.js`.
