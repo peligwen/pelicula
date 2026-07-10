@@ -302,8 +302,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     padding-bottom: 0.6rem; margin-bottom: 1.1rem;
     border-bottom: 1px solid var(--border);
 }
-.pane-hdr-count { margin-left: auto; font-size: 0.62rem; font-weight: 600; color: var(--faint); }
-
 /* Right sidebar */
 .pane-side {
     background: var(--panel);
@@ -488,37 +486,7 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 }
 .no-items:empty { display: none; }
 
-/* ── Skeleton loading ─────────────────────────────────────────────────── */
-@keyframes skeleton-pulse {
-    0%   { opacity: 0.6; }
-    50%  { opacity: 0.3; }
-    100% { opacity: 0.6; }
-}
-.skeleton {
-    background: var(--panel2); border: 1.5px solid var(--border);
-    border-radius: 12px; min-height: 3rem;
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-    .skeleton { animation: none; opacity: 0.4; }
-}
-
-/* ── Inline error state ───────────────────────────────────────────────── */
-.inline-error {
-    padding: 0.65rem 1rem; background: var(--danger-bg, #fde8e8);
-    border: 1.5px solid var(--danger-border, rgba(220,53,69,0.4));
-    border-radius: 12px; color: var(--danger-text, #991b1b);
-    font-size: 0.82rem; text-align: center;
-}
-.inline-error .retry-btn {
-    display: inline-block; margin-top: 0.4rem; padding: 0.25rem 0.75rem;
-    background: var(--panel2); border: 1px solid var(--border);
-    border-radius: 8px; font-size: 0.75rem; cursor: pointer;
-    color: var(--ink); font-family: inherit;
-}
-
 /* ── Proc badges ───────────────────────────────────────────────────────── */
-.section-subheader { font-size: 0.6rem; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin: 0.75rem 0 0.4rem; font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; }
 .proc-check-list { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .proc-check { padding: 0.1rem 0.5rem; border-radius: 20px; font-size: 0.68rem; font-weight: 700; }
 .proc-check-pass { background: var(--mint-l);  color: var(--mint); }
@@ -604,7 +572,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 /* ── Sidebar services header ───────────────────────────────────────────── */
 .svc-totals { font-variant-numeric: tabular-nums; flex: 1; font-size: 0.68rem; color: var(--muted); }
 .svc-header-actions { display: flex; align-items: center; gap: 0.4rem; position: relative; }
-.svc-refresh-status { font-variant-numeric: tabular-nums; min-width: 7ch; text-align: right; opacity: 0.6; font-size: 0.5rem; }
 .svc-stack-menu-wrap { position: relative; }
 .svc-stack-menu {
     position: absolute; right: 0; top: calc(100% + 0.4rem);
@@ -720,12 +687,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     font-size: 0.75rem; color: var(--muted); font-weight: 500;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.status-dot {
-    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-    margin-right: 0.3rem; vertical-align: middle;
-}
-.status-dot.active   { background: var(--mint, #7dda93); }
-.status-dot.inactive { background: var(--muted, #9080a8); }
 .summary-row-action {
     background: none; border: 1.5px solid var(--border2);
     padding: 0.35rem 0.85rem; border-radius: 20px;
@@ -885,14 +846,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .drawer-timeline li:last-child { border-bottom: none; }
 .drawer-timeline-time { color: var(--muted); flex-shrink: 0; min-width: 5rem; }
 
-/* ── Status dot (kept for potential reuse) ─────────────────────────────── */
-.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex-shrink: 0; transition: background 0.3s; }
-.status-dot.up      { background: var(--mint);  }
-.status-dot.down    { background: var(--pink);  }
-.status-dot.unknown { background: var(--faint); box-shadow: none; animation: none; }
-.status-dot.checking { background: var(--pink); animation: pulse 1s infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-
 /* ── Login overlay ─────────────────────────────────────────────────────── */
 .login-overlay {
     position: fixed; inset: 0;
@@ -944,7 +897,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .footer a { color: rgba(255,255,255,0.85); text-decoration: underline; }
 #footer-update { }
 .footer .hi { color: rgba(255,255,255,0.95); font-weight: 800; }
-.footer .footer-count { opacity: 0.85; }
 .footer .statusbar-right { margin-left: auto; opacity: 0.75; }
 
 /* Sidebar VPN + host stats blocks */
@@ -997,8 +949,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .download-bar.storage-bar-folder { background: var(--faint); }
 
 /* ── Activity feed ─────────────────────────────────────────────────────── */
-.activity-item { display: none; } /* legacy — replaced by .act-* */
-
 .act-item {
     border-bottom: 1px solid var(--border);
     cursor: pointer;
@@ -1134,16 +1084,7 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .open-jellyfin-link { color: var(--mint); }
 .request-item .users-error { flex-basis: 100%; margin: 0; }
 .unblock-error { display: block; font-size: 0.75rem; color: var(--pink); margin-top: 0.25rem; flex-basis: 100%; }
-.share-url-input {
-    flex: 1; min-width: 0; padding: 0.45rem 0.9rem; margin-top: 0.4rem;
-    background: var(--panel2); border: 1.5px solid var(--border2); border-radius: 50px;
-    color: var(--muted); font-size: 0.78rem; outline: none; width: 100%;
-    font-family: var(--font-body, 'Nunito Sans', sans-serif);
-}
-
 /* ── Invite links ──────────────────────────────────────────────────────── */
-.invites-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-.invites-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; font-family: var(--font-display, 'Nunito', sans-serif); }
 .invites-list { list-style: none; margin: 0 0 0.5rem; padding: 0; }
 .invite-empty { font-size: 0.78rem; color: var(--faint); padding: 0.4rem 0; }
 .users-list-empty {
@@ -1286,7 +1227,6 @@ details[open] .add-user-summary::before { content: '− '; }
     padding: 0.6rem 0.75rem; margin: 0.25rem 0 0.5rem; display: flex; flex-direction: column; gap: 0.4rem;
 }
 
-.sm-settings { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.25rem 0; }
 .sm-setting-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--muted); }
 .sm-threshold-input {
     width: 52px; padding: 0.2rem 0.5rem;
@@ -1331,11 +1271,7 @@ details[open] .add-user-summary::before { content: '− '; }
     box-sizing: border-box;
 }
 .lib-form-input:focus { outline: none; border-color: var(--pink); box-shadow: 0 0 0 3px rgba(240,96,168,0.12); }
-.lib-form-actions { display: flex; align-items: center; gap: 0.5rem; padding-top: 0.6rem; flex-wrap: wrap; }
 .lib-form-error { font-size: 0.75rem; color: var(--pink); margin-left: auto; }
-.lib-form-hint  { font-size: 0.68rem; color: var(--muted); margin-top: 0.15rem; line-height: 1.4; }
-.lib-slug-display { font-size: 0.78rem; color: var(--ink); font-family: monospace; }
-.lib-slug-edit { font-size: 0.68rem; color: var(--pink); cursor: pointer; margin-left: 0.4rem; background: none; border: none; padding: 0; text-decoration: underline; }
 .lib-modal { width: min(440px, 92vw); }
 .lib-form-row select, .lib-form-row input { margin-bottom: 0; }
 
