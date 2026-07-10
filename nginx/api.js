@@ -1,7 +1,12 @@
 // api.js — unified API client for the pelicula dashboard.
 //
 // All requests are sent with same-origin credentials and a 10-second timeout.
-// 401 responses redirect to the root (login overlay shows automatically).
+// A 401 from a /api/pelicula/ path means "session expired or not logged in"
+// — the login overlay handles that case, so those 401s resolve to null
+// instead of throwing. A 401 from any other path (e.g. /api/procula/*,
+// /api/vpn/*, proxied directly by nginx) means a caller/auth-wiring bug, not
+// session expiry, so it throws APIError like any other non-2xx response —
+// see FE-6 in .claude/plans/audit-2026-07/frontend-ux.md.
 // 4xx / 5xx responses throw APIError so callers can differentiate error types.
 // Returns parsed JSON on success (2xx). The raw Response is never exposed.
 
@@ -30,7 +35,7 @@ async function request(method, path, body) {
             opts.body = JSON.stringify(body);
         }
         const res = await fetch(path, opts);
-        if (res.status === 401) {
+        if (res.status === 401 && path.startsWith('/api/pelicula/')) {
             // Session expired or not logged in — let the login overlay handle it.
             // dashboard.js checkAuth will show the overlay on next status poll.
             return null;
