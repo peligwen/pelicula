@@ -91,7 +91,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| `GET` | `/api/pelicula/catalog` | Viewer+ | List movies and series from Radarr+Sonarr. Optional `?q=…&type=movie|series` filter |
+| `GET` | `/api/pelicula/catalog` | Viewer+ | List movies and series from Radarr+Sonarr. Optional `?q=…&type=movie|series` filter. Response: `{movies, series, errors?}` — `errors` (e.g. `{"radarr": "unreachable"}`) is present only when a service fetch failed, so an empty list with `errors` set means "unavailable", not "empty library" |
 | `GET` | `/api/pelicula/catalog/series/{id}` | Viewer+ | Sonarr series detail by Sonarr internal ID |
 | `GET` | `/api/pelicula/catalog/series/{id}/season/{n}` | Viewer+ | Episode + episodefile list for a specific season |
 | `GET` | `/api/pelicula/catalog/item/history` | Viewer+ | Procula job history for a file path (`?path=…`) |
@@ -102,7 +102,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `POST` | `/api/pelicula/catalog/backfill` | Admin | Trigger background backfill from Radarr+Sonarr into the catalog DB |
 | `POST` | `/api/pelicula/catalog/command` | Admin | Proxy force-search, rescan, or unmonitor to Radarr/Sonarr (`arr_type`, `arr_id`, `command`) |
 | `POST` | `/api/pelicula/catalog/replace` | Admin | Mark release as failed in *arr, rescan, and re-search (`arr_type`, `arr_id`, `episode_id`, `path`) |
-| `DELETE` | `/api/pelicula/catalog/blocklist/{id}` | Admin | Remove an entry from the *arr blocklist (`?arr_type=radarr|sonarr`) |
+| `DELETE` | `/api/pelicula/catalog/blocklist/{id}` | Admin | Remove an entry from the *arr blocklist (`?arr_type=radarr|sonarr`). 204 on success, 502 if the *arr delete fails |
 | `GET` | `/api/pelicula/catalog/qualityprofiles` | Viewer+ | Returns `{radarr: {id: name}, sonarr: {id: name}}` quality profile maps |
 | `GET` | `/api/pelicula/jobs` | Viewer+ | Procula job list grouped by state (proxied) |
 

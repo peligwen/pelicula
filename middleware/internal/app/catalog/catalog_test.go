@@ -88,8 +88,9 @@ func TestHandleCatalogListFansOut(t *testing.T) {
 		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		Movies []map[string]any `json:"movies"`
-		Series []map[string]any `json:"series"`
+		Movies []map[string]any  `json:"movies"`
+		Series []map[string]any  `json:"series"`
+		Errors map[string]string `json:"errors"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -99,6 +100,165 @@ func TestHandleCatalogListFansOut(t *testing.T) {
 	}
 	if len(resp.Series) != 1 {
 		t.Errorf("series = %d, want 1", len(resp.Series))
+	}
+	if len(resp.Errors) != 0 {
+		t.Errorf("errors = %v, want omitted when both fetches succeed", resp.Errors)
+	}
+}
+
+// TestHandleCatalogList_SurfacesArrFetchErrors verifies the MWA-5 fix: when a
+// Radarr/Sonarr fetch fails, the response carries a top-level errors field
+// naming the failing service instead of silently presenting an empty library.
+// The healthy service's list must still be returned.
+func TestHandleCatalogList_SurfacesArrFetchErrors(t *testing.T) {
+	t.Parallel()
+
+	// Radarr replies 400 — a permanent (non-retried) error, so the test does
+	// not wait out the arr client's 5xx/transport retry backoff.
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer radarr.Close()
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"id":10,"title":"Show","year":2020}]`)) //nolint:errcheck
+	}))
+	defer sonarr.Close()
+
+	h := newTestHandler(radarr, sonarr, nil, "rk", "sk")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/catalog", nil)
+	w := httptest.NewRecorder()
+	h.HandleCatalogList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Movies []map[string]any  `json:"movies"`
+		Series []map[string]any  `json:"series"`
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Errors["radarr"] == "" {
+		t.Errorf("errors.radarr missing — an empty library is indistinguishable from a Radarr outage (MWA-5 regression); body=%s", w.Body.String())
+	}
+	if _, ok := resp.Errors["sonarr"]; ok {
+		t.Errorf("errors.sonarr = %q, want absent (sonarr fetch succeeded)", resp.Errors["sonarr"])
+	}
+	if len(resp.Movies) != 0 {
+		t.Errorf("movies = %d, want 0 (radarr failed)", len(resp.Movies))
+	}
+	if len(resp.Series) != 1 {
+		t.Errorf("series = %d, want 1 (sonarr healthy)", len(resp.Series))
+	}
+}
+
+// ── MWA-4: blocklist removal must not fake success ────────────────────────────
+
+// TestHandleCatalogUnblocklist_ReturnsBadGatewayOnFailure verifies that a
+// failed DeleteBlocklistItem call surfaces as 502 instead of the
+// unconditional 204 the handler used to return.
+func TestHandleCatalogUnblocklist_ReturnsBadGatewayOnFailure(t *testing.T) {
+	t.Parallel()
+
+	// 400 (permanent, non-retried) keeps the test fast; any *arr error must
+	// produce a 502 regardless of its class.
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer radarr.Close()
+
+	h := newTestHandler(radarr, nil, nil, "rk", "")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/catalog/blocklist/5?arr_type=radarr", nil)
+	req.SetPathValue("id", "5")
+	w := httptest.NewRecorder()
+	h.HandleCatalogUnblocklist(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 when the *arr delete fails (MWA-4 regression); body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleCatalogUnblocklist_SuccessReturns204 verifies the happy path still
+// returns 204 and hits the expected *arr endpoint.
+func TestHandleCatalogUnblocklist_SuccessReturns204(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			gotPath = r.URL.Path
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer sonarr.Close()
+
+	h := newTestHandler(nil, sonarr, nil, "", "sk")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/catalog/blocklist/7?arr_type=sonarr", nil)
+	req.SetPathValue("id", "7")
+	w := httptest.NewRecorder()
+	h.HandleCatalogUnblocklist(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if gotPath != "/api/v3/blocklist/7" {
+		t.Errorf("sonarr DELETE path = %q, want /api/v3/blocklist/7", gotPath)
+	}
+}
+
+// TestHandleCatalogUnblocklist_UnknownArrTypeOneSucceeds verifies the
+// try-both fallback: with no arr_type, success in either app returns 204 even
+// if the other app rejects the ID (blocklist IDs are per-app).
+func TestHandleCatalogUnblocklist_UnknownArrTypeOneSucceeds(t *testing.T) {
+	t.Parallel()
+
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer radarr.Close()
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer sonarr.Close()
+
+	h := newTestHandler(radarr, sonarr, nil, "rk", "sk")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/catalog/blocklist/9", nil)
+	req.SetPathValue("id", "9")
+	w := httptest.NewRecorder()
+	h.HandleCatalogUnblocklist(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204 (sonarr succeeded); body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleCatalogUnblocklist_UnknownArrTypeBothFail verifies that when no
+// arr_type is given and both apps reject the delete, the handler reports 502.
+func TestHandleCatalogUnblocklist_UnknownArrTypeBothFail(t *testing.T) {
+	t.Parallel()
+
+	fail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer fail.Close()
+
+	h := newTestHandler(fail, fail, nil, "rk", "sk")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/pelicula/catalog/blocklist/9", nil)
+	req.SetPathValue("id", "9")
+	w := httptest.NewRecorder()
+	h.HandleCatalogUnblocklist(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 when both *arr deletes fail; body=%s", w.Code, w.Body.String())
 	}
 }
 

@@ -80,6 +80,11 @@ func (h *Handler) rootCtx() context.Context {
 type catalogResponse struct {
 	Movies []json.RawMessage `json:"movies"`
 	Series []json.RawMessage `json:"series"`
+	// Errors reports per-service fetch failures (key: "radarr"/"sonarr",
+	// value: short reason) so the dashboard can distinguish "library is
+	// empty" from "Radarr/Sonarr was unreachable". Omitted when both
+	// fetches succeed — an additive field per docs/API.md's stability policy.
+	Errors map[string]string `json:"errors,omitempty"`
 }
 
 // HandleCatalogList returns movies and series from Radarr+Sonarr in parallel.
@@ -130,10 +135,21 @@ func (h *Handler) HandleCatalogList(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	resp := catalogResponse{Movies: []json.RawMessage{}, Series: []json.RawMessage{}}
-	if rf := <-radarrCh; rf.err == nil && len(rf.data) > 0 {
+	addErr := func(service string, err error) {
+		slog.Error("catalog list fetch failed", "component", "catalog", "service", service, "error", err)
+		if resp.Errors == nil {
+			resp.Errors = make(map[string]string, 2)
+		}
+		resp.Errors[service] = "unreachable"
+	}
+	if rf := <-radarrCh; rf.err != nil {
+		addErr("radarr", rf.err)
+	} else if len(rf.data) > 0 {
 		resp.Movies = filterByTitle(rf.data, q)
 	}
-	if sf := <-sonarrCh; sf.err == nil && len(sf.data) > 0 {
+	if sf := <-sonarrCh; sf.err != nil {
+		addErr("sonarr", sf.err)
+	} else if len(sf.data) > 0 {
 		resp.Series = filterByTitle(sf.data, q)
 	}
 	httputil.WriteJSON(w, resp)
@@ -697,13 +713,26 @@ func (h *Handler) HandleCatalogUnblocklist(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	arrType := r.URL.Query().Get("arr_type")
-	if arrType == "radarr" {
-		h.Arr.RadarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
-	} else if arrType == "sonarr" {
-		h.Arr.SonarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
-	} else {
-		h.Arr.SonarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
-		h.Arr.RadarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id) //nolint:errcheck
+	var err error
+	switch arrType {
+	case "radarr":
+		err = h.Arr.RadarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id)
+	case "sonarr":
+		err = h.Arr.SonarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id)
+	default:
+		// arr_type unknown: blocklist IDs are per-app, so try both; success in
+		// either app means the entry is gone. Only fail if both calls failed.
+		sonarrErr := h.Arr.SonarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id)
+		radarrErr := h.Arr.RadarrClient().DeleteBlocklistItem(r.Context(), "/api/v3", id)
+		if sonarrErr != nil && radarrErr != nil {
+			err = errors.Join(sonarrErr, radarrErr)
+		}
+	}
+	if err != nil {
+		slog.Error("blocklist removal failed", "component", "catalog",
+			"blocklist_id", id, "arr_type", arrType, "error", err)
+		httputil.WriteError(w, "failed to remove blocklist entry — check Radarr/Sonarr availability", http.StatusBadGateway)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -41,6 +41,7 @@ component('catalog', function (el, store, _props) {
 
     // ── Store initialisation ──────────────────────────────────────────────────
     store.set('catalog.items', []);
+    store.set('catalog.errors', null);
     store.set('catalog.query', '');
     store.set('catalog.type', '');
     store.set('catalog.loading', false);
@@ -86,9 +87,13 @@ component('catalog', function (el, store, _props) {
             if (t) params.set('type', t);
             const data = await get('/api/pelicula/catalog?' + params);
             if (!data) throw new Error('catalog unavailable');
+            // Set errors before items: renderCatalog fires on the items
+            // subscription and reads catalog.errors for its empty-state copy.
+            store.set('catalog.errors', data.errors || null);
             store.set('catalog.items', [...(data.movies || []), ...(data.series || [])]);
             store.set('catalog.loaded', true);
         } catch (e) {
+            store.set('catalog.errors', null); // total failure — the list message covers it
             if (list) setHTML(list, html`<div class="no-items">Failed to load catalog. Is the stack running?</div>`);
         } finally {
             store.set('catalog.loading', false);
@@ -139,13 +144,45 @@ component('catalog', function (el, store, _props) {
         list.replaceChildren(frag);
     }
 
+    // ── Degraded-source banner ────────────────────────────────────────────────
+    // Non-blocking warning shown when the backend reports that Radarr/Sonarr
+    // could not be reached (errors field on GET /api/pelicula/catalog): the
+    // list below may be incomplete rather than genuinely empty. Reuses the
+    // .library-warning banner idiom from dashboard.js.
+    function degradedServices() {
+        const errors = store.get('catalog.errors');
+        if (!errors) return [];
+        const pretty = { radarr: 'Radarr', sonarr: 'Sonarr' };
+        return Object.keys(errors).map(k => pretty[k] || k);
+    }
+
+    function renderDegraded() {
+        const list = document.getElementById('cat-list');
+        if (!list || !list.parentNode) return;
+        let banner = document.getElementById('cat-degraded');
+        const names = degradedServices();
+        if (!names.length) { if (banner) banner.remove(); return; }
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'cat-degraded';
+            banner.className = 'library-warning';
+            list.parentNode.insertBefore(banner, list);
+        }
+        setHTML(banner, html`⚠ ${names.join(' and ')} unavailable — the list may be incomplete.`);
+    }
+
     // ── Render list ───────────────────────────────────────────────────────────
     function renderCatalog() {
+        renderDegraded();
         const list = document.getElementById('cat-list');
         if (!list) return;
         const items = store.get('catalog.items');
         if (!items.length) {
-            setHTML(list, html`<div class="no-items">No items found.</div>`);
+            if (degradedServices().length) {
+                setHTML(list, html`<div class="no-items">Library unavailable — Radarr/Sonarr could not be reached.</div>`);
+            } else {
+                setHTML(list, html`<div class="no-items">No items found.</div>`);
+            }
             return;
         }
         const missingItems = items.filter(isMissing);
@@ -1223,6 +1260,7 @@ component('catalog', function (el, store, _props) {
 
     // ── Subscribe to store changes ────────────────────────────────────────────
     store.subscribe('catalog.items', renderCatalog);
+    store.subscribe('catalog.errors', renderDegraded);
     store.subscribe('catalog.flaggedRows', renderAttention);
 
     // ── Event delegation for catalog controls ─────────────────────────────────
