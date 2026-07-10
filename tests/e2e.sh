@@ -199,14 +199,29 @@ cmd_test() {
 
         if [[ ${keep:-0} -eq 0 ]]; then
             info "Cleaning up test stack..."
+            # --profile vpn must match the `up` invocation: profile-gated
+            # services (gluetun/qbittorrent/prowlarr) are not "orphans" to a
+            # profileless down and survive it — same bug class the CLI's
+            # restart-acquire had (CIT-7).
             $NEEDS_SUDO docker compose \
                 --project-directory "$SCRIPT_DIR" \
                 --env-file "${down_env:-$SCRIPT_DIR/.env}" \
                 -f "$COMPOSE_FILE" \
                 -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
                 -p pelicula-test \
+                --profile vpn \
                 down -v --remove-orphans 2>/dev/null || true
             rm -f "${down_env:-}"
+            # Loud post-cleanup sanity: a swapped-out .env or surviving test
+            # containers have silently leaked several times — warn hard so the
+            # operator (or CI log reader) sees it even on a green run.
+            if [[ -n "${test_env_backup:-}" || -f "${test_env:-$SCRIPT_DIR/.env}.test-bak-$$" ]]; then
+                [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]] || \
+                    warn "SANITY: ${test_env:-$SCRIPT_DIR/.env} missing after cleanup — restore it from its .test-bak-* backup!"
+            fi
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^pelicula-test-'; then
+                warn "SANITY: pelicula-test containers survived teardown — run: docker compose -p pelicula-test --profile vpn down -v"
+            fi
             # Container-created files can defeat a plain rm two ways: on
             # macOS, Docker Desktop's VirtioFS stamps a `deny delete` ACL on
             # dirs containers create (strip with chmod -N; the flag doesn't
