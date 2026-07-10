@@ -226,6 +226,13 @@ var ErrInviteNotFound = errors.New("invite not found")
 // ErrInviteNotActive is returned by Redeem when the invite is expired/exhausted/revoked.
 var ErrInviteNotActive = errors.New("invite is not active")
 
+// ErrAccountCreatedAuditFailed is returned by Redeem when the Jellyfin account
+// was created successfully but InsertRedemption (Phase 3, the audit record)
+// failed afterward. The account exists and the invite slot correctly stays
+// consumed — callers must not report this as "account creation failed," since
+// a retry would just hit "username already taken" and confuse the invitee.
+var ErrAccountCreatedAuditFailed = errors.New("account created but audit record failed")
+
 // Redeem validates the token, creates the Jellyfin account, then records the
 // redemption. A slot is reserved under a transaction before the Jellyfin call to
 // prevent concurrent over-use; the slot is released (decremented) on failure.
@@ -272,7 +279,7 @@ func (s *InviteStore) Redeem(ctx context.Context, token, username, password stri
 	if err := s.repo.InsertRedemption(ctx, token, username, jellyfinID, time.Now().UTC()); err != nil {
 		slog.Error("invite redeemed but audit record lost", "component", "invites",
 			"username", username, "error", err)
-		return fmt.Errorf("audit record failed: %w", err)
+		return fmt.Errorf("%w: %v", ErrAccountCreatedAuditFailed, err)
 	}
 	return nil
 }
@@ -499,6 +506,19 @@ func (p *Deps) HandleInviteRedeem(w http.ResponseWriter, r *http.Request, token 
 		}
 		if errors.Is(err, clients.ErrPasswordRequired) {
 			httputil.WriteError(w, "password is required", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrAccountCreatedAuditFailed) {
+			// The Jellyfin account was created even though the audit record
+			// failed — do NOT tell the invitee account creation failed (they'd
+			// retry and hit "username already taken" with no idea an account
+			// already exists). The invite slot is correctly consumed either way.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "account created — try logging in",
+				"code":  "account_created",
+			})
 			return
 		}
 		// Detect username-already-taken (Jellyfin returns 400)

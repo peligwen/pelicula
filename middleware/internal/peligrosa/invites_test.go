@@ -246,6 +246,43 @@ func TestRedeemRace(t *testing.T) {
 	}
 }
 
+// TestRedeem_AuditInsertFailureAfterAccountCreated is the MWD-6 regression
+// test: when InsertRedemption (Phase 3) fails after CreateUser (Phase 2) has
+// already succeeded, Redeem must return the distinguishable
+// ErrAccountCreatedAuditFailed sentinel instead of an opaque error that looks
+// identical to "nothing happened." The fake Jellyfin handler deletes the
+// invite row out from under InsertRedemption's foreign key exactly at the
+// point the "account" is created, forcing the Phase 3 insert to fail.
+func TestRedeem_AuditInsertFailureAfterAccountCreated(t *testing.T) {
+	var store *InviteStore
+	var token string
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			if _, err := store.db().Exec(`DELETE FROM invites WHERE token = ?`, token); err != nil {
+				t.Fatalf("failed to delete invite mid-redemption: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"jf-user-audit-fail"}`)) //nolint:errcheck
+		})
+	})
+	store = newTestInviteStoreWithClient(t, jc)
+
+	maxUses := 1
+	inv, err := store.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	token = inv.Token
+
+	err = store.Redeem(context.Background(), token, "alice", "hunter12")
+	if err == nil {
+		t.Fatal("Redeem should fail when the audit insert fails after account creation")
+	}
+	if !errors.Is(err, ErrAccountCreatedAuditFailed) {
+		t.Fatalf("Redeem error = %v, want ErrAccountCreatedAuditFailed", err)
+	}
+}
+
 // TestRedeem_CanceledContextStillReleasesSlot is the MWD-3 regression test:
 // when CreateUser fails because the request context was canceled (client
 // disconnects/navigates away mid-redemption), the compensating ReleaseSlot
@@ -633,6 +670,60 @@ func TestInviteRedeem_InfraError_DoesNotCount(t *testing.T) {
 		if code != http.StatusBadGateway {
 			t.Errorf("attempt %d: expected 502, got %d", i+1, code)
 		}
+	}
+}
+
+// TestHandleInviteRedeem_AuditInsertFailure_ReturnsAccountCreatedMessage is
+// the MWD-6 HTTP-layer regression test: when Redeem fails with
+// ErrAccountCreatedAuditFailed, the client must get a distinguishable message
+// telling them the account exists — not the generic "could not create
+// account" that a genuine Jellyfin-down failure gets (which would lead the
+// invitee to retry and be confused by "username already taken").
+func TestHandleInviteRedeem_AuditInsertFailure_ReturnsAccountCreatedMessage(t *testing.T) {
+	var store *InviteStore
+	var token string
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			if _, err := store.db().Exec(`DELETE FROM invites WHERE token = ?`, token); err != nil {
+				t.Fatalf("failed to delete invite mid-redemption: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"jf-user-audit-fail"}`)) //nolint:errcheck
+		})
+	})
+	store = newTestInviteStoreWithClient(t, jc)
+	a := newTestAuthWithRateLimit(t)
+	deps := newTestDeps(a, store)
+
+	maxUses := 1
+	inv, err := store.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	token = inv.Token
+
+	body := map[string]string{"username": "alice", "password": "hunter12"}
+	b, _ := json.Marshal(body)
+	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+token+"/redeem", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.HandleInviteOp(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["code"] != "account_created" {
+		t.Errorf("code = %q, want \"account_created\"", resp["code"])
+	}
+	if !strings.Contains(resp["error"], "try logging in") {
+		t.Errorf("error message = %q, want a hint to log in", resp["error"])
+	}
+	if strings.Contains(resp["error"], "could not create account") {
+		t.Errorf("error message = %q, must not read as an outright failure", resp["error"])
 	}
 }
 
