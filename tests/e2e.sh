@@ -175,6 +175,19 @@ cmd_test() {
     }
 
     cleanup_test() {
+        # Teardown's `compose down` needs the TEST env for compose-file
+        # variable interpolation, but the original .env must be restored even
+        # if teardown dies mid-way. Snapshot the test env to a temp file,
+        # restore .env immediately, then run down against the snapshot —
+        # previously down ran with --env-file pointing at the already
+        # restored/deleted path, which could fail silently and leave the
+        # whole test stack running.
+        local down_env=""
+        if [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]]; then
+            down_env="$(mktemp /tmp/peli_e2e_downenv_XXXXXX)"
+            cp "${test_env:-$SCRIPT_DIR/.env}" "$down_env"
+        fi
+
         # Always restore the original .env — the test containers have env vars baked in
         # from the initial `up -d` and are unaffected by the file on disk. Leaving the
         # test .env in place (dummy WireGuard key etc.) breaks `pelicula up` for prod.
@@ -188,13 +201,25 @@ cmd_test() {
             info "Cleaning up test stack..."
             $NEEDS_SUDO docker compose \
                 --project-directory "$SCRIPT_DIR" \
-                --env-file "${test_env:-$SCRIPT_DIR/.env}" \
+                --env-file "${down_env:-$SCRIPT_DIR/.env}" \
                 -f "$COMPOSE_FILE" \
                 -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
                 -p pelicula-test \
                 down -v --remove-orphans 2>/dev/null || true
-            rm -rf "${test_dir:-}"
+            rm -f "${down_env:-}"
+            # Container-created files (e.g. bazarr's config tree, written as
+            # uid 0 inside the container) can't be removed by the invoking
+            # user — fall back to deleting through a container, and never let
+            # a cleanup failure set the exit code of an otherwise-green run
+            # (it previously leaked straight into the script's exit status).
+            if [[ -n "${test_dir:-}" ]] && ! rm -rf "${test_dir}" 2>/dev/null; then
+                $NEEDS_SUDO docker run --rm -v "${test_dir}:/target" alpine \
+                    sh -c 'rm -rf /target/* /target/.[!.]*' 2>/dev/null || true
+                rmdir "${test_dir}" 2>/dev/null || \
+                    warn "cleanup: leftover temp dir (container-owned files): ${test_dir}"
+            fi
         else
+            rm -f "${down_env:-}"
             echo ""
             warn "Test stack left running (--keep is set)."
             warn "Original .env has been restored — prod stack is safe."
