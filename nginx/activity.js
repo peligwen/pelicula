@@ -6,7 +6,7 @@
 'use strict';
 
 import { component, html, raw, toast, router } from '/framework.js';
-import { get, del, post } from '/api.js';
+import { post } from '/api.js';
 
 // notif-helpers.js is a classic script loaded before this module; pull its
 // exports into module scope so bare identifiers resolve without relying on
@@ -37,7 +37,6 @@ function buildDrawer(e) {
     } else if (e.type === 'storage_warning' || e.type === 'storage_critical') {
         actions.push(html`<button class="act-btn act-btn-primary" data-action="act-go-storage">Go to storage</button>`);
     }
-    actions.push(html`<button class="act-btn" data-action="act-dismiss" data-id="${e.id}">Dismiss</button>`);
 
     const detail = e.detail ? html`<div class="act-detail">${e.detail}</div>` : raw('');
     return html`<div class="act-drawer">${detail}<div class="act-actions">${actions}</div></div>`;
@@ -49,7 +48,6 @@ function buildRow(e) {
             <span class="act-icon">${raw(notifIcon(e.type))}</span>
             <span class="act-msg">${e.message}</span>
             <span class="act-time">${formatTime(e.timestamp)}</span>
-            <button class="act-x" title="Dismiss" data-action="act-dismiss" data-id="${e.id}">&#10005;</button>
         </div>
         ${buildDrawer(e)}
     </div>`;
@@ -98,18 +96,6 @@ function actToggleOlder() {
     if (chevron) chevron.classList.toggle('open');
 }
 
-async function actDismiss(id) {
-    try {
-        await del('/api/pelicula/notifications/' + id);
-    } catch { toast('Could not dismiss', { error: true }); return; }
-    try {
-        const events = await get('/api/pelicula/notifications');
-        if (events === null) return;
-        if (window.renderNotifications) window.renderNotifications(events);
-        renderActivity(events);
-    } catch (e) { console.warn('[activity] dismiss refresh error:', e); }
-}
-
 async function actRetry(jobId) {
     try {
         await post('/api/pelicula/procula/jobs/' + jobId + '/retry', {});
@@ -136,8 +122,7 @@ document.getElementById('activity-list').addEventListener('click', e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
-    if (action === 'act-dismiss') actDismiss(btn.dataset.id);
-    else if (action === 'act-retry') actRetry(btn.dataset.jobId);
+    if (action === 'act-retry') actRetry(btn.dataset.jobId);
     else if (action === 'act-jump') actJumpToJob(btn.dataset.jobId);
     else if (action === 'act-go-storage') actGoToStorage();
     else if (action === 'act-toggle-drawer') actToggleDrawer(btn);
