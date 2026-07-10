@@ -431,6 +431,95 @@ func TestListByState(t *testing.T) {
 	}
 }
 
+// TestListActiveByKey verifies MWD-8's targeted dedup lookup: it must match
+// on the correct ID column per type (tmdb_id for movies, tvdb_id for series),
+// exclude terminal states (denied/available), and return nothing for key=0.
+func TestListActiveByKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	seed := func(id, reqType string, tmdbID, tvdbID int, state requests.State) {
+		t.Helper()
+		r := makeRequest(id, reqType, "Title "+id, state)
+		r.TmdbID = tmdbID
+		r.TvdbID = tvdbID
+		if err := s.Insert(ctx, r); err != nil {
+			t.Fatalf("Insert %q: %v", id, err)
+		}
+	}
+
+	seed("movie_pending", "movie", 500, 0, requests.StatePending)
+	seed("movie_denied", "movie", 500, 0, requests.StateDenied)       // same tmdb_id, terminal — must be excluded
+	seed("movie_available", "movie", 501, 0, requests.StateAvailable) // terminal — must be excluded
+	seed("movie_other", "movie", 999, 0, requests.StatePending)       // different tmdb_id — must not match
+	seed("series_grabbed", "series", 0, 700, requests.StateGrabbed)
+	seed("series_wrong_type", "series", 500, 0, requests.StatePending) // tmdb_id=500 but type=series — must not match a movie lookup
+
+	t.Run("movie matches active tmdb_id, excludes terminal", func(t *testing.T) {
+		t.Parallel()
+		got, err := s.ListActiveByKey(ctx, "movie", 500)
+		if err != nil {
+			t.Fatalf("ListActiveByKey: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "movie_pending" {
+			t.Errorf("got %+v, want exactly [movie_pending]", ids(got))
+		}
+	})
+
+	t.Run("movie key with only a terminal match returns empty", func(t *testing.T) {
+		t.Parallel()
+		got, err := s.ListActiveByKey(ctx, "movie", 501)
+		if err != nil {
+			t.Fatalf("ListActiveByKey: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %+v, want none (only match is terminal)", ids(got))
+		}
+	})
+
+	t.Run("series matches active tvdb_id", func(t *testing.T) {
+		t.Parallel()
+		got, err := s.ListActiveByKey(ctx, "series", 700)
+		if err != nil {
+			t.Fatalf("ListActiveByKey: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "series_grabbed" {
+			t.Errorf("got %+v, want exactly [series_grabbed]", ids(got))
+		}
+	})
+
+	t.Run("key=0 returns empty without querying", func(t *testing.T) {
+		t.Parallel()
+		got, err := s.ListActiveByKey(ctx, "movie", 0)
+		if err != nil {
+			t.Fatalf("ListActiveByKey: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %+v, want none for key=0", ids(got))
+		}
+	})
+
+	t.Run("no match for unrelated key", func(t *testing.T) {
+		t.Parallel()
+		got, err := s.ListActiveByKey(ctx, "movie", 123456)
+		if err != nil {
+			t.Fatalf("ListActiveByKey: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %+v, want none", ids(got))
+		}
+	})
+}
+
+func ids(rs []*requests.Request) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.ID
+	}
+	return out
+}
+
 // ── Claim CAS: only one concurrent writer wins ─────────────────────────────
 
 // TestClaim_CAS verifies that when two goroutines race to claim (Update) a

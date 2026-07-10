@@ -30,7 +30,7 @@ func cmdResetConfig(ctx *Context, args []string) {
 	}
 }
 
-// resetConfigSoft wipes service configs, preserving API keys / gluetun / certs / user auth.
+// resetConfigSoft wipes service configs, preserving API keys / gluetun / user auth.
 func resetConfigSoft(ctx *Context) {
 	env := ctx.Env
 	configDir := env["CONFIG_DIR"]
@@ -38,7 +38,7 @@ func resetConfigSoft(ctx *Context) {
 	fmt.Printf("%sReset configuration%s\n", colorBold, colorReset)
 	fmt.Println()
 	fmt.Println("This wipes service config and databases so auto-wiring runs fresh.")
-	fmt.Println("Your API keys, VPN config, TLS certs, and user auth are preserved.")
+	fmt.Println("Your API keys, VPN config, and user auth are preserved.")
 	fmt.Println()
 	fmt.Printf("%sWhat will be cleared:%s\n", colorBold, colorReset)
 	fmt.Println("  sonarr/      — all config except API key")
@@ -50,7 +50,6 @@ func resetConfigSoft(ctx *Context) {
 	fmt.Println()
 	fmt.Printf("%sWhat is kept:%s\n", colorBold, colorReset)
 	fmt.Println("  gluetun/   — WireGuard config")
-	fmt.Println("  certs/     — TLS certificates")
 	fmt.Println("  pelicula/  — users and auth config")
 	fmt.Println("  procula/profiles/, procula/notifications.json")
 	fmt.Println()
@@ -153,7 +152,6 @@ func resetConfigAll(ctx *Context) {
 	fmt.Println("  Sonarr/Radarr API keys, series/movie databases")
 	fmt.Println("  Pelicula admin accounts and invite tokens")
 	fmt.Println("  Procula custom transcoding profiles and notification settings")
-	fmt.Println("  TLS certificates (regenerated on next up)")
 	fmt.Println()
 	fmt.Printf("%sWhat is kept:%s\n", colorBold, colorReset)
 	fmt.Println("  Prowlarr indexer database (indexers survive)")
@@ -198,7 +196,7 @@ func resetConfigAll(ctx *Context) {
 		fatal("Failed to wipe config dir: " + err.Error())
 	}
 
-	// Rebuild directory structure and TLS cert.
+	// Rebuild directory structure.
 	// After a hard reset configDir is wiped, so readOrCreateLibraries will
 	// recreate the default libraries.json and return the built-in slugs.
 	resetLibs, err := readOrCreateLibraries(filepath.Join(configDir, "pelicula"))
@@ -208,9 +206,6 @@ func resetConfigAll(ctx *Context) {
 	}
 	if err := setupDirs(configDir, libraryDir, workDir, resetLibs); err != nil {
 		fatal("Failed to recreate directories: " + err.Error())
-	}
-	if err := SetupCert(configDir); err != nil {
-		warn("TLS cert generation failed: " + err.Error())
 	}
 
 	// Restore Prowlarr indexer database

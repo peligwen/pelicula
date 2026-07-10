@@ -97,7 +97,9 @@ CMD ["procula"]
 
 No CGO — pure-Go build. FFprobe is bundled as part of the `ffmpeg` Alpine package.
 
-**Queue implementation:** Jobs are persisted in SQLite (`procula.db`, tables: `jobs`, `settings`) via `modernc.org/sqlite` (pure-Go SQLite driver, no CGO — Procula's single external Go dependency). On first startup, any existing JSON job files in `/config/procula/jobs/` are migrated automatically (idempotent). The single-goroutine worker means there is no lock contention beyond standard SQLite serialized writes.
+**Queue implementation:** Jobs are persisted in SQLite (`procula.db`, tables: `jobs`, `settings`) via `modernc.org/sqlite` (pure-Go SQLite driver, no CGO — Procula's single external Go dependency). The single-goroutine worker means there is no lock contention beyond standard SQLite serialized writes.
+
+**Historical note:** Pre-SQLite installs (schema versions before the SQLite migration) once had legacy JSON job files under `/config/procula/jobs/` migrated automatically on first startup. That migration code (`migrate_json.go`, plus the equivalent `middleware/internal/repo/migratejson` for the middleware's own JSON state) has since been removed — the schema has been stable at SQLite for many releases and no supported upgrade path still needs it. Pre-SQLite JSON state is no longer auto-migrated; an install with leftover un-migrated JSON files from that era would need to be rebuilt from a fresh setup.
 
 ## API Endpoints
 
@@ -129,7 +131,7 @@ GET    /api/procula/subtitle-tracks                  List subtitle tracks for a 
 DELETE /api/procula/dualsub-sidecars                 Delete generated ASS sidecar files — requires X-API-Key
 POST   /api/procula/subtitles/search                 Trigger a per-language Bazarr subtitle search — requires X-API-Key
 POST   /api/procula/transcode                        Enqueue a manual transcode action — requires X-API-Key
-GET    /api/procula/events                           List pipeline SSE event log entries
+GET    /api/procula/events                           Paginated JSON GET of pipeline event log entries (`?limit=&offset=&type=`) — not Server-Sent Events despite the name
 POST   /api/procula/actions                          Enqueue an action-bus job — requires X-API-Key
 GET    /api/procula/actions/registry                 List registered action handlers
 GET    /api/procula/catalog/flags                    Catalog flag summary ("Needs Attention" entries)
@@ -157,7 +159,8 @@ Runs immediately when a job enters the queue. Fast checks, no heavy processing.
 | **Duration sanity** | Compare FFprobe duration vs expected runtime from *arr metadata (passed in job payload) | Warn if >10% deviation, fail if >50% |
 | **Codec detection** | Extract video codec, audio codec, subtitle tracks | Log for processing stage decisions |
 | **Sample detection** | File size vs expected (a "1080p movie" under 500MB is suspicious) | Blocklist release, trigger re-search |
-| **Archive detection** | Check for RAR/ZIP containers | Queue extraction before further processing |
+
+**Not implemented: archive detection.** RAR/ZIP unpacking was planned but never built — Sonarr/Radarr already unpack archives themselves before firing the import webhook, so by the time a job reaches Procula the file is not an archive. `Validate()` performs exactly the four checks above.
 
 On validation failure:
 1. Procula calls `POST /api/pelicula/downloads/cancel` with `blocklist: true` and the appropriate reason
@@ -167,14 +170,9 @@ On validation failure:
 
 ### Stage 2: Process
 
-Runs after validation passes. Heavy work happens here.
+Runs after validation passes. Heavy work happens here. (There is no separate extraction sub-stage — see the archive-detection note under Stage 1: Validate.)
 
-**2a. Extract (if needed)**
-- Unpack RAR/ZIP archives to `/processing/`
-- Move extracted media file to the library path
-- Clean up archive files
-
-**2b. Transcode (if profile matches)**
+**2a. Transcode (if profile matches)**
 Transcode profiles are stored in `/config/procula/profiles/` as JSON:
 
 ```json
@@ -215,14 +213,24 @@ ffmpeg -i input.mkv -c:v libx264 -preset medium -crf 20 -vf scale=-2:1080 \
 
 Progress tracking: parse FFmpeg's stderr for `frame=` / `time=` / `speed=` to report percentage.
 
-**2c. Audio normalization (optional per profile)**
+**2b. Audio normalization (optional per profile)**
 ```
 ffmpeg -i input.mkv -af loudnorm=I=-14:TP=-2:LRA=7 ...
 ```
 
-**2d. Subtitle handling**
+**2c. Subtitle handling**
 - Detect embedded subtitle tracks via FFprobe
-- If none found for configured languages, flags them in `missing_subs`; the Await Subs stage then kicks Bazarr and waits for sidecars
+- If none found for configured languages, flags them in `missing_subs`; the Await Subs stage then kicks Bazarr and waits for sidecars (see [Await Subs](#await-subs) below for how this no longer blocks the worker)
+
+### Await Subs
+
+Procula has a single sequential worker. Job-record writes are serialized per job ID — a per-job mutex guards each job's read-modify-write update cycle — which is what makes it safe for a background goroutine to keep updating a job's record after the worker has moved on to the next one (see below). Waiting for Bazarr to deliver a missing subtitle sidecar can take minutes — the timeout defaults to 30 minutes — and historically this blocked the single worker from picking up the next queued job for the whole wait.
+
+Await Subs now **parks** instead of blocking: when a job has missing subtitles, the wait (and the rest of that job's pipeline run — dual-sub generation, transcoding, late catalog) is handed off to a background goroutine, and the worker immediately moves on to the next queued job. Parking is bounded to **8 concurrent slots**; if all 8 are in use when a job needs to park, that job falls back to the old inline (worker-blocking) wait rather than skipping subtitle acquisition — a deliberate bounded degradation instead of unbounded goroutine growth after a large import burst.
+
+FFmpeg transcodes remain **serialized process-wide** regardless of parking — a single-slot gate ensures at most one FFmpeg process runs at a time, since parked continuations could otherwise reach the transcode stage concurrently and stack multiple FFmpeg processes on NAS-class hardware.
+
+Parked jobs behave like any other in-flight job: cancelling one commits `StateCancelled` and unblocks its wait immediately, and if the Procula process dies while a job is parked, the job row is still `state=processing` — the normal crash-recovery path re-queues it from the Validate stage on restart (stages are idempotent, and already-acquired subtitle sidecars are picked up on the first poll).
 
 ### Stage 3: Catalog
 
@@ -325,7 +333,6 @@ procula/
       main.go           # Entry point: HTTP server startup, route registration
   main.go               # Package-level HTTP route wiring
   db.go                 # SQLite schema, migration, job/settings CRUD
-  migrate_json.go       # One-time migration from legacy JSON job files
   queue.go              # Job queue: create, list, update (backed by db.go)
   pipeline.go           # Stage orchestration: validate -> process -> catalog
   validate.go           # FFprobe checks, sample detection, duration sanity
@@ -336,7 +343,7 @@ procula/
   dualsub.go            # Dual-subtitle ASS sidecar generation
   settings.go           # Procula settings (SQLite-backed)
   actions.go            # Action bus handler registrations
-  events.go             # SSE pipeline event streaming
+  events.go             # Pipeline event log (paginated JSON, not SSE)
   libraries.go          # Library management
   updates.go            # Update check
 ```
@@ -462,8 +469,7 @@ All settings are also exposed in the Procula dashboard under **Settings → Dual
 
 ```
 /config/procula/
-  procula.db               # SQLite database: jobs, settings, catalog_flags, dualsub_profiles, blocked_releases, notifications, migrated_json_files
-  jobs/                    # Legacy — migrated to SQLite on first startup (renamed to .json.migrated)
+  procula.db               # SQLite database: jobs, settings, catalog_flags, dualsub_profiles, blocked_releases, notifications, migrated_json_files (schema kept for history; the migration code that populated it has been removed — see the Historical note above)
   profiles/                # Transcode profile JSON files
   dualsub-cache/           # Translator cue cache (SHA-256-keyed .txt files)
   notifications.json       # Webhook URLs and preferences

@@ -41,7 +41,6 @@ import (
 	"pelicula-api/internal/cryptogen"
 	"pelicula-api/internal/peligrosa"
 	"pelicula-api/internal/remoteconfig"
-	"pelicula-api/internal/repo/migratejson"
 	"pelicula-api/internal/repo/peliculadb"
 	reporeqs "pelicula-api/internal/repo/requests"
 
@@ -108,11 +107,9 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		}
 	}
 
-	// Read TMDB key and search mode from env file.
-	tmdbKey := ""
+	// Read search mode from env file.
 	searchMode := ""
 	if vars, err := settings.ParseEnvFile(envPath); err == nil {
-		tmdbKey = vars["TMDB_API_KEY"]
 		searchMode = vars["SEARCH_MODE"]
 	}
 
@@ -183,15 +180,10 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		db.Close()
 		return nil, err
 	}
-	migratejson.Run(ctx, db, "/config/pelicula")
 
-	searchHandler := search.New(svc, urls.Sonarr, urls.Radarr, urls.Prowlarr, libHandler, tmdbKey, searchMode)
-
-	invites := peligrosa.NewInviteStore(db, jellyfinClient)
-	requests := peligrosa.NewRequestStore(reporeqs.New(db), search.NewArrFulfiller(searchHandler))
-
-	// Construct the shared catalog cache once; both CatalogHandler and
-	// missingwatcher draw from it to avoid redundant full-library fetches.
+	// Construct the shared catalog cache once; CatalogHandler, missingwatcher,
+	// and search.Handler all draw from it to avoid redundant full-library
+	// fetches (search.Handler uses it for the search-results "added" flag).
 	arrCatalogCache := catalog.NewCatalogCache(
 		func(ctx context.Context) ([]byte, error) {
 			return svc.RadarrClient().Get(ctx, "/api/v3/movie")
@@ -200,6 +192,12 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			return svc.SonarrClient().Get(ctx, "/api/v3/series")
 		},
 	)
+
+	searchHandler := search.New(svc, urls.Sonarr, urls.Radarr, urls.Prowlarr, libHandler, searchMode)
+	searchHandler.ArrCache = arrCatalogCache
+
+	invites := peligrosa.NewInviteStore(db, jellyfinClient)
+	requests := peligrosa.NewRequestStore(reporeqs.New(db), search.NewArrFulfiller(searchHandler))
 
 	hub := sse.NewHub()
 
@@ -313,7 +311,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 
 	// Autowirer InvalidateIndexerCache captures a.IdxCache by pointer, which
 	// is valid for the lifetime of the App.
-	autowirer, _ := autowire.NewAutowirer(autowire.Config{
+	autowirer := autowire.NewAutowirer(autowire.Config{
 		Svc: svc,
 		URLs: autowire.URLs{
 			Sonarr:      urls.Sonarr,

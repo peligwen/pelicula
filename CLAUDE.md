@@ -35,6 +35,7 @@ pelicula import [dir]        # import local media files via the browser wizard
 pelicula test                # run e2e integration test (isolated stack on port 7399, runs verify suite against it)
 pelicula verify [--target H] # post-deploy regression checks against any running stack (default localhost:7354)
                               # supports --skip-auth, --suite SUITE,...; dispatches to tests/bug*.sh via tests/verify.sh
+pelicula doctor              # dump container status and error logs for troubleshooting
 ```
 
 ## Architecture

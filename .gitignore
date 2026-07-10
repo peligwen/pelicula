@@ -26,4 +26,3 @@ tests/playwright/report/
 test-results/
 .playwright-mcp/
 /*.png
-.worktrees/

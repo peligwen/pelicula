@@ -31,8 +31,8 @@ func currentVersion(t *testing.T, db *sql.DB) int {
 func TestOpen_CreatesTablesAndSetsVersion(t *testing.T) {
 	db := testDB(t)
 
-	if got := currentVersion(t, db); got != 2 {
-		t.Errorf("user_version = %d, want 2", got)
+	if got := currentVersion(t, db); got != 3 {
+		t.Errorf("user_version = %d, want 3", got)
 	}
 
 	for _, table := range []string{
@@ -62,15 +62,15 @@ func TestOpen_MigratesForwardFromZero(t *testing.T) {
 	}
 	raw.Close()
 
-	// Open via peliculadb.Open — must migrate 0 → 2.
+	// Open via peliculadb.Open — must migrate 0 → 3.
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 
-	if got := currentVersion(t, db); got != 2 {
-		t.Errorf("user_version = %d, want 2", got)
+	if got := currentVersion(t, db); got != 3 {
+		t.Errorf("user_version = %d, want 3", got)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestOpen_IdempotentOnSecondOpen(t *testing.T) {
 	}
 	defer db2.Close()
 
-	if got := currentVersion(t, db2); got != 2 {
-		t.Errorf("user_version = %d after second open, want 2", got)
+	if got := currentVersion(t, db2); got != 3 {
+		t.Errorf("user_version = %d after second open, want 3", got)
 	}
 }
 
@@ -132,5 +132,39 @@ func TestSchemaEquivalence_PeliculaDB(t *testing.T) {
 	// Final user_version must equal the count of migrations.
 	if ver := currentVersion(t, db); ver != len(migrations) {
 		t.Errorf("user_version = %d, want %d (len(migrations))", ver, len(migrations))
+	}
+}
+
+// TestMigrate3_DeletingInviteDoesNotCascadeToRedemptions verifies MWD-5: the
+// ON DELETE CASCADE on redemptions.invite_token was dropped in migrate3, so
+// deleting an invite (a normal admin-hygiene action) leaves its redemption
+// audit rows in place instead of silently erasing them.
+func TestMigrate3_DeletingInviteDoesNotCascadeToRedemptions(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+
+	if _, err := db.Exec(
+		`INSERT INTO invites (token, label, created_at, created_by, max_uses, uses, revoked)
+		 VALUES ('tok-1', '', '2026-01-01T00:00:00Z', 'admin', 1, 1, 0)`,
+	); err != nil {
+		t.Fatalf("insert invite: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO redemptions (invite_token, username, jellyfin_id, redeemed_at)
+		 VALUES ('tok-1', 'alice', 'jf-1', '2026-01-01T00:01:00Z')`,
+	); err != nil {
+		t.Fatalf("insert redemption: %v", err)
+	}
+
+	if _, err := db.Exec(`DELETE FROM invites WHERE token = 'tok-1'`); err != nil {
+		t.Fatalf("delete invite: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM redemptions WHERE invite_token = 'tok-1'`).Scan(&count); err != nil {
+		t.Fatalf("count redemptions: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("redemption rows after invite delete = %d, want 1 (audit trail must survive invite deletion)", count)
 	}
 }

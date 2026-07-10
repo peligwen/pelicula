@@ -85,10 +85,13 @@ func (h *Handler) HandleStackRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Restart everything except ourselves first.
-	// qbittorrent is omitted: it shares gluetun's network namespace and
-	// comes back automatically when gluetun restarts.
-	order := []string{"nginx", "procula", "sonarr", "radarr", "prowlarr",
-		"qbittorrent", "jellyfin", "bazarr", "gluetun"}
+	// Invariant: qbittorrent and prowlarr run on gluetun's network namespace
+	// (network_mode: service:gluetun), so they must be restarted *after*
+	// gluetun — restarting gluetun tears down and recreates its namespace,
+	// which orphans any dependent container still attached to the old one.
+	// Same ordering HandleVPNRestart below uses for the VPN-only subset.
+	order := []string{"nginx", "procula", "sonarr", "radarr",
+		"gluetun", "qbittorrent", "prowlarr", "jellyfin", "bazarr"}
 	var errs []string
 	for _, svc := range order {
 		if !h.Docker.IsAllowed(svc) {
@@ -162,10 +165,14 @@ func (h *Handler) HandleServiceLogs(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, "unknown service", http.StatusBadRequest)
 		return
 	}
+	const maxTail = 500
 	tail := 200
 	if s := r.URL.Query().Get("tail"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 {
 			tail = n
+			if tail > maxTail {
+				tail = maxTail
+			}
 		}
 	}
 	logs, err := h.Docker.Logs(r.Context(), svc, tail, false)

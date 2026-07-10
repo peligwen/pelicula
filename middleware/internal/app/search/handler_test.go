@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/library"
 	arrclient "pelicula-api/internal/clients/arr"
 )
@@ -83,7 +84,7 @@ func newHandler(sonarrSrv, radarrSrv, prowlarrSrv *httptest.Server, searchMode s
 	arr := newHandlerArr(sonarrSrv, radarrSrv, prowlarrSrv)
 	h := New(arr,
 		srvURL(sonarrSrv), srvURL(radarrSrv), srvURL(prowlarrSrv),
-		&library.Handler{}, "", searchMode)
+		&library.Handler{}, searchMode)
 	return h
 }
 
@@ -306,6 +307,61 @@ func TestHandleSearch_AddedFlagFromExisting(t *testing.T) {
 	}
 }
 
+// TestHandleSearch_UsesArrCacheForAddedFlag verifies MWA-19: when ArrCache is
+// wired, HandleSearch computes the "added" flag from the shared cache instead
+// of issuing its own full Radarr/Sonarr library fetch on every search. The
+// cache is seeded with a different answer than Radarr's own /api/v3/movie
+// endpoint would give, so the assertion can tell which one was actually used.
+func TestHandleSearch_UsesArrCacheForAddedFlag(t *testing.T) {
+	t.Parallel()
+
+	var libraryFetches int32
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/movie/lookup":
+			w.Write([]byte(`[{"title":"Dune","year":2021,"tmdbId":438631}]`)) //nolint:errcheck
+		case "/api/v3/movie":
+			atomic.AddInt32(&libraryFetches, 1)
+			// Radarr's own list does NOT contain the movie — deliberately the
+			// opposite of what the cache below reports.
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		}
+	}))
+	defer radarr.Close()
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/series/lookup":
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case "/api/v3/series":
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		}
+	}))
+	defer sonarr.Close()
+
+	h := newHandler(sonarr, radarr, nil, "")
+	h.ArrCache = catalog.NewCatalogCache(
+		func(ctx context.Context) ([]byte, error) {
+			return []byte(`[{"tmdbId":438631,"title":"Dune"}]`), nil
+		},
+		func(ctx context.Context) ([]byte, error) {
+			return []byte(`[]`), nil
+		},
+	)
+
+	results := resultsFrom(t, doSearch(t, h, "dune", "movie"))
+
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if results[0]["added"] != true {
+		t.Errorf("results[0].added = %v, want true (from ArrCache, not Radarr's own list)", results[0]["added"])
+	}
+	if got := atomic.LoadInt32(&libraryFetches); got != 0 {
+		t.Errorf("Radarr /api/v3/movie was fetched %d times; want 0 — HandleSearch should use ArrCache instead", got)
+	}
+}
+
 // TestHandleSearch_IndexerModeFilters: searchMode="indexer"; Prowlarr returns
 // only tmdbId=2 → only that movie survives the filter.
 func TestHandleSearch_IndexerModeFilters(t *testing.T) {
@@ -409,7 +465,7 @@ func TestCachedIndexerSearch_TTL(t *testing.T) {
 		sonarr:      arrclient.New("", "sk"),
 		radarr:      arrclient.New("", "rk"),
 		prowlarr:    arrclient.New(prowlarr.URL, "pk"),
-	}, "", "", prowlarr.URL, &library.Handler{}, "", "indexer")
+	}, "", "", prowlarr.URL, &library.Handler{}, "indexer")
 	h.now = func() time.Time { return faketime }
 
 	// First call — cache miss.
@@ -452,7 +508,7 @@ func TestCachedIndexerSearch_LazyEviction(t *testing.T) {
 		sonarr:      arrclient.New("", "sk"),
 		radarr:      arrclient.New("", "rk"),
 		prowlarr:    arrclient.New(prowlarr.URL, "pk"),
-	}, "", "", prowlarr.URL, &library.Handler{}, "", "indexer")
+	}, "", "", prowlarr.URL, &library.Handler{}, "indexer")
 	h.now = func() time.Time { return faketime }
 
 	// Prime A and B.
@@ -530,7 +586,7 @@ func TestHandleSearchAdd_RejectsUnknownType(t *testing.T) {
 	t.Parallel()
 
 	h := New(keysOnlyArr("sk", "rk", "pk"),
-		"", "", "", &library.Handler{}, "", "")
+		"", "", "", &library.Handler{}, "")
 
 	body := `{"type":"album","tmdbId":1,"title":"OST"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
@@ -548,7 +604,7 @@ func TestHandleSearchAdd_BodySizeLimit(t *testing.T) {
 	t.Parallel()
 
 	h := New(keysOnlyArr("sk", "rk", "pk"),
-		"", "", "", &library.Handler{}, "", "")
+		"", "", "", &library.Handler{}, "")
 
 	// 200KB body — well over the 64KB limit.
 	oversized := strings.Repeat("x", 200<<10)
@@ -770,7 +826,7 @@ func TestArrFulfiller_PassesCtx(t *testing.T) {
 	defer radarr.Close()
 
 	h := New(newHandlerArr(nil, radarr, nil),
-		"", radarr.URL, "", nil, "", "")
+		"", radarr.URL, "", nil, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel so ctx.Err() != nil on entry

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,52 @@ func TestClients_TypedClientsConstructedOnce(t *testing.T) {
 	}
 	if svc.Qbt != qbt {
 		t.Error("ReloadKeys() replaced svc.Qbt pointer — invariant violated")
+	}
+}
+
+// TestClients_JellyfinClientCachedNotPerCall verifies that New() constructs
+// the Jellyfin client once (services/jellyfin.go quick win): the unexported
+// jellyfin field is non-nil right after construction and JellyfinGet reuses
+// that same pointer across multiple calls instead of allocating a fresh
+// *jfclient.Client per request. Also exercises JellyfinGet end-to-end against
+// a real httptest.Server to confirm the caching didn't change behavior.
+func TestClients_JellyfinClientCachedNotPerCall(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if got := r.Header.Get("X-Emby-Authorization"); !strings.Contains(got, `Token="jf-token"`) {
+			t.Errorf("X-Emby-Authorization = %q, want it to contain Token=\"jf-token\"", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	cfg := minConfig(t, dir, "http://localhost:0")
+	cfg.URLs.Jellyfin = srv.URL
+	svc := New(cfg, "jf-key")
+
+	if svc.jellyfin == nil {
+		t.Fatal("svc.jellyfin is nil after New() — must be constructed eagerly, not lazily per call")
+	}
+	cached := svc.jellyfin
+
+	for i := 0; i < 3; i++ {
+		body, err := svc.JellyfinGet(context.Background(), "/System/Info", "jf-token")
+		if err != nil {
+			t.Fatalf("call %d: JellyfinGet: %v", i, err)
+		}
+		if string(body) != `{"ok":true}` {
+			t.Errorf("call %d: body = %q", i, body)
+		}
+		if svc.jellyfin != cached {
+			t.Errorf("call %d: svc.jellyfin pointer changed — a new client was allocated per call", i)
+		}
+	}
+
+	if hits != 3 {
+		t.Errorf("server hits = %d, want 3", hits)
 	}
 }
 

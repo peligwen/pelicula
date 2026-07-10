@@ -18,6 +18,7 @@ func Open(path string) (*sql.DB, error) {
 var migrations = []dbutil.Migration{
 	{Version: 1, Up: migrate1},
 	{Version: 2, Up: migrate2},
+	{Version: 3, Up: migrate3},
 }
 
 func migrate1(tx *sql.Tx) error {
@@ -95,6 +96,34 @@ func migrate2(tx *sql.Tx) error {
 	)`)
 	if err != nil {
 		return fmt.Errorf("create migrated_json_files: %w", err)
+	}
+	return nil
+}
+
+// migrate3 drops the ON DELETE CASCADE on redemptions.invite_token. redemptions
+// is an append-only audit log (who redeemed which invite, and when); deleting
+// an invite is a routine admin-hygiene action and should not erase that
+// history. SQLite has no ALTER TABLE ... DROP CONSTRAINT, so the fix is the
+// standard rebuild: recreate the table without the FK action, copy rows over,
+// drop the old table, rename. Orphaned invite_token values afterward are
+// harmless for a read-only history table.
+func migrate3(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE redemptions_new (
+			invite_token TEXT NOT NULL,
+			username     TEXT NOT NULL,
+			jellyfin_id  TEXT NOT NULL,
+			redeemed_at  TEXT NOT NULL
+		)`,
+		`INSERT INTO redemptions_new (invite_token, username, jellyfin_id, redeemed_at)
+			SELECT invite_token, username, jellyfin_id, redeemed_at FROM redemptions`,
+		`DROP TABLE redemptions`,
+		`ALTER TABLE redemptions_new RENAME TO redemptions`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
+		}
 	}
 	return nil
 }

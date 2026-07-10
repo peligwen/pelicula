@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +65,63 @@ func TestFirstExistingAncestor_RootSentinel(t *testing.T) {
 	got := firstExistingAncestor(deep)
 	if got != root {
 		t.Errorf("firstExistingAncestor(%q) = %q, want %q (the temp root)", deep, got, root)
+	}
+}
+
+// TestWriteEnvFile_SingleTimestampedBackup is the regression test for the
+// resetConfigAll double-backup fix: writeEnvFile must produce exactly one
+// backup of a pre-existing .env — its own timestamped ".env.bak.<unix>" —
+// and must NOT also trigger WriteEnv's plain ".env.bak" (writeEnvFile calls
+// writeEnvNoBackup internally for exactly this reason).
+func TestWriteEnvFile_SingleTimestampedBackup(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+
+	const oldContent = "CONFIG_DIR=\"/old/config\"\n"
+	if err := os.WriteFile(envPath, []byte(oldContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeEnvFile(envPath, "/new/config", "/new/lib", "/new/work",
+		"1000", "1000", "UTC", "wgkey", "Netherlands", "7354",
+		"admin", "proculakey", "jfpass"); err != nil {
+		t.Fatalf("writeEnvFile: %v", err)
+	}
+
+	// The plain ".bak" (WriteEnv's own backup) must NOT exist — only the
+	// timestamped one should have been written.
+	if _, err := os.Stat(envPath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("plain %s.bak should not exist (redundant backup) — writeEnvFile should be the only backup writer", envPath)
+	}
+
+	// Exactly one timestamped backup should exist, containing the old content.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var timestamped []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".env.bak.") {
+			timestamped = append(timestamped, e.Name())
+		}
+	}
+	if len(timestamped) != 1 {
+		t.Fatalf("expected exactly 1 timestamped backup, found %d: %v", len(timestamped), timestamped)
+	}
+	backupContent, err := os.ReadFile(filepath.Join(dir, timestamped[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backupContent) != oldContent {
+		t.Errorf("backup content = %q, want %q", backupContent, oldContent)
+	}
+
+	// The .env file itself should now hold the new content.
+	m, err := ParseEnv(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["CONFIG_DIR"] != "/new/config" {
+		t.Errorf("CONFIG_DIR = %q, want /new/config", m["CONFIG_DIR"])
 	}
 }

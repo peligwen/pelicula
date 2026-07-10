@@ -521,9 +521,18 @@ func parseSRTTime(s string) (time.Duration, error) {
 
 // stripSubTags removes HTML (<i>, <b>, …) and ASS ({...}) inline tags from
 // subtitle text, leaving plain text suitable for display or translation.
+//
+// assTagRE only matches well-formed, balanced {...} blocks. A cue with a lone
+// unmatched brace (malformed source subtitle, or a literal "{"/"}" in dialogue)
+// would otherwise reach the generated .ass Dialogue line unstripped — libass
+// then reads it as the start of a never-closed ASS override tag block, which
+// silently swallows the rest of that cue's text. Strip any leftover brace
+// characters after the balanced-pair pass so that can't happen.
 func stripSubTags(text string) string {
 	text = srtTagRE.ReplaceAllString(text, "")
 	text = assTagRE.ReplaceAllString(text, "")
+	text = strings.ReplaceAll(text, "{", "")
+	text = strings.ReplaceAll(text, "}", "")
 	return strings.TrimSpace(text)
 }
 

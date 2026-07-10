@@ -51,6 +51,47 @@ func TestDetectLANURL_HonorsPort(t *testing.T) {
 	}
 }
 
+// TestPlatformLabel_StrongSynologySignal confirms IsSynology (set only from
+// /proc/syno_platform in Detect) drives both the label and HostPlatformID.
+func TestPlatformLabel_StrongSynologySignal(t *testing.T) {
+	p := Platform{OS: "linux", IsSynology: true}
+	if got := p.PlatformLabel(); got != "Synology NAS" {
+		t.Errorf("PlatformLabel() = %q, want %q", got, "Synology NAS")
+	}
+	if got := p.HostPlatformID(); got != "synology" {
+		t.Errorf("HostPlatformID() = %q, want %q", got, "synology")
+	}
+}
+
+// TestPlatformLabel_Volume1HintAloneIsNotSynology is the regression test for
+// CIT-10: a bare /volume1 directory (recorded via the unexported
+// hasVolume1Hint field, since it's a secondary hint) must never by itself
+// classify the host as Synology or select Synology default paths — only
+// /proc/syno_platform (IsSynology) may do that. The hint may still surface
+// in the human-readable label.
+func TestPlatformLabel_Volume1HintAloneIsNotSynology(t *testing.T) {
+	p := Platform{OS: "linux", hasVolume1Hint: true}
+
+	if got := p.PlatformLabel(); got == "Synology NAS" {
+		t.Errorf("PlatformLabel() = %q — /volume1 alone must not claim Synology NAS", got)
+	}
+	if !strings.Contains(p.PlatformLabel(), "volume1") {
+		t.Errorf("PlatformLabel() = %q, want it to mention volume1 as a hint", p.PlatformLabel())
+	}
+	if got := p.HostPlatformID(); got != "linux" {
+		t.Errorf("HostPlatformID() = %q, want %q — /volume1 alone must not select the synology platform ID", got, "linux")
+	}
+}
+
+// TestPlatformLabel_PlainLinux confirms the label falls back to a bare
+// "Linux" when neither Synology signal is present.
+func TestPlatformLabel_PlainLinux(t *testing.T) {
+	p := Platform{OS: "linux"}
+	if got := p.PlatformLabel(); got != "Linux" {
+		t.Errorf("PlatformLabel() = %q, want %q", got, "Linux")
+	}
+}
+
 func TestIsRFC1918(t *testing.T) {
 	cases := []struct {
 		ip   string

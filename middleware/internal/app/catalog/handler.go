@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"pelicula-api/httputil"
@@ -66,6 +67,11 @@ type Handler struct {
 	// supervisor root ctx in bootstrap; nil falls back to context.Background().
 	RootCtx context.Context
 	jfCache jellyfinCacheState
+
+	// backfillRunning guards against overlapping HandleCatalogBackfill runs;
+	// a duplicate trigger while one is in flight gets a 409 instead of
+	// spawning a second concurrent full Radarr+Sonarr+Jellyfin sweep.
+	backfillRunning atomic.Bool
 }
 
 // rootCtx returns the Handler's root context, falling back to context.Background()
@@ -484,12 +490,22 @@ func (h *Handler) HandleCatalogItemDetail(w http.ResponseWriter, r *http.Request
 }
 
 // HandleCatalogBackfill triggers a background backfill from Radarr+Sonarr.
+// Only one backfill may run at a time; a duplicate trigger (repeated click,
+// flaky UI double-submit) while one is already in flight gets a 409 instead
+// of spawning a redundant concurrent sweep.
 func (h *Handler) HandleCatalogBackfill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.WriteError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	go BackfillFromArr(h.rootCtx(), h.DB, h.Jf, h.Arr) //nolint:errcheck
+	if !h.backfillRunning.CompareAndSwap(false, true) {
+		httputil.WriteError(w, "backfill already running", http.StatusConflict)
+		return
+	}
+	go func() {
+		defer h.backfillRunning.Store(false)
+		BackfillFromArr(h.rootCtx(), h.DB, h.Jf, h.Arr) //nolint:errcheck
+	}()
 	httputil.WriteJSON(w, map[string]string{"status": "started"})
 }
 

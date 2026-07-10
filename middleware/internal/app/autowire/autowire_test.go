@@ -157,9 +157,9 @@ func (s *stubSvc) findPost(pathSuffix string) *capturedCall {
 	return nil
 }
 
-// TestAutowireStateDone verifies that AutowireState.Done() starts false
-// and becomes true after a successful Run.
-func TestAutowireStateDone(t *testing.T) {
+// TestRun_SuccessfulWiring verifies that a successful Run calls the
+// WireJellyfin callback and marks the service wired via SetWired(true).
+func TestRun_SuccessfulWiring(t *testing.T) {
 	// Spin up a tiny HTTP server that answers all service-readiness pings.
 	pingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -189,50 +189,23 @@ func TestAutowireStateDone(t *testing.T) {
 	}
 
 	jellyfinCalled := false
-	a, state := autowire.NewAutowirer(autowire.Config{
+	a := autowire.NewAutowirer(autowire.Config{
 		Svc:           svc,
 		URLs:          urls,
 		VPNConfigured: false, // skip Prowlarr/qBT readiness checks
 		WireJellyfin:  func() { jellyfinCalled = true },
 		GetLibraries:  func() []autowire.Library { return nil },
 	})
-	_ = a
-
-	if state.Done() {
-		t.Fatal("AutowireState.Done() should be false before Run")
-	}
 
 	if err := a.Run(context.Background()); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	if !state.Done() {
-		t.Error("AutowireState.Done() should be true after successful Run")
-	}
 	if !jellyfinCalled {
 		t.Error("WireJellyfin callback was not called")
 	}
 	if !svc.wired {
 		t.Error("SetWired(true) was not called on the service")
-	}
-}
-
-// TestAutowireStateDoneBeforeRun verifies the zero-value is false.
-func TestAutowireStateDoneBeforeRun(t *testing.T) {
-	pingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer pingSrv.Close()
-	svc := newStubSvc(t, pingSrv.Client())
-	svc.sonarrKey = "k"
-	svc.radarrKey = "k"
-	_, state := autowire.NewAutowirer(autowire.Config{
-		Svc:          svc,
-		URLs:         autowire.URLs{},
-		GetLibraries: func() []autowire.Library { return nil },
-	})
-	if state.Done() {
-		t.Error("AutowireState.Done() must be false before Run is called")
 	}
 }
 
@@ -291,7 +264,7 @@ func TestWireDownloadClientDrift(t *testing.T) {
 		QBT:         pingSrv.URL,
 		PeliculaAPI: "http://pelicula-api:8181",
 	}
-	a, _ := autowire.NewAutowirer(autowire.Config{
+	a := autowire.NewAutowirer(autowire.Config{
 		Svc:           svc,
 		URLs:          urls,
 		VPNConfigured: true,
@@ -370,7 +343,7 @@ func TestWireImportWebhookURLDrift(t *testing.T) {
 		Jellyfin:    pingSrv.URL,
 		PeliculaAPI: correctAPI,
 	}
-	a, _ := autowire.NewAutowirer(autowire.Config{
+	a := autowire.NewAutowirer(autowire.Config{
 		Svc:           svc,
 		URLs:          urls,
 		VPNConfigured: false,
@@ -455,7 +428,7 @@ func TestWireImportWebhookSecretDrift(t *testing.T) {
 		Jellyfin:    pingSrv.URL,
 		PeliculaAPI: peliculaAPI,
 	}
-	a, _ := autowire.NewAutowirer(autowire.Config{
+	a := autowire.NewAutowirer(autowire.Config{
 		Svc:           svc,
 		URLs:          urls,
 		VPNConfigured: false,
@@ -529,7 +502,7 @@ func runReleaseProfileTest(t *testing.T, svc *stubSvc, pingSrv *httptest.Server)
 		Jellyfin:    pingSrv.URL,
 		PeliculaAPI: "http://pelicula-api:8181",
 	}
-	a, _ := autowire.NewAutowirer(autowire.Config{
+	a := autowire.NewAutowirer(autowire.Config{
 		Svc:           svc,
 		URLs:          urls,
 		VPNConfigured: false,
@@ -795,7 +768,7 @@ func TestProwlarrWiring_RadarrAttemptedAfterSonarrFailure(t *testing.T) {
 		PeliculaAPI: "http://pelicula-api:8181",
 	}
 
-	a, _ := autowire.NewAutowirer(autowire.Config{
+	a := autowire.NewAutowirer(autowire.Config{
 		Svc:           svc,
 		URLs:          urls,
 		VPNConfigured: true,

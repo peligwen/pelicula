@@ -61,6 +61,7 @@ func Run() {
 	proculaAPIKey = env("PROCULA_API_KEY", "")
 	refreshDebounce = parseRefreshDebounceMs(os.Getenv("JELLYFIN_REFRESH_DEBOUNCE_MS"))
 	preferredAudioLangVal = normalizeLangCode(env("PELICULA_AUDIO_LANG", "en"))
+	subLangsVal = os.Getenv("PELICULA_SUB_LANGS")
 
 	db, err := OpenDB(filepath.Join(configDir, "procula.db"))
 	if err != nil {
@@ -68,10 +69,6 @@ func Run() {
 		os.Exit(1)
 	}
 	appDB = db
-
-	if os.Getenv("PROCULA_ALLOW_JSON_MIGRATION") == "1" {
-		migrateAllJSON(db, configDir)
-	}
 
 	// One-shot: import any existing JSONL notifications feed into SQLite.
 	migrateNotificationsFeedToDB(db, configDir)

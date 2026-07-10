@@ -1,5 +1,7 @@
 # Cut the Pelicula Remote Vhost Layer
 
+> **Archived — the cut described here shipped (see `docs/ROADMAP.md` → Shipped → "2026-05-04 — retire remote-vhost layer").** This doc's "Out of scope but on the radar" section is stale and should not be trusted: it calls Apprise notifications and the request queue "never used" / "unused now" — both are contradicted by current code. Apprise fires on VPN degraded/recovered, request-available, and catalog events; the request queue has real frontend call sites in `search.js`/`users.js` and is a shipped, tested feature.
+
 **Status:** Approved (vision); planning + implementation pending.
 **Owner:** peligwen
 **Date:** 2026-05-04

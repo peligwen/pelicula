@@ -6,14 +6,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"pelicula-api/internal/app/adminops"
 )
 
-// fakeDocker is a minimal DockerClient that records which services were restarted.
+// fakeDocker is a minimal DockerClient that records which services were
+// restarted. Recording is mutex-guarded: HandleStackRestart restarts
+// pelicula-api itself on a detached goroutine after responding, so Restart
+// can race a test's assertions without it.
 type fakeDocker struct {
+	mu        sync.Mutex
 	restarted []string
+	lastTail  int
+}
+
+// restartedSnapshot returns a copy of the recorded restart order, safe to
+// read while the handler's detached self-restart goroutine may still run.
+func (f *fakeDocker) restartedSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.restarted...)
 }
 
 func (f *fakeDocker) IsAllowed(name string) bool {
@@ -27,11 +41,14 @@ func (f *fakeDocker) IsAllowed(name string) bool {
 }
 
 func (f *fakeDocker) Restart(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.restarted = append(f.restarted, name)
 	return nil
 }
 
 func (f *fakeDocker) Logs(_ context.Context, name string, tail int, timestamps bool) ([]byte, error) {
+	f.lastTail = tail
 	return []byte("fake logs"), nil
 }
 
@@ -74,6 +91,41 @@ func TestHandleStackRestart_FlushCalledAndResponseOK(t *testing.T) {
 	ok, _ := body["ok"].(bool)
 	if !ok {
 		t.Errorf("response body does not contain ok:true — got: %s", rec.Body.String())
+	}
+}
+
+// TestHandleStackRestart_GluetunBeforeNamespaceDependents verifies MWA-18's
+// real invariant: qbittorrent and prowlarr share gluetun's network namespace,
+// so gluetun must be restarted before them (matching HandleVPNRestart's
+// order), not after.
+func TestHandleStackRestart_GluetunBeforeNamespaceDependents(t *testing.T) {
+	docker := &fakeDocker{}
+	h := adminops.New(docker, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/admin/stack/restart", nil)
+	w := httptest.NewRecorder()
+	h.HandleStackRestart(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	order := docker.restartedSnapshot()
+	indexOf := func(name string) int {
+		for i, s := range order {
+			if s == name {
+				return i
+			}
+		}
+		t.Fatalf("%q was never restarted; got order %v", name, order)
+		return -1
+	}
+
+	gluetunIdx := indexOf("gluetun")
+	for _, dependent := range []string{"qbittorrent", "prowlarr"} {
+		if depIdx := indexOf(dependent); depIdx < gluetunIdx {
+			t.Errorf("%s restarted at index %d, before gluetun at index %d; must restart after gluetun to avoid attaching to a torn-down namespace", dependent, depIdx, gluetunIdx)
+		}
 	}
 }
 
@@ -141,5 +193,44 @@ func TestRateLimiter_AllowsThenBlocks(t *testing.T) {
 	h.HandleServiceLogs(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("request %d: status = %d, want 429", limit+1, w.Code)
+	}
+}
+
+// TestHandleServiceLogs_ClampsTailToMax verifies MWA-11: the documented max
+// of 500 (see the HandleServiceLogs doc comment) is actually enforced, not
+// just advertised.
+func TestHandleServiceLogs_ClampsTailToMax(t *testing.T) {
+	docker := &fakeDocker{}
+	h := adminops.New(docker, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/admin/logs?svc=nginx&tail=1000000", nil)
+	req.RemoteAddr = "192.0.2.2:9999"
+	w := httptest.NewRecorder()
+	h.HandleServiceLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if docker.lastTail != 500 {
+		t.Errorf("tail passed to Docker.Logs = %d, want clamped to 500", docker.lastTail)
+	}
+}
+
+// TestHandleServiceLogs_TailWithinLimitPassesThrough verifies that a tail
+// value under the max is passed through unchanged.
+func TestHandleServiceLogs_TailWithinLimitPassesThrough(t *testing.T) {
+	docker := &fakeDocker{}
+	h := adminops.New(docker, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/admin/logs?svc=nginx&tail=50", nil)
+	req.RemoteAddr = "192.0.2.3:9999"
+	w := httptest.NewRecorder()
+	h.HandleServiceLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if docker.lastTail != 50 {
+		t.Errorf("tail passed to Docker.Logs = %d, want 50 (unclamped)", docker.lastTail)
 	}
 }

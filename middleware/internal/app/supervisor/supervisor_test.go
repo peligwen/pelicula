@@ -79,7 +79,7 @@ func TestRun_WaitsForGoroutines(t *testing.T) {
 
 	hub := sse.NewHub()
 	poller := sse.NewPoller(hub, svc, "", nil)
-	autowirer, _ := autowire.NewAutowirer(autowire.Config{Svc: svc})
+	autowirer := autowire.NewAutowirer(autowire.Config{Svc: svc})
 
 	a := &pelapp.App{
 		Svc:       svc,

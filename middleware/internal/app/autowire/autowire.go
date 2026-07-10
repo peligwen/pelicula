@@ -9,23 +9,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	arrclient "pelicula-api/internal/clients/arr"
 	bazarrclient "pelicula-api/internal/clients/bazarr"
 )
-
-// AutowireState holds completion state for the auto-wiring run.
-// The zero value is "not done".
-type AutowireState struct {
-	done atomic.Bool
-}
-
-// Done reports whether the auto-wiring run has completed successfully.
-func (s *AutowireState) Done() bool {
-	return s.done.Load()
-}
 
 // Library is the minimal library descriptor that Autowirer needs.
 // It mirrors cmd/pelicula-api.Library without depending on package main.
@@ -85,7 +73,6 @@ type Autowirer struct {
 	getLibraries  func() []Library
 	wireJellyfin  func() // callback into cmd/ for Jellyfin-specific wiring
 	invalidateIdx func() // callback to clear indexer count cache
-	state         *AutowireState
 }
 
 // Config is the constructor argument bag for NewAutowirer.
@@ -107,9 +94,7 @@ type Config struct {
 }
 
 // NewAutowirer constructs an Autowirer from Config.
-// The returned *AutowireState can be queried before Run completes.
-func NewAutowirer(cfg Config) (*Autowirer, *AutowireState) {
-	state := &AutowireState{}
+func NewAutowirer(cfg Config) *Autowirer {
 	a := &Autowirer{
 		svc:           cfg.Svc,
 		urls:          cfg.URLs,
@@ -120,7 +105,6 @@ func NewAutowirer(cfg Config) (*Autowirer, *AutowireState) {
 		getLibraries:  cfg.GetLibraries,
 		wireJellyfin:  cfg.WireJellyfin,
 		invalidateIdx: cfg.InvalidateIndexerCache,
-		state:         state,
 	}
 	if a.getLibraries == nil {
 		a.getLibraries = func() []Library { return nil }
@@ -131,7 +115,7 @@ func NewAutowirer(cfg Config) (*Autowirer, *AutowireState) {
 	if a.wireJellyfin == nil {
 		a.wireJellyfin = func() {}
 	}
-	return a, state
+	return a
 }
 
 // Run executes the auto-wiring sequence and blocks until it completes (or fails).
@@ -202,7 +186,7 @@ func (a *Autowirer) Run(ctx context.Context) error {
 	a.wireJellyfin()
 
 	// Wire Bazarr: connect Sonarr/Radarr and set subtitle languages.
-	a.wireBazarr()
+	a.wireBazarr(ctx)
 
 	if sonarrWired && radarrWired && prowlarrWired {
 		a.svc.SetWired(true)
@@ -215,7 +199,6 @@ func (a *Autowirer) Run(ctx context.Context) error {
 		slog.Warn("some wiring failed — check logs above", "component", "autowire")
 	}
 
-	a.state.done.Store(true)
 	return nil
 }
 
@@ -641,7 +624,7 @@ func normalizeURL(raw string) string {
 // (a JSON-encoded list, not a separate endpoint). Bazarr only schedules its
 // background missing-subtitle searches when `use_sonarr`/`use_radarr` are
 // true, so this wiring is load-bearing for the whole subtitle pipeline.
-func (a *Autowirer) wireBazarr() {
+func (a *Autowirer) wireBazarr(ctx context.Context) {
 	slog.Info("checking Bazarr", "component", "autowire")
 
 	apiKey, err := readBazarrAPIKey(a.svc.ConfigDir())
@@ -663,7 +646,7 @@ func (a *Autowirer) wireBazarr() {
 	}
 
 	bzClient := a.svc.BazarrClient()
-	if bazarrAlreadyWired(bzClient, sonarrKey, radarrKey, subLangs) {
+	if bazarrAlreadyWired(ctx, bzClient, sonarrKey, radarrKey, subLangs) {
 		slog.Info("Bazarr already wired, skipping", "component", "autowire")
 		return
 	}
@@ -721,7 +704,7 @@ func (a *Autowirer) wireBazarr() {
 		form.Add("settings-general-enabled_providers", p)
 	}
 
-	if err := bzClient.SaveSettings(context.Background(), form); err != nil {
+	if err := bzClient.SaveSettings(ctx, form); err != nil {
 		slog.Error("failed to wire Bazarr", "component", "autowire", "error", err)
 		return
 	}
@@ -769,8 +752,8 @@ func buildPeliculaProfile(langs []string) map[string]any {
 	}
 }
 
-func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey string, subLangs []string) bool {
-	data, err := bzClient.RawGet(context.Background(), "/api/system/settings")
+func bazarrAlreadyWired(ctx context.Context, bzClient *bazarrclient.Client, sonarrKey, radarrKey string, subLangs []string) bool {
+	data, err := bzClient.RawGet(ctx, "/api/system/settings")
 	if err != nil {
 		return false
 	}
@@ -820,7 +803,7 @@ func bazarrAlreadyWired(bzClient *bazarrclient.Client, sonarrKey, radarrKey stri
 		return false
 	}
 
-	pdata, err := bzClient.RawGet(context.Background(), "/api/system/languages/profiles")
+	pdata, err := bzClient.RawGet(ctx, "/api/system/languages/profiles")
 	if err != nil {
 		return false
 	}

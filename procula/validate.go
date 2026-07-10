@@ -236,11 +236,17 @@ func normalizeLangCode(tag string) string {
 	return t
 }
 
+// subLangsVal is the raw PELICULA_SUB_LANGS value, loaded once at startup
+// (see main.go's Run) rather than re-read from the environment on every
+// request. Matches the project's documented startup-loaded env var pattern
+// (see refreshDebounce, preferredAudioLangVal).
+var subLangsVal string
+
 // checkMissingSubtitles returns the subset of PELICULA_SUB_LANGS codes that are
 // not found in the embedded subtitle tracks. Returns nil when PELICULA_SUB_LANGS
 // is unset or empty (no check configured).
 func checkMissingSubtitles(embedded []string) []string {
-	langs := strings.TrimSpace(os.Getenv("PELICULA_SUB_LANGS"))
+	langs := strings.TrimSpace(subLangsVal)
 	if langs == "" {
 		return nil
 	}

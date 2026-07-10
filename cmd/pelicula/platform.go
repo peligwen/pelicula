@@ -22,6 +22,14 @@ type Platform struct {
 	UID        int
 	GID        int
 
+	// hasVolume1Hint records whether /volume1 exists, independent of the
+	// strong /proc/syno_platform signal. It is corroborating evidence for
+	// the human-readable PlatformLabel only (CIT-10) — a bare /volume1
+	// directory can exist on any Linux host (a manually created mount
+	// point, a NAS-in-a-VM setup, etc.), so it must never by itself select
+	// Synology default paths.
+	hasVolume1Hint bool
+
 	DefaultConfigDir  string
 	DefaultLibraryDir string
 	DefaultWorkDir    string
@@ -41,11 +49,16 @@ func Detect(scriptDir string) Platform {
 		p.GID = 1000
 	}
 
-	// Synology detection
+	// Synology detection.
+	// /proc/syno_platform is a genuine Synology-only kernel marker — it is
+	// the only signal strong enough to switch default config/library/work
+	// paths. /volume1 is recorded separately as a secondary hint used only
+	// to enrich PlatformLabel (see hasVolume1Hint doc comment).
 	if _, err := os.Stat("/proc/syno_platform"); err == nil {
 		p.IsSynology = true
-	} else if _, err := os.Stat("/volume1"); err == nil {
-		p.IsSynology = true
+	}
+	if _, err := os.Stat("/volume1"); err == nil {
+		p.hasVolume1Hint = true
 	}
 
 	// WSL detection (Linux only)
@@ -95,6 +108,9 @@ func (p Platform) PlatformLabel() string {
 			return "WSL (" + name + ")"
 		}
 		return "WSL"
+	}
+	if p.hasVolume1Hint {
+		return "Linux (/volume1 present — not detected as Synology)"
 	}
 	return "Linux"
 }
