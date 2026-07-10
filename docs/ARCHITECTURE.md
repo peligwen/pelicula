@@ -20,6 +20,8 @@ The stack is assembled from several Compose files depending on context:
 
 **Graceful drain:** `pelicula-api` has `stop_grace_period: 8s` and `procula` has `stop_grace_period: 15s` — giving each service time to drain in-flight requests before Docker force-kills them.
 
+**Test/orchestration env seams:** two process-env variables, read once in `cmd/pelicula`'s `newContext()`/`Compose.buildArgs()`, are not user-facing configuration — they exist solely so `tests/e2e.sh` can drive the real CLI against an isolated instance without ever touching the production `.env`. `PELICULA_ENV_FILE` (absolute path) replaces `<scriptDir>/.env` as `ctx.EnvFile` for the whole invocation — every `.env` read/write and every `docker compose --env-file` flows through it. `PELICULA_COMPOSE_OVERLAY` (absolute path to one compose file, e.g. `docker-compose.test.yml` above) is appended last in `buildArgs`, after `docker-compose.libraries.yml` and before `--profile` flags, so it wins merges; if set but the file is missing, the CLI fails fast at startup with an actionable message rather than failing later inside `docker compose`. Leave both unset for normal `pelicula up`/`down`/etc. usage.
+
 ## Data Layer
 
 Both Go services use SQLite (via `modernc.org/sqlite`, a pure-Go driver — no CGO) for all mutable state. Config files (XML, INI) remain file-based.

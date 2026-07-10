@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,18 +18,25 @@ type Compose struct {
 }
 
 // NewCompose creates a Compose helper rooted at scriptDir.
+// envFile is the --env-file path to use; pass "" to get the default
+// scriptDir/.env (this is the fallback used when the PELICULA_ENV_FILE
+// process-env override is unset — see (*Context).newCompose, the only
+// production call site, which always passes ctx.EnvFile explicitly).
 // isSynology should come from the Platform detected via Detect() — it is
 // passed explicitly so that Synology detection is not duplicated here.
 // projectName is passed as --project-name to every docker compose invocation so
 // that container names are always pelicula-<service>-1 regardless of what
 // directory the repo was cloned into.
-func NewCompose(scriptDir string, needsSudo, isSynology bool, projectName string) *Compose {
+func NewCompose(scriptDir, envFile string, needsSudo, isSynology bool, projectName string) *Compose {
 	if projectName == "" {
 		projectName = "pelicula"
 	}
+	if envFile == "" {
+		envFile = filepath.Join(scriptDir, ".env")
+	}
 	return &Compose{
 		projectDir:  scriptDir,
-		envFile:     filepath.Join(scriptDir, ".env"),
+		envFile:     envFile,
 		needsSudo:   needsSudo,
 		isSynology:  isSynology,
 		projectName: projectName,
@@ -65,6 +73,30 @@ func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
 	return cmd
 }
 
+// validateComposeOverlay checks that the PELICULA_COMPOSE_OVERLAY path (if
+// set) exists on disk. It is called once, at newContext() time, rather than
+// on every Compose.buildArgs call: buildArgs runs on every single docker
+// compose invocation within a command (sometimes several), and it has no
+// error return — folding a Stat-and-fail check into it would mean either
+// silently ignoring a missing overlay (letting the intended stub/override
+// never actually merge in, which then fails much later and more confusingly
+// inside `docker compose` itself) or making buildArgs a failing, non-pure
+// function. Checking once at startup gives one clear, early error instead.
+//
+// path == "" (override unset) is not an error — it returns nil.
+func validateComposeOverlay(path string) error {
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf(
+			"PELICULA_COMPOSE_OVERLAY=%s does not exist (%v) — set it to an existing compose file, or unset it",
+			path, err,
+		)
+	}
+	return nil
+}
+
 // args builds the full docker compose argument list.
 // Profile flags are inserted before the subcommand (required by Docker Compose v5+).
 func (c *Compose) buildArgs(extra ...string) []string {
@@ -85,6 +117,19 @@ func (c *Compose) buildArgs(extra ...string) []string {
 	libraries := filepath.Join(c.projectDir, "compose", "docker-compose.libraries.yml")
 	if _, err := os.Stat(libraries); err == nil {
 		args = append(args, "-f", libraries)
+	}
+
+	// PELICULA_COMPOSE_OVERLAY is a test/orchestration seam (not user-facing
+	// config — see docs/ARCHITECTURE.md): one extra compose file, appended
+	// last so it wins merges against everything above (docker-compose.yml,
+	// the optional override.yml, and docker-compose.libraries.yml). Used by
+	// tests/e2e.sh to stub services for the isolated test stack.
+	//
+	// Existence is validated once, at newContext() time (see
+	// validateComposeOverlay) — by the time buildArgs runs the path is
+	// already known-good, so this is a plain, non-failing append.
+	if overlay := os.Getenv("PELICULA_COMPOSE_OVERLAY"); overlay != "" {
+		args = append(args, "-f", overlay)
 	}
 
 	// Profiles must come before the subcommand
