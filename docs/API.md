@@ -100,6 +100,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `GET` | `/api/pelicula/catalog/items` | Viewer+ | List catalog items with optional `?type=…&tier=…&q=…` filters |
 | `GET` | `/api/pelicula/catalog/items/{id}` | Viewer+ | Single catalog item by ID |
 | `POST` | `/api/pelicula/catalog/backfill` | Admin | Trigger background backfill from Radarr+Sonarr into the catalog DB |
+| `POST` | `/api/pelicula/catalog/reconcile` | Admin | Run the orphan reconciler synchronously and return the result |
 | `POST` | `/api/pelicula/catalog/command` | Admin | Proxy force-search, rescan, or unmonitor to Radarr/Sonarr (`arr_type`, `arr_id`, `command`) |
 | `POST` | `/api/pelicula/catalog/replace` | Admin | Mark release as failed in *arr, rescan, and re-search (`arr_type`, `arr_id`, `episode_id`, `path`) |
 | `DELETE` | `/api/pelicula/catalog/blocklist/{id}` | Admin | Remove an entry from the *arr blocklist (`?arr_type=radarr|sonarr`). 204 on success, 502 if the *arr delete fails |
@@ -135,6 +136,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `POST` | `/api/pelicula/library/resub` | Admin | Trigger Bazarr subtitle search for a file path via Procula (`{"path": "…"}`) |
 | `POST` | `/api/pelicula/procula/jobs/{id}/resub` | Admin | Re-trigger subtitle search for a specific Procula job |
 | `POST` | `/api/pelicula/procula/jobs/{id}/retry` | Admin | Re-queue a failed Procula job |
+| `POST` | `/api/pelicula/procula/jobs/{id}/cancel` | Admin | Cancel an in-progress or queued Procula job |
 
 ### Download management
 
