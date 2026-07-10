@@ -729,3 +729,100 @@ func TestWireReleaseProfileUserEditedTagsPreserved(t *testing.T) {
 		t.Errorf("tags not preserved: got %v, want [3]", tags)
 	}
 }
+
+// ── MWA-1 regression: Prowlarr wiring must not short-circuit ─────────────────
+
+// TestProwlarrWiring_RadarrAttemptedAfterSonarrFailure verifies that a failed
+// Prowlarr↔Sonarr wiring does not prevent Prowlarr↔Radarr from being
+// attempted. Before the fix, `sonarrOK && radarrWiring()` short-circuited on
+// Go's && operator and never even called wireProwlarrApp for Radarr.
+func TestProwlarrWiring_RadarrAttemptedAfterSonarrFailure(t *testing.T) {
+	pingSrv := newDriftTestSrv(t)
+	defer pingSrv.Close()
+
+	var mu sync.Mutex
+	var addAppNames []string
+
+	arrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]")) //nolint:errcheck
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/applications" {
+			body, _ := io.ReadAll(r.Body)
+			var payload struct {
+				Name string `json:"name"`
+			}
+			json.Unmarshal(body, &payload) //nolint:errcheck
+			mu.Lock()
+			addAppNames = append(addAppNames, payload.Name)
+			mu.Unlock()
+			if payload.Name == "Sonarr" {
+				// Simulate a persistent failure wiring Prowlarr↔Sonarr.
+				// 400 (never retried by httpx) keeps the test fast; the
+				// failure class is irrelevant to the short-circuit bug.
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer arrSrv.Close()
+
+	svc := &stubSvc{
+		httpClient:  pingSrv.Client(),
+		configDir:   t.TempDir(),
+		responses:   map[string][]byte{},
+		sonarrKey:   "sonarr-key",
+		radarrKey:   "radarr-key",
+		prowlarrKey: "prowlarr-key",
+		sonarr:      arrclient.New(arrSrv.URL, "test-key"),
+		radarr:      arrclient.New(arrSrv.URL, "test-key"),
+		prowlarr:    arrclient.New(arrSrv.URL, "test-key"),
+		arrSrv:      arrSrv,
+	}
+
+	urls := autowire.URLs{
+		Sonarr:      pingSrv.URL,
+		Radarr:      pingSrv.URL,
+		Prowlarr:    pingSrv.URL,
+		Bazarr:      pingSrv.URL,
+		Jellyfin:    pingSrv.URL,
+		QBT:         pingSrv.URL,
+		PeliculaAPI: "http://pelicula-api:8181",
+	}
+
+	a, _ := autowire.NewAutowirer(autowire.Config{
+		Svc:           svc,
+		URLs:          urls,
+		VPNConfigured: true,
+		GetLibraries:  func() []autowire.Library { return nil },
+	})
+
+	if err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	names := append([]string(nil), addAppNames...)
+	mu.Unlock()
+
+	var hasSonarr, hasRadarr bool
+	for _, n := range names {
+		switch n {
+		case "Sonarr":
+			hasSonarr = true
+		case "Radarr":
+			hasRadarr = true
+		}
+	}
+	if !hasSonarr {
+		t.Error("expected a Prowlarr AddApplication attempt for Sonarr")
+	}
+	if !hasRadarr {
+		t.Errorf("expected a Prowlarr AddApplication attempt for Radarr even though Sonarr's failed first (MWA-1 regression); calls seen: %v", names)
+	}
+}
