@@ -6,15 +6,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"pelicula-api/internal/app/adminops"
 )
 
-// fakeDocker is a minimal DockerClient that records which services were restarted.
+// fakeDocker is a minimal DockerClient that records which services were
+// restarted. Recording is mutex-guarded: HandleStackRestart restarts
+// pelicula-api itself on a detached goroutine after responding, so Restart
+// can race a test's assertions without it.
 type fakeDocker struct {
+	mu        sync.Mutex
 	restarted []string
 	lastTail  int
+}
+
+// restartedSnapshot returns a copy of the recorded restart order, safe to
+// read while the handler's detached self-restart goroutine may still run.
+func (f *fakeDocker) restartedSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.restarted...)
 }
 
 func (f *fakeDocker) IsAllowed(name string) bool {
@@ -28,6 +41,8 @@ func (f *fakeDocker) IsAllowed(name string) bool {
 }
 
 func (f *fakeDocker) Restart(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.restarted = append(f.restarted, name)
 	return nil
 }
@@ -95,13 +110,14 @@ func TestHandleStackRestart_GluetunBeforeNamespaceDependents(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 
+	order := docker.restartedSnapshot()
 	indexOf := func(name string) int {
-		for i, s := range docker.restarted {
+		for i, s := range order {
 			if s == name {
 				return i
 			}
 		}
-		t.Fatalf("%q was never restarted; got order %v", name, docker.restarted)
+		t.Fatalf("%q was never restarted; got order %v", name, order)
 		return -1
 	}
 
