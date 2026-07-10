@@ -207,16 +207,21 @@ cmd_test() {
                 -p pelicula-test \
                 down -v --remove-orphans 2>/dev/null || true
             rm -f "${down_env:-}"
-            # Container-created files (e.g. bazarr's config tree, written as
-            # uid 0 inside the container) can't be removed by the invoking
-            # user — fall back to deleting through a container, and never let
-            # a cleanup failure set the exit code of an otherwise-green run
-            # (it previously leaked straight into the script's exit status).
+            # Container-created files can defeat a plain rm two ways: on
+            # macOS, Docker Desktop's VirtioFS stamps a `deny delete` ACL on
+            # dirs containers create (strip with chmod -N; the flag doesn't
+            # exist on Linux, hence 2>/dev/null); on Linux they're simply
+            # root-owned (delete through a container instead). Never let a
+            # cleanup failure set the exit code of an otherwise-green run —
+            # it previously leaked straight into the script's exit status.
             if [[ -n "${test_dir:-}" ]] && ! rm -rf "${test_dir}" 2>/dev/null; then
-                $NEEDS_SUDO docker run --rm -v "${test_dir}:/target" alpine \
-                    sh -c 'rm -rf /target/* /target/.[!.]*' 2>/dev/null || true
-                rmdir "${test_dir}" 2>/dev/null || \
-                    warn "cleanup: leftover temp dir (container-owned files): ${test_dir}"
+                chmod -RN "${test_dir}" 2>/dev/null || true
+                if ! rm -rf "${test_dir}" 2>/dev/null; then
+                    $NEEDS_SUDO docker run --rm -v "${test_dir}:/target" alpine \
+                        sh -c 'rm -rf /target/* /target/.[!.]*' 2>/dev/null || true
+                    rmdir "${test_dir}" 2>/dev/null || \
+                        warn "cleanup: leftover temp dir (container-owned files): ${test_dir}"
+                fi
             fi
         else
             rm -f "${down_env:-}"
