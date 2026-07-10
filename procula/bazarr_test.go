@@ -216,7 +216,12 @@ func TestBazarrSearchSubtitles_SubLangsFallback(t *testing.T) {
 	dir := t.TempDir()
 	writeTestAPIKey(t, dir, "fallback-key")
 
-	t.Setenv("PELICULA_SUB_LANGS", "en, FR")
+	// subLangsVal is loaded once at startup from PELICULA_SUB_LANGS (see
+	// main.go's Run); t.Setenv has no effect on the already-loaded package
+	// var, so set it directly and restore afterward.
+	origSubLangs := subLangsVal
+	subLangsVal = "en, FR"
+	t.Cleanup(func() { subLangsVal = origSubLangs })
 
 	// Synthetic resub job: no MissingSubs computed.
 	job := &Job{

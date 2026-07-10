@@ -251,9 +251,17 @@ func TestNormalizeLangCode(t *testing.T) {
 	}
 }
 
+// TestCheckMissingSubtitles exercises checkMissingSubtitles against
+// subLangsVal, the package var PELICULA_SUB_LANGS is loaded into once at
+// startup (see main.go's Run) rather than re-read per call — see R14 P3 /
+// MWA-hoist. t.Setenv has no effect on it, so each subtest sets subLangsVal
+// directly; the outer t.Cleanup restores it once all subtests finish.
 func TestCheckMissingSubtitles(t *testing.T) {
+	orig := subLangsVal
+	t.Cleanup(func() { subLangsVal = orig })
+
 	t.Run("env unset — no check", func(t *testing.T) {
-		t.Setenv("PELICULA_SUB_LANGS", "")
+		subLangsVal = ""
 		got := checkMissingSubtitles([]string{"eng", "spa"})
 		if got != nil {
 			t.Errorf("expected nil when env unset, got %v", got)
@@ -261,7 +269,7 @@ func TestCheckMissingSubtitles(t *testing.T) {
 	})
 
 	t.Run("all configured langs present (3-letter)", func(t *testing.T) {
-		t.Setenv("PELICULA_SUB_LANGS", "en,es")
+		subLangsVal = "en,es"
 		got := checkMissingSubtitles([]string{"eng", "spa"})
 		if len(got) != 0 {
 			t.Errorf("expected no missing, got %v", got)
@@ -269,7 +277,7 @@ func TestCheckMissingSubtitles(t *testing.T) {
 	})
 
 	t.Run("all configured langs present (2-letter)", func(t *testing.T) {
-		t.Setenv("PELICULA_SUB_LANGS", "en,es")
+		subLangsVal = "en,es"
 		got := checkMissingSubtitles([]string{"en", "es"})
 		if len(got) != 0 {
 			t.Errorf("expected no missing, got %v", got)
@@ -277,7 +285,7 @@ func TestCheckMissingSubtitles(t *testing.T) {
 	})
 
 	t.Run("one lang missing", func(t *testing.T) {
-		t.Setenv("PELICULA_SUB_LANGS", "en,es")
+		subLangsVal = "en,es"
 		got := checkMissingSubtitles([]string{"eng"})
 		if len(got) != 1 || got[0] != "es" {
 			t.Errorf("expected [es], got %v", got)
@@ -285,7 +293,7 @@ func TestCheckMissingSubtitles(t *testing.T) {
 	})
 
 	t.Run("all langs missing — no embedded subs", func(t *testing.T) {
-		t.Setenv("PELICULA_SUB_LANGS", "en,fr")
+		subLangsVal = "en,fr"
 		got := checkMissingSubtitles(nil)
 		if len(got) != 2 {
 			t.Errorf("expected [en fr], got %v", got)
@@ -293,7 +301,7 @@ func TestCheckMissingSubtitles(t *testing.T) {
 	})
 
 	t.Run("extra embedded langs don't cause false missing", func(t *testing.T) {
-		t.Setenv("PELICULA_SUB_LANGS", "en")
+		subLangsVal = "en"
 		got := checkMissingSubtitles([]string{"eng", "spa", "fra"})
 		if len(got) != 0 {
 			t.Errorf("expected no missing, got %v", got)

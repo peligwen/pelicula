@@ -449,6 +449,40 @@ func TestStripSubTags_Nested(t *testing.T) {
 	}
 }
 
+// TestStripSubTags_UnbalancedBraces verifies the quick-win fix: a lone,
+// unmatched "{" or "}" (malformed source subtitle, or literal brace in
+// dialogue) must be stripped, not passed through — an unstripped unmatched
+// "{" reaching the generated .ass Dialogue line is read by libass as the
+// start of a never-closed override tag block, which swallows the rest of
+// that cue's text.
+func TestStripSubTags_UnbalancedBraces(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"hello { world", "hello  world"},
+		{"hello } world", "hello  world"},
+		{"{unterminated tag block", "unterminated tag block"},
+		{"trailing brace at end}", "trailing brace at end"},
+		{"{\\an8}top { stray", "top  stray"},  // well-formed pair still stripped, stray brace also stripped
+		{"just a } and a {", "just a  and a"}, // } before { — can't pair as a well-formed block, both stray
+	}
+	for _, tc := range cases {
+		got := stripSubTags(tc.in)
+		if got != tc.want {
+			t.Errorf("stripSubTags(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestToASSText_StripsUnbalancedBraces verifies the fix also applies via
+// toASSText (which delegates to stripSubTags), the actual path that feeds the
+// generated .ass Dialogue line.
+func TestToASSText_StripsUnbalancedBraces(t *testing.T) {
+	got := toASSText("line one { stray\nline two")
+	want := "line one  stray\\Nline two"
+	if got != want {
+		t.Errorf("toASSText = %q, want %q", got, want)
+	}
+}
+
 // ── isUpToDate missing files ──────────────────────────────────────────────────
 
 func TestIsUpToDate_MissingOutput(t *testing.T) {

@@ -154,7 +154,7 @@ func bazarrSearchSubtitlesWithOpts(ctx context.Context, configDir string, job *J
 func bazarrSearchSubtitles(ctx context.Context, configDir string, job *Job) {
 	langs := job.MissingSubs
 	if len(langs) == 0 {
-		for _, c := range strings.Split(os.Getenv("PELICULA_SUB_LANGS"), ",") {
+		for _, c := range strings.Split(subLangsVal, ",") {
 			if c = strings.ToLower(strings.TrimSpace(c)); c != "" {
 				langs = append(langs, c)
 			}
