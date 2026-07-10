@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -513,5 +514,180 @@ func TestScanItem_ErrorReturnsNilItem(t *testing.T) {
 	}
 	if item != nil {
 		t.Errorf("expected nil Item on scan error, got %+v", item)
+	}
+}
+
+// ── Sweep primitives ──────────────────────────────────────────────────────────
+
+// seedRow inserts a minimal catalog row with explicit id, type, parent_id and
+// updated_at via raw SQL, bypassing Upsert so tests control timestamps.
+func seedRow(t *testing.T, db *sql.DB, id, typ, parentID, updatedAt string) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO catalog_items
+			(id, type, parent_id, title, tier, created_at, updated_at)
+		VALUES (?,?,?,?,'library',?,?)
+	`, id, typ, parentID, "row "+id, updatedAt, updatedAt); err != nil {
+		t.Fatalf("seed row %s: %v", id, err)
+	}
+}
+
+func countRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM catalog_items`).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return n
+}
+
+func TestListRoots_ReturnsOnlyMoviesAndSeries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	seedRow(t, db, "m1", "movie", "", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "s1", "series", "", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "se1", "season", "s1", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "ep1", "episode", "se1", "2026-01-01T00:00:00Z")
+
+	roots, err := s.ListRoots(ctx)
+	if err != nil {
+		t.Fatalf("ListRoots: %v", err)
+	}
+	if len(roots) != 2 {
+		t.Fatalf("expected 2 roots, got %d: %+v", len(roots), roots)
+	}
+	for _, it := range roots {
+		if it.Type != "movie" && it.Type != "series" {
+			t.Errorf("unexpected type in roots: %q", it.Type)
+		}
+	}
+}
+
+func TestDeleteStale_RespectsUpdatedBeforeGuard(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	seedRow(t, db, "old", "movie", "", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "fresh", "movie", "", "2026-06-01T00:00:00Z")
+
+	// Both IDs are doomed by the caller, but only the row older than the
+	// cutoff may actually be deleted.
+	n, err := s.DeleteStale(ctx, []string{"old", "fresh"}, "2026-03-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("DeleteStale: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 deletion, got %d", n)
+	}
+
+	if got, _ := s.Get(ctx, "old"); got != nil {
+		t.Error("stale row survived DeleteStale")
+	}
+	if got, _ := s.Get(ctx, "fresh"); got == nil {
+		t.Error("fresh row was deleted despite updated_at >= cutoff")
+	}
+}
+
+func TestDeleteStale_EmptyIDsIsNoop(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	n, err := s.DeleteStale(ctx, nil, "2026-03-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("DeleteStale: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 deletions, got %d", n)
+	}
+}
+
+// TestDeleteStale_ChunksLargeIDLists crosses the internal chunk boundary
+// (500) to prove multi-statement batching deletes every doomed row.
+func TestDeleteStale_ChunksLargeIDLists(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	const total = 750
+	ids := make([]string, 0, total)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin seed tx: %v", err)
+	}
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("bulk_%04d", i)
+		if _, err := tx.Exec(`
+			INSERT INTO catalog_items (id, type, parent_id, title, tier, created_at, updated_at)
+			VALUES (?,?,?,?,'library','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')
+		`, id, "movie", "", "bulk "+id); err != nil {
+			t.Fatalf("seed bulk row: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit seed tx: %v", err)
+	}
+
+	n, err := s.DeleteStale(ctx, ids, "2026-03-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("DeleteStale: %v", err)
+	}
+	if n != total {
+		t.Errorf("expected %d deletions, got %d", total, n)
+	}
+	if left := countRows(t, db); left != 0 {
+		t.Errorf("expected empty table, %d rows remain", left)
+	}
+}
+
+func TestDeleteOrphanedChildren_CascadesSeasonsThenEpisodes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	// Live chain: series → season → episode. Must survive untouched.
+	seedRow(t, db, "live_series", "series", "", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "live_season", "season", "live_series", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "live_ep", "episode", "live_season", "2026-01-01T00:00:00Z")
+
+	// Dead chain: parent series already swept — season and episode must
+	// cascade in one pass.
+	seedRow(t, db, "dead_season", "season", "gone_series", "2026-01-01T00:00:00Z")
+	seedRow(t, db, "dead_ep", "episode", "dead_season", "2026-01-01T00:00:00Z")
+
+	n, err := s.DeleteOrphanedChildren(ctx)
+	if err != nil {
+		t.Fatalf("DeleteOrphanedChildren: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 deletions, got %d", n)
+	}
+
+	for _, id := range []string{"live_series", "live_season", "live_ep"} {
+		if got, _ := s.Get(ctx, id); got == nil {
+			t.Errorf("live row %s was deleted", id)
+		}
+	}
+	for _, id := range []string{"dead_season", "dead_ep"} {
+		if got, _ := s.Get(ctx, id); got != nil {
+			t.Errorf("orphaned row %s survived", id)
+		}
+	}
+
+	// Idempotent: second pass deletes nothing.
+	n, err = s.DeleteOrphanedChildren(ctx)
+	if err != nil {
+		t.Fatalf("DeleteOrphanedChildren rerun: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected idempotent rerun, got %d deletions", n)
 	}
 }

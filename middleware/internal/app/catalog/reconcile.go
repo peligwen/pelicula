@@ -59,6 +59,94 @@ type jellyfinMovieItem struct {
 	ProviderIDs    map[string]string `json:"ProviderIds"`
 }
 
+// resolveJellyfinUserID returns the cached pelicula-internal Jellyfin user ID,
+// resolving and caching it via /Users on first use. Prefers the
+// pelicula-internal service user, falling back to the first listed user.
+func resolveJellyfinUserID(ctx context.Context, jf JellyfinMetaClient) (string, error) {
+	if uid := jf.GetJellyfinUserID(); uid != "" {
+		return uid, nil
+	}
+	body, err := jf.JellyfinGet(ctx, "/Users", jf.GetJellyfinAPIKey())
+	if err != nil {
+		return "", fmt.Errorf("fetch jellyfin users: %w", err)
+	}
+	var users []struct {
+		ID   string `json:"Id"`
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal(body, &users); err != nil {
+		return "", fmt.Errorf("parse jellyfin users: %w", err)
+	}
+	uid := ""
+	for _, u := range users {
+		if u.Name == jellyfinServiceUser {
+			uid = u.ID
+			break
+		}
+	}
+	if uid == "" && len(users) > 0 {
+		uid = users[0].ID
+	}
+	if uid == "" {
+		return "", fmt.Errorf("no jellyfin users found")
+	}
+	jf.SetJellyfinUserID(uid)
+	return uid, nil
+}
+
+// scanJellyfinMovies pages through the Jellyfin movie library (with Path and
+// ProviderIds) until the full library has been scanned or reconcileLibraryCap
+// is hit — a safety valve, not a routine truncation; see the near-cap warning.
+// complete reports whether the whole library was covered: when false, absence
+// from the returned slice proves nothing and callers (the sweep) must not
+// treat missing items as deleted.
+func scanJellyfinMovies(ctx context.Context, jf JellyfinMetaClient) (items []jellyfinMovieItem, complete bool, err error) {
+	uid, err := resolveJellyfinUserID(ctx, jf)
+	if err != nil {
+		return nil, false, err
+	}
+
+	libraryCap := reconcileLibraryCap()
+	totalRecordCount := 0
+	for startIndex := 0; len(items) < libraryCap; startIndex += reconcilePageSize {
+		pageLimit := reconcilePageSize
+		if remaining := libraryCap - len(items); remaining < pageLimit {
+			pageLimit = remaining
+		}
+		jfPath := fmt.Sprintf(
+			"/Users/%s/Items?IncludeItemTypes=Movie&Fields=Path,ProviderIds&Recursive=true&StartIndex=%d&Limit=%d",
+			uid, startIndex, pageLimit,
+		)
+		jfBody, err := jf.JellyfinGet(ctx, jfPath, jf.GetJellyfinAPIKey())
+		if err != nil {
+			return nil, false, fmt.Errorf("fetch jellyfin movies (offset %d): %w", startIndex, err)
+		}
+		var jfResp struct {
+			Items            []jellyfinMovieItem `json:"Items"`
+			TotalRecordCount int                 `json:"TotalRecordCount"`
+		}
+		if err := json.Unmarshal(jfBody, &jfResp); err != nil {
+			return nil, false, fmt.Errorf("parse jellyfin movies (offset %d): %w", startIndex, err)
+		}
+		totalRecordCount = jfResp.TotalRecordCount
+		items = append(items, jfResp.Items...)
+		if len(jfResp.Items) == 0 || len(items) >= totalRecordCount {
+			break
+		}
+	}
+
+	if count := len(items); count >= int(float64(libraryCap)*0.8) {
+		slog.Warn("jellyfin library scan near cap",
+			"component", "catalog_reconcile",
+			"scanned", count,
+			"cap", libraryCap,
+			"pct", fmt.Sprintf("%.0f%%", float64(count)/float64(libraryCap)*100),
+			"hint", "consider raising RECONCILE_LIBRARY_LIMIT",
+		)
+	}
+	return items, len(items) >= totalRecordCount, nil
+}
+
 // ReconcileOrphans identifies Jellyfin Movie items that fall under a Radarr
 // root folder but have no catalog_items row and are not traceable to a Radarr
 // movie with hasFile=true. For each such item a new row is inserted with
@@ -100,77 +188,11 @@ func ReconcileOrphans(ctx context.Context, db *sql.DB, jf JellyfinMetaClient, ra
 		}
 	}
 
-	// 2. Fetch Jellyfin Movies with Path field, paginating via StartIndex
-	// until the full library has been scanned (or reconcileLibraryCap is hit
-	// — a safety valve, not a routine truncation; see the near-cap warning
-	// below).
-	uid := jf.GetJellyfinUserID()
-	if uid == "" {
-		// Resolve user ID from Jellyfin API.
-		body, err := jf.JellyfinGet(ctx, "/Users", jf.GetJellyfinAPIKey())
-		if err != nil {
-			return result, fmt.Errorf("fetch jellyfin users: %w", err)
-		}
-		var users []struct {
-			ID   string `json:"Id"`
-			Name string `json:"Name"`
-		}
-		if err := json.Unmarshal(body, &users); err != nil {
-			return result, fmt.Errorf("parse jellyfin users: %w", err)
-		}
-		for _, u := range users {
-			if u.Name == jellyfinServiceUser {
-				uid = u.ID
-				break
-			}
-		}
-		if uid == "" && len(users) > 0 {
-			uid = users[0].ID
-		}
-		if uid == "" {
-			return result, fmt.Errorf("no jellyfin users found")
-		}
-		jf.SetJellyfinUserID(uid)
-	}
-
-	libraryCap := reconcileLibraryCap()
-	var jfItems []jellyfinMovieItem
-	totalRecordCount := 0
-	for startIndex := 0; len(jfItems) < libraryCap; startIndex += reconcilePageSize {
-		pageLimit := reconcilePageSize
-		if remaining := libraryCap - len(jfItems); remaining < pageLimit {
-			pageLimit = remaining
-		}
-		jfPath := fmt.Sprintf(
-			"/Users/%s/Items?IncludeItemTypes=Movie&Fields=Path,ProviderIds&Recursive=true&StartIndex=%d&Limit=%d",
-			uid, startIndex, pageLimit,
-		)
-		jfBody, err := jf.JellyfinGet(ctx, jfPath, jf.GetJellyfinAPIKey())
-		if err != nil {
-			return result, fmt.Errorf("fetch jellyfin movies (offset %d): %w", startIndex, err)
-		}
-		var jfResp struct {
-			Items            []jellyfinMovieItem `json:"Items"`
-			TotalRecordCount int                 `json:"TotalRecordCount"`
-		}
-		if err := json.Unmarshal(jfBody, &jfResp); err != nil {
-			return result, fmt.Errorf("parse jellyfin movies (offset %d): %w", startIndex, err)
-		}
-		totalRecordCount = jfResp.TotalRecordCount
-		jfItems = append(jfItems, jfResp.Items...)
-		if len(jfResp.Items) == 0 || len(jfItems) >= totalRecordCount {
-			break
-		}
-	}
-
-	if count := len(jfItems); count >= int(float64(libraryCap)*0.8) {
-		slog.Warn("reconcile: jellyfin library scan near cap",
-			"component", "catalog_reconcile",
-			"scanned", count,
-			"cap", libraryCap,
-			"pct", fmt.Sprintf("%.0f%%", float64(count)/float64(libraryCap)*100),
-			"hint", "consider raising RECONCILE_LIBRARY_LIMIT",
-		)
+	// 2. Scan Jellyfin Movies (paged; Path field needed for prefix matching).
+	// Adoption doesn't need the completeness flag — it adopts what it saw.
+	jfItems, _, err := scanJellyfinMovies(ctx, jf)
+	if err != nil {
+		return result, err
 	}
 
 	// Filter to items under a Radarr root folder.
