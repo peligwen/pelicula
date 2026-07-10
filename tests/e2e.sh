@@ -865,6 +865,25 @@ assert 'Movies' in names and 'TV Shows' in names
         warn "Skipping Jellyfin library wiring check (no Jellyfin token — Stage 6 auth failed)"
     fi
 
+    # ── Verify smoke against isolated stack ──────────
+    # Must run BEFORE Stage 10: the Playwright suite includes
+    # login-debounce.spec.js, which deliberately submits wrong passwords and
+    # trips peligrosa's anti-brute-force limiter (5 failed logins / 5 min per
+    # IP → 429 for the rest of the window). The verify suites each perform a
+    # real login and would all 429 if they ran inside that poisoned window.
+
+    info "Running verify smoke against isolated stack (localhost:${test_port})..."
+    # The isolated stack's own admin credentials (seeded into test_env above)
+    # are known here, so run verify.sh with real auth instead of --skip-auth —
+    # this unlocks the 5 authenticated suites (bug1-reconcile, bug4-registration,
+    # sweep-catalog/jobs/users/settings) instead of silently skipping them.
+    if PELICULA_TEST_JELLYFIN_USER=admin PELICULA_TEST_JELLYFIN_PASSWORD=test-jellyfin-pw \
+            bash "$SCRIPT_DIR/tests/verify.sh" --target "localhost:${test_port}"; then
+        t_pass "verify smoke passed"
+    else
+        t_fail "verify smoke failed (tests/verify.sh)"
+    fi
+
     # ── Stage 10: Playwright UI Tests ────────────────
 
     # Check for the project's own pinned Playwright install (tests/playwright/node_modules),
@@ -1154,20 +1173,6 @@ assert 'Movies' in names and 'TV Shows' in names
         fi
     else
         warn "Node/Playwright not found — skipping UI tests (run: cd tests/playwright && npm install && npx playwright install chromium)"
-    fi
-
-    # ── Verify smoke against isolated stack ──────────
-
-    info "Running verify smoke against isolated stack (localhost:${test_port})..."
-    # The isolated stack's own admin credentials (seeded into test_env above)
-    # are known here, so run verify.sh with real auth instead of --skip-auth —
-    # this unlocks the 5 authenticated suites (bug1-reconcile, bug4-registration,
-    # sweep-catalog/jobs/users/settings) instead of silently skipping them.
-    if PELICULA_TEST_JELLYFIN_USER=admin PELICULA_TEST_JELLYFIN_PASSWORD=test-jellyfin-pw \
-            bash "$SCRIPT_DIR/tests/verify.sh" --target "localhost:${test_port}"; then
-        t_pass "verify smoke passed"
-    else
-        t_fail "verify smoke failed (tests/verify.sh)"
     fi
 
     # ── Rate-limit burst test (LAST — pollutes auth lockout) ─────────────────
