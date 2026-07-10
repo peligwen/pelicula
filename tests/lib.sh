@@ -33,6 +33,7 @@ set -euo pipefail
 
 _PELI_SESSION_JAR=""         # path to curl cookie jar for pelicula auth
 _PELI_SESSION_VALID=0        # 1 once we have a valid session cookie
+_PELI_SESSION_JAR_OWNED=1    # 0 when the jar came from PELI_SESSION_JAR (caller cleans up)
 _PELI_SCAN_TASK_ID=""        # cached Jellyfin "Scan Media Library" task ID
 _PELI_JF_USER_ID=""          # cached Jellyfin user ID for item queries
 _PELI_SEEDED_PATHS=()        # fixture paths seeded; removed in tear_down_fixtures
@@ -116,8 +117,15 @@ peli_load_env() {
     # several suites — verify.sh sets it so its whole run costs a single login.
     # nginx rate-limits /api/pelicula/auth/login to 10r/m (burst 5), which a
     # login-per-suite (let alone the historical login-per-subshell, see
-    # _peli_ensure_session) blows through immediately.
-    _PELI_SESSION_JAR="${PELI_SESSION_JAR:-$(mktemp /tmp/peli_session_XXXXXX)}"
+    # _peli_ensure_session) blows through immediately. A caller-provided jar is
+    # not ours to delete: the caller cleans it up (_PELI_SESSION_JAR_OWNED).
+    if [[ -n "${PELI_SESSION_JAR:-}" ]]; then
+        _PELI_SESSION_JAR="$PELI_SESSION_JAR"
+        _PELI_SESSION_JAR_OWNED=0
+    else
+        _PELI_SESSION_JAR="$(mktemp /tmp/peli_session_XXXXXX)"
+        _PELI_SESSION_JAR_OWNED=1
+    fi
     _PELI_ORIG_SETTINGS_FILE="$(mktemp /tmp/peli_orig_settings_XXXXXX)"
 
     _peli_log "Loaded env: BASE_URL=$PELI_BASE_URL LIBRARY_DIR=$LIBRARY_DIR"
@@ -669,8 +677,11 @@ tear_down_fixtures() {
         _PELI_ORIG_SETTINGS_FILE=""
     fi
 
-    # Clean up session jar
-    if [[ -n "$_PELI_SESSION_JAR" && -f "$_PELI_SESSION_JAR" ]]; then
+    # Clean up session jar — but never a caller-provided (shared) one: deleting
+    # it here would log every later suite in verify.sh's run back through
+    # nginx's rate-limited login endpoint (the exact 429 cascade the shared
+    # jar exists to prevent). The caller owns its cleanup.
+    if [[ "${_PELI_SESSION_JAR_OWNED:-1}" -eq 1 && -n "$_PELI_SESSION_JAR" && -f "$_PELI_SESSION_JAR" ]]; then
         rm -f "$_PELI_SESSION_JAR" 2>/dev/null || true
         _PELI_SESSION_JAR=""
         _PELI_SESSION_VALID=0
