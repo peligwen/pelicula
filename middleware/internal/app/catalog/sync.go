@@ -67,33 +67,9 @@ func (h *Handler) fetchJellyfinLibrary(ctx context.Context, jf JellyfinMetaClien
 	// Hold the write lock across the entire fetch so concurrent misses serialize.
 	defer h.jfCache.mu.Unlock()
 
-	userID := jf.GetJellyfinUserID()
-	if userID == "" {
-		// Try to resolve from the API
-		body, err := jf.JellyfinGet(ctx, "/Users", jf.GetJellyfinAPIKey())
-		if err != nil {
-			return nil, fmt.Errorf("jellyfin users list: %w", err)
-		}
-		var users []struct {
-			ID   string `json:"Id"`
-			Name string `json:"Name"`
-		}
-		if err := json.Unmarshal(body, &users); err != nil {
-			return nil, fmt.Errorf("jellyfin users parse: %w", err)
-		}
-		for _, u := range users {
-			if u.Name == jellyfinServiceUser {
-				userID = u.ID
-				break
-			}
-		}
-		if userID == "" && len(users) > 0 {
-			userID = users[0].ID
-		}
-		if userID == "" {
-			return nil, fmt.Errorf("no Jellyfin users found")
-		}
-		jf.SetJellyfinUserID(userID)
+	userID, err := resolveJellyfinUserID(ctx, jf)
+	if err != nil {
+		return nil, err
 	}
 
 	jellyfinLibraryCap := 5000
@@ -233,6 +209,12 @@ func BackfillFromArr(ctx context.Context, db *sql.DB, jf JellyfinMetaClient, svc
 	} else if result.Added > 0 {
 		slog.Info("backfill reconcile: orphans recovered",
 			"component", "catalog_sync", "added", result.Added)
+	}
+
+	// Sweep last so a manual backfill is a full resync: rows the passes
+	// above didn't confirm alive are removed, not just left behind.
+	if _, err := SweepStale(ctx, db, jf, svc); err != nil {
+		slog.Error("backfill sweep failed", "component", "catalog_sync", "error", err)
 	}
 
 	slog.Info("catalog backfill complete", "component", "catalog_sync")
