@@ -73,10 +73,30 @@ func ParseEnv(path string) (EnvMap, error) {
 	return m, scanner.Err()
 }
 
-// WriteEnv writes the given EnvMap to path in canonical key order,
-// with a header comment. Keys not in envKeyOrder are appended at the end
-// in sorted-ish order (insertion order of map is not defined, so we just
-// append extras).
+// WriteEnv writes the given EnvMap to path in canonical key order, first
+// backing up any existing file to a plain ".bak" sibling. See writeEnvNoBackup
+// for the atomicity guarantees of the write itself.
+//
+// The pre-write ".bak" copy is a secondary, human-recoverable safety net
+// (e.g. for reverting to an earlier config after a successful-but-undesired
+// write). Callers that already maintain their own backup before calling in
+// (e.g. resetConfigAll's timestamped ".env.bak.<unix>", which — unlike this
+// plain ".bak" — survives across repeated resets without being overwritten)
+// should call writeEnvNoBackup directly instead, to avoid writing two
+// redundant backups of the same pre-write content.
+func WriteEnv(path string, m EnvMap) error {
+	// Back up existing file
+	if _, err := os.Stat(path); err == nil {
+		// best-effort backup — ignore errors
+		_ = copyFile(path, path+".bak")
+	}
+	return writeEnvNoBackup(path, m)
+}
+
+// writeEnvNoBackup writes the given EnvMap to path in canonical key order,
+// with a header comment, but performs no backup of any pre-existing file —
+// see WriteEnv, which wraps this with the standard ".bak" safety net and is
+// what most callers should use.
 //
 // The write is atomic: content is written to a temp file in the same
 // directory as path, then moved into place with os.Rename, which is atomic
@@ -84,16 +104,11 @@ func ParseEnv(path string) (EnvMap, error) {
 // volume (true here — both live in path's directory). A crash, power loss,
 // or OOM-kill during the write can therefore never leave a truncated or
 // partially-written .env — the reader always sees either the old content or
-// the fully-written new content, never a mix. The pre-write ".bak" copy is
-// kept as a secondary, human-recoverable safety net (e.g. for reverting to
-// an earlier config after a successful-but-undesired write).
-func WriteEnv(path string, m EnvMap) error {
-	// Back up existing file
-	if _, err := os.Stat(path); err == nil {
-		// best-effort backup — ignore errors
-		_ = copyFile(path, path+".bak")
-	}
-
+// the fully-written new content, never a mix.
+//
+// Keys not in envKeyOrder are appended at the end in sorted-ish order
+// (insertion order of map is not defined, so we just append extras).
+func writeEnvNoBackup(path string, m EnvMap) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
