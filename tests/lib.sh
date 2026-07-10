@@ -112,7 +112,12 @@ peli_load_env() {
         return 1
     fi
 
-    _PELI_SESSION_JAR="$(mktemp /tmp/peli_session_XXXXXX)"
+    # PELI_SESSION_JAR (env) lets a caller share one session cookie jar across
+    # several suites — verify.sh sets it so its whole run costs a single login.
+    # nginx rate-limits /api/pelicula/auth/login to 10r/m (burst 5), which a
+    # login-per-suite (let alone the historical login-per-subshell, see
+    # _peli_ensure_session) blows through immediately.
+    _PELI_SESSION_JAR="${PELI_SESSION_JAR:-$(mktemp /tmp/peli_session_XXXXXX)}"
     _PELI_ORIG_SETTINGS_FILE="$(mktemp /tmp/peli_orig_settings_XXXXXX)"
 
     _peli_log "Loaded env: BASE_URL=$PELI_BASE_URL LIBRARY_DIR=$LIBRARY_DIR"
@@ -126,6 +131,26 @@ peli_load_env() {
 _peli_ensure_session() {
     if [[ $_PELI_SESSION_VALID -eq 1 ]]; then
         return 0
+    fi
+
+    # Reuse an existing cookie before logging in. Two reasons this matters:
+    # (1) http_json is usually called inside $(...) command substitutions, so
+    # _PELI_SESSION_VALID=1 set here never propagates back to the parent —
+    # without this probe every API call performed a fresh login; (2) the
+    # login endpoint sits behind nginx's peli_auth limit_req zone (10r/m,
+    # burst 5, 429 beyond), so those redundant logins 429 within one suite
+    # run. The probe hits /api/pelicula/auth/check, which is public and not
+    # rate-limited.
+    if [[ -s "$_PELI_SESSION_JAR" ]]; then
+        local valid
+        valid="$(curl -sf \
+            -b "$_PELI_SESSION_JAR" \
+            "${PELI_BASE_URL}/api/pelicula/auth/check" 2>/dev/null \
+            | jq -r '.valid // false' 2>/dev/null)"
+        if [[ "$valid" == "true" ]]; then
+            _PELI_SESSION_VALID=1
+            return 0
+        fi
     fi
 
     local url="${PELI_BASE_URL}/api/pelicula/auth/login"

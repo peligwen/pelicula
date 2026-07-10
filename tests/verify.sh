@@ -70,6 +70,14 @@ while (( $# > 0 )); do
     esac
 done
 
+# Share one session cookie jar across every suite in this run (see lib.sh's
+# _peli_ensure_session): each suite would otherwise log in independently —
+# several times each, via command-substitution subshells — and trip nginx's
+# 10r/m rate limit on /api/pelicula/auth/login partway through the list.
+PELI_SESSION_JAR="$(mktemp /tmp/peli_session_shared_XXXXXX)"
+export PELI_SESSION_JAR
+trap 'rm -f "$PELI_SESSION_JAR"' EXIT
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _log()  { printf '\033[36m→\033[0m %s\n' "$*"; }
