@@ -311,7 +311,14 @@ services:
       - GLUETUN_PROXY_URL=${GLUETUN_PROXY_URL:-http://gluetun:8888}
       - PELICULA_PROJECT_NAME=${PELICULA_PROJECT_NAME:-pelicula}
     volumes:
-      - ./.env:/project/.env
+      # The middleware reads AND writes this file at runtime (setup wizard,
+      # auto-wiring's API-key persistence — see bootstrap.go's envPath).
+      # PELICULA_ENV_FILE is the CLI's test/orchestration seam: when exported
+      # (tests/e2e.sh's isolated stack), the same env file the CLI operates on
+      # is what the container mounts; unset, production mounts repo-root .env
+      # exactly as before. OS environment wins over --env-file in compose
+      # substitution, so the export flows through `pelicula up` unchanged.
+      - ${PELICULA_ENV_FILE:-./.env}:/project/.env
       - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
       - ${CONFIG_DIR}/radarr:/config/radarr:ro
       - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
