@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	appservices "pelicula-api/internal/app/services"
 	"pelicula-api/internal/config"
@@ -51,4 +53,54 @@ func TestHandleJobsListGroupsByState(t *testing.T) {
 		len(resp.Groups["failed"]) != 1 || len(resp.Groups["completed"]) != 1 {
 		t.Errorf("groups = %+v", resp.Groups)
 	}
+}
+
+// TestHandleJobsList_CancelsOnClientDisconnect verifies MWA-21: the outbound
+// call to procula is tied to the caller's request context via
+// http.NewRequestWithContext, so a cancelled request context aborts the
+// outbound call instead of running it to completion (bounded only by the
+// shared client's timeout).
+func TestHandleJobsList_CancelsOnClientDisconnect(t *testing.T) {
+	serverSawCancellation := make(chan bool, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			serverSawCancellation <- true
+		case <-time.After(2 * time.Second):
+			serverSawCancellation <- false
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		}
+	}))
+	defer upstream.Close()
+
+	orig := proculaURL
+	origSvc := services
+	proculaURL = upstream.URL
+	services = appservices.New(&config.Config{}, "")
+	t.Cleanup(func() { proculaURL = orig; services = origSvc })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/jobs", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleJobsList(w, req)
+	}()
+
+	// Give the handler a moment to issue the outbound request, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case sawCancel := <-serverSawCancellation:
+		if !sawCancel {
+			t.Error("upstream request completed instead of being cancelled — request context is not propagated")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for upstream handler to observe cancellation")
+	}
+
+	<-done
 }

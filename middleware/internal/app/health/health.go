@@ -118,7 +118,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ChecksTotal:  total,
 	}
 
-	slog.Info("health check", "component", "health", "passed", passed, "total", total)
+	// Debug, not Info: Docker healthchecks poll this endpoint every 30s, and
+	// logging every hit at Info crowds out the rotated logs with noise.
+	slog.Debug("health check", "component", "health", "passed", passed, "total", total)
 	writeJSON(w, resp)
 }
 

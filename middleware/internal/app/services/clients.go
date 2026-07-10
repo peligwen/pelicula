@@ -16,6 +16,7 @@ import (
 
 	arrclient "pelicula-api/internal/clients/arr"
 	bazarrclient "pelicula-api/internal/clients/bazarr"
+	jfclient "pelicula-api/internal/clients/jellyfin"
 	qbtclient "pelicula-api/internal/clients/qbt"
 )
 
@@ -80,6 +81,11 @@ type Clients struct {
 	Qbt      *qbtclient.Client
 	Bazarr   *bazarrclient.Client
 
+	// jellyfin is the typed Jellyfin client used by jellyfinGet. Constructed
+	// once in New() and reused, rather than per-call — it wraps c.jellyfinURL
+	// and c.client, neither of which change after construction.
+	jellyfin *jfclient.Client
+
 	wired bool
 	mu    sync.RWMutex
 }
@@ -115,6 +121,7 @@ func New(cfg *config.Config, jellyfinAPIKey string) *Clients {
 	c.Radarr = arrclient.New(c.radarrURL, "")
 	c.Prowlarr = arrclient.New(c.prowlarrURL, "")
 	c.Bazarr = bazarrclient.New(c.bazarrURL, "")
+	c.jellyfin = jfclient.NewWithHTTPClient(c.jellyfinURL, c.client)
 	c.JellyfinAPIKey = jellyfinAPIKey
 	c.loadKeys()
 	return c
