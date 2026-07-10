@@ -252,8 +252,16 @@ func (s *InviteStore) Redeem(ctx context.Context, token, username, password stri
 	// Phase 2: create Jellyfin user (outside tx — can be slow).
 	jellyfinID, err := s.jellyfin.CreateUser(ctx, username, password)
 	if err != nil {
-		// Release the slot so the invite can be reused.
-		if rollErr := s.repo.ReleaseSlot(ctx, token); rollErr != nil {
+		// Release the slot so the invite can be reused. Deliberately run the
+		// compensation on a detached context: when CreateUser failed
+		// *because* ctx was canceled (client disconnected mid-redemption —
+		// a real possibility for a signup flow on a phone) or its deadline
+		// expired, reusing ctx would make ReleaseSlot fail identically,
+		// permanently burning a single-use invite with no account created
+		// (MWD-3).
+		relCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if rollErr := s.repo.ReleaseSlot(relCtx, token); rollErr != nil {
 			slog.Warn("failed to release invite slot after Jellyfin error",
 				"component", "invites", "username", username, "error", rollErr)
 		}

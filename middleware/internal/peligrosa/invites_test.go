@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -242,6 +243,62 @@ func TestRedeemRace(t *testing.T) {
 	}
 	if list[0].RedeemedBy[0].JellyfinID == "" {
 		t.Error("RedeemedBy[0].JellyfinID should be populated")
+	}
+}
+
+// TestRedeem_CanceledContextStillReleasesSlot is the MWD-3 regression test:
+// when CreateUser fails because the request context was canceled (client
+// disconnects/navigates away mid-redemption), the compensating ReleaseSlot
+// must still run — it must use a detached context, not the already-canceled
+// request ctx (database/sql checks ctx.Err() before issuing the query, so
+// reusing ctx would fail identically and permanently burn a single-use
+// invite with no account created).
+func TestRedeem_CanceledContextStillReleasesSlot(t *testing.T) {
+	// The fake Jellyfin cancels the caller's context on /Users/New —
+	// simulating the client disconnecting exactly while CreateUser is in
+	// flight (after Phase 1's slot reservation already committed) — then
+	// blocks until the aborted request tears down its own connection.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			// Drain the body first: net/http only watches for a client
+			// disconnect (and cancels r.Context()) once the request body
+			// has been consumed — without this the handler would block
+			// forever and hang the httptest server's Close.
+			io.Copy(io.Discard, r.Body) //nolint:errcheck
+			cancel()
+			<-r.Context().Done()
+		})
+	})
+	s := newTestInviteStoreWithClient(t, jc)
+
+	maxUses := 1
+	inv, err := s.CreateInvite(context.Background(), "admin", "single-use", nil, &maxUses)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+
+	err = s.Redeem(ctx, inv.Token, "alice", "hunter12")
+	if err == nil {
+		t.Fatal("Redeem should fail when the request context is canceled mid-CreateUser")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Redeem error = %v, want context.Canceled", err)
+	}
+
+	// The slot must have been released despite the canceled request ctx:
+	// uses back to 0, and the single-use invite still redeemable.
+	list := s.ListInvites(context.Background())
+	if len(list) != 1 {
+		t.Fatalf("expected 1 invite, got %d", len(list))
+	}
+	if list[0].Uses != 0 {
+		t.Errorf("Uses = %d after canceled redemption, want 0 — the reserved slot was not released", list[0].Uses)
+	}
+	if state, found := s.CheckInvite(context.Background(), inv.Token); !found || state != "active" {
+		t.Errorf("invite state = %q (found=%v), want active — a client disconnect must not burn the invite",
+			state, found)
 	}
 }
 
