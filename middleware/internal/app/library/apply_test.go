@@ -2,8 +2,11 @@ package library
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -206,5 +209,241 @@ func TestHandleLibraryApply_LookupFailureIsReported(t *testing.T) {
 	}
 	if !sawNotFound {
 		t.Errorf("errors = %v, want a 'series not found' entry", result.Errors)
+	}
+}
+
+// TestHandleLibraryApply_InterleavesMoveAndRegister is the MWA-6 regression
+// test: with strategy "import", each item's file must be moved immediately
+// before that item's own *arr registration is attempted — not as a batch
+// move for the whole request followed by a batch of registrations. It
+// verifies both halves of that guarantee: (1) a registration failure on one
+// item does not stop later items from being processed, and (2) the failed
+// item's error names the destination its file was already moved to, so an
+// admin can find and manually register it instead of it silently rotting in
+// the library root.
+func TestHandleLibraryApply_InterleavesMoveAndRegister(t *testing.T) {
+	base := t.TempDir()
+	srcRoot := filepath.Join(base, "downloads")
+	dstRoot := filepath.Join(base, "movies")
+	for _, d := range []string{srcRoot, dstRoot} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	srcs := make([]string, 3)
+	for i, name := range []string{"one.mkv", "two.mkv", "three.mkv"} {
+		srcs[i] = filepath.Join(srcRoot, name)
+		if err := os.WriteFile(srcs[i], []byte("data"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dsts := []string{
+		filepath.Join(dstRoot, "one.mkv"),
+		filepath.Join(dstRoot, "two.mkv"),
+		filepath.Join(dstRoot, "three.mkv"),
+	}
+
+	var mu sync.Mutex
+	var registeredTmdbIDs []int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/movie", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			applyJSON(w, `[]`)
+			return
+		}
+		var p map[string]any
+		json.NewDecoder(r.Body).Decode(&p) //nolint:errcheck
+		id := int(p["tmdbId"].(float64))
+		if id == 202 {
+			// Item 2 (tmdbId 202) always fails registration.
+			http.Error(w, "radarr unavailable", http.StatusBadGateway)
+			return
+		}
+		mu.Lock()
+		registeredTmdbIDs = append(registeredTmdbIDs, id)
+		mu.Unlock()
+		applyJSON(w, `{"id":1}`)
+	})
+	mux.HandleFunc("/api/v3/movie/lookup/tmdb", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("tmdbId")
+		applyJSON(w, fmt.Sprintf(`{"title":"Movie","tmdbId":%s,"year":2020}`, id))
+	})
+	mux.HandleFunc("/api/v3/qualityprofile", func(w http.ResponseWriter, r *http.Request) {
+		applyJSON(w, `[{"id":1,"name":"Any"}]`)
+	})
+	mux.HandleFunc("/api/v3/series", func(w http.ResponseWriter, r *http.Request) {
+		applyJSON(w, `[]`)
+	})
+
+	h := &Handler{
+		Svc:                  newMuxArrSvc(t, mux),
+		applyAllowedSrcRoots: []string{srcRoot},
+		applyAllowedDstRoots: []string{dstRoot},
+	}
+
+	body := fmt.Sprintf(`{
+		"items": [
+			{"type":"movie","tmdbId":201,"title":"Movie One","year":2020,"sourcePath":%q,"destPath":%q},
+			{"type":"movie","tmdbId":202,"title":"Movie Two","year":2020,"sourcePath":%q,"destPath":%q},
+			{"type":"movie","tmdbId":203,"title":"Movie Three","year":2020,"sourcePath":%q,"destPath":%q}
+		],
+		"strategy":"import"
+	}`, srcs[0], dsts[0], srcs[1], dsts[1], srcs[2], dsts[2])
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/library/apply", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleLibraryApply(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleLibraryApply: code = %d, body = %s", w.Code, w.Body.String())
+	}
+	var result LibraryApplyResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.Added != 2 || result.Failed != 1 {
+		t.Fatalf("added/failed = %d/%d, want 2/1 (errors: %v)", result.Added, result.Failed, result.Errors)
+	}
+
+	// Item 3 (tmdbId 203) must still have been registered even though item 2
+	// failed — proves the loop didn't abort or skip subsequent items.
+	mu.Lock()
+	registered := append([]int(nil), registeredTmdbIDs...)
+	mu.Unlock()
+	var sawOne, sawThree bool
+	for _, id := range registered {
+		if id == 201 {
+			sawOne = true
+		}
+		if id == 203 {
+			sawThree = true
+		}
+	}
+	if !sawOne || !sawThree {
+		t.Errorf("registeredTmdbIDs = %v, want 201 and 203 both present", registered)
+	}
+
+	// Item 2's error must say the file was already moved and name the
+	// destination — not just the raw *arr error.
+	var errFor2 string
+	for _, e := range result.Errors {
+		if strings.Contains(e, "Movie Two") {
+			errFor2 = e
+		}
+	}
+	if errFor2 == "" {
+		t.Fatalf("no error recorded for Movie Two; errors = %v", result.Errors)
+	}
+	if !strings.Contains(errFor2, "already moved") {
+		t.Errorf("error for Movie Two = %q, want it to say the file was already moved", errFor2)
+	}
+	if !strings.Contains(errFor2, dsts[1]) {
+		t.Errorf("error for Movie Two = %q, want it to name destination %q", errFor2, dsts[1])
+	}
+
+	// The file for item 2 really did move to its destination on disk despite
+	// the registration failure — the crash-safety property MWA-6 requires:
+	// the admin can find and manually register it.
+	if _, err := os.Stat(dsts[1]); err != nil {
+		t.Errorf("dst for Movie Two should exist on disk after move: %v", err)
+	}
+	if _, err := os.Stat(srcs[1]); !os.IsNotExist(err) {
+		t.Errorf("src for Movie Two should be gone after move")
+	}
+}
+
+// TestHandleLibraryApply_FSOpFailureSkipsRegistration verifies that when the
+// filesystem operation itself fails (not the *arr call), the item is
+// reported as Failed and *arr registration is never attempted for it — since
+// the file never reached its destination there is nothing to register.
+// Later items must still be processed.
+func TestHandleLibraryApply_FSOpFailureSkipsRegistration(t *testing.T) {
+	base := t.TempDir()
+	srcRoot := filepath.Join(base, "downloads")
+	dstRoot := filepath.Join(base, "movies")
+	for _, d := range []string{srcRoot, dstRoot} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	srcs := make([]string, 2)
+	for i, name := range []string{"blocked.mkv", "ok.mkv"} {
+		srcs[i] = filepath.Join(srcRoot, name)
+		if err := os.WriteFile(srcs[i], []byte("data"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Item 1's destination parent is unreadable, so MkdirAll/Lstat on it fails.
+	blockedDir := filepath.Join(dstRoot, "blocked")
+	if err := os.Mkdir(blockedDir, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(blockedDir, 0755) }) //nolint:errcheck
+	dstBlocked := filepath.Join(blockedDir, "sub", "blocked.mkv")
+	dstOK := filepath.Join(dstRoot, "ok.mkv")
+
+	var registeredCount int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/movie", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			applyJSON(w, `[]`)
+			return
+		}
+		registeredCount++
+		applyJSON(w, `{"id":1}`)
+	})
+	mux.HandleFunc("/api/v3/movie/lookup/tmdb", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("tmdbId")
+		applyJSON(w, fmt.Sprintf(`{"title":"Movie","tmdbId":%s,"year":2020}`, id))
+	})
+	mux.HandleFunc("/api/v3/qualityprofile", func(w http.ResponseWriter, r *http.Request) {
+		applyJSON(w, `[{"id":1,"name":"Any"}]`)
+	})
+
+	h := &Handler{
+		Svc:                  newMuxArrSvc(t, mux),
+		applyAllowedSrcRoots: []string{srcRoot},
+		applyAllowedDstRoots: []string{dstRoot},
+	}
+
+	body := fmt.Sprintf(`{
+		"items": [
+			{"type":"movie","tmdbId":401,"title":"Blocked Movie","year":2020,"sourcePath":%q,"destPath":%q},
+			{"type":"movie","tmdbId":402,"title":"OK Movie","year":2020,"sourcePath":%q,"destPath":%q}
+		],
+		"strategy":"import"
+	}`, srcs[0], dstBlocked, srcs[1], dstOK)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/library/apply", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleLibraryApply(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleLibraryApply: code = %d, body = %s", w.Code, w.Body.String())
+	}
+	var result LibraryApplyResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.Added != 1 || result.Failed != 1 {
+		t.Fatalf("added/failed = %d/%d, want 1/1 (errors: %v)", result.Added, result.Failed, result.Errors)
+	}
+	if registeredCount != 1 {
+		t.Errorf("registeredCount = %d, want 1 (blocked item must not reach *arr)", registeredCount)
+	}
+	var sawFSFailure bool
+	for _, e := range result.Errors {
+		if strings.Contains(e, "Blocked Movie") && strings.Contains(e, "filesystem operation failed") {
+			sawFSFailure = true
+		}
+	}
+	if !sawFSFailure {
+		t.Errorf("errors = %v, want a filesystem-operation-failed entry for Blocked Movie", result.Errors)
 	}
 }
