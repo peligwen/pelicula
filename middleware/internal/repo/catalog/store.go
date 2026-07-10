@@ -367,6 +367,96 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Item, error) {
 	return items, rows.Err()
 }
 
+// ── Sweep support ─────────────────────────────────────────────────────────────
+
+// deleteChunkSize bounds the number of bound parameters per DELETE statement.
+const deleteChunkSize = 500
+
+// ListRoots returns every movie and series row, unfiltered and unlimited.
+// It backs the stale-row sweep, which must test the full root population
+// against the live Radarr/Sonarr/Jellyfin sets; seasons and episodes are
+// never listed here — they live and die with their parent chain via
+// DeleteOrphanedChildren.
+func (s *Store) ListRoots(ctx context.Context) ([]Item, error) {
+	rows, err := s.db.QueryContext(ctx, selectItem+` WHERE type IN ('movie','series')`)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog roots: %w", err)
+	}
+	defer rows.Close()
+
+	items := []Item{}
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		if it == nil {
+			continue
+		}
+		items = append(items, *it)
+	}
+	return items, rows.Err()
+}
+
+// DeleteStale deletes the given rows, skipping any written at or after
+// updatedBefore (RFC3339 UTC — string comparison is chronological for this
+// format). The updated_at re-check runs inside the DELETE itself, so a row
+// upserted between the caller's liveness snapshot and this call survives the
+// sweep. Returns the number of rows actually deleted.
+func (s *Store) DeleteStale(ctx context.Context, ids []string, updatedBefore string) (int64, error) {
+	var total int64
+	for start := 0; start < len(ids); start += deleteChunkSize {
+		chunk := ids[start:min(start+deleteChunkSize, len(ids))]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, len(chunk)+1)
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		args = append(args, updatedBefore)
+		res, err := s.db.ExecContext(ctx,
+			`DELETE FROM catalog_items WHERE id IN (`+placeholders+`) AND updated_at < ?`, args...)
+		if err != nil {
+			return total, fmt.Errorf("delete stale catalog items: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, nil
+}
+
+// DeleteOrphanedChildren deletes season rows whose parent series no longer
+// exists, then episode rows whose parent season no longer exists — in that
+// order, so episodes under a just-removed season are caught in the same pass.
+// Rows with an empty parent_id are never touched. Returns rows deleted.
+func (s *Store) DeleteOrphanedChildren(ctx context.Context) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin orphan-children tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck — safe no-op after Commit
+
+	var total int64
+	for _, q := range []string{
+		`DELETE FROM catalog_items
+		  WHERE type='season' AND parent_id != ''
+		    AND parent_id NOT IN (SELECT id FROM catalog_items WHERE type='series')`,
+		`DELETE FROM catalog_items
+		  WHERE type='episode' AND parent_id != ''
+		    AND parent_id NOT IN (SELECT id FROM catalog_items WHERE type='season')`,
+	} {
+		res, err := tx.ExecContext(ctx, q)
+		if err != nil {
+			return 0, fmt.Errorf("delete orphaned children: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit orphan-children delete: %w", err)
+	}
+	return total, nil
+}
+
 // UpdateMetadata sets Jellyfin-sourced fields on a catalog item.
 func (s *Store) UpdateMetadata(ctx context.Context, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
 	result, err := s.db.ExecContext(ctx, `
