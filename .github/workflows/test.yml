@@ -43,6 +43,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/pelicula/go.mod
+          cache-dependency-path: cmd/pelicula/go.mod
       - name: install docker compose plugin
         run: |
           DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
