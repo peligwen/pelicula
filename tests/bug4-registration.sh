@@ -18,7 +18,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
-peli_load_env "${SCRIPT_DIR}/../.env"
+# PELICULA_ENV_FILE overrides the default when set (e.g. by tests/e2e.sh,
+# which points every suite at its isolated .env — see tests/lib.sh's
+# peli_load_env doc comment).
+peli_load_env "${PELICULA_ENV_FILE:-${SCRIPT_DIR}/../.env}"
 
 trap tear_down_fixtures EXIT
 

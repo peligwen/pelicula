@@ -47,34 +47,98 @@ docker_cmd() {
     $NEEDS_SUDO docker "$@"
 }
 
-seed_config() {
-    local file="$1" content="$2"
-    if [[ ! -f "$file" ]]; then
-        echo "$content" > "$file"
+# check_disk_space DIR
+#   procula pauses its whole processing pipeline once disk usage crosses its
+#   storage-critical threshold (~90-95%, see procula/settings.go's
+#   StorageCriticalPct). A run that starts on an already-near-full disk
+#   doesn't fail here — it hangs ~8 minutes into Stage 5 waiting for a job
+#   that will never complete, and reports a cryptic timeout instead of the
+#   real cause (this exact failure mode is in the campaign log). Catch it
+#   before doing any work. `df -Pk` forces POSIX-portable, 1024-byte-block
+#   output so the column layout (and units) is identical on macOS/BSD and
+#   Linux/GNU.
+PELI_E2E_DISK_CRITICAL_PCT=90
+
+check_disk_space() {
+    local dir="$1"
+    local df_line
+    df_line="$(df -Pk "$dir" 2>/dev/null | tail -1)"
+    if [[ -z "$df_line" ]]; then
+        warn "Could not determine disk usage for $dir — skipping pre-flight disk check"
+        return 0
     fi
+
+    local used_pct avail_kb
+    used_pct="$(echo "$df_line" | awk '{print $5}' | tr -d '%')"
+    avail_kb="$(echo "$df_line" | awk '{print $4}')"
+    if ! [[ "$used_pct" =~ ^[0-9]+$ ]]; then
+        warn "Could not parse disk usage for $dir — skipping pre-flight disk check"
+        return 0
+    fi
+
+    if [[ "$used_pct" -ge "$PELI_E2E_DISK_CRITICAL_PCT" ]]; then
+        local avail_human
+        avail_human="$(numfmt --to=iec --from-unit=1024 "$avail_kb" 2>/dev/null || echo "${avail_kb} KB")"
+        fail "Disk is ${used_pct}% full on the filesystem hosting $dir (>= ${PELI_E2E_DISK_CRITICAL_PCT}%)"
+        warn "Only ${avail_human} free. procula's storage-critical threshold will pause the"
+        warn "processing pipeline mid-run — this run would time out ~8 minutes into Stage 5"
+        warn "with a cryptic failure instead of failing fast here. Free up space and re-run."
+        return 1
+    fi
+
+    info "Disk headroom OK (${used_pct}% used on the test filesystem)"
+    return 0
 }
 
-setup_dirs() {
-    local config_dir="$1" library_dir="$2" work_dir="$3"
-    mkdir -p \
-        "$config_dir/gluetun" \
-        "$config_dir/qbittorrent" \
-        "$config_dir/prowlarr" \
-        "$config_dir/sonarr" \
-        "$config_dir/radarr" \
-        "$config_dir/jellyfin" \
-        "$config_dir/bazarr" \
-        "$config_dir/procula/jobs" \
-        "$config_dir/procula/profiles" \
-        "$config_dir/pelicula" \
-        "$config_dir/certs" \
-        "$library_dir/movies" \
-        "$library_dir/tv" \
-        "$work_dir/downloads" \
-        "$work_dir/downloads/incomplete" \
-        "$work_dir/downloads/radarr" \
-        "$work_dir/downloads/tv-sonarr" \
-        "$work_dir/processing"
+# build_pelicula_cli builds bin/pelicula exactly like the ./pelicula wrapper
+# does (same ldflags, same output path, same Docker-based fallback for
+# Go-less hosts) so e2e drives a binary that's provably built from this
+# checkout. Unlike the wrapper, there is no staleness skip — e2e always
+# rebuilds, trading a few seconds for the guarantee that the binary matches
+# HEAD exactly (the wrapper's mtime-based skip is an interactive-CLI speed
+# optimization, not something a test harness should trust).
+# The binary must live under the repo root ($SCRIPT_DIR/bin/pelicula, never
+# under $test_dir): getScriptDir() walks up from the binary's own location
+# to find the repo, so a binary built elsewhere can't find compose/, etc.
+build_pelicula_cli() {
+    local bin="$SCRIPT_DIR/bin/pelicula"
+    local git_version
+    git_version="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+
+    if [[ ! -d "$SCRIPT_DIR/cmd/pelicula" ]]; then
+        fail "cmd/pelicula/ not found — are you running from the pelicula repo?"
+        return 1
+    fi
+
+    mkdir -p "$SCRIPT_DIR/bin"
+    if command -v go &>/dev/null; then
+        if ! ( cd "$SCRIPT_DIR/cmd/pelicula" && go build -ldflags "-X main.version=$git_version" -o "$bin" . ); then
+            fail "go build failed"
+            return 1
+        fi
+    else
+        # Synology's Docker Compose fork fails when HOME's parent dir is a symlink
+        # (/var/services/homes -> /volume1/@fake_home_link) — same workaround the
+        # wrapper uses.
+        local docker_home="$HOME"
+        if [[ -L "$(dirname "$HOME")" ]]; then
+            docker_home="$SCRIPT_DIR"
+        fi
+        if ! HOME="$docker_home" $NEEDS_SUDO docker run --rm \
+                -v "$SCRIPT_DIR:/src" \
+                -w /src/cmd/pelicula \
+                golang:1.23-alpine \
+                go build -ldflags "-X main.version=$git_version" -o /src/bin/pelicula .; then
+            fail "Docker-based Go build failed"
+            return 1
+        fi
+    fi
+
+    if [[ ! -x "$bin" ]]; then
+        fail "binary not found at $bin after build"
+        return 1
+    fi
+    return 0
 }
 
 # ── Parse Flags ─────────────────────────────────────
@@ -106,27 +170,27 @@ cmd_test() {
     local test_config_dir="$test_dir/config"
     local test_library_dir="$test_dir/library"
     local test_work_dir="$test_dir/work"
-    # Write test config to the standard .env path so bind-mounts inside containers work.
-    # Back up any existing .env and restore it on cleanup.
-    local test_env="$SCRIPT_DIR/.env"
-    local test_env_backup=""
-    if [[ -f "$test_env" ]]; then
-        test_env_backup="${test_env}.test-bak-$$"
-        cp "$test_env" "$test_env_backup"
-    fi
+    # The isolated .env lives entirely under $test_dir — the repo-root .env
+    # (production config) is never read, written, backed up, or swapped by
+    # e2e. bin/pelicula is pointed at this file via PELICULA_ENV_FILE.
+    local test_env="$test_dir/.env"
+    local PELICULA_BIN="$SCRIPT_DIR/bin/pelicula"
     local test_passes=0 test_failures=0
 
     # Local pass/fail wrappers that track counts
     t_pass() { pass "$1"; test_passes=$((test_passes + 1)); }
     t_fail() { fail "$1"; test_failures=$((test_failures + 1)); }
 
-    # Compose wrapper: isolated project, test env, test overlay.
+    # Compose wrapper: isolated project, test env, test overlay. Used for
+    # ancillary ops (image build, nginx -t, log dumps, docker exec) that
+    # don't go through bin/pelicula — bring-up/teardown themselves are
+    # driven by the real CLI (see Stage 1 and cleanup_test below).
     # --profile vpn starts gluetun/qbittorrent/prowlarr, which the overlay
     # replaces with safe stubs (alpine for gluetun, real images with test names).
     test_compose() {
         $NEEDS_SUDO docker compose \
             --project-directory "$SCRIPT_DIR" \
-            --env-file "${test_env:-$SCRIPT_DIR/.env}" \
+            --env-file "$test_env" \
             -f "$COMPOSE_FILE" \
             -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
             -p pelicula-test \
@@ -174,53 +238,36 @@ cmd_test() {
             'http://localhost:8282/api/procula/settings' 2>/dev/null
     }
 
+    # cleanup_test is registered as an EXIT trap and also called explicitly
+    # at the end of a green run (see Summary), so it must be idempotent
+    # (safe to run twice) and must never let its own failures set the exit
+    # code of an otherwise-green run — every step below is best-effort.
     cleanup_test() {
-        # Teardown's `compose down` needs the TEST env for compose-file
-        # variable interpolation, but the original .env must be restored even
-        # if teardown dies mid-way. Snapshot the test env to a temp file,
-        # restore .env immediately, then run down against the snapshot —
-        # previously down ran with --env-file pointing at the already
-        # restored/deleted path, which could fail silently and leave the
-        # whole test stack running.
-        local down_env=""
-        if [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]]; then
-            down_env="$(mktemp /tmp/peli_e2e_downenv_XXXXXX)"
-            cp "${test_env:-$SCRIPT_DIR/.env}" "$down_env"
-        fi
-
-        # Always restore the original .env — the test containers have env vars baked in
-        # from the initial `up -d` and are unaffected by the file on disk. Leaving the
-        # test .env in place (dummy WireGuard key etc.) breaks `pelicula up` for prod.
-        if [[ -n "${test_env_backup:-}" ]] && [[ -f "${test_env_backup:-}" ]]; then
-            mv "$test_env_backup" "${test_env:-$SCRIPT_DIR/.env}"
-        elif [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]]; then
-            rm -f "${test_env:-$SCRIPT_DIR/.env}"
-        fi
-
         if [[ ${keep:-0} -eq 0 ]]; then
             info "Cleaning up test stack..."
-            # --profile vpn must match the `up` invocation: profile-gated
-            # services (gluetun/qbittorrent/prowlarr) are not "orphans" to a
-            # profileless down and survive it — same bug class the CLI's
-            # restart-acquire had (CIT-7).
-            $NEEDS_SUDO docker compose \
-                --project-directory "$SCRIPT_DIR" \
-                --env-file "${down_env:-$SCRIPT_DIR/.env}" \
-                -f "$COMPOSE_FILE" \
-                -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
-                -p pelicula-test \
-                --profile vpn \
-                down -v --remove-orphans 2>/dev/null || true
-            rm -f "${down_env:-}"
-            # Loud post-cleanup sanity: a swapped-out .env or surviving test
-            # containers have silently leaked several times — warn hard so the
-            # operator (or CI log reader) sees it even on a green run.
-            if [[ -n "${test_env_backup:-}" || -f "${test_env:-$SCRIPT_DIR/.env}.test-bak-$$" ]]; then
-                [[ -f "${test_env:-$SCRIPT_DIR/.env}" ]] || \
-                    warn "SANITY: ${test_env:-$SCRIPT_DIR/.env} missing after cleanup — restore it from its .test-bak-* backup!"
+            # Same PELICULA_ENV_FILE/PELICULA_COMPOSE_OVERLAY exported for
+            # bring-up. cmdDown activates the vpn + apprise profiles
+            # unconditionally (not just whatever the current env implies),
+            # so profile-gated services (gluetun/qbittorrent/prowlarr) are
+            # always torn down — the same profile-parity bug class the
+            # CLI's restart-acquire hit (CIT-7). down is safe to call even
+            # if bring-up never got as far as starting containers.
+            #
+            # Guard on PELICULA_ENV_FILE actually being set: without it,
+            # bin/pelicula falls back to the default "pelicula" project
+            # name — production's — which must never be touched by e2e.
+            # If we get here before the export (e.g. mktemp itself failed),
+            # nothing was ever started, so there's nothing to tear down.
+            if [[ -n "${PELICULA_ENV_FILE:-}" && -x "$PELICULA_BIN" ]]; then
+                "$PELICULA_BIN" down || \
+                    warn "bin/pelicula down exited non-zero during teardown — checking for survivors"
+            elif [[ -z "${PELICULA_ENV_FILE:-}" ]]; then
+                warn "PELICULA_ENV_FILE was never set — skipping bin/pelicula down (nothing to tear down)"
             fi
+
             if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^pelicula-test-'; then
-                warn "SANITY: pelicula-test containers survived teardown — run: docker compose -p pelicula-test --profile vpn down -v"
+                warn "SANITY: pelicula-test containers survived teardown — run:"
+                warn "  PELICULA_ENV_FILE=${test_env} PELICULA_COMPOSE_OVERLAY=${SCRIPT_DIR}/compose/docker-compose.test.yml ${PELICULA_BIN} down"
             fi
             # Container-created files can defeat a plain rm two ways: on
             # macOS, Docker Desktop's VirtioFS stamps a `deny delete` ACL on
@@ -239,11 +286,12 @@ cmd_test() {
                 fi
             fi
         else
-            rm -f "${down_env:-}"
             echo ""
             warn "Test stack left running (--keep is set)."
-            warn "Original .env has been restored — prod stack is safe."
-            warn "Clean up test stack: docker compose -p pelicula-test down -v"
+            warn "Drive it yourself with the same isolated env this run used:"
+            warn "  export PELICULA_ENV_FILE=${test_env}"
+            warn "  export PELICULA_COMPOSE_OVERLAY=${SCRIPT_DIR}/compose/docker-compose.test.yml"
+            warn "  ${PELICULA_BIN} down    # tear it down when done"
             warn "Temp dirs: ${test_dir:-<unknown>}"
         fi
     }
@@ -292,45 +340,74 @@ NOTIFICATIONS_MODE=internal
 EOF
     chmod 600 "$test_env"
 
-    setup_dirs "$test_config_dir" "$test_library_dir" "$test_work_dir"
+    # Point the CLI at the isolated env + test compose overlay for the rest
+    # of this run. bin/pelicula up (Stage 1) reads PELICULA_ENV_FILE instead
+    # of the repo-root .env, and appends PELICULA_COMPOSE_OVERLAY last in
+    # every compose invocation it makes — this is what makes the isolated
+    # stack possible without ever touching the production .env.
+    #
+    # Exported immediately after test_env is written, and before ANY check
+    # that could fail and unwind into cleanup_test (the EXIT trap): cmdDown
+    # falls back to the default "pelicula" project name — production's —
+    # when PELICULA_ENV_FILE is unset or points at a file that doesn't exist
+    # yet. Teardown must never be able to run without this pointed at a
+    # real, isolated .env, or a failure here could reach for the production
+    # stack instead of the (nonexistent) test one.
+    export PELICULA_ENV_FILE="$test_env"
+    export PELICULA_COMPOSE_OVERLAY="$SCRIPT_DIR/compose/docker-compose.test.yml"
 
-    # Seed *arr + Jellyfin configs (same as cmd_up)
-    seed_config "$test_config_dir/sonarr/config.xml" \
-        '<Config><UrlBase>/sonarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
-    seed_config "$test_config_dir/radarr/config.xml" \
-        '<Config><UrlBase>/radarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
-    seed_config "$test_config_dir/prowlarr/config.xml" \
-        '<Config><UrlBase>/prowlarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>'
-    seed_config "$test_config_dir/jellyfin/network.xml" \
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?><NetworkConfiguration xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\"><BaseUrl>/jellyfin</BaseUrl><PublishedServerUrl>http://127.0.0.1:${test_port}/jellyfin</PublishedServerUrl></NetworkConfiguration>"
-    mkdir -p "$test_config_dir/bazarr/config"
-    seed_config "$test_config_dir/bazarr/config/config.ini" \
-'[general]
-base_url=/bazarr
-'
-    mkdir -p "$test_config_dir/qbittorrent/qBittorrent"
-    seed_config "$test_config_dir/qbittorrent/qBittorrent/qBittorrent.conf" \
-'[Preferences]
-WebUI\AuthSubnetWhitelistEnabled=true
-WebUI\AuthSubnetWhitelist=172.16.0.0/12
-WebUI\LocalHostAuth=false
-WebUI\CSRFProtection=false
-
-[BitTorrent]
-Session\DefaultSavePath=/downloads/'
-
+    # Directory tree + *arr/Jellyfin/Bazarr/qBittorrent config seeding is no
+    # longer duplicated here — bin/pelicula up's setupDirs()/SeedAllConfigs()
+    # (dirs.go, seed.go) do it, exercising the same code path production
+    # installs go through.
     t_pass "Environment initialized"
 
-    # ── Stage 1: Start Stack ──────────────────────────
+    # Disk pre-flight, before bring-up (Stage 1) does any real work. Runs
+    # after the export above so a failure here still tears down through the
+    # isolated pelicula-test project, never production's.
+    if ! check_disk_space "$test_dir"; then
+        t_fail "Disk pre-flight check failed"
+        return 1
+    fi
 
-    info "Building and starting test stack (this may take a minute)..."
-    if ! test_compose up -d --build 2>&1; then
-        t_fail "Stack failed to start"
+    # ── Stage 1: Build CLI + Start Stack ──────────────
+
+    info "Building pelicula CLI from HEAD..."
+    if ! build_pelicula_cli; then
+        t_fail "Failed to build bin/pelicula"
+        return 1
+    fi
+
+    info "Building container images (this may take a minute)..."
+    if ! test_compose build 2>&1; then
+        t_fail "Image build failed"
         echo ""
         warn "Check Docker logs for details. Run with --keep to investigate."
         return 1
     fi
 
+    # bin/pelicula up seeds every service config, creates the directory
+    # tree, starts compose with the vpn profile (the dummy WireGuard key
+    # above activates it) plus PELICULA_COMPOSE_OVERLAY, waits for gluetun
+    # health, and — as its very last step — runs its own auth-free
+    # tests/verify.sh --skip-auth smoke against this same stack. That smoke
+    # can legitimately report failures here if pelicula-api isn't fully
+    # warmed up yet (up doesn't block on it before running it); it's
+    # non-fatal to 'up' and is NOT the same run as the full authed verify.sh
+    # e2e invokes later in this script — seeing two verify runs in the log
+    # is expected, not a duplicate-test bug.
+    info "Starting test stack via bin/pelicula up..."
+    if ! "$PELICULA_BIN" up; then
+        t_fail "bin/pelicula up failed (bring-up gate)"
+        echo ""
+        warn "Check Docker logs for details. Run with --keep to investigate."
+        return 1
+    fi
+
+    # e2e-specific readiness polling that 'up' doesn't cover: 'up' doesn't
+    # block on pelicula-api's own health before returning (only on gluetun's,
+    # when VPN is configured), so wait for it explicitly here before Stage 2
+    # (auto-wire) and the nginx -t check below rely on it being reachable.
     info "Waiting for middleware to be ready..."
     local wait=0
     while [[ $wait -lt 60 ]]; do
@@ -918,10 +995,15 @@ assert 'Movies' in names and 'TV Shows' in names
     # real login and would all 429 if they ran inside that poisoned window.
 
     info "Running verify smoke against isolated stack (localhost:${test_port})..."
-    # The isolated stack's own admin credentials (seeded into test_env above)
-    # are known here, so run verify.sh with real auth instead of --skip-auth —
-    # this unlocks the 5 authenticated suites (bug1-reconcile, bug4-registration,
-    # sweep-catalog/jobs/users/settings) instead of silently skipping them.
+    # This is the SECOND verify.sh run in this log, not a duplicate: the
+    # first ran auth-free inside bin/pelicula up (Stage 1) as its own
+    # post-deploy smoke. The isolated stack's own admin credentials (seeded
+    # into test_env above) are known here, so this run uses real auth
+    # instead of --skip-auth — this unlocks the 5 authenticated suites
+    # (bug1-reconcile, bug4-registration, sweep-catalog/jobs/users/settings)
+    # instead of silently skipping them. PELICULA_ENV_FILE, exported in
+    # Stage 0, is inherited by this subshell and flows through to every
+    # suite's own ENV_FILE resolution (see tests/lib.sh's peli_load_env doc).
     if PELICULA_TEST_JELLYFIN_USER=admin PELICULA_TEST_JELLYFIN_PASSWORD=test-jellyfin-pw \
             bash "$SCRIPT_DIR/tests/verify.sh" --target "localhost:${test_port}"; then
         t_pass "verify smoke passed"
@@ -1274,9 +1356,11 @@ assert 'Movies' in names and 'TV Shows' in names
         echo ""
         echo "  Debug commands:"
         echo "    bash tests/e2e.sh --keep        re-run, keep containers up"
-        echo "    docker compose -p pelicula-test logs procula"
-        echo "    docker compose -p pelicula-test logs pelicula-api"
-        echo "    docker compose -p pelicula-test logs jellyfin"
+        echo "  Then, with the PELICULA_ENV_FILE/PELICULA_COMPOSE_OVERLAY exports"
+        echo "  that --keep run prints on exit:"
+        echo "    ${SCRIPT_DIR}/bin/pelicula logs procula"
+        echo "    ${SCRIPT_DIR}/bin/pelicula logs pelicula-api"
+        echo "    ${SCRIPT_DIR}/bin/pelicula logs jellyfin"
         echo ""
         trap - EXIT
         cleanup_test

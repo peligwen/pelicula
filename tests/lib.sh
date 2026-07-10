@@ -58,6 +58,15 @@ _peli_err()  { echo -e "${_PELI_RED}[err]${_PELI_NC} $*" >&2; }
 #   Source the .env file and export test globals.
 #   HOST defaults to localhost. Uses PELICULA_PORT from .env for PELI_BASE_URL.
 #   Fails loudly if PELICULA_TEST_JELLYFIN_PASSWORD is unset.
+#
+#   ENV_FILE is caller-resolved, not defaulted here. Every suite that calls
+#   this (bug1-reconcile.sh, bug2-storage.sh, bug4-registration.sh,
+#   sweep-*.sh) resolves its own ENV_FILE as
+#   "${PELICULA_ENV_FILE:-${SCRIPT_DIR}/../.env}" — standalone `pelicula
+#   verify` runs against the production .env as before, while tests/e2e.sh
+#   exports PELICULA_ENV_FILE for its isolated stack and that flows through
+#   verify.sh to every suite automatically, without ever touching the
+#   repo-root .env.
 peli_load_env() {
     local env_file="${1:-}"
     local host="${2:-localhost}"
