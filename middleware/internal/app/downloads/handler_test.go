@@ -404,6 +404,47 @@ func TestHandleDownloadCancel_QbtPostErr(t *testing.T) {
 	}
 }
 
+// TestHandleDownloadCancel_ArrKeysNotLoaded verifies that when the *arr API
+// key for the requested category is not loaded yet (pre-autowire startup
+// window), the handler refuses the cancel outright with 503 instead of
+// deleting the torrent and orphaning the *arr queue entry (MWA-16).
+func TestHandleDownloadCancel_ArrKeysNotLoaded(t *testing.T) {
+	var queueCalled, deleteCalled atomic.Bool
+
+	radarrMux := http.NewServeMux()
+	radarrMux.HandleFunc("/api/v3/queue", func(w http.ResponseWriter, r *http.Request) {
+		queueCalled.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"totalRecords":0,"records":[]}`))
+	})
+
+	qbtMux := http.NewServeMux()
+	qbtMux.HandleFunc("/api/v2/torrents/delete", func(w http.ResponseWriter, r *http.Request) {
+		deleteCalled.Store(true)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	svc := newStubSvc(t, nil, radarrMux, qbtMux)
+	svc.keysRet = [3]string{"sonarr-key", "", "prowlarr-key"} // radarrKey not loaded yet
+	h := &Handler{Svc: svc}
+
+	body := `{"hash":"abc123abc123","category":"radarr","blocklist":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/downloads/cancel", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleDownloadCancel(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HandleDownloadCancel keys not loaded: code = %d, want 503, body = %s", w.Code, w.Body.String())
+	}
+	if queueCalled.Load() {
+		t.Error("HandleDownloadCancel keys not loaded: arr queue must not be touched")
+	}
+	if deleteCalled.Load() {
+		t.Error("HandleDownloadCancel keys not loaded: torrent must not be deleted — would orphan the arr queue entry")
+	}
+}
+
 // TestHandleDownloadCancel_QbtDown verifies that when qBittorrent is unreachable
 // the handler still returns 200 (best-effort cleanup — arr side effects may still
 // have fired, but qbt delete failure is non-fatal).
