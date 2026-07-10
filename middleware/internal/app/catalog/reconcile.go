@@ -15,13 +15,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-// reconcileBatchLimit caps the number of Jellyfin movie items scanned per run.
-// Prevents runaway memory use on large libraries. Raise if needed.
-const reconcileBatchLimit = 500
+// reconcilePageSize is the number of Jellyfin movie items requested per page
+// while paginating through the library within a single reconcile run.
+const reconcilePageSize = 500
+
+// reconcileLibraryCap returns the maximum total number of Jellyfin items
+// scanned across all pages in a single reconcile run — a safety valve against
+// unbounded memory/runtime on a pathologically large or misbehaving library,
+// not a per-run truncation of the library itself (see reconcilePageSize and
+// the pagination loop in ReconcileOrphans, which pages via StartIndex until
+// the full library has been scanned or this cap is hit).
+// Overridable via RECONCILE_LIBRARY_LIMIT; mirrors JELLYFIN_LIBRARY_LIMIT in
+// sync.go's fetchJellyfinLibrary.
+func reconcileLibraryCap() int {
+	limit := 5000
+	if v := os.Getenv("RECONCILE_LIBRARY_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	return limit
+}
 
 // ReconcileResult summarises one reconcile run.
 type ReconcileResult struct {
@@ -80,7 +100,10 @@ func ReconcileOrphans(ctx context.Context, db *sql.DB, jf JellyfinMetaClient, ra
 		}
 	}
 
-	// 2. Fetch Jellyfin Movies with Path field, bounded by reconcileBatchLimit.
+	// 2. Fetch Jellyfin Movies with Path field, paginating via StartIndex
+	// until the full library has been scanned (or reconcileLibraryCap is hit
+	// — a safety valve, not a routine truncation; see the near-cap warning
+	// below).
 	uid := jf.GetJellyfinUserID()
 	if uid == "" {
 		// Resolve user ID from Jellyfin API.
@@ -110,24 +133,49 @@ func ReconcileOrphans(ctx context.Context, db *sql.DB, jf JellyfinMetaClient, ra
 		jf.SetJellyfinUserID(uid)
 	}
 
-	jfPath := fmt.Sprintf(
-		"/Users/%s/Items?IncludeItemTypes=Movie&Fields=Path,ProviderIds&Recursive=true&Limit=%d",
-		uid, reconcileBatchLimit,
-	)
-	jfBody, err := jf.JellyfinGet(ctx, jfPath, jf.GetJellyfinAPIKey())
-	if err != nil {
-		return result, fmt.Errorf("fetch jellyfin movies: %w", err)
+	libraryCap := reconcileLibraryCap()
+	var jfItems []jellyfinMovieItem
+	totalRecordCount := 0
+	for startIndex := 0; len(jfItems) < libraryCap; startIndex += reconcilePageSize {
+		pageLimit := reconcilePageSize
+		if remaining := libraryCap - len(jfItems); remaining < pageLimit {
+			pageLimit = remaining
+		}
+		jfPath := fmt.Sprintf(
+			"/Users/%s/Items?IncludeItemTypes=Movie&Fields=Path,ProviderIds&Recursive=true&StartIndex=%d&Limit=%d",
+			uid, startIndex, pageLimit,
+		)
+		jfBody, err := jf.JellyfinGet(ctx, jfPath, jf.GetJellyfinAPIKey())
+		if err != nil {
+			return result, fmt.Errorf("fetch jellyfin movies (offset %d): %w", startIndex, err)
+		}
+		var jfResp struct {
+			Items            []jellyfinMovieItem `json:"Items"`
+			TotalRecordCount int                 `json:"TotalRecordCount"`
+		}
+		if err := json.Unmarshal(jfBody, &jfResp); err != nil {
+			return result, fmt.Errorf("parse jellyfin movies (offset %d): %w", startIndex, err)
+		}
+		totalRecordCount = jfResp.TotalRecordCount
+		jfItems = append(jfItems, jfResp.Items...)
+		if len(jfResp.Items) == 0 || len(jfItems) >= totalRecordCount {
+			break
+		}
 	}
-	var jfResp struct {
-		Items []jellyfinMovieItem `json:"Items"`
-	}
-	if err := json.Unmarshal(jfBody, &jfResp); err != nil {
-		return result, fmt.Errorf("parse jellyfin movies: %w", err)
+
+	if count := len(jfItems); count >= int(float64(libraryCap)*0.8) {
+		slog.Warn("reconcile: jellyfin library scan near cap",
+			"component", "catalog_reconcile",
+			"scanned", count,
+			"cap", libraryCap,
+			"pct", fmt.Sprintf("%.0f%%", float64(count)/float64(libraryCap)*100),
+			"hint", "consider raising RECONCILE_LIBRARY_LIMIT",
+		)
 	}
 
 	// Filter to items under a Radarr root folder.
 	var candidates []jellyfinMovieItem
-	for _, item := range jfResp.Items {
+	for _, item := range jfItems {
 		if item.Path == "" {
 			continue
 		}

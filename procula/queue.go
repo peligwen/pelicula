@@ -136,13 +136,27 @@ type Queue struct {
 	pending   chan struct{}
 	cancelsMu sync.Mutex
 	cancels   map[string]context.CancelFunc
+
+	// updateMu guards updateLocks (the map itself, not the per-job mutexes it
+	// holds). updateLocks provides a per-job-ID mutex so Update's
+	// read-modify-write cycle is serialized per job, mirroring the
+	// cancelsMu/cancels pattern above. Without this, two concurrent Update
+	// calls for the same job (e.g. an HTTP cancel racing a worker progress
+	// callback) can both read the row before either writes, and the last
+	// writer silently reverts whatever the other one committed (including a
+	// user-initiated cancellation). Entries are never removed: a *sync.Mutex
+	// is a few dozen bytes and job IDs are never reused, so even years of high
+	// job volume keep this map a rounding error of process memory.
+	updateMu    sync.Mutex
+	updateLocks map[string]*sync.Mutex
 }
 
 func NewQueue(db *sql.DB) (*Queue, error) {
 	q := &Queue{
-		db:      db,
-		pending: make(chan struct{}, 1),
-		cancels: make(map[string]context.CancelFunc),
+		db:          db,
+		pending:     make(chan struct{}, 1),
+		cancels:     make(map[string]context.CancelFunc),
+		updateLocks: make(map[string]*sync.Mutex),
 	}
 
 	if err := q.loadExisting(); err != nil {
@@ -443,10 +457,40 @@ func (q *Queue) ArchiveOldJobs(olderThan time.Duration) (int, error) {
 	return int(n), nil
 }
 
+// lockForUpdate returns the per-job mutex used to serialize Update's
+// read-modify-write cycle, creating it on first use.
+func (q *Queue) lockForUpdate(id string) *sync.Mutex {
+	q.updateMu.Lock()
+	defer q.updateMu.Unlock()
+	mu, ok := q.updateLocks[id]
+	if !ok {
+		mu = &sync.Mutex{}
+		q.updateLocks[id] = mu
+	}
+	return mu
+}
+
+// Update applies fn to the job's current state and persists every column
+// back to the row. The whole read-modify-write cycle is serialized per job ID
+// (see lockForUpdate) so concurrent callers — e.g. an HTTP cancel and the
+// worker's progress callback — can never interleave a stale read against a
+// newer write.
 func (q *Queue) Update(id string, fn func(*Job)) error {
+	mu := q.lockForUpdate(id)
+	mu.Lock()
+	defer mu.Unlock()
+
 	job, ok := q.Get(id)
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
+	}
+
+	// updateSyncHook, when set by a test, runs here — after the read, before
+	// the mutation/write — so a regression test can deterministically widen
+	// the old race window and prove the per-job mutex above now excludes a
+	// second concurrent Update for the same ID. Always nil in production.
+	if updateSyncHook != nil {
+		updateSyncHook(id)
 	}
 
 	fn(job)
@@ -544,6 +588,9 @@ func (q *Queue) Update(id string, fn func(*Job)) error {
 	}
 	return nil
 }
+
+// updateSyncHook is a test-only seam; see the call site inside Update.
+var updateSyncHook func(id string)
 
 func (q *Queue) Retry(id string) error {
 	found := false

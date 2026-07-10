@@ -167,8 +167,12 @@ func (a *Autowirer) Run(ctx context.Context) error {
 		} else {
 			sonarrWired = a.wireDownloadClient(ctx, "Sonarr", a.svc.SonarrClient(), "/api/v3", "tv-sonarr")
 			radarrWired = a.wireDownloadClient(ctx, "Radarr", a.svc.RadarrClient(), "/api/v3", "radarr")
-			prowlarrWired = a.wireProwlarrApp(ctx, "Sonarr", a.urls.Sonarr, sonarrKey) &&
-				a.wireProwlarrApp(ctx, "Radarr", a.urls.Radarr, radarrKey)
+			// Evaluate both Prowlarr↔*arr wirings unconditionally before ANDing —
+			// Go's && short-circuits, so writing this as a single expression would
+			// skip the Radarr call entirely whenever the Sonarr call fails.
+			sonarrAppWired := a.wireProwlarrApp(ctx, "Sonarr", a.urls.Sonarr, sonarrKey)
+			radarrAppWired := a.wireProwlarrApp(ctx, "Radarr", a.urls.Radarr, radarrKey)
+			prowlarrWired = sonarrAppWired && radarrAppWired
 		}
 	} else {
 		slog.Info("VPN not configured — skipping download client and indexer wiring", "component", "autowire")

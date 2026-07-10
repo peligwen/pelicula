@@ -66,6 +66,23 @@ func TestMatchesConditions(t *testing.T) {
 			TranscodeConditions{CodecsInclude: []string{"av1"}, MinHeight: 2160},
 			"h264", 2160, true,
 		},
+		{
+			// PRO-6: MaxSourceHeight is a ceiling that ANDs against the rest —
+			// a codec match at/above the ceiling must NOT trigger the profile.
+			"max source height ceiling excludes taller source despite codec match",
+			TranscodeConditions{CodecsInclude: []string{"hevc"}, MaxSourceHeight: 2160},
+			"hevc", 2160, false,
+		},
+		{
+			"max source height ceiling allows shorter source with codec match",
+			TranscodeConditions{CodecsInclude: []string{"hevc"}, MaxSourceHeight: 2160},
+			"hevc", 1080, true,
+		},
+		{
+			"max source height ceiling excludes the no-conditions catch-all too",
+			TranscodeConditions{MaxSourceHeight: 1080},
+			"anything", 1080, false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -282,6 +299,40 @@ func TestSeededProfileDefaults(t *testing.T) {
 		if _, ok := byName2[name]; !ok {
 			t.Errorf("after second seed: missing profile %q", name)
 		}
+	}
+}
+
+// TestDefaultProfiles_FirstMatchRespectsResolution is the PRO-6 regression
+// test. Procula only ever applies the first matching enabled profile (no
+// fan-out — see docs/PROCULA.md); with all three shipped defaults enabled,
+// "Compatibility 1080p" is evaluated before "Downscale 4K to 1080p" in
+// lexical filename order and previously matched ANY HEVC/AV1 source
+// regardless of height, permanently shadowing the downscale profile for 4K
+// HEVC sources. LoadProfiles returns profiles in the on-disk order production
+// actually walks (os.ReadDir sorts by filename), so this exercises the real
+// evaluation order rather than just matchesConditions in isolation.
+func TestDefaultProfiles_FirstMatchRespectsResolution(t *testing.T) {
+	dir := t.TempDir()
+	SeedDefaultProfiles(dir)
+
+	profiles, err := LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("LoadProfiles: %v", err)
+	}
+
+	if got := FindMatchingProfile(profiles, "hevc", 2160); got == nil || got.Name != "Downscale 4K to 1080p" {
+		name := "<nil>"
+		if got != nil {
+			name = got.Name
+		}
+		t.Errorf("4K (2160p) HEVC source matched %q, want \"Downscale 4K to 1080p\"", name)
+	}
+	if got := FindMatchingProfile(profiles, "hevc", 1080); got == nil || got.Name != "Compatibility 1080p" {
+		name := "<nil>"
+		if got != nil {
+			name = got.Name
+		}
+		t.Errorf("1080p HEVC source matched %q, want \"Compatibility 1080p\"", name)
 	}
 }
 

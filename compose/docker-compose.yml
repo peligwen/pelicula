@@ -197,7 +197,12 @@ services:
     build: ./procula
     logging: *default-logging
     restart: unless-stopped
-    stop_grace_period: 15s
+    # Worst-case graceful shutdown in procula/main.go: 10s HTTP drain
+    # (serveWithShutdown) + 10s background-goroutine drain + up to 10s for
+    # FlushJellyfinRefresh's own HTTP client timeout (only if a debounced
+    # refresh is pending) = 30s. 15s let SIGKILL land before that finished —
+    # the same mismatch as pelicula-api's (MWA-14); 32s gives ~2s of margin.
+    stop_grace_period: 32s
     # Run as the operator's user so files written to the library/processing
     # volumes match host ownership (image has no privilege-drop entrypoint).
     user: "${PUID}:${PGID}"
@@ -334,7 +339,11 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
-    stop_grace_period: 8s
+    # Worst-case graceful shutdown in cmd/pelicula-api/main.go: 10s HTTP
+    # drain (serveWithShutdown's Shutdown context) + 5s background-goroutine
+    # drain = 15s. 8s let SIGKILL land before that finished (MWA-14); 16s
+    # gives 1s of margin.
+    stop_grace_period: 16s
 
   # ═══════════════════════════════════════════════════
   # Push Notifications — opt-in (profile: apprise)

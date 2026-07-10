@@ -53,6 +53,16 @@ type Handler struct {
 	ConfigDir     string // e.g. /config/pelicula
 	ForwardToProc ForwardToProculaFunc
 
+	// applyAllowedSrcRoots / applyAllowedDstRoots override the production
+	// browse/library roots HandleLibraryApply validates filesystem operations
+	// against. Nil in production: HandleLibraryApply falls back to
+	// browseRoots() (source) and the registered libraries' ContainerPaths
+	// (destination), both fixed container mount points (/downloads, /media/*).
+	// Tests set these to a temp directory so real move/symlink/hardlink
+	// operations can be exercised without touching those fixed paths.
+	applyAllowedSrcRoots []string
+	applyAllowedDstRoots []string
+
 	registryMu sync.RWMutex
 	registry   LibraryConfig
 }

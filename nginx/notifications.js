@@ -2,8 +2,7 @@
 // Notifications component — registered with PeliculaFW; mounted by dashboard.js.
 'use strict';
 
-import { component, html, raw, toast } from '/framework.js';
-import { get, del } from '/api.js';
+import { component, html, raw } from '/framework.js';
 
 // notif-helpers.js is a classic script loaded before this module; pull its
 // exports into module scope so bare identifiers resolve without relying on
@@ -30,29 +29,6 @@ function formatNotifTime(ts) {
 
 // ── Notification list rendering ───────────────────────────────────────────
 
-async function dismissNotification(id) {
-    try {
-        await del('/api/pelicula/notifications/' + id);
-    } catch (e) {
-        toast('Could not dismiss notification', { error: true });
-        return;
-    }
-    try {
-        const events = await get('/api/pelicula/notifications');
-        if (events !== null) renderNotifications(events);
-    } catch (e) { console.warn('[pelicula] notifications refresh error:', e); }
-}
-
-async function clearAllNotifications() {
-    try {
-        await del('/api/pelicula/notifications');
-    } catch (e) {
-        toast('Could not clear notifications', { error: true });
-        return;
-    }
-    renderNotifications([]);
-}
-
 // renderNotifications renders notification items using the framework's html``
 // tagged template, which auto-escapes all string interpolations.
 function renderNotifications(events) {
@@ -73,27 +49,21 @@ function renderNotifications(events) {
         return;
     }
 
-    const clearBtn = html`<div class="notif-actions">
-        <button class="notif-clear-all" data-action="clear-all">Clear all</button>
-    </div>`;
-
     const items = events.slice(0, 20).map(e => {
         const isUnread = e.timestamp > lastSeenTs;
         const typeClass = notifClass(e.type);
         const icon = notifIcon(e.type);
         const time = formatNotifTime(e.timestamp);
-        const id = e.id || '';
         return html`<div class="notif-item ${isUnread ? 'unread' : ''} ${typeClass}">
             <span class="notif-icon">${raw(icon)}</span>
             <div class="notif-body">
                 <div class="notif-msg">${e.message}</div>
                 <div class="notif-time">${time}</div>
             </div>
-            <button class="notif-dismiss" title="Dismiss" data-action="dismiss" data-id="${id}">&#10005;</button>
         </div>`;
     });
 
-    dropdown.innerHTML = clearBtn.str + items.map(i => i.str).join('');
+    dropdown.innerHTML = items.map(i => i.str).join('');
 }
 
 function toggleNotifications() {
@@ -127,13 +97,6 @@ component('notifications', function (el, storeProxy) {
 });
 
 document.getElementById('bell-btn').addEventListener('click', toggleNotifications);
-
-document.getElementById('notif-dropdown').addEventListener('click', e => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    if (btn.dataset.action === 'dismiss') dismissNotification(btn.dataset.id);
-    else if (btn.dataset.action === 'clear-all') clearAllNotifications();
-});
 
 // ── Window exports ────────────────────────────────────────────────────────
 // renderNotifications is called by sse.js, activity.js, and dashboard.js refresh.

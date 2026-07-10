@@ -58,10 +58,27 @@ func Process(ctx context.Context, job *Job, profile *TranscodeProfile, progressF
 	return processWithDir(ctx, job, profile, progressFn, outputDir)
 }
 
+// transcodeGate serializes FFmpeg transcodes process-wide. The single
+// sequential worker used to guarantee at most one transcode at a time
+// implicitly; now that parked await-subs continuations resume their remaining
+// stages on background goroutines (see awaitAndResume in pipeline.go),
+// several runs could otherwise reach stageProcess concurrently and stack
+// FFmpeg processes on NAS-class hardware. Waiting here does not consume the
+// transcode's wall-clock budget — the timeout context is created only after
+// the slot is acquired — and the wait aborts promptly on cancellation.
+var transcodeGate = make(chan struct{}, 1)
+
 func processWithDir(ctx context.Context, job *Job, profile *TranscodeProfile, progressFn func(pct, etaSecs float64), outputDir string) (string, error) {
 	input := job.Source.Path
 	if input == "" {
 		return "", fmt.Errorf("no input path")
+	}
+
+	select {
+	case transcodeGate <- struct{}{}:
+		defer func() { <-transcodeGate }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("cancelled while waiting for transcode slot: %w", ctx.Err())
 	}
 
 	finalPath := resolveOutputPath(input, profile.Output.Suffix, outputDir)

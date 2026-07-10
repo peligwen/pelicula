@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 
 	"pelicula-api/httputil"
@@ -65,9 +64,14 @@ type ApplyItemResult struct {
 
 // ── HandleLibraryApply ───────────────────────────────────────────────────────
 
-// HandleLibraryApply receives a list of matched items and registers them in
-// Radarr/Sonarr with search disabled. The CLI has already performed any
-// necessary filesystem operations (move / symlink) before calling this.
+// HandleLibraryApply receives a list of matched items, performs the requested
+// filesystem operation (move / symlink / hardlink, or none for strategy
+// "register") for each item, and registers it in Radarr/Sonarr with search
+// disabled. The filesystem operation and the *arr registration are
+// interleaved one item at a time — not run as two separate batch passes —
+// so that a crash or a registration failure only ever leaves the single
+// in-flight item moved-but-unregistered instead of the whole request (see
+// MWA-6).
 func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -120,15 +124,26 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	movieProfiles, _ := loadProfileNameMap(ctx, h.Svc.RadarrClient())
 	seriesProfiles, _ := loadProfileNameMap(ctx, h.Svc.SonarrClient())
 
-	// ── Filesystem operations (import / link) ────────────────────────────────
-	libs := h.GetLibraries()
-	dstRoots := make([]string, 0, len(libs))
-	for _, lib := range libs {
-		dstRoots = append(dstRoots, lib.ContainerPath())
+	// ── Filesystem operation + *arr registration, interleaved per item ───────
+	// fsSess computes the filesystem operation (import / link / hardlink, or
+	// "kept" for strategy "register") for one item at a time; each item is
+	// moved immediately before its own *arr registration is attempted, not as
+	// two separate batch passes over the whole request. That bounds the blast
+	// radius of a crash or a registration failure to the single item in
+	// flight — every earlier item in the request either completed both steps
+	// or (if its own registration failed) is reported with the destination it
+	// was already moved to; every later item hasn't been touched on disk yet.
+	allowedDstRoots := h.applyAllowedDstRoots
+	if allowedDstRoots == nil {
+		libs := h.GetLibraries()
+		allowedDstRoots = make([]string, 0, len(libs))
+		for _, lib := range libs {
+			allowedDstRoots = append(allowedDstRoots, lib.ContainerPath())
+		}
 	}
 	movieRoot := h.FirstLibraryPath("radarr", "/media/movies")
 	tvRoot := h.FirstLibraryPath("sonarr", "/media/tv")
-	fsResults := applyFSOps(req.Items, req.Strategy, nil, dstRoots, movieRoot, tvRoot)
+	fsSess := newFSOpSession(req.Strategy, h.applyAllowedSrcRoots, allowedDstRoots, movieRoot, tvRoot)
 
 	type dedupeKey struct {
 		kind string
@@ -138,20 +153,28 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 
 	result := &LibraryApplyResult{}
 	var addedItems []ApplyItem
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 5)
 
-	for idx, item := range req.Items {
-		fsResult := fsResults[idx]
+	for idx := range req.Items {
+		item := &req.Items[idx]
+		fsResult := fsSess.apply(item)
 
 		if fsResult.op == "skipped" {
-			mu.Lock()
 			result.Skipped++
 			result.Items = append(result.Items, ApplyItemResult{
 				Title: item.Title, Src: item.SourcePath, FSOp: "skipped", Error: fsResult.err,
 			})
-			mu.Unlock()
+			continue
+		}
+		if fsResult.op == "failed" {
+			// The filesystem operation itself failed (permission denied, disk
+			// full, MkdirAll error, ...) — the file never reached its
+			// destination, so there is nothing to register with *arr yet.
+			result.Failed++
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("%s %q: filesystem operation failed: %s", item.Type, item.Title, fsResult.err))
+			result.Items = append(result.Items, ApplyItemResult{
+				Title: item.Title, Src: item.SourcePath, FSOp: "failed", Error: fsResult.err,
+			})
 			continue
 		}
 
@@ -162,70 +185,82 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		case "series":
 			k = dedupeKey{"series", item.TvdbID}
 		default:
+			// Unrecognized type (future item type, or a malformed client
+			// payload) — account for it explicitly instead of silently
+			// vanishing from the result (MWA-8). The filesystem op above may
+			// already have relocated the file, so say so when it did.
+			result.Failed++
+			errMsg := fmt.Sprintf("unrecognized item type %q", item.Type)
+			if fsMoved(fsResult.op) {
+				errMsg = fmt.Sprintf("file already %s to %s, but item type %q is not recognized: cannot register with *arr",
+					fsResult.op, item.DestPath, item.Type)
+			}
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("%q: %s", item.Title, errMsg))
+			result.Items = append(result.Items, ApplyItemResult{
+				Title: item.Title, Src: item.SourcePath, Dest: item.DestPath, FSOp: "failed", Error: errMsg,
+			})
 			continue
 		}
 
 		if seen[k] {
-			// Non-primary edition: file placed on disk by fsOps, but we skip
+			// Non-primary edition: file placed on disk by fsSess, but we skip
 			// Radarr/Sonarr registration (1:1 per tmdbId/tvdbId). Report it as
 			// placed and include in Procula forwarding.
-			mu.Lock()
 			reportedOp := fsResult.op
 			if reportedOp == "" {
 				reportedOp = "kept"
 			}
 			result.Added++
-			addedItems = append(addedItems, item)
+			addedItems = append(addedItems, *item)
 			result.Items = append(result.Items, ApplyItemResult{
 				Title: item.Title, Src: item.SourcePath, Dest: item.DestPath, FSOp: reportedOp,
 			})
-			mu.Unlock()
 			continue
 		}
 		seen[k] = true
 
 		if (item.Type == "movie" && existingMovies[item.TmdbID]) ||
 			(item.Type == "series" && existingSeries[item.TvdbID]) {
-			mu.Lock()
 			result.Skipped++
-			mu.Unlock()
 			continue
 		}
 
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(it ApplyItem, fsRes fsOpResult) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			var err error
-			if it.Type == "movie" {
-				err = h.applyMovie(ctx, radarrKey, it, movieProfiles)
-			} else {
-				err = h.applySeries(ctx, sonarrKey, it, seriesProfiles)
+		var err error
+		if item.Type == "movie" {
+			err = h.applyMovie(ctx, radarrKey, *item, movieProfiles)
+		} else {
+			err = h.applySeries(ctx, sonarrKey, *item, seriesProfiles)
+		}
+		if err != nil {
+			result.Failed++
+			errMsg := err.Error()
+			if fsMoved(fsResult.op) {
+				// The item's file already landed at its destination before
+				// registration was attempted — say so, and name the path, so
+				// an admin can find and manually register it instead of it
+				// silently rotting in the library root (MWA-6).
+				errMsg = fmt.Sprintf("file already %s to %s, but registration failed: %s",
+					fsResult.op, item.DestPath, errMsg)
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				result.Failed++
-				result.Errors = append(result.Errors,
-					fmt.Sprintf("%s %q: %v", it.Type, it.Title, err))
-				result.Items = append(result.Items, ApplyItemResult{
-					Title: it.Title, Src: it.SourcePath, FSOp: "failed", Error: err.Error(),
-				})
-			} else {
-				result.Added++
-				addedItems = append(addedItems, it)
-				reportedOp := fsRes.op
-				if reportedOp == "" {
-					reportedOp = "kept"
-				}
-				result.Items = append(result.Items, ApplyItemResult{
-					Title: it.Title, Src: it.SourcePath, Dest: it.DestPath, FSOp: reportedOp,
-				})
-			}
-		}(item, fsResult)
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("%s %q: %s", item.Type, item.Title, errMsg))
+			result.Items = append(result.Items, ApplyItemResult{
+				Title: item.Title, Src: item.SourcePath, Dest: item.DestPath, FSOp: "failed", Error: errMsg,
+			})
+			continue
+		}
+
+		result.Added++
+		addedItems = append(addedItems, *item)
+		reportedOp := fsResult.op
+		if reportedOp == "" {
+			reportedOp = "kept"
+		}
+		result.Items = append(result.Items, ApplyItemResult{
+			Title: item.Title, Src: item.SourcePath, Dest: item.DestPath, FSOp: reportedOp,
+		})
 	}
-	wg.Wait()
 
 	slog.Info("library apply complete", "component", "library",
 		"added", result.Added, "skipped", result.Skipped, "failed", result.Failed)
@@ -445,17 +480,41 @@ func resolveRoots(roots []string) []string {
 	return out
 }
 
-// applyFSOps iterates items and performs the filesystem operation dictated by
-// strategy for each item that has a SourcePath. allowedSrcRoots defaults to
-// the production browse roots when nil; allowedDstRoots defaults to empty.
-// movieRoot and tvRoot are used to compute suggested destination paths when
-// item.DestPath is empty; pass empty strings to use the hardcoded fallbacks.
-func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string, movieRoot, tvRoot string) []fsOpResult {
-	results := make([]fsOpResult, len(items))
-	for i := range results {
-		results[i] = fsOpResult{op: "kept"}
+// fsMoved reports whether op represents a filesystem relocation that already
+// happened (the item's file is physically sitting at its destination), as
+// opposed to "kept" (strategy "register": no relocation) or a non-terminal
+// state. Used to decide whether a subsequent *arr registration failure needs
+// to tell the admin where the file already went (MWA-6).
+func fsMoved(op string) bool {
+	switch op {
+	case "moved", "hardlinked", "symlinked":
+		return true
+	default:
+		return false
 	}
+}
 
+// fsOpSession holds the strategy and roots shared across every item in one
+// apply request, computed once, so callers can apply the filesystem
+// operation to items one at a time (interleaved with *arr registration)
+// instead of only as a single batch pass.
+type fsOpSession struct {
+	strategy         string // normalised: "import" | "link" | "hardlink" | "register"
+	allowedSrcRoots  []string
+	allowedDstRoots  []string
+	resolvedSrcRoots []string
+	movieRoot        string
+	tvRoot           string
+}
+
+// newFSOpSession normalises strategy and, unless it's "register" (no
+// filesystem operation is ever performed), resolves allowedSrcRoots /
+// allowedDstRoots. allowedSrcRoots defaults to the production browse roots
+// when nil; allowedDstRoots defaults to empty (nothing passes) when nil.
+// movieRoot and tvRoot are used to compute suggested destination paths when
+// an item's DestPath is empty; pass empty strings to use the hardcoded
+// fallbacks.
+func newFSOpSession(strategy string, allowedSrcRoots, allowedDstRoots []string, movieRoot, tvRoot string) *fsOpSession {
 	// Normalise legacy strategy names to canonical ones.
 	switch strategy {
 	case "migrate":
@@ -465,8 +524,9 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 	case "keep":
 		strategy = "register"
 	}
+	sess := &fsOpSession{strategy: strategy, movieRoot: movieRoot, tvRoot: tvRoot}
 	if strategy == "register" {
-		return results
+		return sess
 	}
 	if allowedSrcRoots == nil {
 		allowedSrcRoots = browseRoots()
@@ -474,116 +534,132 @@ func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstR
 	if allowedDstRoots == nil {
 		allowedDstRoots = []string{}
 	}
+	sess.allowedSrcRoots = allowedSrcRoots
+	sess.allowedDstRoots = allowedDstRoots
 	// Resolve symlinks in the allowed source roots once. The post-EvalSymlinks
 	// comparison below would otherwise fail when a root itself contains symlink
 	// components (e.g. macOS /var → /private/var, or LIBRARY_DIR being a
 	// Synology shared-folder symlink).
-	resolvedSrcRoots := resolveRoots(allowedSrcRoots)
+	sess.resolvedSrcRoots = resolveRoots(allowedSrcRoots)
+	return sess
+}
 
-	for i := range items {
-		item := &items[i]
-		if item.SourcePath == "" {
-			continue
-		}
-		src := filepath.Clean(item.SourcePath)
-		if !IsUnderPrefixes(src, allowedSrcRoots) {
-			results[i] = fsOpResult{op: "skipped", err: "path not allowed"}
-			continue
-		}
-		// Resolve symlinks and re-validate. A symlink planted under an allowed
-		// root (e.g. /downloads/sneaky → /etc) would pass the textual prefix
-		// check but redirect the rename/link to anywhere on disk. HandleBrowse
-		// already resolves on listing; mirror that here so the apply path
-		// can't be tricked by something the browse view would have hidden.
-		resolved, err := filepath.EvalSymlinks(src)
-		if err != nil {
-			results[i] = fsOpResult{op: "skipped", err: "source not readable: " + err.Error()}
-			continue
-		}
-		if !IsUnderPrefixes(resolved, resolvedSrcRoots) {
-			results[i] = fsOpResult{op: "skipped", err: "path not allowed"}
-			continue
-		}
-		src = resolved
+// apply performs the filesystem operation for a single item, mutating
+// item.SourcePath/DestPath in place when the strategy relocates the file (so
+// later reads of item reflect where it actually ended up).
+func (s *fsOpSession) apply(item *ApplyItem) fsOpResult {
+	if s.strategy == "register" || item.SourcePath == "" {
+		return fsOpResult{op: "kept"}
+	}
 
-		dst := item.DestPath
-		if dst == "" {
-			if item.Type == "movie" {
-				dst = suggestedMoviePath(movieRoot, item.Title, item.Year, filepath.Base(src), item.Edition)
-			} else {
-				dst = suggestedTVPath(tvRoot, item.Title, 0, filepath.Base(src))
-			}
-		}
-		dst = filepath.Clean(dst)
-		if !IsUnderPrefixes(dst, allowedDstRoots) {
-			results[i] = fsOpResult{op: "skipped", err: "destination path not allowed"}
-			continue
-		}
+	src := filepath.Clean(item.SourcePath)
+	if !IsUnderPrefixes(src, s.allowedSrcRoots) {
+		return fsOpResult{op: "skipped", err: "path not allowed"}
+	}
+	// Resolve symlinks and re-validate. A symlink planted under an allowed
+	// root (e.g. /downloads/sneaky → /etc) would pass the textual prefix
+	// check but redirect the rename/link to anywhere on disk. HandleBrowse
+	// already resolves on listing; mirror that here so the apply path
+	// can't be tricked by something the browse view would have hidden.
+	resolved, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return fsOpResult{op: "skipped", err: "source not readable: " + err.Error()}
+	}
+	if !IsUnderPrefixes(resolved, s.resolvedSrcRoots) {
+		return fsOpResult{op: "skipped", err: "path not allowed"}
+	}
+	src = resolved
 
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			slog.Warn("import: mkdir failed", "component", "library", "dst", dst, "error", err)
-			results[i] = fsOpResult{op: "failed", err: err.Error()}
-			continue
+	dst := item.DestPath
+	if dst == "" {
+		if item.Type == "movie" {
+			dst = suggestedMoviePath(s.movieRoot, item.Title, item.Year, filepath.Base(src), item.Edition)
+		} else {
+			dst = suggestedTVPath(s.tvRoot, item.Title, 0, filepath.Base(src))
 		}
+	}
+	dst = filepath.Clean(dst)
+	if !IsUnderPrefixes(dst, s.allowedDstRoots) {
+		return fsOpResult{op: "skipped", err: "destination path not allowed"}
+	}
 
-		switch strategy {
-		case "import":
-			if err := moveFile(src, dst); err != nil {
-				slog.Warn("import: move failed", "component", "library",
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		slog.Warn("import: mkdir failed", "component", "library", "dst", dst, "error", err)
+		return fsOpResult{op: "failed", err: err.Error()}
+	}
+
+	switch s.strategy {
+	case "import":
+		if err := moveFile(src, dst); err != nil {
+			slog.Warn("import: move failed", "component", "library",
+				"src", src, "dst", dst, "error", err)
+			return fsOpResult{op: "failed", err: err.Error()}
+		}
+		item.SourcePath = dst
+		item.DestPath = dst
+		return fsOpResult{op: "moved"}
+	case "hardlink":
+		_, lstatErr := os.Lstat(dst)
+		switch {
+		case errors.Is(lstatErr, fs.ErrNotExist):
+			if err := os.Link(src, dst); err != nil {
+				slog.Warn("import: hardlink failed", "component", "library",
 					"src", src, "dst", dst, "error", err)
-				results[i] = fsOpResult{op: "failed", err: err.Error()}
-			} else {
-				item.SourcePath = dst
-				item.DestPath = dst
-				results[i] = fsOpResult{op: "moved"}
+				return fsOpResult{op: "failed", err: err.Error()}
 			}
-		case "hardlink":
-			_, lstatErr := os.Lstat(dst)
-			switch {
-			case errors.Is(lstatErr, fs.ErrNotExist):
-				if err := os.Link(src, dst); err != nil {
-					slog.Warn("import: hardlink failed", "component", "library",
-						"src", src, "dst", dst, "error", err)
-					results[i] = fsOpResult{op: "failed", err: err.Error()}
-				} else {
-					item.DestPath = dst
-					results[i] = fsOpResult{op: "hardlinked"}
-				}
-			case lstatErr == nil:
-				// dst already exists — idempotent success.
-				item.DestPath = dst
-				results[i] = fsOpResult{op: "hardlinked"}
-			default:
-				// Any other Lstat error (permission denied, I/O error, etc.)
-				// must not silently succeed.
-				slog.Warn("import: lstat failed before hardlink", "component", "library",
-					"dst", dst, "error", lstatErr)
-				results[i] = fsOpResult{op: "failed", err: lstatErr.Error()}
-			}
-		case "link":
-			_, lstatErr := os.Lstat(dst)
-			switch {
-			case errors.Is(lstatErr, fs.ErrNotExist):
-				if err := os.Symlink(src, dst); err != nil {
-					slog.Warn("import: symlink failed", "component", "library",
-						"src", src, "dst", dst, "error", err)
-					results[i] = fsOpResult{op: "failed", err: err.Error()}
-				} else {
-					item.DestPath = dst
-					results[i] = fsOpResult{op: "symlinked"}
-				}
-			case lstatErr == nil:
-				// dst already exists — idempotent success.
-				item.DestPath = dst
-				results[i] = fsOpResult{op: "symlinked"}
-			default:
-				// Any other Lstat error (permission denied, I/O error, etc.)
-				// must not silently succeed.
-				slog.Warn("import: lstat failed before symlink", "component", "library",
-					"dst", dst, "error", lstatErr)
-				results[i] = fsOpResult{op: "failed", err: lstatErr.Error()}
-			}
+			item.DestPath = dst
+			return fsOpResult{op: "hardlinked"}
+		case lstatErr == nil:
+			// dst already exists — idempotent success.
+			item.DestPath = dst
+			return fsOpResult{op: "hardlinked"}
+		default:
+			// Any other Lstat error (permission denied, I/O error, etc.)
+			// must not silently succeed.
+			slog.Warn("import: lstat failed before hardlink", "component", "library",
+				"dst", dst, "error", lstatErr)
+			return fsOpResult{op: "failed", err: lstatErr.Error()}
 		}
+	case "link":
+		_, lstatErr := os.Lstat(dst)
+		switch {
+		case errors.Is(lstatErr, fs.ErrNotExist):
+			if err := os.Symlink(src, dst); err != nil {
+				slog.Warn("import: symlink failed", "component", "library",
+					"src", src, "dst", dst, "error", err)
+				return fsOpResult{op: "failed", err: err.Error()}
+			}
+			item.DestPath = dst
+			return fsOpResult{op: "symlinked"}
+		case lstatErr == nil:
+			// dst already exists — idempotent success.
+			item.DestPath = dst
+			return fsOpResult{op: "symlinked"}
+		default:
+			// Any other Lstat error (permission denied, I/O error, etc.)
+			// must not silently succeed.
+			slog.Warn("import: lstat failed before symlink", "component", "library",
+				"dst", dst, "error", lstatErr)
+			return fsOpResult{op: "failed", err: lstatErr.Error()}
+		}
+	}
+	return fsOpResult{op: "kept"}
+}
+
+// applyFSOps iterates items and performs the filesystem operation dictated by
+// strategy for each item that has a SourcePath, computing every item's
+// result up front. This batch form is kept for tests (and any future caller
+// that wants the whole set resolved eagerly); HandleLibraryApply itself uses
+// fsOpSession.apply directly, one item at a time, interleaved with that
+// item's *arr registration (see MWA-6). allowedSrcRoots defaults to the
+// production browse roots when nil; allowedDstRoots defaults to empty.
+// movieRoot and tvRoot are used to compute suggested destination paths when
+// item.DestPath is empty; pass empty strings to use the hardcoded fallbacks.
+func applyFSOps(items []ApplyItem, strategy string, allowedSrcRoots, allowedDstRoots []string, movieRoot, tvRoot string) []fsOpResult {
+	sess := newFSOpSession(strategy, allowedSrcRoots, allowedDstRoots, movieRoot, tvRoot)
+	results := make([]fsOpResult, len(items))
+	for i := range items {
+		results[i] = sess.apply(&items[i])
 	}
 	return results
 }

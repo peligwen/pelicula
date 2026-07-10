@@ -250,8 +250,8 @@ document.addEventListener('click', (e) => {
 // toggleStackMenu, stackRestart, showServiceLogs, closeLogModal,
 // refreshServiceLogs, copyServiceLogs, runSpeedTest — moved to services.js.
 // ── Notifications bell ────────────────────
-// renderNotifications, toggleNotifications, notifIcon, notifClass, formatNotifTime,
-// dismissNotification, clearAllNotifications — all live in notifications.js (PeliculaFW component).
+// renderNotifications, toggleNotifications, notifIcon, notifClass, formatNotifTime
+// — all live in notifications.js (PeliculaFW component).
 
 async function checkNotifications() {
     try {

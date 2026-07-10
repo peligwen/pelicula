@@ -113,11 +113,7 @@ async function saveSettingsTab() {
             post('/api/pelicula/procula-settings', procPayload),
             post('/api/pelicula/settings', middlewarePayload),
         ]);
-        if (r1.status === 'fulfilled' && r2.status === 'fulfilled') {
-            if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
-        } else {
-            if (statusEl) statusEl.textContent = 'Save failed';
-        }
+        reportSaveResults(statusEl, r1, r2);
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Save failed';
     }
@@ -139,12 +135,10 @@ async function saveSubtitlesDrawer() {
             post('/api/pelicula/procula-settings', procPayload),
             post('/api/pelicula/settings', middlewarePayload),
         ]);
-        if (r1.status === 'fulfilled' && r2.status === 'fulfilled') {
-            if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000); }
+        const ok = reportSaveResults(statusEl, r1, r2);
+        if (ok) {
             updateSubsSummary();
             closeSettingsDrawer('subs');
-        } else {
-            if (statusEl) statusEl.textContent = 'Save failed';
         }
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Save failed';
@@ -218,6 +212,38 @@ function renderPendingBanner(result) {
     dismissBtn.textContent = '\u00d7';
     dismissBtn.addEventListener('click', () => banner.remove());
     banner.append(title, list, copyBtn, dismissBtn);
+}
+
+// reportSaveResults merges the two settings-save endpoints' PromiseSettled
+// results into a single status line + pending-restart banner. Only the
+// middleware endpoint (`/api/pelicula/settings`) returns
+// {applied, pending, requires_pelicula_up} — procula applies its own
+// settings in-process immediately and has no pending/restart concept, so its
+// result only affects success/failure reporting, not the applied/pending
+// text. Returns true when both endpoints saved successfully.
+function reportSaveResults(statusEl, procResult, middlewareResult) {
+    const procOk = procResult.status === 'fulfilled' && procResult.value !== null;
+    const midOk  = middlewareResult.status === 'fulfilled' && middlewareResult.value !== null;
+
+    if (!procOk && !midOk) {
+        if (statusEl) statusEl.textContent = 'Save failed';
+        return false;
+    }
+
+    if (midOk) {
+        applySaveFeedback(statusEl, middlewareResult.value);
+        renderPendingBanner(middlewareResult.value);
+    } else if (statusEl) {
+        statusEl.textContent = 'Saved ✓';
+        setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 8000);
+    }
+
+    if (!procOk || !midOk) {
+        const failedPart = !procOk ? 'processing settings' : 'dashboard settings';
+        if (statusEl) statusEl.textContent += ' — ' + failedPart + ' failed to save';
+        return false;
+    }
+    return true;
 }
 
 // ── Transcoding profiles ──────────────────────────────────────────────────
@@ -430,13 +456,17 @@ async function saveRequestsSettings() {
     if (radarrRoot)    body.requests_radarr_root       = radarrRoot;
     if (sonarrProfile) body.requests_sonarr_profile_id = sonarrProfile;
     if (sonarrRoot)    body.requests_sonarr_root       = sonarrRoot;
+    const statusEl = document.getElementById('requests-settings-save-status');
     try {
-        await post('/api/pelicula/settings', body);
-        const statusEl = document.getElementById('requests-settings-save-status');
-        if (statusEl) { statusEl.textContent = 'Saved \u2713'; setTimeout(function() { statusEl.textContent = ''; }, 3000); }
+        const result = await post('/api/pelicula/settings', body);
+        if (result !== null) {
+            applySaveFeedback(statusEl, result);
+            renderPendingBanner(result);
+        } else if (statusEl) {
+            statusEl.textContent = 'Save failed';
+        }
     } catch (e) {
         const errMsg = (e.body && e.body.error) || e.message || 'unknown';
-        const statusEl = document.getElementById('requests-settings-save-status');
         if (statusEl) statusEl.textContent = 'Save failed: ' + errMsg;
     }
 }

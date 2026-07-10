@@ -132,9 +132,7 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 
 	// Create a cancellable context so Cancel() can kill a running FFmpeg
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	q.registerCancel(id, cancel)
-	defer q.unregisterCancel(id)
 
 	slog.Info("starting job", "component", "pipeline", "job_id", id, "title", job.Source.Title, "type", job.Source.Type, "processing_mode", procMode)
 
@@ -148,15 +146,26 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 		q:           q,
 		id:          id,
 		ctx:         ctx,
+		cancel:      cancel,
 		configDir:   configDir,
 		peliculaAPI: peliculaAPI,
 		settings:    GetSettings(appDB),
 		procMode:    procMode,
 	}
+	// When stageAwaitSubs parks the job (r.parked), ownership of ctx/cancel
+	// and the cancel-func registration passes to the background continuation
+	// goroutine — it performs this cleanup in awaitAndResume instead. Only
+	// clean up here when the run stays on the worker end-to-end.
+	defer func() {
+		if !r.parked {
+			cancel()
+			q.unregisterCancel(id)
+		}
+	}()
 	for _, stage := range []func() bool{
 		r.stageValidate,     // Stage 1
 		r.stageCatalogEarly, // Stage 2
-		r.stageAwaitSubs,    // Stage 2.5
+		r.stageAwaitSubs,    // Stage 2.5 (may park + hand off; see awaitAndResume)
 		r.stageDualSub,      // Stage 3
 		r.stageProcess,      // Stage 4
 		r.stageCatalogLate,  // Stage 5
@@ -169,17 +178,25 @@ func processJob(q *Queue, id, configDir, peliculaAPI string) {
 }
 
 // pipelineRun carries the per-job state shared by the stage functions. Each
-// stage returns false to stop the run (validation failure or cancellation);
-// stages re-fetch the job from the queue at their boundary so a Cancel()
-// between stages is observed.
+// stage returns false to stop the run (validation failure, cancellation, or
+// an await-subs park); stages re-fetch the job from the queue at their
+// boundary so a Cancel() between stages is observed.
 type pipelineRun struct {
 	q           *Queue
 	id          string
 	ctx         context.Context
+	cancel      context.CancelFunc
 	configDir   string
 	peliculaAPI string
 	settings    PipelineSettings
 	procMode    string
+
+	// parked is set by stageAwaitSubs (on the worker goroutine, before the
+	// continuation goroutine is spawned) when the rest of the run is handed
+	// off to awaitAndResume. processJob's deferred cleanup checks it to know
+	// whether it still owns ctx/cancel. Never touched by the background
+	// goroutine, so no synchronization is needed.
+	parked bool
 }
 
 // cancelled reports whether the job was cancelled (or vanished) since the
@@ -310,24 +327,99 @@ func (r *pipelineRun) stageCatalogEarly() bool {
 	return true
 }
 
+// awaitSlots bounds how many jobs may sit in a background await-subs park at
+// once. Each parked job costs one goroutine polling disk every 30s — cheap —
+// but an unbounded fleet after a large import burst would still be sloppy.
+// When the cap is reached, stageAwaitSubs falls back to the historical
+// inline (worker-blocking) wait rather than skipping subtitle acquisition.
+// A var (not const-sized) so tests can swap in a smaller channel.
+var awaitSlots = make(chan struct{}, 8)
+
 // stageAwaitSubs runs Stage 2.5: wait for Bazarr to deliver missing subtitle
 // sidecars before generating dual-sub ASS files. The media is already
-// watchable (Catalog Early ran).
+// watchable (Catalog Early ran), so this stage must not hold the single
+// worker hostage: when subtitles are missing, the wait — and the rest of the
+// run — is parked onto a background goroutine (awaitAndResume) and the worker
+// moves on to the next queued job immediately. If every park slot is taken,
+// it degrades to the old inline wait on the worker.
 func (r *pipelineRun) stageAwaitSubs() bool {
 	q, id := r.q, r.id
 	if r.cancelled() {
 		return false
 	}
 	job, _ := q.Get(id)
-	if len(job.MissingSubs) > 0 {
-		updateJob(q, id, func(j *Job) {
-			j.Stage = StageAwaitSubs
-			j.Progress = 0.41
-		})
-		job, _ = q.Get(id)
-		awaitSubtitles(r.ctx, q, job, r.settings, r.configDir)
+	if len(job.MissingSubs) == 0 {
+		return true
 	}
-	return true
+	updateJob(q, id, func(j *Job) {
+		j.Stage = StageAwaitSubs
+		j.Progress = 0.41
+	})
+	job, _ = q.Get(id)
+
+	select {
+	case awaitSlots <- struct{}{}:
+		// Park: hand the remainder of this run to a background goroutine.
+		// r.parked must be set before the goroutine starts so processJob's
+		// deferred cleanup (which runs when this stage returns false) knows
+		// ownership of ctx/cancel has transferred. The slot channel is passed
+		// explicitly so the release always targets the channel the slot was
+		// taken from, even if a test swaps the awaitSlots var mid-flight.
+		r.parked = true
+		slog.Info("await_subs: parked in background — worker continues with next job",
+			"component", "pipeline", "job_id", id, "langs", job.MissingSubs)
+		go r.awaitAndResume(job, awaitSlots)
+		return false
+	default:
+		// All park slots busy: fall back to the pre-decoupling inline wait so
+		// subtitle acquisition semantics are preserved (bounded degradation).
+		slog.Info("await_subs: all park slots busy — awaiting inline on worker",
+			"component", "pipeline", "job_id", id, "langs", job.MissingSubs)
+		awaitSubtitles(r.ctx, q, job, r.settings, r.configDir)
+		return true
+	}
+}
+
+// awaitAndResume is the background continuation of a parked pipeline run: it
+// performs the await-subs wait off the worker's hot path, then resumes the
+// remaining stages (dualsub, process, late catalog, finish) and releases the
+// resources the worker handed over (park slot, cancel registration, context).
+//
+// Job-record writes all go through the Queue API, whose per-job Update mutex
+// makes them safe against the worker and HTTP handlers. Cancellation of a
+// parked job works unchanged: Cancel() commits StateCancelled and fires the
+// registered cancel func (still this run's ctx), which unblocks
+// awaitSubtitles; the next stage boundary observes the cancelled state.
+// If the process dies while a job is parked, the row is still
+// state=processing, so the existing loadExisting crash recovery re-queues it
+// from stageValidate on restart; the stages are idempotent and already
+// acquired sidecars are picked up by awaitSubtitles' first poll.
+func (r *pipelineRun) awaitAndResume(job *Job, slots chan struct{}) {
+	defer func() { <-slots }()
+	defer r.q.unregisterCancel(r.id)
+	defer r.cancel()
+	// Deferred funcs run LIFO: this recover fires before the cleanups above,
+	// so a panic still releases the slot, registration, and context (mirrors
+	// the per-job recover in RunWorker).
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("panic in await-subs continuation — job abandoned until restart recovery",
+				"component", "pipeline", "job_id", r.id, "panic", rec)
+		}
+	}()
+
+	awaitSubtitles(r.ctx, r.q, job, r.settings, r.configDir)
+
+	for _, stage := range []func() bool{
+		r.stageDualSub,     // Stage 3
+		r.stageProcess,     // Stage 4
+		r.stageCatalogLate, // Stage 5
+	} {
+		if !stage() {
+			return
+		}
+	}
+	r.finish()
 }
 
 // stageDualSub runs Stage 3: generate stacked ASS sidecar files (e.g.
@@ -404,9 +496,18 @@ func (r *pipelineRun) stageProcess() bool {
 		// Audit mode: validate-only. Skip transcoding and file modification.
 		slog.Info("audit mode: skipping transcoding", "component", "pipeline", "job_id", id, "path", job.Source.Path)
 	} else if err := maybeTranscode(r.ctx, q, job, r.configDir); err != nil {
-		slog.Warn("transcoding failed, proceeding with original", "component", "pipeline", "job_id", id, "error", err)
-		job, _ = q.Get(id)
-		WriteTranscodeFailedNotification(job, r.configDir, err.Error())
+		if r.ctx.Err() != nil || r.cancelled() {
+			// Deliberate cancel: the "failure" is just FFmpeg being SIGKILLed
+			// by the registered cancel func. Skip the "Transcode failed"
+			// dashboard notification — it would misreport a user-initiated
+			// cancel as an error. The next stage boundary observes the
+			// cancelled state and stops the run.
+			slog.Info("transcode aborted by cancellation", "component", "pipeline", "job_id", id)
+		} else {
+			slog.Warn("transcoding failed, proceeding with original", "component", "pipeline", "job_id", id, "error", err)
+			job, _ = q.Get(id)
+			WriteTranscodeFailedNotification(job, r.configDir, err.Error())
+		}
 	}
 	persistFlags(q, id)
 	return true
@@ -637,13 +738,30 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 	})
 
 	if err != nil {
-		slog.Warn("manual transcode failed", "component", "pipeline", "job_id", id, "error", err)
+		// Cancel-vs-failure guard (same pattern as runActionJob): a user
+		// cancel kills FFmpeg via the registered context cancel func, so
+		// Process returns "FFmpeg exited with error: signal: killed" — that
+		// must surface as Cancelled, not as a cryptic Failed. The state check
+		// runs inside Update's per-job critical section so a concurrently
+		// committed cancellation is always observed.
+		cancelled := false
 		updateJob(q, id, func(j *Job) {
+			if j.State == StateCancelled || ctx.Err() != nil {
+				j.State = StateCancelled
+				j.Stage = StageProcess
+				cancelled = true
+				return
+			}
 			j.State = StateFailed
 			j.Stage = StageProcess
 			j.TranscodeDecision = "failed"
 			j.TranscodeError = err.Error()
 		})
+		if cancelled {
+			slog.Info("manual transcode cancelled", "component", "pipeline", "job_id", id)
+			return
+		}
+		slog.Warn("manual transcode failed", "component", "pipeline", "job_id", id, "error", err)
 		emitEvent(PipelineEvent{
 			Type:      EventTranscodeFailed,
 			JobID:     id,
@@ -687,6 +805,11 @@ func runManualTranscode(ctx context.Context, q *Queue, id, configDir, peliculaAP
 	// consecutive-interrupt streak only counts pre-process; clearing it after a
 	// successful transcode means restarts during a long-running new transcode get a fresh budget.
 	updateJob(q, id, func(j *Job) {
+		if j.State == StateCancelled {
+			// Cancel landed after FFmpeg finished — the sidecar exists, but the
+			// user's cancellation wins (mirrors finish() for pipeline jobs).
+			return
+		}
 		j.State = StateCompleted
 		j.Stage = StageDone
 		j.Progress = 1.0

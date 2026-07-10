@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -242,6 +243,99 @@ func TestRedeemRace(t *testing.T) {
 	}
 	if list[0].RedeemedBy[0].JellyfinID == "" {
 		t.Error("RedeemedBy[0].JellyfinID should be populated")
+	}
+}
+
+// TestRedeem_AuditInsertFailureAfterAccountCreated is the MWD-6 regression
+// test: when InsertRedemption (Phase 3) fails after CreateUser (Phase 2) has
+// already succeeded, Redeem must return the distinguishable
+// ErrAccountCreatedAuditFailed sentinel instead of an opaque error that looks
+// identical to "nothing happened." The fake Jellyfin handler deletes the
+// invite row out from under InsertRedemption's foreign key exactly at the
+// point the "account" is created, forcing the Phase 3 insert to fail.
+func TestRedeem_AuditInsertFailureAfterAccountCreated(t *testing.T) {
+	var store *InviteStore
+	var token string
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			if _, err := store.db().Exec(`DELETE FROM invites WHERE token = ?`, token); err != nil {
+				t.Fatalf("failed to delete invite mid-redemption: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"jf-user-audit-fail"}`)) //nolint:errcheck
+		})
+	})
+	store = newTestInviteStoreWithClient(t, jc)
+
+	maxUses := 1
+	inv, err := store.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	token = inv.Token
+
+	err = store.Redeem(context.Background(), token, "alice", "hunter12")
+	if err == nil {
+		t.Fatal("Redeem should fail when the audit insert fails after account creation")
+	}
+	if !errors.Is(err, ErrAccountCreatedAuditFailed) {
+		t.Fatalf("Redeem error = %v, want ErrAccountCreatedAuditFailed", err)
+	}
+}
+
+// TestRedeem_CanceledContextStillReleasesSlot is the MWD-3 regression test:
+// when CreateUser fails because the request context was canceled (client
+// disconnects/navigates away mid-redemption), the compensating ReleaseSlot
+// must still run — it must use a detached context, not the already-canceled
+// request ctx (database/sql checks ctx.Err() before issuing the query, so
+// reusing ctx would fail identically and permanently burn a single-use
+// invite with no account created).
+func TestRedeem_CanceledContextStillReleasesSlot(t *testing.T) {
+	// The fake Jellyfin cancels the caller's context on /Users/New —
+	// simulating the client disconnecting exactly while CreateUser is in
+	// flight (after Phase 1's slot reservation already committed) — then
+	// blocks until the aborted request tears down its own connection.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			// Drain the body first: net/http only watches for a client
+			// disconnect (and cancels r.Context()) once the request body
+			// has been consumed — without this the handler would block
+			// forever and hang the httptest server's Close.
+			io.Copy(io.Discard, r.Body) //nolint:errcheck
+			cancel()
+			<-r.Context().Done()
+		})
+	})
+	s := newTestInviteStoreWithClient(t, jc)
+
+	maxUses := 1
+	inv, err := s.CreateInvite(context.Background(), "admin", "single-use", nil, &maxUses)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+
+	err = s.Redeem(ctx, inv.Token, "alice", "hunter12")
+	if err == nil {
+		t.Fatal("Redeem should fail when the request context is canceled mid-CreateUser")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Redeem error = %v, want context.Canceled", err)
+	}
+
+	// The slot must have been released despite the canceled request ctx:
+	// uses back to 0, and the single-use invite still redeemable.
+	list := s.ListInvites(context.Background())
+	if len(list) != 1 {
+		t.Fatalf("expected 1 invite, got %d", len(list))
+	}
+	if list[0].Uses != 0 {
+		t.Errorf("Uses = %d after canceled redemption, want 0 — the reserved slot was not released", list[0].Uses)
+	}
+	if state, found := s.CheckInvite(context.Background(), inv.Token); !found || state != "active" {
+		t.Errorf("invite state = %q (found=%v), want active — a client disconnect must not burn the invite",
+			state, found)
 	}
 }
 
@@ -576,6 +670,60 @@ func TestInviteRedeem_InfraError_DoesNotCount(t *testing.T) {
 		if code != http.StatusBadGateway {
 			t.Errorf("attempt %d: expected 502, got %d", i+1, code)
 		}
+	}
+}
+
+// TestHandleInviteRedeem_AuditInsertFailure_ReturnsAccountCreatedMessage is
+// the MWD-6 HTTP-layer regression test: when Redeem fails with
+// ErrAccountCreatedAuditFailed, the client must get a distinguishable message
+// telling them the account exists — not the generic "could not create
+// account" that a genuine Jellyfin-down failure gets (which would lead the
+// invitee to retry and be confused by "username already taken").
+func TestHandleInviteRedeem_AuditInsertFailure_ReturnsAccountCreatedMessage(t *testing.T) {
+	var store *InviteStore
+	var token string
+	jc := newFakeJellyfinClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/Users/New", func(w http.ResponseWriter, r *http.Request) {
+			if _, err := store.db().Exec(`DELETE FROM invites WHERE token = ?`, token); err != nil {
+				t.Fatalf("failed to delete invite mid-redemption: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"jf-user-audit-fail"}`)) //nolint:errcheck
+		})
+	})
+	store = newTestInviteStoreWithClient(t, jc)
+	a := newTestAuthWithRateLimit(t)
+	deps := newTestDeps(a, store)
+
+	maxUses := 1
+	inv, err := store.CreateInvite(context.Background(), "admin", "", nil, &maxUses)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	token = inv.Token
+
+	body := map[string]string{"username": "alice", "password": "hunter12"}
+	b, _ := json.Marshal(body)
+	r := httptest.NewRequest(http.MethodPost, "/api/pelicula/invites/"+token+"/redeem", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.HandleInviteOp(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["code"] != "account_created" {
+		t.Errorf("code = %q, want \"account_created\"", resp["code"])
+	}
+	if !strings.Contains(resp["error"], "try logging in") {
+		t.Errorf("error message = %q, want a hint to log in", resp["error"])
+	}
+	if strings.Contains(resp["error"], "could not create account") {
+		t.Errorf("error message = %q, must not read as an outright failure", resp["error"])
 	}
 }
 

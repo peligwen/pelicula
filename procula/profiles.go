@@ -26,6 +26,21 @@ type TranscodeConditions struct {
 	// MinHeight: trigger if the input video height is >= this value.
 	// Example: 2160 for 4K content
 	MinHeight int `json:"min_height,omitempty"`
+
+	// MaxSourceHeight: when set (>0), EXCLUDES sources with height >= this
+	// value, regardless of whether CodecsInclude/MinHeight would otherwise
+	// match. Unlike CodecsInclude/MinHeight (which OR together as
+	// alternative triggers — a profile matches if any one of them fires),
+	// MaxSourceHeight always ANDs against the rest: it's a ceiling, not a
+	// trigger. Use it to keep one profile from shadowing a later, more
+	// specific profile for the same codec at higher resolutions — e.g. a
+	// 1080p compatibility profile that re-encodes any HEVC source should not
+	// also claim 4K HEVC sources that a "downscale 4K" profile should handle
+	// instead (see docs/PROCULA.md's profile-matching section and PRO-6).
+	// Named distinctly from Output.MaxHeight (the transcode's target
+	// scale-down height) to avoid confusing "how tall the input may be for
+	// this profile to apply" with "how tall the output should be scaled to."
+	MaxSourceHeight int `json:"max_source_height,omitempty"`
 }
 
 type TranscodeOutput struct {
@@ -45,7 +60,10 @@ func defaultProfiles() []TranscodeProfile {
 			Name:        "Compatibility 1080p",
 			Enabled:     true,
 			Description: "Re-encode HEVC/AV1 to H.264 for broad device compatibility, capped at 1080p.",
-			Conditions:  TranscodeConditions{CodecsInclude: []string{"hevc", "h265", "av1"}},
+			// MaxSourceHeight excludes 4K+ sources so they fall through to
+			// "Downscale 4K to 1080p" instead of being claimed here first
+			// (profiles are evaluated in lexical filename order — see PRO-6).
+			Conditions: TranscodeConditions{CodecsInclude: []string{"hevc", "h265", "av1"}, MaxSourceHeight: 2160},
 			Output: TranscodeOutput{
 				VideoCodec:    "libx264",
 				VideoPreset:   "medium",
@@ -60,7 +78,8 @@ func defaultProfiles() []TranscodeProfile {
 			Name:        "Compatibility 720p",
 			Enabled:     true,
 			Description: "Re-encode HEVC/AV1 to H.264 at 720p for mobile and older devices.",
-			Conditions:  TranscodeConditions{CodecsInclude: []string{"hevc", "h265", "av1"}},
+			// Same 4K exclusion as "Compatibility 1080p" — see comment above.
+			Conditions: TranscodeConditions{CodecsInclude: []string{"hevc", "h265", "av1"}, MaxSourceHeight: 2160},
 			Output: TranscodeOutput{
 				VideoCodec:    "libx264",
 				VideoPreset:   "medium",
@@ -263,8 +282,15 @@ func ShouldPassthrough(codecs *CodecInfo, profile *TranscodeProfile) bool {
 }
 
 func matchesConditions(c TranscodeConditions, videoCodec string, videoHeight int) bool {
-	// A profile matches if ANY of its conditions are satisfied.
-	// (Profiles typically specify one condition type.)
+	// MaxSourceHeight is a ceiling, not a trigger: it always ANDs against
+	// whatever else follows, unlike CodecsInclude/MinHeight below (which OR
+	// together as alternative triggers). A source taller than the ceiling
+	// never matches this profile, full stop (PRO-6).
+	if c.MaxSourceHeight > 0 && videoHeight >= c.MaxSourceHeight {
+		return false
+	}
+	// A profile matches if ANY of its remaining conditions are satisfied.
+	// (Profiles typically specify one trigger condition type.)
 	if len(c.CodecsInclude) > 0 {
 		for _, codec := range c.CodecsInclude {
 			if strings.EqualFold(codec, videoCodec) {
@@ -275,7 +301,8 @@ func matchesConditions(c TranscodeConditions, videoCodec string, videoHeight int
 	if c.MinHeight > 0 && videoHeight >= c.MinHeight {
 		return true
 	}
-	// Profile with no conditions matches everything (catch-all).
+	// Profile with no trigger conditions matches everything (catch-all),
+	// still subject to the MaxSourceHeight ceiling checked above.
 	if len(c.CodecsInclude) == 0 && c.MinHeight == 0 {
 		return true
 	}

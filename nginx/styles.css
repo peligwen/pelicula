@@ -1014,13 +1014,6 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .act-msg  { flex: 1; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .act-time { flex-shrink: 0; font-size: 0.68rem; color: var(--faint); }
 
-.act-x {
-    flex-shrink: 0; background: none; border: none; color: var(--faint);
-    cursor: pointer; font-size: 0.75rem; padding: 0.1rem 0.3rem;
-    border-radius: 3px; line-height: 1;
-}
-.act-x:hover { color: var(--pink); background: var(--pink-l); }
-
 .act-item.notif-ready   .act-icon { color: var(--mint); }
 .act-item.notif-failed  .act-icon { color: var(--pink); }
 .act-item.notif-storage .act-icon { color: var(--warn); }

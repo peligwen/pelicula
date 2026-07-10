@@ -183,7 +183,8 @@ Transcode profiles are stored in `/config/procula/profiles/` as JSON:
   "enabled": true,
   "conditions": {
     "min_height": 2160,
-    "codecs_include": ["hevc", "h265"]
+    "codecs_include": ["hevc", "h265"],
+    "max_source_height": 2160
   },
   "output": {
     "video_codec": "libx264",
@@ -197,7 +198,14 @@ Transcode profiles are stored in `/config/procula/profiles/` as JSON:
 }
 ```
 
-A profile's `conditions` determine which files it applies to. A file can match multiple profiles, producing multiple output files (e.g., keep the 4K master and also produce a 1080p copy).
+A profile's `conditions` determine which files it applies to:
+- `codecs_include` and `min_height` are **triggers** — a profile matches if *any* trigger it specifies is satisfied (they OR together). A profile with no triggers at all matches everything (catch-all).
+- `max_source_height` is a **ceiling**, not a trigger — when set, it *excludes* sources at or above that height regardless of whether a trigger fired (it ANDs against the rest). Use it so one profile doesn't shadow a later, more specific one for the same codec at a higher resolution.
+- Don't confuse `conditions.max_source_height` (how tall the *input* may be for this profile to apply) with `output.max_height` (how tall the *output* is scaled to) — they're independent fields on different objects.
+
+**Only the first matching enabled profile is applied — there is no fan-out.** Procula walks a file's enabled profiles in order and transcodes with the first one whose conditions match; it does not run every matching profile to produce multiple outputs (e.g. it will not keep a 4K master *and* also produce a 1080p copy from a single job). Profiles are loaded from `/config/procula/profiles/*.json` in the directory's lexical filename order, so filename sort order **is** evaluation priority — name profile files (or the `name` field, which the filename is derived from) so the profile you want checked first sorts first alphabetically.
+
+The three shipped default profiles rely on this: `compatibility-1080p.json` and `compatibility-720p.json` both sort before `downscale-4k-to-1080p.json`, so without a ceiling condition either compatibility profile would claim every HEVC/AV1 source — including 4K ones — before the downscale profile is ever reached. Both compatibility profiles set `max_source_height: 2160` for exactly this reason: it excludes 4K-and-above sources so they fall through to the downscale profile instead.
 
 FFmpeg invocation is shelled out from Go:
 ```

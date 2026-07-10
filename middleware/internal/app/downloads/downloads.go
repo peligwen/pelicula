@@ -189,12 +189,20 @@ func (h *Handler) HandleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if apiKey != "" {
-		if !req.Blocklist {
-			h.unmonitorArrItem(r.Context(), arrClient, apiVer, req.Category, req.Hash)
-		}
-		h.removeFromArrQueue(r.Context(), arrClient, apiVer, req.Category, req.Hash, req.Blocklist)
+	if apiKey == "" {
+		// Keys aren't loaded yet (pre-autowire startup window). Deleting the
+		// torrent now would orphan the *arr queue entry — it would keep
+		// showing a stalled download it can no longer manage, with nothing
+		// left in qBittorrent to reconcile against. Refuse the whole cancel
+		// instead of doing half of it (MWA-16).
+		httputil.WriteError(w, "arr apps not ready yet — try again shortly", http.StatusServiceUnavailable)
+		return
 	}
+
+	if !req.Blocklist {
+		h.unmonitorArrItem(r.Context(), arrClient, apiVer, req.Category, req.Hash)
+	}
+	h.removeFromArrQueue(r.Context(), arrClient, apiVer, req.Category, req.Hash, req.Blocklist)
 
 	if err := h.Svc.QbtClient().DeleteTorrent(r.Context(), req.Hash); err != nil {
 		slog.Error("failed to delete torrent from qBittorrent", "component", "downloads", "error", err)
