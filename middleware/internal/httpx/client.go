@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -67,8 +68,19 @@ type Client struct {
 }
 
 // RetryPolicy configures automatic retry on transient failures.
-// Applies to all requests with a known-idempotent body (GET, DELETE, JSON POST/PUT).
-// Errors classified as transient: transport errors and HTTP 5xx responses.
+//
+// Idempotent requests (GET, PUT, DELETE) retry on any transport error and on
+// HTTP 5xx responses. POST requests are non-idempotent — they back resource
+// creates in the *arr apps (root folders, download clients, webhooks,
+// Prowlarr applications) — so a POST transport error is retried only when it
+// provably occurred before the request reached the server (dial-phase errors
+// such as connection refused or DNS failure). A reset or EOF after the
+// request was sent may mean the server already committed the create before
+// the response was lost; those surface as errors instead of risking a
+// duplicate. HTTP 5xx responses ARE still retried for POSTs: they prove the
+// request was processed and rejected (this stack talks to each backend
+// directly — no intermediary proxy that could return an ambiguous 502 for a
+// request the app may have committed).
 // HTTP 4xx responses are permanent — they are never retried.
 type RetryPolicy struct {
 	// MaxAttempts is the total number of tries (including the first). Zero or 1 means no retry.
@@ -77,12 +89,28 @@ type RetryPolicy struct {
 	Delay time.Duration
 }
 
-// isTransientErr returns true for transport errors worth retrying.
+// isTransientErr returns true for transport errors worth retrying on
+// idempotent requests (GET, PUT, DELETE).
 // HTTP 5xx responses are handled separately (retry=true returned inline).
 func isTransientErr(err error) bool {
 	return err != nil &&
 		!errors.Is(err, context.Canceled) &&
 		!errors.Is(err, context.DeadlineExceeded)
+}
+
+// isRetriableSendErr reports whether a transport error occurred before any
+// bytes could have reached the server, making a retry provably safe even for
+// non-idempotent POSTs. Only dial-phase failures qualify (connection refused,
+// DNS failure, unreachable network): the TCP connection was never
+// established, so the server cannot have processed the request. Connection
+// resets, unexpected EOFs, and timeouts after send do NOT qualify — the
+// response may have been lost after the server committed the operation.
+func isRetriableSendErr(err error) bool {
+	if !isTransientErr(err) {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
 // withRetry calls fn until fn signals no-retry, the context is done, or
@@ -218,7 +246,9 @@ func (c *Client) RawGet(ctx context.Context, path string) ([]byte, error) {
 
 // PostJSON makes a POST request with a JSON-encoded body and decodes the response into out.
 // out may be nil if the response body is not needed.
-// Retries on transient failures per the configured RetryPolicy.
+// POSTs are non-idempotent: per the RetryPolicy doc, transport errors are
+// retried only in the dial phase (request provably never reached the server);
+// post-send transport errors are returned as-is. 5xx responses retry as usual.
 func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -233,7 +263,7 @@ func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := c.httpClient().Do(req)
 		if err != nil {
-			return isTransientErr(err), fmt.Errorf("POST %s: %w", redactPath(path), err)
+			return isRetriableSendErr(err), fmt.Errorf("POST %s: %w", redactPath(path), err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 500 {
@@ -252,7 +282,9 @@ func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error
 }
 
 // RawPost makes a POST request with a JSON-encoded body and returns the raw bytes.
-// Retries on transient failures per the configured RetryPolicy.
+// POSTs are non-idempotent: per the RetryPolicy doc, transport errors are
+// retried only in the dial phase (request provably never reached the server);
+// post-send transport errors are returned as-is. 5xx responses retry as usual.
 func (c *Client) RawPost(ctx context.Context, path string, body any) ([]byte, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -269,7 +301,7 @@ func (c *Client) RawPost(ctx context.Context, path string, body any) ([]byte, er
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := c.httpClient().Do(req)
 		if err != nil {
-			return isTransientErr(err), fmt.Errorf("POST %s: %w", redactPath(path), err)
+			return isRetriableSendErr(err), fmt.Errorf("POST %s: %w", redactPath(path), err)
 		}
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
