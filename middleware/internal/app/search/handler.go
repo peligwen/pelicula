@@ -348,13 +348,15 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	case "movie":
 		arrID, err = h.addMovieInternal(r.Context(), req.TmdbID, radarrProfileID, radarrRoot)
 		if err != nil {
-			httputil.WriteError(w, "failed to add movie: "+err.Error(), http.StatusBadGateway)
+			slog.Error("add movie failed", "component", "search", "tmdbId", req.TmdbID, "error", err)
+			httputil.WriteError(w, "Radarr is unreachable — check service health", http.StatusBadGateway)
 			return
 		}
 	case "series":
 		arrID, err = h.addSeriesInternal(r.Context(), req.TvdbID, sonarrProfileID, sonarrRoot)
 		if err != nil {
-			httputil.WriteError(w, "failed to add series: "+err.Error(), http.StatusBadGateway)
+			slog.Error("add series failed", "component", "search", "tvdbId", req.TvdbID, "error", err)
+			httputil.WriteError(w, "Sonarr is unreachable — check service health", http.StatusBadGateway)
 			return
 		}
 	default:

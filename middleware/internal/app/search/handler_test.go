@@ -563,6 +563,81 @@ func TestHandleSearchAdd_BodySizeLimit(t *testing.T) {
 	}
 }
 
+// TestHandleSearchAdd_MovieUpstreamFailureHidesInternals: when Radarr is
+// unreachable, the client response must not leak the raw dial error or the
+// internal host:port — it should get a generic, actionable message while the
+// detail is logged server-side. Pins MWA-12.
+func TestHandleSearchAdd_MovieUpstreamFailureHidesInternals(t *testing.T) {
+	lc := installLogCapture(t)
+
+	// A closed server yields a real "connection refused" dial error that
+	// embeds the 127.0.0.1:port host — exactly the kind of internal detail
+	// that must not reach the client.
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	radarrHost := strings.TrimPrefix(radarr.URL, "http://")
+	radarr.Close()
+
+	h := newHandler(nil, radarr, nil, "")
+
+	body := `{"type":"movie","tmdbId":438631,"title":"Dune","year":2021}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", w.Code)
+	}
+	respBody := w.Body.String()
+	if strings.Contains(respBody, radarrHost) {
+		t.Errorf("response leaked internal host %q: %s", radarrHost, respBody)
+	}
+	if strings.Contains(respBody, "dial tcp") || strings.Contains(respBody, "connect: connection refused") {
+		t.Errorf("response leaked raw dial error: %s", respBody)
+	}
+	if !strings.Contains(respBody, "unreachable") {
+		t.Errorf("response missing generic actionable message: %s", respBody)
+	}
+	if !lc.hasWarn("add movie failed") {
+		t.Errorf("expected server-side error log for the failed add, got none")
+	}
+}
+
+// TestHandleSearchAdd_SeriesUpstreamFailureHidesInternals: series twin of the
+// above. Pins MWA-12.
+func TestHandleSearchAdd_SeriesUpstreamFailureHidesInternals(t *testing.T) {
+	lc := installLogCapture(t)
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	sonarrHost := strings.TrimPrefix(sonarr.URL, "http://")
+	sonarr.Close()
+
+	h := newHandler(sonarr, nil, nil, "")
+
+	body := `{"type":"series","tvdbId":12345,"title":"Dune"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", w.Code)
+	}
+	respBody := w.Body.String()
+	if strings.Contains(respBody, sonarrHost) {
+		t.Errorf("response leaked internal host %q: %s", sonarrHost, respBody)
+	}
+	if strings.Contains(respBody, "dial tcp") || strings.Contains(respBody, "connect: connection refused") {
+		t.Errorf("response leaked raw dial error: %s", respBody)
+	}
+	if !strings.Contains(respBody, "unreachable") {
+		t.Errorf("response missing generic actionable message: %s", respBody)
+	}
+	if !lc.hasWarn("add series failed") {
+		t.Errorf("expected server-side error log for the failed add, got none")
+	}
+}
+
 // TestHandleArrMeta_ReturnsProfilesAndRoots: happy path — both arrs return
 // quality profiles and root folders.
 func TestHandleArrMeta_ReturnsProfilesAndRoots(t *testing.T) {
