@@ -185,6 +185,21 @@ func (h *Handler) HandleLibraryApply(w http.ResponseWriter, r *http.Request) {
 		case "series":
 			k = dedupeKey{"series", item.TvdbID}
 		default:
+			// Unrecognized type (future item type, or a malformed client
+			// payload) — account for it explicitly instead of silently
+			// vanishing from the result (MWA-8). The filesystem op above may
+			// already have relocated the file, so say so when it did.
+			result.Failed++
+			errMsg := fmt.Sprintf("unrecognized item type %q", item.Type)
+			if fsMoved(fsResult.op) {
+				errMsg = fmt.Sprintf("file already %s to %s, but item type %q is not recognized: cannot register with *arr",
+					fsResult.op, item.DestPath, item.Type)
+			}
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("%q: %s", item.Title, errMsg))
+			result.Items = append(result.Items, ApplyItemResult{
+				Title: item.Title, Src: item.SourcePath, Dest: item.DestPath, FSOp: "failed", Error: errMsg,
+			})
 			continue
 		}
 

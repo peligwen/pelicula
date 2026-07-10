@@ -447,3 +447,132 @@ func TestHandleLibraryApply_FSOpFailureSkipsRegistration(t *testing.T) {
 		t.Errorf("errors = %v, want a filesystem-operation-failed entry for Blocked Movie", result.Errors)
 	}
 }
+
+// TestHandleLibraryApply_UnknownItemTypeIsReported is the MWA-8 regression
+// test: an item whose "type" is neither "movie" nor "series" must be routed
+// into result.Failed with an explicit error entry — not silently dropped,
+// which would let Added+Skipped+Failed fall short of len(items) with no
+// trace of why.
+func TestHandleLibraryApply_UnknownItemTypeIsReported(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/movie", func(w http.ResponseWriter, r *http.Request) {
+		applyJSON(w, `[]`)
+	})
+	mux.HandleFunc("/api/v3/series", func(w http.ResponseWriter, r *http.Request) {
+		applyJSON(w, `[]`)
+	})
+	mux.HandleFunc("/api/v3/qualityprofile", func(w http.ResponseWriter, r *http.Request) {
+		applyJSON(w, `[{"id":1,"name":"Any"}]`)
+	})
+	// Deliberately no /movie/lookup/tmdb or /series/lookup handler — an
+	// unrecognized type must never reach either arr's lookup endpoint.
+
+	h := &Handler{Svc: newMuxArrSvc(t, mux)}
+
+	body := `{
+		"items": [
+			{"type":"album","title":"Weird Item","sourcePath":"/import/weird.mkv"}
+		],
+		"strategy":"keep"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/library/apply", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleLibraryApply(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleLibraryApply: code = %d, body = %s", w.Code, w.Body.String())
+	}
+	var result LibraryApplyResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.Failed != 1 || result.Added != 0 || result.Skipped != 0 {
+		t.Errorf("failed/added/skipped = %d/%d/%d, want 1/0/0 (errors: %v)",
+			result.Failed, result.Added, result.Skipped, result.Errors)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(result.Items) = %d, want 1 — the item must appear in the per-item detail", len(result.Items))
+	}
+	if result.Items[0].FSOp != "failed" {
+		t.Errorf("Items[0].FSOp = %q, want \"failed\"", result.Items[0].FSOp)
+	}
+	if !strings.Contains(result.Items[0].Error, "album") {
+		t.Errorf("Items[0].Error = %q, want it to name the unrecognized type", result.Items[0].Error)
+	}
+	var sawUnrecognized bool
+	for _, e := range result.Errors {
+		if strings.Contains(e, "unrecognized item type") {
+			sawUnrecognized = true
+		}
+	}
+	if !sawUnrecognized {
+		t.Errorf("errors = %v, want an 'unrecognized item type' entry", result.Errors)
+	}
+}
+
+// TestHandleLibraryApply_UnknownItemTypeAfterMoveNamesDestination verifies
+// that when an unrecognized-type item's file was already relocated by the
+// (type-agnostic) filesystem step before the type check runs, the failure
+// message names the destination — mirroring the MWA-6 "already moved"
+// guidance — so an admin isn't left hunting for a file that silently landed
+// somewhere under the library root.
+func TestHandleLibraryApply_UnknownItemTypeAfterMoveNamesDestination(t *testing.T) {
+	base := t.TempDir()
+	srcRoot := filepath.Join(base, "downloads")
+	dstRoot := filepath.Join(base, "library")
+	for _, d := range []string{srcRoot, dstRoot} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src := filepath.Join(srcRoot, "weird.mkv")
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dstRoot, "weird.mkv")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/movie", func(w http.ResponseWriter, r *http.Request) { applyJSON(w, `[]`) })
+	mux.HandleFunc("/api/v3/series", func(w http.ResponseWriter, r *http.Request) { applyJSON(w, `[]`) })
+
+	h := &Handler{
+		Svc:                  newMuxArrSvc(t, mux),
+		applyAllowedSrcRoots: []string{srcRoot},
+		applyAllowedDstRoots: []string{dstRoot},
+	}
+
+	body := fmt.Sprintf(`{
+		"items": [
+			{"type":"album","title":"Weird Item","sourcePath":%q,"destPath":%q}
+		],
+		"strategy":"import"
+	}`, src, dst)
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/library/apply", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleLibraryApply(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleLibraryApply: code = %d, body = %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("expected file to have been moved to %s despite the unrecognized type: %v", dst, err)
+	}
+	var result LibraryApplyResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("failed = %d, want 1 (errors: %v)", result.Failed, result.Errors)
+	}
+	var sawDest bool
+	for _, e := range result.Errors {
+		if strings.Contains(e, dst) {
+			sawDest = true
+		}
+	}
+	if !sawDest {
+		t.Errorf("errors = %v, want an entry naming the already-moved destination %s", result.Errors, dst)
+	}
+}
