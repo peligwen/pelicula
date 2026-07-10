@@ -42,7 +42,7 @@ func newTestDB(t *testing.T) *sql.DB {
 		);
 		CREATE TABLE redemptions (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
-			invite_token TEXT NOT NULL REFERENCES invites(token) ON DELETE CASCADE,
+			invite_token TEXT NOT NULL,
 			username     TEXT NOT NULL,
 			jellyfin_id  TEXT NOT NULL,
 			redeemed_at  TEXT NOT NULL
@@ -266,6 +266,40 @@ func TestDelete_NotFound(t *testing.T) {
 	err := s.Delete(ctx, token(31))
 	if !errors.Is(err, invites.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestDelete_PreservesRedemptions verifies MWD-5: deleting an invite (routine
+// admin hygiene, e.g. cleaning up an exhausted/revoked invite) must not erase
+// the redemption audit trail recorded against it — redemptions is an
+// append-only log of who redeemed which invite. This pins the removal of
+// ON DELETE CASCADE on redemptions.invite_token (peliculadb migrate3).
+func TestDelete_PreservesRedemptions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := invites.New(db)
+
+	tok := token(32)
+	if err := s.Create(ctx, makeInvite(tok, 0, nil, nil, false)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := s.InsertRedemption(ctx, tok, "alice", "jf-id-002", time.Now().UTC()); err != nil {
+		t.Fatalf("InsertRedemption: %v", err)
+	}
+
+	if err := s.Delete(ctx, tok); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM redemptions WHERE invite_token = ?`, tok,
+	).Scan(&count); err != nil {
+		t.Fatalf("count redemptions: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("redemption rows after Delete = %d, want 1 (audit trail must survive invite deletion)", count)
 	}
 }
 
