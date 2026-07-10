@@ -121,9 +121,10 @@ if [[ -z "$user_count" || "$user_count" == "0" ]]; then
     exit 1
 fi
 
-# Jellyfin user objects have a Name field
-assert_field_nonempty "$users_resp" '.[0].Name' || {
-    _peli_err "Test A FAIL: .[0].Name is empty or null"
+# The middleware normalizes Jellyfin's PascalCase to lowercase `name`
+# (json:"name" in internal/app/jellyfin/users.go; users.js consumes u.name).
+assert_field_nonempty "$users_resp" '.[0].name' || {
+    _peli_err "Test A FAIL: .[0].name is empty or null"
     exit 1
 }
 _peli_ok "Test A passed: /api/pelicula/users returned ${user_count} user(s)"

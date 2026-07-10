@@ -85,13 +85,19 @@ fi
 
 _peli_log "  Settings has ${key_count} keys: $(echo "$settings_resp" | jq -r 'keys | join(", ")' 2>/dev/null)"
 
-# A handful of required keys that must always be present
-for required_key in .port .config_dir .library_dir .sub_langs; do
+# A handful of required keys that must always be present and non-empty
+for required_key in .port .config_dir .library_dir; do
     assert_field_nonempty "$settings_resp" "$required_key" || {
         _peli_err "Test A FAIL: required key $required_key is missing or empty"
         exit 1
     }
 done
+# sub_langs must exist in the contract, but a fresh stack legitimately has it
+# empty (no subtitle languages configured yet) — assert presence, not value.
+if ! echo "$settings_resp" | jq -e 'has("sub_langs")' >/dev/null 2>&1; then
+    _peli_err "Test A FAIL: required key .sub_langs is missing from the settings contract"
+    exit 1
+fi
 _peli_ok "Test A passed: /api/pelicula/settings has ${key_count} keys with required fields"
 
 # ── Test B: Round-trip 4 safe settings keys ───────────────────────────────────
