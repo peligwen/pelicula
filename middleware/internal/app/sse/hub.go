@@ -24,14 +24,7 @@ type Message struct {
 
 // client is a connected SSE subscriber.
 type client struct {
-	events    chan Message
-	done      chan struct{}
-	closeOnce sync.Once
-}
-
-// closeDone closes the done channel exactly once.
-func (c *client) closeDone() {
-	c.closeOnce.Do(func() { close(c.done) })
+	events chan Message
 }
 
 // Hub manages all connected SSE clients and fans out broadcast messages.
@@ -55,12 +48,12 @@ func (h *Hub) register(c *client) {
 	h.clients[c] = struct{}{}
 }
 
-// unregister removes c from the hub and signals it to stop.
+// unregister removes c from the hub. Only HandleSSE's own deferred call
+// unregisters a client — there is no external force-disconnect path.
 func (h *Hub) unregister(c *client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.clients, c)
-	c.closeDone()
 }
 
 // ClientCount returns the number of currently connected SSE clients.
@@ -120,7 +113,6 @@ func (h *Hub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 
 	c := &client{
 		events: make(chan Message, 16),
-		done:   make(chan struct{}),
 	}
 	h.register(c)
 	defer h.unregister(c)
@@ -141,8 +133,6 @@ func (h *Hub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 			fmt.Fprint(w, ": heartbeat\n\n")
 			_ = rc.Flush()
-		case <-c.done:
-			return
 		case <-r.Context().Done():
 			return
 		}

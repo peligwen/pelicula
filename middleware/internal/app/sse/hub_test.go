@@ -19,7 +19,6 @@ func TestHubBroadcastFanOut(t *testing.T) {
 	for i := range clients {
 		c := &client{
 			events: make(chan Message, 16),
-			done:   make(chan struct{}),
 		}
 		hub.register(c)
 		clients[i] = c
@@ -53,7 +52,6 @@ func TestHubBroadcastDropsWhenFull(t *testing.T) {
 	// Register a client with a buffer of 16 and fill it completely.
 	c := &client{
 		events: make(chan Message, 16),
-		done:   make(chan struct{}),
 	}
 	hub.register(c)
 
@@ -78,7 +76,7 @@ func TestHubBroadcastDropsWhenFull(t *testing.T) {
 }
 
 // TestHubUnregisterCleansUp verifies that unregistering a client removes it
-// from the hub and closes its done channel.
+// from the hub's client set.
 func TestHubUnregisterCleansUp(t *testing.T) {
 	t.Parallel()
 
@@ -86,7 +84,6 @@ func TestHubUnregisterCleansUp(t *testing.T) {
 
 	c := &client{
 		events: make(chan Message, 16),
-		done:   make(chan struct{}),
 	}
 	hub.register(c)
 
@@ -104,13 +101,6 @@ func TestHubUnregisterCleansUp(t *testing.T) {
 	hub.mu.RUnlock()
 	if present {
 		t.Fatal("client still present in hub after unregister")
-	}
-
-	select {
-	case <-c.done:
-		// good — channel was closed
-	default:
-		t.Fatal("done channel was not closed after unregister")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pelicula-api/httputil"
+	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/library"
 	arr "pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/config"
@@ -35,8 +36,14 @@ type Handler struct {
 	RadarrURL   string
 	ProwlarrURL string
 	LibHandler  *library.Handler
-	// TODO: wire tmdbKey into direct TMDB API calls when they are added
-	searchMode string // "" or "tmdb" for TMDB/TVDB; "indexer" for Prowlarr filtering
+	searchMode  string // "" or "tmdb" for TMDB/TVDB; "indexer" for Prowlarr filtering
+
+	// ArrCache is the shared Radarr/Sonarr full-library cache also used by
+	// catalog.Handler and missingwatcher.Watcher (see bootstrap's
+	// arrCatalogCache). HandleSearch uses it to compute each result's "added"
+	// flag without a redundant full-library fetch on every search request.
+	// Optional; nil falls back to a direct typed-client fetch (e.g. in tests).
+	ArrCache *catalog.CatalogCache
 
 	// now is injectable for tests; production code leaves it nil (falls back to time.Now).
 	now func() time.Time
@@ -56,9 +63,9 @@ func (h *Handler) timeNow() time.Time {
 	return time.Now()
 }
 
-// New constructs a Handler. tmdbKey and searchMode are resolved at construction
-// from the parsed .env; no per-request .env reads occur.
-func New(svc ArrClient, sonarrURL, radarrURL, prowlarrURL string, libHandler *library.Handler, tmdbKey, searchMode string) *Handler {
+// New constructs a Handler. searchMode is resolved at construction from the
+// parsed .env; no per-request .env reads occur.
+func New(svc ArrClient, sonarrURL, radarrURL, prowlarrURL string, libHandler *library.Handler, searchMode string) *Handler {
 	h := &Handler{
 		Services:    svc,
 		SonarrURL:   sonarrURL,
@@ -69,6 +76,50 @@ func New(svc ArrClient, sonarrURL, radarrURL, prowlarrURL string, libHandler *li
 	}
 	h.cache.entries = make(map[string]indexerSearchEntry)
 	return h
+}
+
+// fetchExistingMovies returns the full Radarr movie list, used to compute
+// each search result's "added" flag. It draws from the shared ArrCache when
+// wired (avoiding a redundant full-library fetch on every search — see
+// bootstrap's arrCatalogCache comment) and falls back to a direct typed-client
+// fetch otherwise, mirroring missingwatcher.Watcher's same fallback pattern.
+func (h *Handler) fetchExistingMovies(ctx context.Context) []map[string]any {
+	if h.ArrCache != nil {
+		data, err := h.ArrCache.GetMovies(ctx)
+		if err != nil {
+			return nil
+		}
+		var out []map[string]any
+		if json.Unmarshal(data, &out) != nil {
+			return nil
+		}
+		return out
+	}
+	existing, err := h.Services.RadarrClient().GetMovies(ctx, "/api/v3")
+	if err != nil {
+		return nil
+	}
+	return existing
+}
+
+// fetchExistingSeries is fetchExistingMovies' Sonarr counterpart.
+func (h *Handler) fetchExistingSeries(ctx context.Context) []map[string]any {
+	if h.ArrCache != nil {
+		data, err := h.ArrCache.GetSeries(ctx)
+		if err != nil {
+			return nil
+		}
+		var out []map[string]any
+		if json.Unmarshal(data, &out) != nil {
+			return nil
+		}
+		return out
+	}
+	existing, err := h.Services.SonarrClient().GetSeries(ctx, "/api/v3")
+	if err != nil {
+		return nil
+	}
+	return existing
 }
 
 // ---- indexer search cache ----
@@ -172,11 +223,9 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 			// Get existing movies to check "added" status
 			existingIDs := make(map[int]bool)
-			if existing, err := h.Services.RadarrClient().GetMovies(r.Context(), "/api/v3"); err == nil {
-				for _, m := range existing {
-					if id, ok := m["tmdbId"].(float64); ok {
-						existingIDs[int(id)] = true
-					}
+			for _, m := range h.fetchExistingMovies(r.Context()) {
+				if id, ok := m["tmdbId"].(float64); ok {
+					existingIDs[int(id)] = true
 				}
 			}
 
@@ -210,11 +259,9 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}
 
 			existingIDs := make(map[int]bool)
-			if existing, err := h.Services.SonarrClient().GetSeries(r.Context(), "/api/v3"); err == nil {
-				for _, s := range existing {
-					if id, ok := s["tvdbId"].(float64); ok {
-						existingIDs[int(id)] = true
-					}
+			for _, s := range h.fetchExistingSeries(r.Context()) {
+				if id, ok := s["tvdbId"].(float64); ok {
+					existingIDs[int(id)] = true
 				}
 			}
 
@@ -473,8 +520,6 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sonarrKey, radarrKey, _ := h.Services.Keys()
-
 	type profileEntry struct {
 		ID   int    `json:"id"`
 		Name string `json:"name"`
@@ -512,9 +557,6 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		}
 		return out
 	}
-
-	_ = radarrKey
-	_ = sonarrKey
 
 	httputil.WriteJSON(w, map[string]any{
 		"radarr": arrMeta{

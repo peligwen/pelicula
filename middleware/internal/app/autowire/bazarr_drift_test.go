@@ -1,10 +1,12 @@
 package autowire
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	bazarrclient "pelicula-api/internal/clients/bazarr"
 )
@@ -77,8 +79,48 @@ func TestBazarrAlreadyWiredHappyPath(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if !bazarrAlreadyWired(c, "sk", "rk", []string{"en"}) {
+	if !bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en"}) {
 		t.Error("expected bazarrAlreadyWired to return true when config matches")
+	}
+}
+
+// TestBazarrAlreadyWiredRespectsContextCancellation verifies MWA-23: the ctx
+// passed into bazarrAlreadyWired is actually threaded into the outbound
+// RawGet calls, so a cancelled ctx aborts the check instead of running the
+// (now-unbounded) context.Background() call it used before.
+func TestBazarrAlreadyWiredRespectsContextCancellation(t *testing.T) {
+	requestSeen := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case requestSeen <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done() // block until the client cancels
+	}))
+	defer srv.Close()
+
+	c := bazarrclient.New(srv.URL, "key")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		done <- bazarrAlreadyWired(ctx, c, "sk", "rk", []string{"en"})
+	}()
+
+	select {
+	case <-requestSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for outbound RawGet to reach the server")
+	}
+	cancel()
+
+	select {
+	case got := <-done:
+		if got {
+			t.Error("bazarrAlreadyWired returned true on a cancelled context; want false (RawGet should fail)")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bazarrAlreadyWired did not return after context cancellation — ctx is not propagated to RawGet")
 	}
 }
 
@@ -92,7 +134,7 @@ func TestBazarrAlreadyWiredSubLangDrift(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if bazarrAlreadyWired(c, "sk", "rk", []string{"en", "fr"}) {
+	if bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en", "fr"}) {
 		t.Error("expected bazarrAlreadyWired to return false when sub-lang set drifted")
 	}
 }
@@ -107,7 +149,7 @@ func TestBazarrAlreadyWiredMissingProfile(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if bazarrAlreadyWired(c, "sk", "rk", []string{"en"}) {
+	if bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en"}) {
 		t.Error("expected bazarrAlreadyWired to return false when Pelicula profile is absent")
 	}
 }
@@ -129,7 +171,7 @@ func TestBazarrAlreadyWiredBrokenProfile(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if bazarrAlreadyWired(c, "sk", "rk", []string{"en"}) {
+	if bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en"}) {
 		t.Error("expected bazarrAlreadyWired to return false when audio_only_include is missing")
 	}
 }
@@ -162,7 +204,7 @@ func TestBazarrAlreadyWiredSonarrURLDrift(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if bazarrAlreadyWired(c, "sk", "rk", []string{"en"}) {
+	if bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en"}) {
 		t.Error("expected bazarrAlreadyWired to return false when Sonarr IP drifted")
 	}
 }
@@ -195,7 +237,7 @@ func TestBazarrAlreadyWiredRadarrPortDrift(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if bazarrAlreadyWired(c, "sk", "rk", []string{"en"}) {
+	if bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en"}) {
 		t.Error("expected bazarrAlreadyWired to return false when Radarr port drifted")
 	}
 }
@@ -219,7 +261,7 @@ func TestBazarrAlreadyWiredEmptyProviders(t *testing.T) {
 	defer srv.Close()
 
 	c := bazarrclient.New(srv.URL, "key")
-	if bazarrAlreadyWired(c, "sk", "rk", []string{"en"}) {
+	if bazarrAlreadyWired(context.Background(), c, "sk", "rk", []string{"en"}) {
 		t.Error("expected bazarrAlreadyWired to return false when enabled_providers is empty")
 	}
 }

@@ -40,7 +40,6 @@ func newStubSvc(t *testing.T, qbtHandler http.Handler) *stubSvc {
 func newTestClient(hub *Hub, cap int) *client {
 	c := &client{
 		events: make(chan Message, cap),
-		done:   make(chan struct{}),
 	}
 	hub.register(c)
 	return c

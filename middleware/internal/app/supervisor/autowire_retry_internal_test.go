@@ -102,7 +102,7 @@ func TestRunAutowireWithRetry_RetriesUntilFullyWired(t *testing.T) {
 		},
 	}, "")
 
-	autowirer, _ := autowire.NewAutowirer(autowire.Config{
+	autowirer := autowire.NewAutowirer(autowire.Config{
 		Svc: svc,
 		URLs: autowire.URLs{
 			Sonarr:      arrSrv.URL,
@@ -178,7 +178,7 @@ func TestRunAutowireWithRetry_StopsOnCtxCancel(t *testing.T) {
 		},
 	}, "")
 
-	autowirer, _ := autowire.NewAutowirer(autowire.Config{
+	autowirer := autowire.NewAutowirer(autowire.Config{
 		Svc: svc,
 		URLs: autowire.URLs{
 			Sonarr:      arrSrv.URL,

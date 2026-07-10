@@ -12,7 +12,6 @@
 //   - dbutil:      Open (with busy_timeout, WAL, foreign-keys pragmas), Migrate,
 //     ParseTime, FormatTime (RFC3339Nano, RFC3339 fallback)
 //   - peliculadb:  pelicula.db schema owner; two migrations: v1 (base tables),
-//     v2 (migrated_json_files bookkeeping table)
-//   - migratejson: one-shot legacy JSON → SQLite importer; ctx-aware, each file
-//     wrapped in a transaction, idempotent via migrated_json_files
+//     v2 (migrated_json_files bookkeeping table, retained for schema history
+//     even though the one-shot JSON importer that used it has been removed)
 package repo
