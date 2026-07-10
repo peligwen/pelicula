@@ -188,6 +188,26 @@ func TestResolveProfileID(t *testing.T) {
 			t.Errorf("got %d, want 1", got)
 		}
 	})
+
+	// MWA-17: the fallback must be deterministic (alphabetically-first name),
+	// not Go's randomized map iteration order. Run many times to make a
+	// regression to map-order iteration flaky-but-detectable rather than
+	// silently passing.
+	t.Run("name not found is deterministic across repeated calls", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]int{"Zulu": 9, "Alpha": 1, "Mike": 5}
+		want := backup.ResolveProfileID("Missing", m)
+		for i := 0; i < 50; i++ {
+			got := backup.ResolveProfileID("Missing", m)
+			if got != want {
+				t.Fatalf("run %d: got %d, want %d (fallback must be stable across calls)", i, got, want)
+			}
+		}
+		// "Alpha" sorts first alphabetically, so its ID (1) is the expected fallback.
+		if want != 1 {
+			t.Errorf("fallback = %d, want 1 (id of alphabetically-first name %q)", want, "Alpha")
+		}
+	})
 }
 
 func TestResolveTagIDs(t *testing.T) {

@@ -315,6 +315,64 @@ func TestHandleCatalogBackfill_RespectsRootCtx(t *testing.T) {
 	}
 }
 
+// TestHandleCatalogBackfill_DuplicateTriggerReturns409 verifies MWA-9: while a
+// backfill goroutine is in flight, a second trigger is rejected with 409
+// instead of spawning a redundant concurrent Radarr+Sonarr+Jellyfin sweep.
+// Once the in-flight run completes, a subsequent trigger succeeds again.
+func TestHandleCatalogBackfill_DuplicateTriggerReturns409(t *testing.T) {
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() { close(started) })
+		<-release
+		w.Write([]byte("[]")) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	db := testSQLiteDB(t)
+	svc := newStubArrBackfill(srv.URL, srv.URL)
+	h := &Handler{DB: db, Arr: svc}
+
+	req1, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
+	w1 := httptest.NewRecorder()
+	h.HandleCatalogBackfill(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("first trigger: status = %d, want 200", w1.Code)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backfill goroutine did not start its outbound call in time")
+	}
+
+	req2, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
+	w2 := httptest.NewRecorder()
+	h.HandleCatalogBackfill(w2, req2)
+	if w2.Code != http.StatusConflict {
+		t.Errorf("duplicate trigger while in flight: status = %d, want 409", w2.Code)
+	}
+
+	close(release)
+
+	// Wait for the in-flight guard to clear once the first run finishes.
+	deadline := time.Now().Add(2 * time.Second)
+	for h.backfillRunning.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("backfillRunning did not clear after the in-flight run finished")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	req3, _ := http.NewRequest(http.MethodPost, "/api/pelicula/catalog/backfill", nil)
+	w3 := httptest.NewRecorder()
+	h.HandleCatalogBackfill(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Errorf("trigger after prior run completed: status = %d, want 200", w3.Code)
+	}
+}
+
 // TestSyncJellyfinMetadata_PassesCtxToUpdate verifies that the ctx passed to
 // SyncJellyfinMetadata reaches UpdateCatalogMetadata. A cancelled ctx causes
 // the SQLite write to fail, surfacing the cancellation as a returned error.

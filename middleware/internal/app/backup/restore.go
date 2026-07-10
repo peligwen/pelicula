@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"sync"
 
 	"pelicula-api/httputil"
@@ -304,21 +305,32 @@ func (h *Handler) loadExistingSeriesIDs(ctx context.Context, arrCli *arr.Client)
 // ── Pure helpers (no receiver) ────────────────────────────────────────────────
 
 // ResolveProfileID looks up profile ID by name.
-// If not found, logs a warning and falls back to the first available profile
-// (or 1 if the map is empty). The warning makes profile mismatches visible.
+// If not found, logs a warning and falls back to the alphabetically-first
+// profile name in nameMap (or 1 if the map is empty). Go map iteration order
+// is randomized, so picking a fallback requires sorting names first —
+// otherwise restoring the same backup twice could assign different quality
+// profiles to the same items whenever the original profile name is gone.
+// The warning makes profile mismatches visible either way.
 func ResolveProfileID(name string, nameMap map[string]int) int {
 	if id, ok := nameMap[name]; ok {
 		return id
 	}
-	// Fall back to first available profile
-	for _, id := range nameMap {
-		slog.Warn("quality profile not found, using fallback",
-			"component", "export", "requested", name, "fallback_id", id)
-		return id
+	if len(nameMap) == 0 {
+		slog.Warn("quality profile not found and no profiles available, using id=1",
+			"component", "export", "requested", name)
+		return 1
 	}
-	slog.Warn("quality profile not found and no profiles available, using id=1",
-		"component", "export", "requested", name)
-	return 1
+	// Fall back to the alphabetically-first profile name for a deterministic pick.
+	names := make([]string, 0, len(nameMap))
+	for n := range nameMap {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	fallback := names[0]
+	id := nameMap[fallback]
+	slog.Warn("quality profile not found, using fallback",
+		"component", "export", "requested", name, "fallback_name", fallback, "fallback_id", id)
+	return id
 }
 
 // ResolveTagIDs converts tag labels to IDs.
