@@ -1,0 +1,31 @@
+# Library source: local bind mount — the default.
+#
+# One of exactly two library overlays (see the header in docker-compose.yml);
+# the CLI includes this file whenever LIBRARY_NFS is unset or not "true".
+# ${LIBRARY_DIR} is a host directory (local disk, or an OS-level NAS mount
+# the operator manages themselves). The :? guard lives here rather than in
+# the base file so that NFS-mode installs don't need a meaningless
+# LIBRARY_DIR value just to satisfy interpolation.
+#
+# Keep the service list in lockstep with docker-compose.nfs.yml — every
+# media service must appear in both files with the same /media target.
+
+services:
+  sonarr:
+    volumes:
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+  radarr:
+    volumes:
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+  jellyfin:
+    volumes:
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+  procula:
+    volumes:
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+  bazarr:
+    volumes:
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
+  pelicula-api:
+    volumes:
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
