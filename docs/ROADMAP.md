@@ -26,6 +26,11 @@ in `## Shipped` capture each pass.
 
 ## Shipped
 
+### 2026-07-11 — post-campaign review round
+- Full review pass over the 2026-07 audit campaign's own merged output (~65 commits, ~1.9k production Go LOC + frontend/harness since baseline `7233732`): baseline gates all green (`go vet`, `gofmt`, unit + `-race` on procula and the hot middleware packages), no correctness findings — the campaign's fixes held up.
+- Caught and executed the one dropped ball: the dualsub owner-decision pair from the 2026-07-09 interview never got mapped into a phase table. Argos translator fallback removed (~150 LOC across procula/settings/UI/docs; behavior identical to the `none` default every real deployment ran) and the Playwright dualsub specs now assert the actual written `.ass` sidecar content — structure, styles, and exact stacked Dialogue lines against the fixture cues — via the new `tests/playwright/helpers/hostfs.js` container→host path mapping (README's "output file not asserted" matrix gap closed).
+- Residual cleanups: orphaned `RolesFile` type dropped (migratejson leftover), PELIGROSA.md documents MWD-1's immediate session revocation on demote/delete, permanently-skipping `TestDeleteOnFailure_True_AllowedPath` stub folded into its sibling's doc comment.
+
 ### 2026-07-10 — catalog stale-row sweep (MWD-7)
 - `catalog_items` is now explicitly a derived cache + reconcile ledger, never an independent source of truth: `SweepStale` (middleware `internal/app/catalog/sweep.go`) removes rows whose backing media no longer exists. Hook/backfill rows live by *arr membership (matched on the same natural keys `Upsert` uses); reconcile-adopted rows live by file-path presence in a complete Jellyfin scan; seasons/episodes cascade with their parent chain.
 - Runs after every reconcile-loop tick (15 min) and at the end of `BackfillFromArr` — the dashboard's manual backfill button is now a full resync, not append-only.
