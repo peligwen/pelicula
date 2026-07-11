@@ -1364,6 +1364,18 @@ details[open] .add-user-summary::before { content: '− '; }
 .request-year  { font-size: 0.72rem; color: var(--faint); }
 .request-meta  { font-size: 0.7rem; color: var(--muted); }
 .request-reason { font-size: 0.72rem; color: var(--pink); margin-top: 0.1rem; }
+/* Admin approval scope editor (pending list) — free-text season numbers,
+   parsed client-side in users.js's approveRequest; the read-only
+   ".request-seasons-scope" variant below is the "Mine" list's equivalent. */
+.request-seasons-row { flex-basis: 100%; display: flex; flex-direction: column; gap: 0.2rem; margin: 0.15rem 0; }
+.request-seasons-label { font-size: 0.65rem; color: var(--muted); }
+.request-seasons-input {
+    padding: 0.3rem 0.55rem; background: var(--panel2); border: 1.5px solid var(--border2);
+    border-radius: 8px; color: var(--ink); font-size: 0.78rem; outline: none; box-sizing: border-box;
+    font-family: var(--font-body, 'Nunito Sans', sans-serif); max-width: 220px;
+}
+.request-seasons-input:focus { border-color: var(--pink); }
+.request-seasons-scope { font-size: 0.7rem; color: var(--muted); margin-top: 0.1rem; }
 .request-state {
     font-size: 0.65rem; padding: 0.1rem 0.5rem; border-radius: 20px;
     align-self: flex-start; margin-top: 0.25rem; font-weight: 700;

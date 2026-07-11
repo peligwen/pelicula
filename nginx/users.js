@@ -223,11 +223,29 @@ function renderRequests(requests) {
                 ? html`<img class="request-poster" src="${r.poster}" alt="">`.str
                 : '<div class="request-poster request-poster-placeholder"></div>';
             const yearSpan = r.year ? html` <span class="request-year">(${r.year})</span>`.str : '';
-            return html`<li class="request-item" data-id="${r.id}">
+            // Viewer's requested season scope (series only) \u2014 always shown
+            // explicitly here ("all" when r.seasons is absent/empty) so the
+            // admin can decide whether to override at approve time. No
+            // per-series season list at this surface by design: there's no
+            // extra lookup endpoint, so the admin edits a free-text list of
+            // season numbers instead (parsed client-side in approveRequest;
+            // the backend is the authoritative validator against Sonarr).
+            const seasonsMeta = r.type === 'series'
+                ? html` \u00b7 seasons: ${(r.seasons && r.seasons.length) ? r.seasons.join(', ') : 'all'}`.str
+                : '';
+            const seasonsInput = r.type === 'series'
+                ? html`<div class="request-seasons-row">
+                        <label class="request-seasons-label" for="request-seasons-${r.id}">Approve seasons (blank = all)</label>
+                        <input type="text" class="request-seasons-input" id="request-seasons-${r.id}"
+                               placeholder="e.g. 1, 2" value="${(r.seasons && r.seasons.length) ? r.seasons.join(', ') : ''}">
+                    </div>`.str
+                : '';
+            return html`<li class="request-item" data-id="${r.id}" data-type="${r.type}">
                 ${raw(poster)}
                 <div class="request-info">
                     <div class="request-title">${r.title}${raw(yearSpan)}</div>
-                    <div class="request-meta">${r.type} \u00b7 requested by ${r.requested_by}</div>
+                    <div class="request-meta">${r.type} \u00b7 requested by ${r.requested_by}${raw(seasonsMeta)}</div>
+                    ${raw(seasonsInput)}
                 </div>
                 <div class="request-actions">
                     <button class="request-btn request-btn-approve" data-action="approve-request">Approve</button>
@@ -253,12 +271,20 @@ function renderRequests(requests) {
                 : '<div class="request-poster request-poster-placeholder"></div>';
             const yearSpan = r.year ? html` <span class="request-year">(${r.year})</span>`.str : '';
             const reasonDiv = r.reason ? html`<div class="request-reason">${r.reason}</div>`.str : '';
+            // Read-only scope line \u2014 series requests with a recorded seasons
+            // scope only; omitted (not "seasons: all") when absent, since
+            // "all" is the implicit default and this list isn't the surface
+            // for adjusting it (that's the pending list, admin-only, above).
+            const seasonsScope = (r.type === 'series' && r.seasons && r.seasons.length)
+                ? html`<div class="request-seasons-scope">seasons: ${r.seasons.join(', ')}</div>`.str
+                : '';
             return html`<li class="request-item request-item-${r.state}" data-id="${r.id}">
                 ${raw(poster)}
                 <div class="request-info">
                     <div class="request-title">${r.title}${raw(yearSpan)}</div>
                     <div class="request-meta">${r.type}</div>
                     ${raw(reasonDiv)}
+                    ${raw(seasonsScope)}
                 </div>
                 <span class="request-state request-state-${r.state}">${r.state}</span>
             </li>`.str;
@@ -267,15 +293,46 @@ function renderRequests(requests) {
     }
 }
 
+// approveRequest parses the admin's free-text seasons input (series only)
+// before posting: strip whitespace, split on commas, drop empty segments (a
+// stray leading/trailing/doubled comma), then require every remaining token
+// be a bare non-negative integer \u2014 anything else aborts with an inline error
+// before the request ever reaches the network. Empty input (after stripping)
+// posts {seasons: []} for series \u2014 the documented approve-side convention
+// for "clear the scope, use all seasons" (asymmetric with search/add and
+// request-create, where [] is rejected; see docs/API.md). Movies never carry
+// a seasons key at all.
 async function approveRequest(id) {
-    const btn = document.querySelector('.request-item[data-id="' + id + '"] .request-btn-approve');
+    const li = document.querySelector('.request-item[data-id="' + id + '"]');
+    const btn = li ? li.querySelector('.request-btn-approve') : null;
+    const errEl = li ? li.querySelector('.users-error') : null;
+    if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+
+    let body = {};
+    if (li && li.dataset.type === 'series') {
+        const input = li.querySelector('.request-seasons-input');
+        const rawInput = input ? input.value.trim() : '';
+        if (rawInput) {
+            const tokens = rawInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            const seasons = [];
+            for (const tok of tokens) {
+                if (!/^\d+$/.test(tok)) {
+                    if (errEl) { errEl.textContent = 'Invalid season number: "' + tok + '" (use whole numbers separated by commas, e.g. "1, 2")'; errEl.classList.remove('hidden'); }
+                    return;
+                }
+                seasons.push(parseInt(tok, 10));
+            }
+            body = {seasons};
+        } else {
+            body = {seasons: []}; // explicit all-seasons override
+        }
+    }
+
     if (btn) { btn.disabled = true; btn.textContent = 'Approving\u2026'; }
     try {
-        await post('/api/pelicula/requests/' + id + '/approve', {});
+        await post('/api/pelicula/requests/' + id + '/approve', body);
         await loadRequests();
     } catch (e) {
-        const li = btn ? btn.closest('li') : null;
-        const errEl = li ? li.querySelector('.users-error') : null;
         if (errEl) { errEl.textContent = 'Approve failed: ' + ((e.body && e.body.error) || e.status || 'error'); errEl.classList.remove('hidden'); }
         if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
     }
