@@ -182,6 +182,8 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `GET` | `/api/pelicula/actions/registry` | Viewer+ | List registered Procula action handlers (60s cache) |
 | `POST` | `/api/pelicula/actions` | Admin | Dispatch an action to the Procula action bus (proxied with API key). Optional `?wait=…` |
 
+The registry currently returns six actions: `validate`, `transcode`, `subtitle_search`, `dualsub`, and `replace` (all `applies_to: ["movie","episode"]`, fan out per-episode at series/season level in the dashboard), plus `remove` (`applies_to: ["movie","series"]` — whole-title deletion, rendered as a single non-fanout action at series level). See docs/PROCULA.md's Action Bus section for the full catalog and the `remove` design decision.
+
 ### Admin / container control
 
 | Method | Path | Auth | Notes |
@@ -210,6 +212,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 |--------|------|------|-------|
 | `POST` | `/api/pelicula/hooks/import` | Internal | Receives Radarr/Sonarr import webhooks, normalizes payload, forwards to Procula. Validates `X-Webhook-Secret` header against `WEBHOOK_SECRET` env var (check skipped when unset) |
 | `POST` | `/api/pelicula/jellyfin/refresh` | Internal | Triggers Jellyfin library scan. Called by Procula; requires `X-API-Key: <PROCULA_API_KEY>` |
+| `POST` | `/api/pelicula/catalog/remove` | Internal | Deletes a whole title — files, *arr entry (`DELETE .../movie\|series/{id}?deleteFiles=true`), and catalog rows. Called by Procula's `remove` action handler; requires `X-API-Key: <PROCULA_API_KEY>`. Request: `{"arr_type":"radarr"\|"sonarr","arr_id":N}`. Response: `{"removed":true,"arr_type":…,"arr_id":…,"title":…,"file_paths":[…]}`. Idempotent — a 404 from the *arr delete (already gone) is treated as success |
 
 ---
 

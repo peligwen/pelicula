@@ -147,6 +147,81 @@ GET  /api/pelicula/processing       Proxies Procula job status for dashboard
 GET  /api/pelicula/storage          Proxies Procula storage stats for dashboard
 ```
 
+## Action Bus
+
+Ad-hoc, per-item media actions — as opposed to the automatic Validate → Process
+→ Catalog pipeline that runs on every import — dispatch through a small
+registry-and-handler mechanism (`procula/actions.go`), distinct from the job
+pipeline above. The dashboard's catalog context menu (movie/series/episode
+rows) is the primary caller, via the middleware's proxy:
+
+- `GET /api/procula/actions/registry` lists every registered `ActionDef`
+  (`name`, `label`, `applies_to`, `sync`, `description`); proxied at
+  `GET /api/pelicula/actions/registry` (Viewer+, 60s cache — see docs/API.md).
+- `POST /api/procula/actions` enqueues a synthetic job for a named action
+  against a `target` (some mix of `arr_type`/`arr_id`/`path`/`episode_id`,
+  depending on the action) and `params`; proxied at
+  `POST /api/pelicula/actions` (**Admin**-gated, unlike the registry read —
+  this endpoint mutates), with an optional `?wait=N` to block up to `N`
+  seconds for a synchronous result.
+
+Registered actions:
+
+| Action | Label | Applies to | Sync | What it does |
+|---|---|---|---|---|
+| `validate` | Re-verify file | movie, episode | yes | Re-runs `Validate()` against a file path |
+| `transcode` | Re-transcode | movie, episode | no | Runs the current transcode profile against a file |
+| `subtitle_search` | Search subtitles… | movie, episode | yes | Bazarr search with explicit languages, HI, and forced flags |
+| `dualsub` | Dual subtitles… | movie, episode | yes | Generates dual-language ASS sidecars from a chosen profile + track pairs |
+| `replace` | Replace… | movie, episode | yes | Deletes one file, blocklists the release in Sonarr/Radarr, and re-searches |
+| `remove` | Remove from library… | movie, series | yes | Deletes the whole title — see below |
+
+Every action except `remove` is movie/episode-scoped: at series/season level
+in the dashboard, these fan out and run once per episode file ("(all
+episodes)" in the context menu). `remove` is the one action scoped to the
+*container* itself (movie or series) rather than to individual episode files;
+the dashboard renders it as a single non-fanout entry instead.
+
+### Remove from library
+
+`remove` is deliberately the odd one out in the table above — a whole-title
+action rather than a per-file one.
+
+**Design decision: middleware-led deletion.** `runRemoveAction`
+(`procula/remove.go`) never talks to Sonarr/Radarr directly and never deletes
+a file itself. It POSTs `{arr_type, arr_id}` to the middleware's internal
+`POST /api/pelicula/catalog/remove` (see docs/API.md) and lets the middleware
+call the *arr's own `DELETE .../movie/{id}?deleteFiles=true` (or
+`.../series/{id}?deleteFiles=true`). Rationale:
+- The *arr's own delete-with-files endpoint is battle-tested and already
+  handles the metadata-folder cleanup Procula would otherwise have to
+  reimplement.
+- Path safety by construction — Procula never resolves or removes a
+  filesystem path for this action, so there's no separate path-traversal
+  surface to audit here.
+- No deletion logic duplicated between Procula and the middleware.
+
+After the middleware call succeeds (or 404s — see idempotency below),
+Procula purges its own `catalog_flags` rows for every file path the
+middleware reports, triggers a Jellyfin library refresh, and returns
+`{removed, arr_type, arr_id, file_paths}`.
+
+**Whole-title granularity only.** `remove` operates on an entire movie or an
+entire series — there is no season- or episode-scoped removal. Deleting a
+single episode's file is `replace` (delete + blocklist + re-search) at
+episode scope, not `remove`.
+
+**Idempotent-ish, safe to retry.** Every dispatch creates a fresh job row —
+there is no dedup key — so re-running `remove` on an already-removed title
+runs the handler again, but the middleware treats a 404 from the *arr delete
+(title already gone) as success rather than an error, so a retry after a
+partial failure doesn't itself fail.
+
+**qBittorrent is intentionally untouched.** `remove` does not pause, remove,
+or otherwise touch any torrent already seeding for the title being removed —
+only the *arr entry, the media files it tracked, and Pelicula's own catalog
+rows are affected.
+
 ## Pipeline Stages
 
 ### Stage 1: Validate
