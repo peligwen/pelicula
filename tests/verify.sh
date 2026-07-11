@@ -45,6 +45,13 @@
 #                     is Admin-gated (unauthenticated request rejected with 401). No
 #                     destructive removal is performed. Requires
 #                     PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
+#   sweep-search-seasons  Season-level granularity HTTP smoke: search/add and
+#                     requests-create both reject seasons on a movie and a non-nil
+#                     empty seasons array with 400; search/add rejects an
+#                     out-of-range season number with 400 before any Sonarr lookup;
+#                     a series request with seasons persists and echoes them back
+#                     (the one write in this suite is cleaned up immediately after).
+#                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #
 # Tests that require a running Jellyfin session need
 #   PELICULA_TEST_JELLYFIN_PASSWORD + PELICULA_TEST_JELLYFIN_USER.
@@ -63,7 +70,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET=""           # empty → tests use their own defaults (localhost:7354)
 SKIP_AUTH=""        # empty → tests perform auth checks if password is present
-SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action"  # comma-separated list of suites to run
+SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action,sweep-search-seasons"  # comma-separated list of suites to run
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 
@@ -96,7 +103,7 @@ _fail() { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
 
 # AUTH_REQUIRED_SUITES: suites that need PELICULA_TEST_JELLYFIN_PASSWORD.
 # When --skip-auth is set these suites are skipped (not counted as failures).
-AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action"
+AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action,sweep-search-seasons"
 
 run_suite() {
     local name="$1" script="$1"

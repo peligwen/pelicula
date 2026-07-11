@@ -1055,10 +1055,10 @@ assert 'Movies' in names and 'TV Shows' in names
     # first ran auth-free inside bin/pelicula up (Stage 1) as its own
     # post-deploy smoke. The isolated stack's own admin credentials (seeded
     # into test_env above) are known here, so this run uses real auth
-    # instead of --skip-auth — this unlocks the 7 authenticated suites
+    # instead of --skip-auth — this unlocks the 8 authenticated suites
     # (bug1-reconcile, bug4-registration, sweep-catalog/jobs/users/settings,
-    # sweep-search-options, sweep-remove-action) instead of silently skipping
-    # them. PELICULA_ENV_FILE, exported in
+    # sweep-search-options, sweep-remove-action, sweep-search-seasons) instead
+    # of silently skipping them. PELICULA_ENV_FILE, exported in
     # Stage 0, is inherited by this subshell and flows through to every
     # suite's own ENV_FILE resolution (see tests/lib.sh's peli_load_env doc).
     if PELICULA_TEST_JELLYFIN_USER=admin PELICULA_TEST_JELLYFIN_PASSWORD=test-jellyfin-pw \
