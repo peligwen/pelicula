@@ -13,7 +13,6 @@ func TestPipelineSettingsDefaults(t *testing.T) {
 	// Clear all env-gated knobs so the test is deterministic regardless of caller env.
 	t.Setenv("DUALSUB_ENABLED", "")
 	t.Setenv("DUALSUB_PAIRS", "")
-	t.Setenv("DUALSUB_TRANSLATOR", "")
 	t.Setenv("TRANSCODING_ENABLED", "")
 
 	s := defaultSettings()
@@ -29,9 +28,6 @@ func TestPipelineSettingsDefaults(t *testing.T) {
 	}
 	if want := []string{"en-es"}; !reflect.DeepEqual(s.DualSubPairs, want) {
 		t.Errorf("DualSubPairs: want %v, got %v", want, s.DualSubPairs)
-	}
-	if s.DualSubTranslator != "none" {
-		t.Errorf("DualSubTranslator: want %q, got %q", "none", s.DualSubTranslator)
 	}
 	if s.TranscodingEnabled {
 		t.Error("TranscodingEnabled: want false, got true")

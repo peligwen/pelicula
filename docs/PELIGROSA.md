@@ -24,6 +24,8 @@ Auth is always on. Credentials are verified against Jellyfin's `/Users/Authentic
 
 Sessions are hybrid: in-memory map for fast lookup, DB-backed (`sessions` table) so logins survive a middleware restart. `pelicula_session` HttpOnly cookie, `SameSite=Strict`, 24-hour lifetime. Login rate limiter: 5 failures per IP in 5 minutes → HTTP 429, DB-backed so it persists across restarts. Guards: `Guard` (viewer+), `GuardManager` (manager+), `GuardAdmin` (admin), wired per-route in `main.go`.
 
+Demoting an operator's role or deleting their operator entry revokes their live sessions immediately (in-memory and DB-backed) — the change does not wait out the 24-hour session TTL. Promotions deliberately do not revoke: the user keeps their session and picks up the wider role at next login.
+
 **Loopback auto-session** (`loopback.go`): requests from the host machine get a transient admin session without a cookie; three gates all must pass: (1) `RemoteAddr` within `172.16.0.0/12` (Docker bridge), (2) loopback `X-Real-IP` (nginx rewrites this from `$remote_addr` unconditionally — LAN clients cannot spoof it), (3) loopback `Host`. LAN clients must authenticate normally. Override the upstream CIDR with `PELICULA_UPSTREAM_CIDR` in `.env` if needed.
 
 ## Users, Invites, and Requests

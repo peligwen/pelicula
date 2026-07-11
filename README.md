@@ -240,7 +240,7 @@ The table below lists every feature claimed in this README. **E2E** shows automa
 | **Optional Services** | | |
 | Apprise push notifications (phone, email, Telegram, ntfy, Gotify, 85+ services) | — | ☐ |
 | Bazarr auto subtitle acquisition (wired to Sonarr + Radarr on startup) | ✓ playwright (subtitle-acquisition spec: await_subs stage → completed → jellyfin_synced) | ☐ |
-| Dual subtitles (stacked ASS sidecar, base + learning language) | ~ partial (pipeline stage runs; output file not asserted) | ☐ |
+| Dual subtitles (stacked ASS sidecar, base + learning language) | ✓ playwright (dualsub-happy asserts the written .ass content — sections, styles, exact stacked Dialogue lines; dualsub-failed asserts the recorded error names the missing language) | ☐ |
 | **Auth** | | |
 | Login required (Jellyfin-backed, always on) | ✓ e2e.sh (login 401/200, session cookie, protected routes, logout) | ☐ |
 | Loopback auto-session (host-machine requests, transient) | — | ☐ |
