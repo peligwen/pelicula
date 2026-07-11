@@ -85,7 +85,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | `GET` | `/api/pelicula/search` | Manager+ | Unified TMDB/TVDB/Prowlarr search. Query: `?q=…&type=movie|series` |
-| `POST` | `/api/pelicula/search/add` | Manager+ | Add a movie (`tmdbId`) or series (`tvdbId`) to Radarr/Sonarr. Optional `profileId` (int) / `rootPath` (string) override the default quality profile / root folder — absent or zero preserves today's default exactly. A supplied value must match an id/path from `GET /api/pelicula/arr-meta`'s `qualityProfiles`/`rootFolders` for that arr or the request is rejected with 400 |
+| `POST` | `/api/pelicula/search/add` | Manager+ | Add a movie (`tmdbId`) or series (`tvdbId`) to Radarr/Sonarr. Optional `profileId` (int) / `rootPath` (string) override the default quality profile / root folder — absent or zero preserves today's default exactly. `profileId` must match an id from `GET /api/pelicula/arr-meta`'s `qualityProfiles` for that arr; `rootPath` must match a **registered library's container path for that arr**, as returned in arr-meta's `libraries` field (not `rootFolders`, which is the *arr's own root-folder list and may not coincide with registered libraries on custom-library setups). Either mismatch is rejected with 400 |
 
 ### Catalog (Radarr/Sonarr + Procula)
 
@@ -156,7 +156,7 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `POST` | `/api/pelicula/settings/reset` | Admin, CSRF-strict | Full settings reset from a new WireGuard key. Same Origin guard |
 | `GET` | `/api/pelicula/procula-settings` | Admin | Read Procula settings (proxied) |
 | `POST` | `/api/pelicula/procula-settings` | Admin | Write Procula settings (proxied, with API key) |
-| `GET` | `/api/pelicula/arr-meta` | Manager+ | Quality profiles and root folders from Radarr + Sonarr, for settings dropdowns and the search "Add with options…" modal. Non-sensitive on a LAN-only stack; relaxed from Admin since search/add is already Manager+ |
+| `GET` | `/api/pelicula/arr-meta` | Manager+ | Quality profiles and root folders from Radarr + Sonarr, plus a `libraries` field (`{name, path}` per registered library for that arr — the container paths `search/add`'s `rootPath` validates against), for settings dropdowns and the search "Add with options…" modal. Non-sensitive on a LAN-only stack; relaxed from Admin since search/add is already Manager+ |
 
 ### Dashboard data
 
