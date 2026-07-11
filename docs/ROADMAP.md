@@ -25,6 +25,13 @@ in `## Shipped` capture each pass.
 
 ## Shipped
 
+### 2026-07-11 — search add-time overrides: quality profile + target library (flow-improvements Phase 1.2)
+- Search cards gain a Manager+ "Add with options…" affordance next to Add, opening a modal (`#add-options-modal`) to override the quality profile and target library (root folder) before adding — instead of always taking the configured default. Populated from `GET /api/pelicula/arr-meta` (radarr vs sonarr branch by card type); submits via `POST /api/pelicula/search/add`'s new optional `profileId`/`rootPath` fields, reusing Phase 1.1's toast-on-failure + button-state handling (`addMedia` now returns success/failure so the options flow can react without duplicating that logic).
+- `arr-meta` relaxed from Admin to Manager+ (chosen over a duplicate slim endpoint): its payload — quality-profile names/ids and root-folder paths — is non-sensitive on a LAN-only stack, and `search/add` was already Manager+.
+- Overrides are validated server-side, never trusted blindly: a supplied `profileId` must match an id from the relevant *arr's live quality profiles; a supplied `rootPath` must match a registered library's container path for that arr — the same sources the defaults (`FirstLibraryPath`, first quality profile) themselves draw from. A mismatch is rejected with 400 and a clear message rather than silently falling back; absent overrides preserve today's default exactly.
+- The modal ships with an explicit, empty, documented extension slot (`#add-options-extra`) for a later phase's series season picker — deliberately not built in this round.
+- New `tests/sweep-search-options.sh` verify suite (arr-meta responds at Manager+, search/add accepts a valid override and rejects an invalid one with 400) wired into `tests/verify.sh`.
+
 ### 2026-07-11 — NFS-backed library (named volumes)
 - The media library can now live on a NAS NFS export with no host-side mount: `LIBRARY_NFS=true` + `NFS_HOST`/`NFS_EXPORT`/`NFS_OPTIONS` in `.env`, and the Docker engine mounts the export as a `local`-driver named volume with `type=nfs` — no `/Volumes`, no VirtioFS, no FUSE in the media path.
 - Structural change: `compose/docker-compose.yml` mounts no `/media` anywhere; exactly one of the new `docker-compose.local-library.yml` (default bind mount) / `docker-compose.nfs.yml` overlay pair supplies it, selected in `Compose.buildArgs` so up/down/logs/restart all assemble the same file set. `WORK_DIR` deliberately stays a local bind — NFS breaks hardlinks, so *arr falls back to copy-on-import.
