@@ -85,21 +85,27 @@
         </div>
     </div>
 
-    <!-- Add-with-options modal (search cards, Manager+ only) — quality
-         profile + target library overrides for search/add. #add-options-extra
-         is a deliberately empty extension slot: a later phase mounts a series
-         season picker there. Keep this modal generic/extensible — do not
-         restructure it into something season-picker-specific. -->
+    <!-- Add-with-options modal (search cards) — quality profile + target
+         library overrides for search/add (Manager+), reused for viewers'
+         "Request seasons…" flow (search.js's addOptionsState.mode toggles
+         between 'add' and 'request'). #add-options-arr-fields wraps the
+         profile/root rows so request mode can hide them (viewers never see
+         and never fetch arr-meta — see search.js). #add-options-extra is the
+         season-picker mount point (search.js renders/clears it on open and
+         close); keep this modal generic/extensible — do not restructure it
+         into something season-picker-specific. -->
     <div class="modal-overlay hidden" id="add-options-modal">
         <div class="modal" role="dialog" aria-modal="true" aria-label="Add with options">
             <h3>Add with Options</h3>
             <div class="modal-sub" id="add-options-name"></div>
-            <label for="add-options-profile">Quality Profile</label>
-            <select id="add-options-profile"></select>
-            <label for="add-options-root">Target Library</label>
-            <select id="add-options-root"></select>
-            <!-- Extension slot: left empty by design. A later phase mounts a
-                 series season picker here when the card type is "series". -->
+            <div id="add-options-arr-fields">
+                <label for="add-options-profile">Quality Profile</label>
+                <select id="add-options-profile"></select>
+                <label for="add-options-root">Target Library</label>
+                <select id="add-options-root"></select>
+            </div>
+            <!-- Extension slot: season picker for series cards, mounted and
+                 cleared by search.js's openAddOptionsModal/closeAddOptionsModal. -->
             <div id="add-options-extra"></div>
             <div class="modal-buttons">
                 <button class="modal-btn-cancel" id="add-options-cancel-btn">Cancel</button>

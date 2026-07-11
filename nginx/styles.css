@@ -559,6 +559,35 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .modal-btn-confirm { background: var(--pink-l); color: var(--pink); border-color: rgba(240,96,168,0.4); }
 .modal-btn-confirm:hover { background: var(--pink); color: #fff; }
 
+/* Season picker — mounted into #add-options-extra (search.js) for series
+   cards, in both the Manager+ "Add with options…" modal and the viewer
+   "Request seasons…" modal (same #add-options-modal, different mode). */
+.season-picker { margin-top: 0.25rem; }
+.season-picker-label {
+    font-size: 0.78rem; color: var(--muted); margin-bottom: 0.35rem;
+    font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
+}
+.season-picker-quickselect { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.season-quickselect-btn {
+    padding: 0.25rem 0.7rem; background: var(--panel2); border: 1.5px solid var(--border2);
+    border-radius: 50px; color: var(--muted); cursor: pointer; transition: all 0.12s;
+    font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; font-size: 0.68rem;
+}
+.season-quickselect-btn:hover { background: var(--pink-l); border-color: rgba(240,96,168,0.4); color: var(--pink); }
+/* Long-running shows can have 30+ seasons — cap and scroll instead of
+   growing the modal unboundedly. */
+.season-picker-list {
+    max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem;
+    padding: 0.5rem 0.65rem; background: var(--panel2); border: 1.5px solid var(--border2);
+    border-radius: 12px; margin-bottom: 0.5rem;
+}
+.season-picker-item {
+    display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--ink);
+    font-family: var(--font-body, 'Nunito Sans', sans-serif); cursor: pointer;
+}
+.season-picker-checkbox { accent-color: var(--pink); cursor: pointer; flex-shrink: 0; }
+.season-picker-hint { font-size: 0.75rem; color: var(--pink); margin: -0.15rem 0 0.5rem; }
+
 /* Log viewer modal */
 .log-modal { max-width: 700px; width: 94vw; }
 .log-modal pre {

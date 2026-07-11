@@ -72,9 +72,7 @@ function renderResultCard(r) {
                 data-testid="search-add-options-btn"
               >Add with options…</button>`
         : raw('');
-    const actionBtn = isManager
-        ? raw(addBtn.str + addOptionsBtn.str)
-        : html`<button
+    const requestBtn = html`<button
                 class="search-request"
                 data-action="submit-request"
                 data-type="${r.type}"
@@ -85,6 +83,24 @@ function renderResultCard(r) {
                 data-poster="${r.poster || ''}"
                 data-testid="search-request-btn"
               >Request</button>`;
+    // Secondary affordance next to Request — viewers only, series only (season
+    // scope has no meaning for movies), never once already added. Opens the
+    // SAME #add-options-modal as Manager+'s "Add with options…" in 'request'
+    // mode: arr-meta is never fetched (viewers get 403 on it) and confirming
+    // calls submitRequest() with the chosen seasons instead of addMedia().
+    const requestOptionsBtn = (!isManager && !added && r.type === 'series')
+        ? html`<button
+                class="search-add-options"
+                data-action="request-options"
+                data-type="${r.type}"
+                data-tmdb="${tmdbId}"
+                data-tvdb="${tvdbId}"
+                data-testid="search-request-options-btn"
+              >Request seasons…</button>`
+        : raw('');
+    const actionBtn = isManager
+        ? raw(addBtn.str + addOptionsBtn.str)
+        : raw(requestBtn.str + requestOptionsBtn.str);
     const detailChips = buildDetailChips(r);
     const overview = r.overview ? html`<div class="search-overview">${r.overview}</div>` : raw('');
     return html`
@@ -189,9 +205,12 @@ function showMediaDetail(tmdbId, tvdbId, type) {
 }
 
 // addMedia posts the add request and drives btn's loading/success/failure
-// states. overrides is optional — {profileId, rootPath} from the "Add with
-// options…" modal; omitted (or falsy fields) preserves the plain-Add
-// behavior exactly. Returns true on success, false on failure, so callers
+// states. overrides is optional: {profileId, rootPath} from the "Add with
+// options..." modal, plus {seasons} (series only, Phase 2.2) — a non-empty
+// int array when present; confirmAddOptions never passes an empty array,
+// since the backend rejects [] with 400 and the modal blocks that selection
+// client-side first. Omitted/falsy fields preserve the plain-Add behavior
+// exactly. Returns true on success, false on failure, so callers
 // (confirmAddOptions) can decide what to do with a second, related button.
 async function addMedia(type, id, btn, overrides) {
     btn.disabled = true; btn.textContent = '\u2026';
@@ -202,6 +221,7 @@ async function addMedia(type, id, btn, overrides) {
         if (hit) { body.title = hit.title; body.year = hit.year || 0; body.poster = hit.poster || ''; }
         if (overrides && overrides.profileId) body.profileId = overrides.profileId;
         if (overrides && overrides.rootPath) body.rootPath = overrides.rootPath;
+        if (overrides && overrides.seasons && overrides.seasons.length) body.seasons = overrides.seasons;
         const data = await post('/api/pelicula/search/add', body);
         if (data !== null) {
             if (hit) { hit.added = true; }
@@ -221,17 +241,89 @@ async function addMedia(type, id, btn, overrides) {
     }
 }
 
+// ── Season picker ─────────────────────────────────────────────────────────
+// Mounts into #add-options-extra for series cards, in both the Manager+
+// 'add' mode and the viewer 'request' mode (see the Add-with-options modal
+// section below). Rendered fresh from the card's lastResults seasons
+// metadata every time the modal opens; a hit with no seasons metadata (or a
+// movie) leaves the slot empty — no picker present means "all seasons",
+// matching the backend's absent/null default exactly.
+const SEASON_CHECKBOX_CLASS = 'season-picker-checkbox';
+
+function renderSeasonPicker(hit) {
+    if (!hit || !hit.seasons || !hit.seasons.length) return '';
+    const items = hit.seasons.map(function(s) {
+        const label = s.seasonNumber === 0 ? 'Specials' : ('Season ' + s.seasonNumber);
+        // episodeCount is additive metadata the backend only sends when
+        // Sonarr's lookup actually reported it — never fabricated here.
+        const epSuffix = s.episodeCount
+            ? html` · ${s.episodeCount} episode${s.episodeCount !== 1 ? 's' : ''}`.str
+            : '';
+        // Default: regular seasons checked, Specials (season 0) unchecked —
+        // mirrors Sonarr's own default monitoring behavior.
+        const checkedAttr = s.seasonNumber === 0 ? raw('') : raw('checked');
+        return html`<label class="season-picker-item">
+                <input type="checkbox" class="${SEASON_CHECKBOX_CLASS}" value="${s.seasonNumber}" ${checkedAttr}>
+                <span>${label}${raw(epSuffix)}</span>
+            </label>`.str;
+    }).join('');
+    return html`
+        <div class="season-picker" data-testid="season-picker">
+            <div class="season-picker-label">Seasons</div>
+            <div class="season-picker-quickselect">
+                <button type="button" class="season-quickselect-btn" data-action="season-select-all" data-testid="season-select-all-btn">All seasons</button>
+                <button type="button" class="season-quickselect-btn" data-action="season-select-latest" data-testid="season-select-latest-btn">Latest season</button>
+            </div>
+            <div class="season-picker-list">${raw(items)}</div>
+            <div class="season-picker-hint hidden" data-testid="season-picker-hint">Select at least one season to continue.</div>
+        </div>`.str;
+}
+
+// readSeasonSelection inspects whatever is currently rendered inside
+// #add-options-extra. present=false means no picker was rendered at all (a
+// movie, or a series hit with no seasons metadata) — the caller should omit
+// the seasons key entirely, same as an unmodified default selection.
+// isDefault mirrors renderSeasonPicker's own default (regular seasons
+// checked, Specials unchecked) so confirming without touching anything also
+// omits the key, keeping that path byte-identical to the pre-season payload.
+function readSeasonSelection() {
+    const extra = document.getElementById('add-options-extra');
+    const checkboxes = extra ? extra.querySelectorAll('.' + SEASON_CHECKBOX_CLASS) : [];
+    if (!checkboxes.length) return {present: false, checked: [], isDefault: true};
+    const checked = [];
+    let isDefault = true;
+    checkboxes.forEach(function(cb) {
+        const n = parseInt(cb.value, 10);
+        if (cb.checked) checked.push(n);
+        if (n === 0 ? cb.checked : !cb.checked) isDefault = false;
+    });
+    checked.sort(function(a, b) { return a - b; });
+    return {present: true, checked: checked, isDefault: isDefault};
+}
+
+function showSeasonHint() {
+    const hint = document.querySelector('#add-options-extra .season-picker-hint');
+    if (hint) hint.classList.remove('hidden');
+}
+
+function hideSeasonHint() {
+    const hint = document.querySelector('#add-options-extra .season-picker-hint');
+    if (hint) hint.classList.add('hidden');
+}
+
 // ── Add-with-options modal ──────────────────────────────────────────────
-// Manager+ only affordance next to Add: lets the operator override quality
-// profile / target library before the add, via GET /api/pelicula/arr-meta
+// Manager+ affordance next to Add ('add' mode, addOptionsState.mode below):
+// override quality profile / target library via GET /api/pelicula/arr-meta
 // (radarr or sonarr branch, by card type) and POST /api/pelicula/search/add's
-// optional profileId/rootPath fields. Reuses addMedia's toast-on-failure and
-// button-state handling — see addMedia above.
-//
-// #add-options-extra (index.html) is a deliberately empty extension slot: a
-// later phase mounts a series season picker there. This module intentionally
-// does not touch it beyond leaving it alone on open/close.
-let addOptionsState = null; // {type, id, addBtn, optionsBtn} while the modal is open
+// optional profileId/rootPath fields. The SAME modal is reused by viewers'
+// "Request seasons…" affordance ('request' mode, Phase 2.2): the
+// #add-options-arr-fields wrapper (index.html) is hidden and arr-meta is
+// NEVER fetched in this mode (viewers get 403 on it), and confirming calls
+// submitRequest() instead of addMedia(). Both modes share the season picker
+// above, mounted into #add-options-extra from the card's lastResults seasons
+// metadata. Reuses addMedia's/submitRequest's toast-on-failure and
+// button-state handling — see both.
+let addOptionsState = null; // {type, id, addBtn, optionsBtn, mode} while the modal is open
 
 function fillOptionsSelect(select, items, valueKey, labelKey) {
     const defaultOpt = html`<option value="">Default</option>`.str;
@@ -243,19 +335,37 @@ function fillOptionsSelect(select, items, valueKey, labelKey) {
     select.innerHTML = defaultOpt + opts;
 }
 
-async function openAddOptionsModal(type, id, addBtn, optionsBtn) {
+async function openAddOptionsModal(type, id, addBtn, optionsBtn, mode) {
+    mode = mode || 'add';
     const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
     const hit = lastResults.find(function(r) { return r[idKey] === id; });
-    addOptionsState = {type: type, id: id, addBtn: addBtn, optionsBtn: optionsBtn};
+    addOptionsState = {type: type, id: id, addBtn: addBtn, optionsBtn: optionsBtn, mode: mode};
 
     const nameEl = document.getElementById('add-options-name');
     if (nameEl) nameEl.textContent = hit ? (hit.title + (hit.year ? ' (' + hit.year + ')' : '')) : '';
 
+    const confirmBtn = document.getElementById('add-options-confirm-btn');
+    if (confirmBtn) confirmBtn.textContent = mode === 'request' ? 'Request' : 'Add';
+
+    const arrFields = document.getElementById('add-options-arr-fields');
+    if (arrFields) arrFields.classList.toggle('hidden', mode === 'request');
+
+    // Season picker: series only, rendered fresh from lastResults metadata.
+    // Always clear the slot first — state must never leak between cards.
+    const extra = document.getElementById('add-options-extra');
+    if (extra) extra.innerHTML = type === 'series' ? renderSeasonPicker(hit) : '';
+
+    document.getElementById('add-options-modal').classList.remove('hidden');
+
+    if (mode === 'request') {
+        // Viewers get 403 on /api/pelicula/arr-meta — never issue the call.
+        return;
+    }
+
     const profileSelect = document.getElementById('add-options-profile');
     const rootSelect = document.getElementById('add-options-root');
-    if (profileSelect) profileSelect.innerHTML = html`<option value="">Loading\u2026</option>`.str;
-    if (rootSelect) rootSelect.innerHTML = html`<option value="">Loading\u2026</option>`.str;
-    document.getElementById('add-options-modal').classList.remove('hidden');
+    if (profileSelect) profileSelect.innerHTML = html`<option value="">Loading…</option>`.str;
+    if (rootSelect) rootSelect.innerHTML = html`<option value="">Loading…</option>`.str;
 
     try {
         const meta = await get('/api/pelicula/arr-meta');
@@ -276,32 +386,86 @@ async function openAddOptionsModal(type, id, addBtn, optionsBtn) {
 
 function closeAddOptionsModal() {
     document.getElementById('add-options-modal').classList.add('hidden');
-    addOptionsState = null;
+    // Always clear the slot on close too — state must never leak between cards.
+    const extra = document.getElementById('add-options-extra');
+    if (extra) extra.innerHTML = '';
+    const confirmBtn = document.getElementById('add-options-confirm-btn');
+    if (confirmBtn) confirmBtn.textContent = 'Add';
+    const arrFields = document.getElementById('add-options-arr-fields');
+    if (arrFields) arrFields.classList.remove('hidden');
+    addOptionsState = null; // mode fully reset — the next open() sets it explicitly
 }
 
 async function confirmAddOptions() {
     if (!addOptionsState) return;
-    const {type, id, addBtn, optionsBtn} = addOptionsState;
+    const {type, id, addBtn, optionsBtn, mode} = addOptionsState;
+
+    // Read the season selection before closing — closeAddOptionsModal clears
+    // #add-options-extra.
+    const sel = readSeasonSelection();
+    if (sel.present && sel.checked.length === 0) {
+        // Nothing checked: the backend rejects an explicit [] with 400, and
+        // there is no "monitor nothing" add/request — keep the modal open
+        // with an inline hint instead of sending it.
+        showSeasonHint();
+        return;
+    }
+    // Default selection (all regular seasons, no Specials) or no picker at
+    // all → omit the seasons key so the payload stays byte-identical to the
+    // pre-season-support shape.
+    const seasons = (!sel.present || sel.isDefault) ? undefined : sel.checked;
+
+    if (mode === 'request') {
+        const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
+        const hit = lastResults.find(function(r) { return r[idKey] === id; });
+        closeAddOptionsModal();
+        if (optionsBtn) optionsBtn.disabled = true;
+        const ok = await submitRequest(
+            type,
+            type === 'movie' ? id : 0,
+            type === 'series' ? id : 0,
+            hit ? hit.title : '',
+            hit ? (hit.year || 0) : 0,
+            hit ? (hit.poster || '') : '',
+            addBtn,
+            seasons
+        );
+        if (optionsBtn) {
+            if (ok) optionsBtn.style.display = 'none'; // card is now requested — matches renderResultCard's !added gate
+            else optionsBtn.disabled = false;           // failed — submitRequest already reset addBtn; let this be retried too
+        }
+        return;
+    }
+
     const profileVal = document.getElementById('add-options-profile').value;
     const rootVal = document.getElementById('add-options-root').value;
     closeAddOptionsModal();
 
     if (optionsBtn) optionsBtn.disabled = true;
-    const ok = await addMedia(type, id, addBtn, {
+    const overrides = {
         profileId: profileVal ? parseInt(profileVal, 10) : 0,
         rootPath: rootVal || ''
-    });
+    };
+    if (seasons !== undefined) overrides.seasons = seasons;
+    const ok = await addMedia(type, id, addBtn, overrides);
     if (optionsBtn) {
         if (ok) optionsBtn.style.display = 'none'; // card is now added — matches renderResultCard's !added gate
         else optionsBtn.disabled = false;           // failed — addMedia already reset addBtn; let this be retried too
     }
 }
 
-async function submitRequest(type, tmdbId, tvdbId, title, year, poster, btn) {
+// submitRequest posts a viewer's media request and drives btn's
+// loading/success/failure states — same button-state contract as addMedia.
+// seasons (series only, Phase 2.2) is an optional non-empty int array from
+// the "Request seasons…" modal; the one-click Request button on a card omits
+// it (default: all seasons), and it's never sent empty (mirrors addMedia's
+// seasons contract).
+async function submitRequest(type, tmdbId, tvdbId, title, year, poster, btn, seasons) {
     try {
         const body = {type: type, title: title, year: year, poster: poster};
         if (type === 'movie') body.tmdb_id = tmdbId;
         else body.tvdb_id = tvdbId;
+        if (seasons && seasons.length) body.seasons = seasons;
         const data = await post('/api/pelicula/requests', body);
         if (!data) {
             toast('Request failed: not authorized', {error: true});
@@ -432,6 +596,16 @@ document.getElementById('search-results').addEventListener('click', e => {
     } else if (action === 'submit-request') {
         el.disabled = true; el.textContent = '…';
         submitRequest(el.dataset.type, parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.title, parseInt(el.dataset.year, 10), el.dataset.poster, el);
+    } else if (action === 'request-options') {
+        // Viewer "Request seasons…" — reuses #add-options-modal in 'request'
+        // mode (see openAddOptionsModal). The card's one-click Request button
+        // is passed through so submitRequest can flip it to "Requested" too,
+        // keeping both affordances on the card in sync.
+        const card = el.closest('.search-card');
+        const requestBtn = card && card.querySelector('.search-request');
+        if (requestBtn) {
+            openAddOptionsModal(el.dataset.type, el.dataset.type === 'movie' ? parseInt(el.dataset.tmdb, 10) : parseInt(el.dataset.tvdb, 10), requestBtn, el, 'request');
+        }
     } else if (action === 'expand-results') {
         expandResults();
     }
@@ -440,4 +614,38 @@ document.getElementById('search-results').addEventListener('click', e => {
 // Add-with-options modal buttons
 document.getElementById('add-options-cancel-btn').addEventListener('click', closeAddOptionsModal);
 document.getElementById('add-options-confirm-btn').addEventListener('click', confirmAddOptions);
+
+// Season picker quick-selects, delegated on the static #add-options-extra
+// slot (its innerHTML is replaced on every modal open/close — see
+// openAddOptionsModal/closeAddOptionsModal — so this listener is wired once
+// here rather than re-bound per render).
+document.getElementById('add-options-extra').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const extra = document.getElementById('add-options-extra');
+    const checkboxes = extra.querySelectorAll('.' + SEASON_CHECKBOX_CLASS);
+    if (btn.dataset.action === 'season-select-all') {
+        checkboxes.forEach(cb => { cb.checked = true; });
+        hideSeasonHint();
+    } else if (btn.dataset.action === 'season-select-latest') {
+        let latest = null;
+        checkboxes.forEach(cb => {
+            const n = parseInt(cb.value, 10);
+            if (n !== 0 && (latest === null || n > latest)) latest = n;
+        });
+        checkboxes.forEach(cb => {
+            const n = parseInt(cb.value, 10);
+            // No regular season exists (Specials-only edge case) — fall back
+            // to checking everything rather than leaving nothing selected.
+            cb.checked = latest === null ? true : (n === latest);
+        });
+        hideSeasonHint();
+    }
+});
+
+// Hide the "select at least one season" hint as soon as the visitor checks
+// anything by hand, so it doesn't linger after a failed confirm attempt.
+document.getElementById('add-options-extra').addEventListener('change', e => {
+    if (e.target.classList.contains(SEASON_CHECKBOX_CLASS) && e.target.checked) hideSeasonHint();
+});
 
