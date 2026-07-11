@@ -261,7 +261,12 @@ async function openAddOptionsModal(type, id, addBtn, optionsBtn) {
         const meta = await get('/api/pelicula/arr-meta');
         const arrMeta = (meta && (type === 'movie' ? meta.radarr : meta.sonarr)) || {};
         fillOptionsSelect(profileSelect, arrMeta.qualityProfiles, 'id', 'name');
-        fillOptionsSelect(rootSelect, arrMeta.rootFolders, 'path', 'path');
+        // Target Library options come from arrMeta.libraries (registered Pelicula
+        // libraries for this arr), NOT rootFolders (the *arr's own root-folder
+        // list) — the backend validates rootPath against registered libraries
+        // (search/handler.go's rootPathValid), and the two sources can diverge
+        // on custom-library setups. See docs/API.md's search/add Notes.
+        fillOptionsSelect(rootSelect, arrMeta.libraries, 'path', 'name');
     } catch (e) {
         console.warn('[pelicula] arr-meta error:', e);
         if (profileSelect) profileSelect.innerHTML = html`<option value="">Default</option>`.str;
