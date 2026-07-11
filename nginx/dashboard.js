@@ -186,7 +186,7 @@ async function checkStatus() {
 // Both are mounted below after DOMContentLoaded.
 
 // data-* bridge helpers for download action buttons — keep user-controlled strings out of JS string literals in onclick
-// dlPauseFromBtn, dlCancelFromBtn, openBlocklistFromBtn are defined in downloads.js.
+// dlPauseFromBtn, openCancelFromBtn, openBlocklistFromBtn are defined in downloads.js.
 function retryFromBtn(btn) { retryJob(btn.dataset.jobId); }
 // formatSpeed, formatSize, formatETA are defined in format.js (loaded before this module).
 const formatSpeed = window.formatSpeed;

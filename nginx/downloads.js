@@ -58,7 +58,7 @@ function renderDownloads(data) {
 // ── data-* bridge helpers ────────────────────────────────────────────────
 
 function dlPauseFromBtn(btn, paused) { dlPause(btn.dataset.hash, paused); }
-function dlCancelFromBtn(btn, blocklist) { dlCancel(btn.dataset.hash, btn.dataset.category, btn.dataset.name, blocklist); }
+function openCancelFromBtn(btn) { openCancelModal(btn.dataset.hash, btn.dataset.category, btn.dataset.name); }
 function openBlocklistFromBtn(btn) { openBlocklistModal(btn.dataset.hash, btn.dataset.category, btn.dataset.name); }
 
 // ── Download actions ──────────────────────────────────────────────────────
@@ -71,11 +71,31 @@ async function dlPause(hash, paused) {
 }
 
 async function dlCancel(hash, category, name, blocklist, reason) {
-    if (!blocklist && !confirm('Cancel download and unmonitor?\n\n' + name)) return;
     try {
         await post('/api/pelicula/downloads/cancel', {hash, category, blocklist, reason: reason || ''});
         setTimeout(checkDownloads, 500);
     } catch (e) { console.warn('[pelicula] error:', e); }
+}
+
+// ── Cancel-download modal ─────────────────────────────────────────────────
+
+let cancelDlState = {};
+
+function openCancelModal(hash, category, name) {
+    cancelDlState = {hash, category, name};
+    document.getElementById('cancel-dl-name').textContent = name;
+    document.getElementById('cancel-dl-modal').classList.remove('hidden');
+}
+
+function closeCancelModal() {
+    document.getElementById('cancel-dl-modal').classList.add('hidden');
+    cancelDlState = {};
+}
+
+function confirmCancelModal() {
+    const {hash, category, name} = cancelDlState;
+    closeCancelModal();
+    dlCancel(hash, category, name, false);
 }
 
 // ── Blocklist modal ───────────────────────────────────────────────────────
@@ -116,11 +136,13 @@ if (_dlList) _dlList.addEventListener('click', e => {
     const action = btn.dataset.action;
     if (action === 'resume') dlPauseFromBtn(btn, false);
     else if (action === 'pause') dlPauseFromBtn(btn, true);
-    else if (action === 'cancel') dlCancelFromBtn(btn, false);
+    else if (action === 'cancel') openCancelFromBtn(btn);
     else if (action === 'blocklist') openBlocklistFromBtn(btn);
     else if (action === 'toggle-name') btn.classList.toggle('expanded');
 });
 
+document.getElementById('cancel-dl-cancel-btn').addEventListener('click', closeCancelModal);
+document.getElementById('cancel-dl-confirm-btn').addEventListener('click', confirmCancelModal);
 document.getElementById('blocklist-cancel-btn').addEventListener('click', closeBlocklistModal);
 document.getElementById('blocklist-confirm-btn').addEventListener('click', confirmBlocklist);
 
