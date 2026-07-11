@@ -75,8 +75,8 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | `GET` | `/api/pelicula/requests` | Viewer+ | List requests. Admins see all; viewers see only their own |
-| `POST` | `/api/pelicula/requests` | Viewer+ | Create a media request (`type`, `tmdb_id`/`tvdb_id`, `title`, `year`) |
-| `POST` | `/api/pelicula/requests/{id}/approve` | Admin | Approve a request; adds to Radarr/Sonarr and marks available |
+| `POST` | `/api/pelicula/requests` | Viewer+ | Create a media request (`type`, `tmdb_id`/`tvdb_id`, `title`, `year`). Optional `seasons` (int array, series only) is the viewer's desired season-level scope — absent/null means all seasons, `[]` is rejected with 400, and each number is shape-validated (0-999, deduped, ≤100 entries) but **not** checked for existence against Sonarr; that check happens at approve, the authoritative gate. `seasons` on a movie is rejected with 400 |
+| `POST` | `/api/pelicula/requests/{id}/approve` | Admin | Approve a request; adds to Radarr/Sonarr and marks available. Optional body `{"seasons": [...]}` (series only) lets the admin override the viewer's requested scope at approval time: **absent/null** uses the request's stored `seasons`; a **non-empty array** is shape-validated and used as the final scope (existence against Sonarr's lookup is validated here — a season number that doesn't exist on the series is rejected with 400); an **explicit `[]`** clears the scope to all seasons. This is intentionally asymmetric with `search/add` and request-create (where `[]` is rejected) — the approval UI has no per-series season list to enumerate against ahead of the Sonarr lookup, so `[]` here means "no override, use everything" rather than "invalid input" |
 | `POST` | `/api/pelicula/requests/{id}/deny` | Admin | Deny a pending request |
 | `DELETE` | `/api/pelicula/requests/{id}` | Admin | Hard-delete a request record |
 
@@ -84,8 +84,8 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| `GET` | `/api/pelicula/search` | Manager+ | Unified TMDB/TVDB/Prowlarr search. Query: `?q=…&type=movie|series` |
-| `POST` | `/api/pelicula/search/add` | Manager+ | Add a movie (`tmdbId`) or series (`tvdbId`) to Radarr/Sonarr. Optional `profileId` (int) / `rootPath` (string) override the default quality profile / root folder — absent or zero preserves today's default exactly. `profileId` must match an id from `GET /api/pelicula/arr-meta`'s `qualityProfiles` for that arr; `rootPath` must match a **registered library's container path for that arr**, as returned in arr-meta's `libraries` field (not `rootFolders`, which is the *arr's own root-folder list and may not coincide with registered libraries on custom-library setups). Either mismatch is rejected with 400 |
+| `GET` | `/api/pelicula/search` | Manager+ | Unified TMDB/TVDB/Prowlarr search. Query: `?q=…&type=movie|series`. Series results carry an additive `seasons` array (`seasonNumber`, plus `episodeCount` when Sonarr's lookup provides `statistics.totalEpisodeCount` — never fabricated when absent) |
+| `POST` | `/api/pelicula/search/add` | Manager+ | Add a movie (`tmdbId`) or series (`tvdbId`) to Radarr/Sonarr. Optional `profileId` (int) / `rootPath` (string) override the default quality profile / root folder — absent or zero preserves today's default exactly. `profileId` must match an id from `GET /api/pelicula/arr-meta`'s `qualityProfiles` for that arr; `rootPath` must match a **registered library's container path for that arr**, as returned in arr-meta's `libraries` field (not `rootFolders`, which is the *arr's own root-folder list and may not coincide with registered libraries on custom-library setups). Either mismatch is rejected with 400. Optional `seasons` (int array, series only) selects which seasons to monitor — absent/null means all seasons (the payload sent to Sonarr is unchanged from before season support existed); `[]` is rejected with 400; each number is shape-validated (0-999, deduped, ≤100 entries) and then checked for existence against Sonarr's own lookup, with a 400 on any number that doesn't exist for that series. `seasons` on a movie is rejected with 400 |
 
 ### Catalog (Radarr/Sonarr + Procula)
 
@@ -248,6 +248,8 @@ Backups are versioned JSON files produced by `POST /api/pelicula/export` and con
 | v2 | v1 + `pelicula_version`, `roles`, `invites`, `requests` | Full data export including auth and request queue state |
 
 **Forward compatibility:** Newer versions always accept older backups. Fields added in later versions get sensible defaults when importing from an older version. The `version` field is always present and always an integer.
+
+**Requests entries (v2, additive):** each entry in `requests` now optionally carries a `seasons` int array — the season-level scope recorded for a series request (absent/omitted means all seasons). This is an additive field on the existing v2 format, not a new backup version; older v2 backups without `seasons` restore with an empty (all-seasons) scope.
 
 ---
 
