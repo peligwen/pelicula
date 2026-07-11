@@ -420,7 +420,10 @@ component('catalog', function (el, store, _props) {
         // files) — these render as single, non-fanout actions. Movie level
         // has no container/episode split: defs is just "applies to movie".
         const episodeDefs = isFanout ? registry.filter(d => d.applies_to && d.applies_to.includes('episode')) : [];
-        const containerDefs = isFanout ? registry.filter(d => d.applies_to && d.applies_to.includes(level)) : [];
+        // Exclude anything already in episodeDefs so a def whose applies_to names
+        // both "episode" and this container level can't render twice (unreachable
+        // with today's registry, but cheap to guard against).
+        const containerDefs = isFanout ? registry.filter(d => d.applies_to && d.applies_to.includes(level) && !episodeDefs.includes(d)) : [];
         const defs = isFanout ? [] : registry.filter(d => d.applies_to && d.applies_to.includes(level));
 
         function addMenuItem(def, fanout) {
@@ -1494,12 +1497,31 @@ component('catalog', function (el, store, _props) {
             ? { arr_type: 'radarr', arr_id: item.id }
             : { arr_type: 'sonarr', arr_id: item.id }; // series
         try {
-            await post('/api/pelicula/actions?wait=10', { action: 'remove', target, params: {} });
+            const data = await post('/api/pelicula/actions?wait=10', { action: 'remove', target, params: {} });
             statusEl.textContent = '';
-            window.removeClose();
-            toast('Removed');
-            store.set('catalog.loaded', false);
-            loadCatalog();
+            // wait=10 still resolves HTTP 200 for a failed job or a wait-timeout
+            // (see procula/handlers_actions.go's handleCreateAction) — !res.ok
+            // alone can't tell success from failure here, so branch on state
+            // the same way runAction (~line 761) and the fanout loop (~line 1432) do.
+            if (data && data.state === 'completed') {
+                window.removeClose();
+                toast('Removed');
+                store.set('catalog.loaded', false);
+                loadCatalog();
+            } else if (data && data.state === 'failed') {
+                toast((data.error) || 'Remove failed', { error: true });
+                window.removeInputChanged(); // re-enable Remove if the typed title still matches
+            } else {
+                // Still queued/processing when the wait window elapsed (or a
+                // malformed body) — the job may still be running server-side.
+                // Don't claim success, but don't keep the operator staring at
+                // a stuck modal either: close it and refresh, since the item
+                // may disappear on its own once the job finishes.
+                window.removeClose();
+                toast('Remove still running — check the jobs tab');
+                store.set('catalog.loaded', false);
+                loadCatalog();
+            }
         } catch (e) {
             const errMsg = (e.body && e.body.error) || e.message || 'unknown';
             statusEl.textContent = '';
