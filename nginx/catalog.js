@@ -1503,7 +1503,11 @@ component('catalog', function (el, store, _props) {
             // (see procula/handlers_actions.go's handleCreateAction) — !res.ok
             // alone can't tell success from failure here, so branch on state
             // the same way runAction (~line 761) and the fanout loop (~line 1432) do.
-            if (data && data.state === 'completed') {
+            if (data === null) {
+                // post() resolves null only on a 401 — session expired mid-modal.
+                toast('Remove failed: not authorized', { error: true });
+                window.removeInputChanged();
+            } else if (data && data.state === 'completed') {
                 window.removeClose();
                 toast('Removed');
                 store.set('catalog.loaded', false);
