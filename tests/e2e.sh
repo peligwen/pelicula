@@ -450,6 +450,32 @@ EOF
         return 1
     fi
 
+    # Validate the NFS library overlay renders. This stack runs in bind-mount
+    # mode (local-library), so a pure `docker compose config` render with stub
+    # NFS vars is the only automated guard against YAML/interpolation rot in
+    # docker-compose.nfs.yml. The two overlays must stay in lockstep (same
+    # /media target per media service — see their header comments), so the
+    # assertion compares mount counts between them instead of hardcoding one.
+    local nfs_render local_render nfs_media local_media
+    nfs_render="$(NFS_HOST=nfs-render-check NFS_EXPORT=/volume1/render-check \
+        $NEEDS_SUDO docker compose \
+            --project-directory "$SCRIPT_DIR" \
+            --env-file "$test_env" \
+            -f "$COMPOSE_FILE" \
+            -f "$SCRIPT_DIR/compose/docker-compose.nfs.yml" \
+            -p pelicula-nfs-render \
+            config 2>&1 || true)"
+    local_render="$(test_compose config 2>&1 || true)"
+    nfs_media="$(echo "$nfs_render" | grep -c "target: /media" || true)"
+    local_media="$(echo "$local_render" | grep -c "target: /media" || true)"
+    if [[ "$nfs_media" -ge 1 && "$nfs_media" -eq "$local_media" ]] \
+            && echo "$nfs_render" | grep -q "type: nfs"; then
+        t_pass "NFS library overlay renders in lockstep (${nfs_media} /media mounts, type=nfs)"
+    else
+        t_fail "NFS library overlay render mismatch (nfs: ${nfs_media} /media mounts, local: ${local_media})"
+        echo "$nfs_render" | tail -15
+    fi
+
     # ── Stage 2: Wait for Auto-Wire ───────────────────
 
     info "Waiting for auto-wire to complete (Jellyfin wizard + library setup)..."
