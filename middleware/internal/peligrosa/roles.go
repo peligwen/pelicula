@@ -17,13 +17,6 @@ type RolesEntry struct {
 	Role       UserRole `json:"role"`
 }
 
-// RolesFile is kept for JSON migration compatibility.
-// Used by migrate_json.go in the main package to deserialize the legacy roles.json.
-type RolesFile struct {
-	Version int          `json:"version"`
-	Users   []RolesEntry `json:"users"`
-}
-
 // RolesStore wraps the typed repo/roles store and adapts its string-typed API
 // to the UserRole domain type used throughout peligrosa.
 // SQLite handles concurrency; no additional mutex is needed.
