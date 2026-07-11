@@ -165,6 +165,23 @@ cmd_test() {
         echo ""
     fi
 
+    # Pre-flight: force-remove any pelicula-test-* survivors from an earlier
+    # run whose teardown never fired (kill -9, SIGTERM mid-hook, trap bug).
+    # Adopting leftovers instead poisons the fresh run in a subtle way: `up`
+    # only recreates containers whose config changed, so survivors keep bind
+    # mounts into the DEAD run's (deleted) temp dir and — worse — a surviving
+    # nginx resolves upstream container names at ITS startup, so it proxies
+    # the fresh run's requests at the old, recycled container IPs and every
+    # API call times out. Scoped strictly to the pelicula-test- name prefix;
+    # never touches production.
+    local survivors
+    survivors="$($NEEDS_SUDO docker ps -aq --filter 'name=^pelicula-test-' 2>/dev/null || true)"
+    if [[ -n "$survivors" ]]; then
+        warn "Found leftover pelicula-test containers from a previous run — removing them first."
+        echo "$survivors" | xargs $NEEDS_SUDO docker rm -f >/dev/null 2>&1 || true
+        $NEEDS_SUDO docker network rm pelicula-test_default >/dev/null 2>&1 || true
+    fi
+
     local test_dir
     test_dir="$(mktemp -d)"
     local test_config_dir="$test_dir/config"
@@ -248,6 +265,13 @@ cmd_test() {
     # (safe to run twice) and must never let its own failures set the exit
     # code of an otherwise-green run — every step below is best-effort.
     cleanup_test() {
+        # PELICULA_BIN is a local of run_test, and this trap can fire OUTSIDE
+        # that scope (a stage's `return 1` unwinds run_test, then the script
+        # exits from the top level). Under set -u a bare $PELICULA_BIN then
+        # kills the trap itself and the whole teardown silently never runs —
+        # this leaked a live test stack on 2026-07-11. Re-derive the
+        # deterministic path up front; every use below goes through $peli_bin.
+        local peli_bin="${PELICULA_BIN:-$SCRIPT_DIR/bin/pelicula}"
         if [[ ${keep:-0} -eq 0 ]]; then
             info "Cleaning up test stack..."
             # Same PELICULA_ENV_FILE/PELICULA_COMPOSE_OVERLAY exported for
@@ -263,8 +287,9 @@ cmd_test() {
             # name — production's — which must never be touched by e2e.
             # If we get here before the export (e.g. mktemp itself failed),
             # nothing was ever started, so there's nothing to tear down.
-            if [[ -n "${PELICULA_ENV_FILE:-}" && -x "$PELICULA_BIN" ]]; then
-                "$PELICULA_BIN" down || \
+            #
+            if [[ -n "${PELICULA_ENV_FILE:-}" && -x "$peli_bin" ]]; then
+                "$peli_bin" down || \
                     warn "bin/pelicula down exited non-zero during teardown — checking for survivors"
             elif [[ -z "${PELICULA_ENV_FILE:-}" ]]; then
                 warn "PELICULA_ENV_FILE was never set — skipping bin/pelicula down (nothing to tear down)"
@@ -272,7 +297,7 @@ cmd_test() {
 
             if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^pelicula-test-'; then
                 warn "SANITY: pelicula-test containers survived teardown — run:"
-                warn "  PELICULA_ENV_FILE=${test_env} PELICULA_COMPOSE_OVERLAY=${SCRIPT_DIR}/compose/docker-compose.test.yml ${PELICULA_BIN} down"
+                warn "  PELICULA_ENV_FILE=${test_env:-<test env>} PELICULA_COMPOSE_OVERLAY=${SCRIPT_DIR}/compose/docker-compose.test.yml ${peli_bin} down"
             fi
             # Container-created files can defeat a plain rm two ways: on
             # macOS, Docker Desktop's VirtioFS stamps a `deny delete` ACL on
@@ -294,9 +319,9 @@ cmd_test() {
             echo ""
             warn "Test stack left running (--keep is set)."
             warn "Drive it yourself with the same isolated env this run used:"
-            warn "  export PELICULA_ENV_FILE=${test_env}"
+            warn "  export PELICULA_ENV_FILE=${test_env:-<test env>}"
             warn "  export PELICULA_COMPOSE_OVERLAY=${SCRIPT_DIR}/compose/docker-compose.test.yml"
-            warn "  ${PELICULA_BIN} down    # tear it down when done"
+            warn "  ${peli_bin} down    # tear it down when done"
             warn "Temp dirs: ${test_dir:-<unknown>}"
         fi
     }
