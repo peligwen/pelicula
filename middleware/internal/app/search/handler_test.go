@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"pelicula-api/clients"
 	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/library"
 	arrclient "pelicula-api/internal/clients/arr"
@@ -1189,5 +1191,372 @@ func TestHandleSearch_EmptyQuery(t *testing.T) {
 	}())
 	if len(results) != 0 {
 		t.Errorf("results = %d, want 0 for empty query", len(results))
+	}
+}
+
+// ── Phase 2.1: season-level granularity for series add ──────────────────────
+
+// TestNormalizeSeasons is a table-driven test of the shape-validation rules
+// shared by search/add and (independently) peligrosa's request create/approve.
+func TestNormalizeSeasons(t *testing.T) {
+	t.Parallel()
+
+	tooMany := make([]int, 101)
+
+	tests := []struct {
+		name    string
+		in      []int
+		want    []int
+		wantErr string
+	}{
+		{name: "nil is valid (all seasons)", in: nil, want: nil, wantErr: ""},
+		{name: "empty is rejected", in: []int{}, want: nil, wantErr: "seasons must be a non-empty array of season numbers"},
+		{name: "dedupes and sorts", in: []int{3, 1, 3, 2}, want: []int{1, 2, 3}, wantErr: ""},
+		{name: "season 0 (specials) is in range", in: []int{0}, want: []int{0}, wantErr: ""},
+		{name: "season 999 is in range", in: []int{999}, want: []int{999}, wantErr: ""},
+		{name: "out of range high is rejected", in: []int{1000}, want: nil, wantErr: "season number 1000 out of range (0-999)"},
+		{name: "negative is rejected", in: []int{-1}, want: nil, wantErr: "season number -1 out of range (0-999)"},
+		{name: "over 100 entries is rejected", in: tooMany, want: nil, wantErr: "seasons must contain at most 100 entries"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, errMsg := normalizeSeasons(tc.in)
+			if errMsg != tc.wantErr {
+				t.Fatalf("errMsg = %q, want %q", errMsg, tc.wantErr)
+			}
+			if errMsg == "" && !equalIntSlices(got, tc.want) {
+				t.Errorf("got = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func equalIntSlices(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestBuildSeasonsPayload_MarksSelectedMonitored verifies that every season
+// from the lookup is present in the output, with only the selected numbers
+// monitored — including specials (season 0) when selected or not.
+func TestBuildSeasonsPayload_MarksSelectedMonitored(t *testing.T) {
+	t.Parallel()
+
+	show := map[string]any{
+		"seasons": []any{
+			map[string]any{"seasonNumber": float64(0), "monitored": false},
+			map[string]any{"seasonNumber": float64(1), "monitored": true},
+			map[string]any{"seasonNumber": float64(2), "monitored": true},
+		},
+	}
+	got, err := buildSeasonsPayload(show, []int{1})
+	if err != nil {
+		t.Fatalf("buildSeasonsPayload: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3 (every season from the lookup)", len(got))
+	}
+	want := map[int]bool{0: false, 1: true, 2: false}
+	for _, s := range got {
+		num := s["seasonNumber"].(int)
+		if s["monitored"].(bool) != want[num] {
+			t.Errorf("season %d monitored = %v, want %v", num, s["monitored"], want[num])
+		}
+	}
+}
+
+// TestBuildSeasonsPayload_UnknownSeasonReturnsErrInvalidSeasons verifies that
+// requesting a season number absent from the lookup's own season list
+// surfaces clients.ErrInvalidSeasons, with the offending number in the text.
+func TestBuildSeasonsPayload_UnknownSeasonReturnsErrInvalidSeasons(t *testing.T) {
+	t.Parallel()
+
+	show := map[string]any{
+		"seasons": []any{
+			map[string]any{"seasonNumber": float64(1), "monitored": true},
+		},
+	}
+	_, err := buildSeasonsPayload(show, []int{9})
+	if !errors.Is(err, clients.ErrInvalidSeasons) {
+		t.Fatalf("err = %v, want wrapping clients.ErrInvalidSeasons", err)
+	}
+	if !strings.Contains(err.Error(), "9") {
+		t.Errorf("error should mention the bad season number 9: %v", err)
+	}
+}
+
+// TestExtractSeasonInfo_EpisodeCountOnlyWhenStatisticsPresent verifies that
+// episodeCount is populated only when the lookup provides
+// statistics.totalEpisodeCount, never fabricated when absent.
+func TestExtractSeasonInfo_EpisodeCountOnlyWhenStatisticsPresent(t *testing.T) {
+	t.Parallel()
+
+	raw := map[string]any{
+		"seasons": []any{
+			map[string]any{"seasonNumber": float64(0), "monitored": false},
+			map[string]any{
+				"seasonNumber": float64(1), "monitored": true,
+				"statistics": map[string]any{"totalEpisodeCount": float64(10)},
+			},
+		},
+	}
+	got := extractSeasonInfo(raw)
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].EpisodeCount != 0 {
+		t.Errorf("season 0 EpisodeCount = %d, want 0 (no statistics on the lookup)", got[0].EpisodeCount)
+	}
+	if got[1].EpisodeCount != 10 {
+		t.Errorf("season 1 EpisodeCount = %d, want 10", got[1].EpisodeCount)
+	}
+}
+
+// TestExtractSeasonInfo_NoSeasonsKeyReturnsNil verifies the additive-field
+// contract: a lookup item with no "seasons" key yields a nil slice (which,
+// combined with SearchResult.Seasons's omitempty tag, keeps the field out of
+// the response for movie results and any degraded series lookup).
+func TestExtractSeasonInfo_NoSeasonsKeyReturnsNil(t *testing.T) {
+	t.Parallel()
+	if got := extractSeasonInfo(map[string]any{}); got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+}
+
+// TestHandleSearch_SeriesResultsCarrySeasonsMetadata verifies GET
+// /api/pelicula/search's additive seasons field end to end: every season
+// from the Sonarr lookup appears, and episodeCount is present only for the
+// season whose lookup entry actually has statistics.
+func TestHandleSearch_SeriesResultsCarrySeasonsMetadata(t *testing.T) {
+	t.Parallel()
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/series/lookup":
+			w.Write([]byte(`[{"title":"Dune: Prophecy","year":2024,"tvdbId":422100,"seasons":[` + //nolint:errcheck
+				`{"seasonNumber":1,"monitored":true,"statistics":{"totalEpisodeCount":6}},` +
+				`{"seasonNumber":2,"monitored":false}]}]`))
+		case "/api/v3/series":
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		}
+	}))
+	defer sonarr.Close()
+
+	h := newHandler(sonarr, nil, nil, "")
+	results := resultsFrom(t, doSearch(t, h, "dune", "series"))
+
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	seasonsRaw, ok := results[0]["seasons"].([]any)
+	if !ok || len(seasonsRaw) != 2 {
+		t.Fatalf("seasons = %v, want 2 entries", results[0]["seasons"])
+	}
+	s1 := seasonsRaw[0].(map[string]any)
+	if int(s1["seasonNumber"].(float64)) != 1 {
+		t.Errorf("seasons[0].seasonNumber = %v, want 1", s1["seasonNumber"])
+	}
+	if int(s1["episodeCount"].(float64)) != 6 {
+		t.Errorf("seasons[0].episodeCount = %v, want 6", s1["episodeCount"])
+	}
+	s2 := seasonsRaw[1].(map[string]any)
+	if _, ok := s2["episodeCount"]; ok {
+		t.Errorf("seasons[1].episodeCount should be omitted (no statistics on the lookup), got %v", s2["episodeCount"])
+	}
+}
+
+// TestHandleSearchAdd_SeasonsOnMovieRejected verifies that seasons on a
+// type="movie" request is rejected with 400, before any Radarr/Sonarr call.
+func TestHandleSearchAdd_SeasonsOnMovieRejected(t *testing.T) {
+	t.Parallel()
+
+	h := New(keysOnlyArr("sk", "rk", "pk"), "", "", "", &library.Handler{}, "")
+
+	body := `{"type":"movie","tmdbId":1,"title":"X","seasons":[1]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for seasons on a movie", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "only valid for series") {
+		t.Errorf("body = %q, want it to explain seasons is series-only", w.Body.String())
+	}
+}
+
+// TestHandleSearchAdd_EmptySeasonsArrayRejected verifies that a non-nil
+// empty seasons array (there is no "monitor nothing" add) is rejected with 400.
+func TestHandleSearchAdd_EmptySeasonsArrayRejected(t *testing.T) {
+	t.Parallel()
+
+	h := New(keysOnlyArr("sk", "rk", "pk"), "", "", "", &library.Handler{}, "")
+
+	body := `{"type":"series","tvdbId":1,"title":"X","seasons":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for a non-nil empty seasons array", w.Code)
+	}
+}
+
+// TestHandleSearchAdd_SeasonOutOfRangeRejected verifies the shape check
+// (0-999) fires before any Sonarr lookup — tvdbId=0 here would 502 if the
+// request reached Sonarr, so a 400 proves it didn't.
+func TestHandleSearchAdd_SeasonOutOfRangeRejected(t *testing.T) {
+	t.Parallel()
+
+	h := New(keysOnlyArr("sk", "rk", "pk"), "", "", "", &library.Handler{}, "")
+
+	body := `{"type":"series","tvdbId":0,"title":"X","seasons":[1000]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for an out-of-range season number", w.Code)
+	}
+}
+
+// TestHandleSearchAdd_NilSeasonsOmitsSeasonsKey pins the "byte-identical to
+// before" contract: an absent seasons field must not add a "seasons" key to
+// the Sonarr add payload at all.
+func TestHandleSearchAdd_NilSeasonsOmitsSeasonsKey(t *testing.T) {
+	t.Setenv("REQUESTS_SONARR_PROFILE_ID", "1")
+	t.Setenv("REQUESTS_SONARR_ROOT", "/media/tv")
+
+	var postedBody map[string]any
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			w.Write([]byte(`[{"title":"Dune: Prophecy","tvdbId":422100,"seasons":[{"seasonNumber":1,"monitored":true}]}]`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&postedBody)           //nolint:errcheck
+			w.Write([]byte(`{"id":77,"title":"Dune: Prophecy"}`)) //nolint:errcheck
+		}
+	}))
+	defer sonarr.Close()
+
+	h := newHandler(sonarr, nil, nil, "")
+
+	body := `{"type":"series","tvdbId":422100,"title":"Dune: Prophecy"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if postedBody == nil {
+		t.Fatal("Sonarr never received the POST /api/v3/series add payload")
+	}
+	if _, ok := postedBody["seasons"]; ok {
+		t.Errorf("payload should have no 'seasons' key when seasons is absent, got %v", postedBody["seasons"])
+	}
+	if _, ok := postedBody["addOptions"].(map[string]any)["monitor"]; ok {
+		t.Errorf("addOptions.monitor must never be set, got %v", postedBody["addOptions"])
+	}
+}
+
+// TestHandleSearchAdd_SeriesWithValidSeasonsThreadsPayload verifies the full
+// happy path: a valid seasons selection produces a Sonarr payload with every
+// season from the lookup, monitored flags matching the selection, and no
+// addOptions.monitor key.
+func TestHandleSearchAdd_SeriesWithValidSeasonsThreadsPayload(t *testing.T) {
+	t.Setenv("REQUESTS_SONARR_PROFILE_ID", "1")
+	t.Setenv("REQUESTS_SONARR_ROOT", "/media/tv")
+
+	var postedBody map[string]any
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			w.Write([]byte(`[{"title":"Dune: Prophecy","tvdbId":422100,"seasons":[` + //nolint:errcheck
+				`{"seasonNumber":0,"monitored":false},` +
+				`{"seasonNumber":1,"monitored":true},` +
+				`{"seasonNumber":2,"monitored":true}]}]`))
+		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&postedBody)           //nolint:errcheck
+			w.Write([]byte(`{"id":77,"title":"Dune: Prophecy"}`)) //nolint:errcheck
+		}
+	}))
+	defer sonarr.Close()
+
+	h := newHandler(sonarr, nil, nil, "")
+
+	// Deliberately duplicated + unsorted, to prove the handler normalizes
+	// before threading into addSeriesInternal.
+	body := `{"type":"series","tvdbId":422100,"title":"Dune: Prophecy","seasons":[2,1,2]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if postedBody == nil {
+		t.Fatal("Sonarr never received the POST /api/v3/series add payload")
+	}
+	if _, ok := postedBody["addOptions"].(map[string]any)["monitor"]; ok {
+		t.Errorf("addOptions.monitor must never be set, got %v", postedBody["addOptions"])
+	}
+	seasonsRaw, ok := postedBody["seasons"].([]any)
+	if !ok || len(seasonsRaw) != 3 {
+		t.Fatalf("seasons = %v, want 3 entries", postedBody["seasons"])
+	}
+	want := map[int]bool{0: false, 1: true, 2: true}
+	for _, s := range seasonsRaw {
+		sm := s.(map[string]any)
+		num := int(sm["seasonNumber"].(float64))
+		monitored := sm["monitored"].(bool)
+		if monitored != want[num] {
+			t.Errorf("season %d monitored = %v, want %v", num, monitored, want[num])
+		}
+	}
+}
+
+// TestHandleSearchAdd_SeriesInvalidSeasonNumberReturns400 verifies that
+// requesting a season number absent from the Sonarr lookup is rejected with
+// 400 (clients.ErrInvalidSeasons), and that Sonarr's add endpoint is never
+// called — existence is validated before the add attempt.
+func TestHandleSearchAdd_SeriesInvalidSeasonNumberReturns400(t *testing.T) {
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			w.Write([]byte(`[{"title":"Dune: Prophecy","tvdbId":422100,"seasons":[{"seasonNumber":1,"monitored":true}]}]`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/series":
+			t.Errorf("Sonarr add should not be called when season existence validation fails (path %s)", r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer sonarr.Close()
+
+	h := newHandler(sonarr, nil, nil, "")
+
+	body := `{"type":"series","tvdbId":422100,"title":"Dune: Prophecy","seasons":[5]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "5") {
+		t.Errorf("expected error to mention the bad season number 5: %s", w.Body.String())
 	}
 }

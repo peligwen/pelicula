@@ -70,7 +70,7 @@ type stubFulfiller struct{}
 func (f *stubFulfiller) AddMovie(_ context.Context, _, _ int, _ string) (int, error) {
 	return 0, nil
 }
-func (f *stubFulfiller) AddSeries(_ context.Context, _, _ int, _ string) (int, error) {
+func (f *stubFulfiller) AddSeries(_ context.Context, _, _ int, _ string, _ []int) (int, error) {
 	return 0, nil
 }
 

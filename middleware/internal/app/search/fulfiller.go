@@ -22,6 +22,6 @@ func (f *ArrFulfiller) AddMovie(ctx context.Context, tmdbID, profileID int, root
 	return f.handler.addMovieInternal(ctx, tmdbID, profileID, rootPath)
 }
 
-func (f *ArrFulfiller) AddSeries(ctx context.Context, tvdbID, profileID int, rootPath string) (int, error) {
-	return f.handler.addSeriesInternal(ctx, tvdbID, profileID, rootPath)
+func (f *ArrFulfiller) AddSeries(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
+	return f.handler.addSeriesInternal(ctx, tvdbID, profileID, rootPath, seasons)
 }

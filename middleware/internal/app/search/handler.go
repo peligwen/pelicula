@@ -5,15 +5,18 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"pelicula-api/clients"
 	"pelicula-api/httputil"
 	"pelicula-api/internal/app/catalog"
 	"pelicula-api/internal/app/library"
@@ -184,6 +187,18 @@ type SearchResult struct {
 	Rating        float64  `json:"rating,omitempty"`      // IMDb preferred, falls back to TMDB
 	Network       string   `json:"network,omitempty"`     // series only
 	SeasonCount   int      `json:"seasonCount,omitempty"` // series only
+	// Seasons is additive per-season metadata for series results, used by the
+	// season-picker UI (Phase 2.2) to know what's available to select.
+	Seasons []SeasonInfo `json:"seasons,omitempty"` // series only
+}
+
+// SeasonInfo is one season's additive metadata on a series search result.
+type SeasonInfo struct {
+	SeasonNumber int `json:"seasonNumber"`
+	// EpisodeCount is populated only when the upstream Sonarr lookup's
+	// statistics.totalEpisodeCount is present — it's often absent on
+	// lookups, and this field is never fabricated when it's missing.
+	EpisodeCount int `json:"episodeCount,omitempty"`
 }
 
 // ---- Handlers ----
@@ -278,6 +293,7 @@ func (h *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 					TmdbID:   tmdbID,
 					Added:    existingIDs[tvdbID],
 					Network:  strVal(s, "network"),
+					Seasons:  extractSeasonInfo(s),
 				}
 				enrichSearchResult(&sr, s)
 				if stats, ok := s["statistics"].(map[string]any); ok {
@@ -384,9 +400,25 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		// profileIDValid/rootPathValid.
 		ProfileID int    `json:"profileId"`
 		RootPath  string `json:"rootPath"`
+		// Seasons is series-only: the season numbers to monitor. Absent/null
+		// means "monitor all seasons" (today's default, byte-identical
+		// payload). A non-nil empty array is rejected — there is no
+		// "monitor nothing" add. See normalizeSeasons for the shape rules
+		// and addSeriesInternal for existence validation against the lookup.
+		Seasons []int `json:"seasons"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Seasons != nil && req.Type != "series" {
+		httputil.WriteError(w, "seasons is only valid for series", http.StatusBadRequest)
+		return
+	}
+	seasons, seasonsErr := normalizeSeasons(req.Seasons)
+	if seasonsErr != "" {
+		httputil.WriteError(w, seasonsErr, http.StatusBadRequest)
 		return
 	}
 
@@ -448,8 +480,12 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 			}
 			sonarrRoot = req.RootPath
 		}
-		arrID, err = h.addSeriesInternal(r.Context(), req.TvdbID, sonarrProfileID, sonarrRoot)
+		arrID, err = h.addSeriesInternal(r.Context(), req.TvdbID, sonarrProfileID, sonarrRoot, seasons)
 		if err != nil {
+			if errors.Is(err, clients.ErrInvalidSeasons) {
+				httputil.WriteError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			slog.Error("add series failed", "component", "search", "tvdbId", req.TvdbID, "error", err)
 			httputil.WriteError(w, "Sonarr is unreachable — check service health", http.StatusBadGateway)
 			return
@@ -546,7 +582,12 @@ func (h *Handler) addMovieInternal(ctx context.Context, tmdbID, profileID int, r
 // addSeriesInternal adds a series to Sonarr and returns the Sonarr internal ID.
 // If profileID is 0 the first available quality profile is used.
 // If rootPath is "" the first sonarr library's container path is used.
-func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, rootPath string) (int, error) {
+// seasons selects which season numbers to monitor; nil means "monitor all
+// seasons" and produces a payload byte-identical to the pre-season-support
+// shape (no "seasons" key at all). A non-nil seasons is validated against the
+// lookup's own season list — see buildSeasonsPayload — before Sonarr is ever
+// called; a mismatch surfaces as clients.ErrInvalidSeasons.
+func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
 	sonarrKey, _, _ := h.Services.Keys()
 	if sonarrKey == "" {
 		return 0, fmt.Errorf("sonarr not configured")
@@ -585,11 +626,109 @@ func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, 
 			"searchForMissingEpisodes": true,
 		},
 	}
+
+	if seasons != nil {
+		seasonsPayload, err := buildSeasonsPayload(show, seasons)
+		if err != nil {
+			return 0, err
+		}
+		payload["seasons"] = seasonsPayload
+	}
+	// Deliberately no addOptions.monitor: Sonarr applies that enum after
+	// refresh and it would overwrite the explicit per-season monitored flags
+	// set above. This exact shape (explicit seasons[].monitored, no
+	// addOptions.monitor) is already proven against Sonarr v3 in
+	// internal/app/backup/restore.go's importSeries.
+
 	added, err := h.Services.SonarrClient().AddSeries(ctx, "/api/v3", payload)
 	if err != nil {
 		return 0, fmt.Errorf("add series: %w", err)
 	}
 	return int(floatVal(added, "id")), nil
+}
+
+// buildSeasonsPayload validates seasons (the requested season numbers)
+// against show's own "seasons" lookup data and returns the full Sonarr
+// seasons array: every season the lookup reports, each with an explicit
+// "monitored" flag (true for a selected season, false otherwise — including
+// specials/season 0 when selected or not). Returns clients.ErrInvalidSeasons
+// (wrapped, with the offending numbers) if any requested season number does
+// not exist for this series — existence is checked here, before Sonarr is
+// ever called.
+func buildSeasonsPayload(show map[string]any, seasons []int) ([]map[string]any, error) {
+	rawSeasons, _ := show["seasons"].([]any)
+
+	existing := make(map[int]bool, len(rawSeasons))
+	for _, rs := range rawSeasons {
+		if sm, ok := rs.(map[string]any); ok {
+			existing[int(floatVal(sm, "seasonNumber"))] = true
+		}
+	}
+
+	selected := make(map[int]bool, len(seasons))
+	for _, n := range seasons {
+		selected[n] = true
+	}
+
+	var badNums []int
+	for n := range selected {
+		if !existing[n] {
+			badNums = append(badNums, n)
+		}
+	}
+	if len(badNums) > 0 {
+		sort.Ints(badNums)
+		return nil, fmt.Errorf("%w: season(s) %v not found for this series", clients.ErrInvalidSeasons, badNums)
+	}
+
+	out := make([]map[string]any, 0, len(rawSeasons))
+	for _, rs := range rawSeasons {
+		sm, ok := rs.(map[string]any)
+		if !ok {
+			continue
+		}
+		num := int(floatVal(sm, "seasonNumber"))
+		out = append(out, map[string]any{
+			"seasonNumber": num,
+			"monitored":    selected[num],
+		})
+	}
+	return out, nil
+}
+
+// normalizeSeasons validates the shape of a seasons parameter shared by
+// search/add and (mirrored independently in peligrosa, see that package's own
+// copy — the two handlers are intentionally decoupled, per Fulfiller's doc
+// comment) the request-queue create/approve endpoints: nil is valid ("all
+// seasons"); a non-nil empty slice is rejected (there is no "monitor
+// nothing" add); each number must be in [0,999]; at most 100 entries;
+// duplicates are silently removed. Returns the deduped, sorted slice and an
+// empty error string on success, or (nil, message) with message suitable for
+// a 400 response body.
+func normalizeSeasons(seasons []int) ([]int, string) {
+	if seasons == nil {
+		return nil, ""
+	}
+	if len(seasons) == 0 {
+		return nil, "seasons must be a non-empty array of season numbers"
+	}
+	if len(seasons) > 100 {
+		return nil, "seasons must contain at most 100 entries"
+	}
+	seen := make(map[int]bool, len(seasons))
+	out := make([]int, 0, len(seasons))
+	for _, n := range seasons {
+		if n < 0 || n > 999 {
+			return nil, fmt.Sprintf("season number %d out of range (0-999)", n)
+		}
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	sort.Ints(out)
+	return out, ""
 }
 
 // HandleArrMeta returns quality profiles and root folders from Radarr and
@@ -719,6 +858,32 @@ func enrichSearchResult(sr *SearchResult, raw map[string]any) {
 			}
 		}
 	}
+}
+
+// extractSeasonInfo builds the additive seasons metadata for a series search
+// result from a raw Sonarr lookup item's "seasons" array. EpisodeCount is
+// populated only when that season's statistics.totalEpisodeCount is present
+// in the lookup response — see SeasonInfo's doc comment.
+func extractSeasonInfo(raw map[string]any) []SeasonInfo {
+	rawSeasons, _ := raw["seasons"].([]any)
+	if len(rawSeasons) == 0 {
+		return nil
+	}
+	out := make([]SeasonInfo, 0, len(rawSeasons))
+	for _, rs := range rawSeasons {
+		sm, ok := rs.(map[string]any)
+		if !ok {
+			continue
+		}
+		si := SeasonInfo{SeasonNumber: int(floatVal(sm, "seasonNumber"))}
+		if stats, ok := sm["statistics"].(map[string]any); ok {
+			if ec, ok := stats["totalEpisodeCount"].(float64); ok {
+				si.EpisodeCount = int(ec)
+			}
+		}
+		out = append(out, si)
+	}
+	return out
 }
 
 func itoa(i int) string {

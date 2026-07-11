@@ -6,7 +6,7 @@ import "context"
 // Set addMovieFn/addSeriesFn to assert on calls; leave nil for a no-op.
 type fakeFulfiller struct {
 	addMovieFn  func(ctx context.Context, tmdbID, profileID int, rootPath string) (int, error)
-	addSeriesFn func(ctx context.Context, tvdbID, profileID int, rootPath string) (int, error)
+	addSeriesFn func(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error)
 }
 
 func (f *fakeFulfiller) AddMovie(ctx context.Context, tmdbID, profileID int, rootPath string) (int, error) {
@@ -16,9 +16,9 @@ func (f *fakeFulfiller) AddMovie(ctx context.Context, tmdbID, profileID int, roo
 	return 0, nil
 }
 
-func (f *fakeFulfiller) AddSeries(ctx context.Context, tvdbID, profileID int, rootPath string) (int, error) {
+func (f *fakeFulfiller) AddSeries(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
 	if f.addSeriesFn != nil {
-		return f.addSeriesFn(ctx, tvdbID, profileID, rootPath)
+		return f.addSeriesFn(ctx, tvdbID, profileID, rootPath, seasons)
 	}
 	return 0, nil
 }
