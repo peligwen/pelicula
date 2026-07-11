@@ -440,7 +440,7 @@ func (r *pipelineRun) stageDualSub() bool {
 		slog.Info("audit mode: skipping dual-sub generation", "component", "pipeline", "job_id", id, "path", job.Source.Path)
 	} else if r.settings.DualSubEnabled {
 		dualSubStart := time.Now()
-		outputs, firstErr := GenerateDualSubs(r.ctx, job, r.settings, r.configDir)
+		outputs, firstErr := GenerateDualSubs(r.ctx, job, r.settings)
 		if len(outputs) > 0 {
 			updateJob(q, id, func(j *Job) {
 				j.DualSubOutputs = outputs

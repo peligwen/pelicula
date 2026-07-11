@@ -30,11 +30,6 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		settings.NotifMode = "internal"
 	}
-	switch settings.DualSubTranslator {
-	case "argos", "none":
-	default:
-		settings.DualSubTranslator = "none"
-	}
 	if len(settings.DualSubPairs) == 0 {
 		settings.DualSubPairs = []string{"en-es"}
 	}

@@ -655,20 +655,13 @@ func TestDeleteOnFailure_False(t *testing.T) {
 	}
 }
 
-// TestDeleteOnFailure_True_AllowedPath verifies that a file under /downloads
-// is deleted when DeleteOnFailure=true and validation fails.
-func TestDeleteOnFailure_True_AllowedPath(t *testing.T) {
-	// We can't put a real file at /downloads in tests, so we verify that
-	// the code path reaches the os.Remove call by using a file under a
-	// temp dir that is NOT on the allowlist — and confirming the file is
-	// NOT deleted (since isAllowedPath returns false for /tmp paths).
-	// The positive case is verified in TestDeleteOnFailure_True_DisallowedPath_Skipped.
-	t.Skip("requires /downloads mount — covered by e2e test")
-}
-
 // TestDeleteOnFailure_True_DisallowedPath_Skipped confirms that a file outside
 // the allowed prefixes (/downloads, /processing) is never deleted even when
 // DeleteOnFailure=true — this is the core of the security fix.
+//
+// The positive direction (a file under /downloads IS deleted) can't run as a
+// unit test — it would need a real file at an allowlisted absolute path —
+// and is covered by the e2e suite instead.
 func TestDeleteOnFailure_True_DisallowedPath_Skipped(t *testing.T) {
 	dir := t.TempDir()
 	filePath := dir + "/movie.mkv" // not under /downloads or /processing
@@ -741,7 +734,6 @@ func TestProcessJob_DualSub_SidecarSource(t *testing.T) {
 		ValidationEnabled:  false,
 		DualSubEnabled:     true,
 		DualSubPairs:       []string{"en-es"},
-		DualSubTranslator:  "none",
 		TranscodingEnabled: false,
 		CatalogEnabled:     false,
 	})
@@ -830,7 +822,6 @@ func TestProcessJob_DualSub_NoSource(t *testing.T) {
 		ValidationEnabled:  false,
 		DualSubEnabled:     true,
 		DualSubPairs:       []string{"en-es"},
-		DualSubTranslator:  "none",
 		TranscodingEnabled: false,
 		CatalogEnabled:     false,
 	})
@@ -982,7 +973,6 @@ func TestCatalogLate_TriggersOnDualSubOutputs(t *testing.T) {
 		ValidationEnabled:  false,
 		DualSubEnabled:     true,
 		DualSubPairs:       []string{"en-es"},
-		DualSubTranslator:  "none",
 		TranscodingEnabled: false,
 		CatalogEnabled:     true, // enabled — should trigger CatalogEarly + CatalogLate
 	})

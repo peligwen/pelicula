@@ -186,7 +186,7 @@ var (
 // of written files. Non-fatal errors (no source sub, translator unavailable)
 // are logged and skipped; the first such error is also returned so the caller
 // can emit a meaningful event when no outputs are produced.
-func GenerateDualSubs(ctx context.Context, job *Job, settings PipelineSettings, configDir string) (outputs []string, firstErr error) {
+func GenerateDualSubs(ctx context.Context, job *Job, settings PipelineSettings) (outputs []string, firstErr error) {
 	for _, pair := range settings.DualSubPairs {
 		parts := strings.SplitN(pair, "-", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -204,7 +204,7 @@ func GenerateDualSubs(ctx context.Context, job *Job, settings PipelineSettings, 
 		}
 
 		prof := FindDualSubProfile(nil, "Default")
-		path, err := generatePair(ctx, job, baseLang, secLang, outPath, settings, configDir, prof)
+		path, err := generatePair(ctx, job, baseLang, secLang, outPath, prof)
 		if err != nil {
 			slog.Warn("dual sub pair failed", "component", "dualsub", "pair", pair, "job_id", job.ID, "error", err)
 			if firstErr == nil {
@@ -219,7 +219,7 @@ func GenerateDualSubs(ctx context.Context, job *Job, settings PipelineSettings, 
 }
 
 // generatePair produces a single ASS sidecar for one language pair.
-func generatePair(ctx context.Context, job *Job, baseLang, secLang, outPath string, settings PipelineSettings, configDir string, prof DualSubProfile) (string, error) {
+func generatePair(ctx context.Context, job *Job, baseLang, secLang, outPath string, prof DualSubProfile) (string, error) {
 	streams, err := probeSubStreams(ctx, job.Source.Path)
 	if err != nil {
 		return "", fmt.Errorf("probe: %w", err)
@@ -234,14 +234,17 @@ func generatePair(ctx context.Context, job *Job, baseLang, secLang, outPath stri
 		return "", fmt.Errorf("no subtitles found for base language %q", baseLang)
 	}
 
-	// Get secondary language cues — attempt source first, fall back to translation
+	// Get secondary language cues — required, same as the base language.
+	// Bazarr acquisition (await_subs) has already had its chance to deliver a
+	// sidecar by the time this stage runs; there is no machine-translation
+	// fallback. Human-authored subtitles or nothing — the job completes with
+	// dualsub_error set and no sidecar, never with synthesized cues.
 	secCues, err := getCues(ctx, job.Source.Path, secLang, streams)
-	if err != nil || len(secCues) == 0 {
-		t := newTranslator(settings.DualSubTranslator, configDir)
-		secCues, err = translateCues(ctx, baseCues, baseLang, secLang, t)
-		if err != nil {
-			return "", fmt.Errorf("secondary cues (%s): %w", secLang, err)
-		}
+	if err != nil {
+		return "", fmt.Errorf("secondary cues (%s): %w", secLang, err)
+	}
+	if len(secCues) == 0 {
+		return "", fmt.Errorf("no subtitles found for secondary language %q", secLang)
 	}
 
 	// Align secondary cues to base cue timing
@@ -376,21 +379,6 @@ func isTextSubCodec(codec string) bool {
 		return true
 	}
 	return false
-}
-
-// translateCues runs the translator on each base cue to produce secondary cues
-// sharing the same timing as the base.
-func translateCues(ctx context.Context, baseCues []SubtitleCue, fromLang, toLang string, t Translator) ([]SubtitleCue, error) {
-	result := make([]SubtitleCue, len(baseCues))
-	for i, c := range baseCues {
-		plain := stripSubTags(c.Text)
-		translated, err := t.Translate(ctx, plain, fromLang, toLang)
-		if err != nil {
-			return nil, fmt.Errorf("cue %d: %w", i+1, err)
-		}
-		result[i] = SubtitleCue{Start: c.Start, End: c.End, Text: translated}
-	}
-	return result, nil
 }
 
 // alignCues matches secondary cues to base cues by midpoint containment.

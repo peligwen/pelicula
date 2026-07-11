@@ -234,7 +234,7 @@ cmd_test() {
         $NEEDS_SUDO docker exec pelicula-test-procula-1 wget -qO- \
             --header='Content-Type: application/json' \
             --header="X-API-Key: ${test_api_key}" \
-            --post-data="{\"validation_enabled\":${validation},\"transcoding_enabled\":${transcoding},\"catalog_enabled\":true,\"notification_mode\":\"internal\",\"storage_warning_pct\":85,\"storage_critical_pct\":95,\"dual_sub_enabled\":true,\"dual_sub_pairs\":[\"en-es\"],\"dual_sub_translator\":\"none\",\"sub_acquire_timeout_min\":1}" \
+            --post-data="{\"validation_enabled\":${validation},\"transcoding_enabled\":${transcoding},\"catalog_enabled\":true,\"notification_mode\":\"internal\",\"storage_warning_pct\":85,\"storage_critical_pct\":95,\"dual_sub_enabled\":true,\"dual_sub_pairs\":[\"en-es\"],\"sub_acquire_timeout_min\":1}" \
             'http://localhost:8282/api/procula/settings' 2>/dev/null
     }
 
@@ -1184,9 +1184,9 @@ assert 'Movies' in names and 'TV Shows' in names
             fi
         fi
 
-        # Fixture 5: Dualsub Failed (2024) — embedded en only; es cue set is
-        # empty and dual_sub_translator="none", so GenerateDualSubs records a
-        # dualsub_error and DualSubOutputs is empty (non-fatal).
+        # Fixture 5: Dualsub Failed (2024) — embedded en only; there is no es
+        # cue source and no translation fallback, so GenerateDualSubs records
+        # a dualsub_error and DualSubOutputs is empty (non-fatal).
         local pw_failed_dir="$test_library_dir/movies/Dualsub Failed (2024)"
         local pw_failed_file="$pw_failed_dir/Dualsub.Failed.2024.mkv"
         mkdir -p "$pw_failed_dir"

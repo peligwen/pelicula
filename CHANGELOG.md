@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- **Argos Translate dualsub fallback** — dual subtitles now require a human-authored secondary track (embedded stream or sidecar, typically via Bazarr); when none exists the pair records `dualsub_error` and the job completes without that sidecar, exactly as it already did with the default `DUALSUB_TRANSLATOR=none`. The fallback needed an undocumented `pip install argostranslate` inside the procula image, and machine-translated cue quality was never good enough to ship. `DUALSUB_TRANSLATOR` and the settings-UI translator toggle are gone; a leftover `dual_sub_translator` key in saved settings is ignored harmlessly on load.
+
 ### Changed
 - **CSP hardening** — dropped `unsafe-eval` from the dashboard Content-Security-Policy; nothing in the frontend uses eval, so this was pure attack surface.
 - **nginx upstream timeouts** — the shared proxy snippet now sets `proxy_connect_timeout 10s` (plus explicit 60 s read/send defaults), so a wedged upstream fails fast instead of holding clients for nginx's default. SSE and Jellyfin playback keep their long-lived per-location overrides.

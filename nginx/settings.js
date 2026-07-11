@@ -75,8 +75,6 @@ async function loadSettingsTab() {
             setToggle('st-dualsub', !!ps.dual_sub_enabled);
             const pairs = document.getElementById('st-dualsub-pairs');
             if (pairs) pairs.value = (ps.dual_sub_pairs || []).join('\n');
-            const translator = ps.dual_sub_translator || 'none';
-            document.querySelectorAll('input[name="st-translator"]').forEach(r => { r.checked = r.value === translator; });
             updateDualSubOpts();
         }
         if (msResult.status === 'fulfilled' && msResult.value) {
@@ -126,7 +124,6 @@ async function saveSubtitlesDrawer() {
         const procPayload = {
             dual_sub_enabled:    document.getElementById('st-dualsub')?.getAttribute('aria-checked') === 'true',
             dual_sub_pairs:      (document.getElementById('st-dualsub-pairs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean),
-            dual_sub_translator: document.querySelector('input[name="st-translator"]:checked')?.value || 'none',
         };
         const middlewarePayload = {
             sub_langs: document.getElementById('st-sub-langs')?.value || '',
