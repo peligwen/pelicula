@@ -85,8 +85,11 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(cfg.Hooks.HandleStorageScanProxy)))
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(cfg.Hooks.HandleUpdatesProxy)))
 
-	// admin only: *arr metadata for settings dropdowns
-	mux.Handle("/api/pelicula/arr-meta", auth.GuardAdmin(http.HandlerFunc(cfg.Search.HandleArrMeta)))
+	// manager+: *arr metadata for settings dropdowns and the search "Add with
+	// options…" modal. Non-sensitive (quality-profile names/ids, root-folder
+	// paths) on a LAN-only stack, and search/add is already manager+, so a
+	// slim duplicate endpoint would add no security value and more surface.
+	mux.Handle("/api/pelicula/arr-meta", auth.GuardManager(http.HandlerFunc(cfg.Search.HandleArrMeta)))
 
 	// manager+: search and add content, pause/resume downloads
 	mux.Handle("/api/pelicula/search", auth.GuardManager(http.HandlerFunc(cfg.Search.HandleSearch)))

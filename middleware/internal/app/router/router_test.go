@@ -26,6 +26,7 @@ import (
 	"pelicula-api/internal/app/settings"
 	"pelicula-api/internal/app/sse"
 	"pelicula-api/internal/app/sysinfo"
+	arrclient "pelicula-api/internal/clients/arr"
 	"pelicula-api/internal/peligrosa"
 	reporeqs "pelicula-api/internal/repo/requests"
 	"pelicula-api/internal/repo/sessions"
@@ -115,21 +116,39 @@ func testDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// stubArrClient is a minimal search.ArrClient backed by empty-URL *arr.Client
+// instances. Calls to Radarr/Sonarr/Prowlarr fail at the network layer (no
+// host to dial) and are handled gracefully by search.Handler (e.g. HandleArrMeta
+// returns empty profile/root lists rather than erroring), so routes wired to
+// search.Handler can be exercised past the auth guard without a real *arr
+// backend or a nil-interface panic.
+type stubArrClient struct{}
+
+func (stubArrClient) Keys() (sonarr, radarr, prowlarr string) { return "", "", "" }
+func (stubArrClient) SonarrClient() *arrclient.Client         { return arrclient.New("", "") }
+func (stubArrClient) RadarrClient() *arrclient.Client         { return arrclient.New("", "") }
+func (stubArrClient) ProwlarrClient() *arrclient.Client       { return arrclient.New("", "") }
+
 // buildTestMux creates a ServeMux with all routes wired via router.Register.
-// Returns the mux and a viewer-role session token. The inner handlers are
-// zero-value stubs — auth guards short-circuit before reaching them for the
-// 401/403/403-CSRF test cases, so the stubs are never invoked.
-func buildTestMux(t *testing.T) (mux *http.ServeMux, viewerToken string) {
+// Returns the mux and viewer/manager-role session tokens. The inner handlers
+// are zero-value stubs (Search excepted, see stubArrClient above) — auth
+// guards short-circuit before reaching them for the 401/403/403-CSRF test
+// cases, so the stubs are never invoked there.
+func buildTestMux(t *testing.T) (mux *http.ServeMux, viewerToken, managerToken string) {
 	t.Helper()
 	db := testDB(t)
 
-	// Seed a viewer session into SQLite before constructing Auth so that
-	// NewAuth's loadSessionsFromDB pull it into the in-memory map.
-	const token = "router-test-viewer-token"
+	// Seed viewer + manager sessions into SQLite before constructing Auth so
+	// that NewAuth's loadSessionsFromDB pulls them into the in-memory map.
+	const vToken = "router-test-viewer-token"
+	const mToken = "router-test-manager-token"
 	expiry := time.Now().Add(time.Hour)
 	sess := sessions.New(db)
-	if err := sess.Create(context.Background(), token, "alice", "viewer", expiry); err != nil {
+	if err := sess.Create(context.Background(), vToken, "alice", "viewer", expiry); err != nil {
 		t.Fatalf("seed viewer session: %v", err)
+	}
+	if err := sess.Create(context.Background(), mToken, "bob", "manager", expiry); err != nil {
+		t.Fatalf("seed manager session: %v", err)
 	}
 
 	auth := peligrosa.NewAuth(peligrosa.AuthConfig{DB: db})
@@ -151,7 +170,7 @@ func buildTestMux(t *testing.T) (mux *http.ServeMux, viewerToken string) {
 		JFInfo:        nil, // nil skips the optional route — guards the if-nil branch
 		Library:       &library.Handler{},
 		Catalog:       &catalog.Handler{},
-		Search:        &search.Handler{},
+		Search:        search.New(stubArrClient{}, "", "", "", &library.Handler{}, ""),
 		Settings:      &settings.Handler{},
 		Actions:       &actions.Handler{},
 		Admin:         &adminops.Handler{},
@@ -162,14 +181,14 @@ func buildTestMux(t *testing.T) (mux *http.ServeMux, viewerToken string) {
 
 	mux = http.NewServeMux()
 	router.Register(mux, cfg)
-	return mux, token
+	return mux, vToken, mToken
 }
 
 // TestRouterAuthGates_PublicPaths asserts that public endpoints return non-401 with no cookie.
 // /api/pelicula/hooks/import and /api/pelicula/jellyfin/refresh expect POST and return 405
 // for GET — that is still non-401 and confirms the routes are public (no auth guard).
 func TestRouterAuthGates_PublicPaths(t *testing.T) {
-	mux, _ := buildTestMux(t)
+	mux, _, _ := buildTestMux(t)
 
 	cases := []struct {
 		method string
@@ -195,7 +214,7 @@ func TestRouterAuthGates_PublicPaths(t *testing.T) {
 
 // TestRouterAuthGates_ViewerGuardedPaths asserts 401 with no cookie.
 func TestRouterAuthGates_ViewerGuardedPaths(t *testing.T) {
-	mux, _ := buildTestMux(t)
+	mux, _, _ := buildTestMux(t)
 
 	paths := []string{
 		"/api/pelicula/status",
@@ -219,13 +238,12 @@ func TestRouterAuthGates_ViewerGuardedPaths(t *testing.T) {
 
 // TestRouterAuthGates_AdminPaths asserts 401 with no cookie, 403 with viewer cookie.
 func TestRouterAuthGates_AdminPaths(t *testing.T) {
-	mux, viewerToken := buildTestMux(t)
+	mux, viewerToken, _ := buildTestMux(t)
 
 	paths := []string{
 		"/api/pelicula/admin/stack/restart",
 		"/api/pelicula/settings",
 		"/api/pelicula/users",
-		"/api/pelicula/arr-meta",
 		"/api/pelicula/downloads/cancel",
 	}
 
@@ -251,11 +269,55 @@ func TestRouterAuthGates_AdminPaths(t *testing.T) {
 	}
 }
 
+// TestRouterAuthGates_ManagerPaths asserts 401 with no cookie, 403 with a
+// viewer cookie, and success (non-401/403) with a manager cookie. arr-meta
+// moved here from TestRouterAuthGates_AdminPaths when it was relaxed from
+// GuardAdmin to GuardManager (Phase 1.2 — the search "Add with options…"
+// modal needs manager-level access to quality profiles / root folders).
+func TestRouterAuthGates_ManagerPaths(t *testing.T) {
+	mux, viewerToken, managerToken := buildTestMux(t)
+
+	paths := []string{
+		"/api/pelicula/arr-meta",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			// No cookie → 401 (not authenticated).
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("%s no-cookie: want 401, got %d", path, w.Code)
+			}
+
+			// Viewer cookie → 403 (authenticated but insufficient role).
+			r2 := httptest.NewRequest(http.MethodGet, path, nil)
+			r2.AddCookie(&http.Cookie{Name: "pelicula_session", Value: viewerToken})
+			w2 := httptest.NewRecorder()
+			mux.ServeHTTP(w2, r2)
+			if w2.Code != http.StatusForbidden {
+				t.Errorf("%s viewer-cookie: want 403, got %d", path, w2.Code)
+			}
+
+			// Manager cookie → past the auth gate (200; the stub *arr client
+			// yields empty profile/root lists rather than an error).
+			r3 := httptest.NewRequest(http.MethodGet, path, nil)
+			r3.AddCookie(&http.Cookie{Name: "pelicula_session", Value: managerToken})
+			w3 := httptest.NewRecorder()
+			mux.ServeHTTP(w3, r3)
+			if w3.Code != http.StatusOK {
+				t.Errorf("%s manager-cookie: want 200, got %d (body %s)", path, w3.Code, w3.Body.String())
+			}
+		})
+	}
+}
+
 // TestRouterAuthGates_CSRFStrict asserts 403 on POST with a foreign Origin header.
 // RequireLocalOriginStrict is wired around admin write endpoints — a non-LAN Origin
 // must be rejected even when the caller is authenticated.
 func TestRouterAuthGates_CSRFStrict(t *testing.T) {
-	mux, _ := buildTestMux(t)
+	mux, _, _ := buildTestMux(t)
 
 	// /api/pelicula/register is wrapped in RequireLocalOriginStrict with no auth
 	// guard above it, so a POST with a foreign Origin exercises pure CSRF rejection
