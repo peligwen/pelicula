@@ -75,6 +75,12 @@ func newHandlerArr(sonarrSrv, radarrSrv, prowlarrSrv *httptest.Server) *stubArr 
 
 // newHandler builds a Handler pointed at live test servers.
 func newHandler(sonarrSrv, radarrSrv, prowlarrSrv *httptest.Server, searchMode string) *Handler {
+	return newHandlerWithLib(sonarrSrv, radarrSrv, prowlarrSrv, &library.Handler{}, searchMode)
+}
+
+// newHandlerWithLib is newHandler's twin for tests that need a populated
+// library registry (e.g. rootPath override validation).
+func newHandlerWithLib(sonarrSrv, radarrSrv, prowlarrSrv *httptest.Server, libHandler *library.Handler, searchMode string) *Handler {
 	srvURL := func(srv *httptest.Server) string {
 		if srv != nil {
 			return srv.URL
@@ -84,7 +90,7 @@ func newHandler(sonarrSrv, radarrSrv, prowlarrSrv *httptest.Server, searchMode s
 	arr := newHandlerArr(sonarrSrv, radarrSrv, prowlarrSrv)
 	h := New(arr,
 		srvURL(sonarrSrv), srvURL(radarrSrv), srvURL(prowlarrSrv),
-		&library.Handler{}, searchMode)
+		libHandler, searchMode)
 	return h
 }
 
@@ -691,6 +697,216 @@ func TestHandleSearchAdd_SeriesUpstreamFailureHidesInternals(t *testing.T) {
 	}
 	if !lc.hasWarn("add series failed") {
 		t.Errorf("expected server-side error log for the failed add, got none")
+	}
+}
+
+// ── Phase 1.2: profileId/rootPath add-time override validation ─────────────
+
+// TestHandleSearchAdd_ValidOverridesThreadedIntoPayload: a profileId matching
+// Radarr's quality profiles and a rootPath matching a registered radarr
+// library are accepted and threaded verbatim into the Radarr add payload
+// (qualityProfileId / rootFolderPath), overriding the env-configured default.
+func TestHandleSearchAdd_ValidOverridesThreadedIntoPayload(t *testing.T) {
+	t.Setenv("REQUESTS_RADARR_PROFILE_ID", "1") // default the override must NOT be used
+	t.Setenv("REQUESTS_RADARR_ROOT", "/media/movies")
+
+	var postedBody map[string]any
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/movie/lookup/tmdb":
+			w.Write([]byte(`{"title":"Dune","year":2021,"tmdbId":438631}`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/qualityprofile":
+			w.Write([]byte(`[{"id":1,"name":"HD-1080p"},{"id":5,"name":"Ultra-HD"}]`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&postedBody) //nolint:errcheck
+			w.Write([]byte(`{"id":99,"title":"Dune"}`)) //nolint:errcheck
+		}
+	}))
+	defer radarr.Close()
+
+	libHandler := &library.Handler{}
+	libHandler.SetRegistry(library.LibraryConfig{Libraries: []library.Library{
+		{Name: "Movies 4K", Slug: "movies4k", Type: "movies", Arr: "radarr", Processing: "full"},
+	}})
+	h := newHandlerWithLib(nil, radarr, nil, libHandler, "")
+
+	body := `{"type":"movie","tmdbId":438631,"title":"Dune","year":2021,"profileId":5,"rootPath":"/media/movies4k"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if postedBody == nil {
+		t.Fatal("Radarr never received the POST /api/v3/movie add payload")
+	}
+	if got := int(postedBody["qualityProfileId"].(float64)); got != 5 {
+		t.Errorf("qualityProfileId = %d, want 5 (the override, not the env default of 1)", got)
+	}
+	if got := postedBody["rootFolderPath"]; got != "/media/movies4k" {
+		t.Errorf("rootFolderPath = %v, want /media/movies4k (the override, not the env default)", got)
+	}
+}
+
+// TestHandleSearchAdd_InvalidProfileIDRejected: a profileId absent from
+// Radarr's quality profiles is rejected with 400, and Radarr's movie lookup
+// (and add) are never reached — the override is validated before any add
+// attempt.
+func TestHandleSearchAdd_InvalidProfileIDRejected(t *testing.T) {
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/qualityprofile":
+			w.Write([]byte(`[{"id":1,"name":"HD-1080p"}]`)) //nolint:errcheck
+		default:
+			t.Errorf("unexpected Radarr request for an invalid profileId: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer radarr.Close()
+
+	h := newHandler(nil, radarr, nil, "")
+
+	body := `{"type":"movie","tmdbId":438631,"title":"Dune","year":2021,"profileId":999}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "999") {
+		t.Errorf("expected error message to mention the rejected profileId 999: %s", w.Body.String())
+	}
+}
+
+// TestHandleSearchAdd_InvalidRootPathRejected: a rootPath that matches no
+// registered radarr library is rejected with 400, before any Radarr network
+// call is attempted.
+func TestHandleSearchAdd_InvalidRootPathRejected(t *testing.T) {
+	t.Parallel()
+
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("Radarr should not be contacted for an invalid rootPath (path %s)", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer radarr.Close()
+
+	libHandler := &library.Handler{}
+	libHandler.SetRegistry(library.LibraryConfig{Libraries: []library.Library{
+		{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full"},
+	}})
+	h := newHandlerWithLib(nil, radarr, nil, libHandler, "")
+
+	body := `{"type":"movie","tmdbId":438631,"title":"Dune","year":2021,"rootPath":"/media/does-not-exist"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "/media/does-not-exist") {
+		t.Errorf("expected error message to mention the rejected rootPath: %s", w.Body.String())
+	}
+}
+
+// TestHandleSearchAdd_AbsentOverridesPreserveDefaults: when profileId/rootPath
+// are absent from the request body, HandleSearchAdd must not attempt to
+// validate anything against the (here, empty) library registry, and the
+// env-configured REQUESTS_RADARR_PROFILE_ID / REQUESTS_RADARR_ROOT defaults
+// must reach the Radarr payload unchanged. Pins the "absent = exactly
+// today's default" contract.
+func TestHandleSearchAdd_AbsentOverridesPreserveDefaults(t *testing.T) {
+	t.Setenv("REQUESTS_RADARR_PROFILE_ID", "7")
+	t.Setenv("REQUESTS_RADARR_ROOT", "/media/movies")
+
+	var postedBody map[string]any
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/movie/lookup/tmdb":
+			w.Write([]byte(`{"title":"Dune","year":2021,"tmdbId":438631}`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/qualityprofile":
+			t.Error("qualityprofile endpoint should not be hit when profileId is absent")
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&postedBody) //nolint:errcheck
+			w.Write([]byte(`{"id":55,"title":"Dune"}`)) //nolint:errcheck
+		}
+	}))
+	defer radarr.Close()
+
+	// Empty registry — proves rootPath validation is never reached (it would
+	// reject the env default /media/movies, since no library is registered).
+	h := newHandlerWithLib(nil, radarr, nil, &library.Handler{}, "")
+
+	body := `{"type":"movie","tmdbId":438631,"title":"Dune","year":2021}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	if postedBody == nil {
+		t.Fatal("Radarr never received the POST /api/v3/movie add payload")
+	}
+	if got := int(postedBody["qualityProfileId"].(float64)); got != 7 {
+		t.Errorf("qualityProfileId = %d, want 7 (env default, untouched)", got)
+	}
+	if got := postedBody["rootFolderPath"]; got != "/media/movies" {
+		t.Errorf("rootFolderPath = %v, want /media/movies (env default, untouched)", got)
+	}
+}
+
+// TestHandleSearchAdd_SeriesValidOverridesThreadedIntoPayload: sonarr twin of
+// TestHandleSearchAdd_ValidOverridesThreadedIntoPayload — guards against a
+// copy/paste mix-up between the movie and series branches.
+func TestHandleSearchAdd_SeriesValidOverridesThreadedIntoPayload(t *testing.T) {
+	t.Setenv("REQUESTS_SONARR_PROFILE_ID", "1")
+	t.Setenv("REQUESTS_SONARR_ROOT", "/media/tv")
+
+	var postedBody map[string]any
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			w.Write([]byte(`[{"title":"Dune: Prophecy","year":2024,"tvdbId":422100}]`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/qualityprofile":
+			w.Write([]byte(`[{"id":1,"name":"HD TV"},{"id":8,"name":"4K TV"}]`)) //nolint:errcheck
+		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&postedBody)           //nolint:errcheck
+			w.Write([]byte(`{"id":77,"title":"Dune: Prophecy"}`)) //nolint:errcheck
+		}
+	}))
+	defer sonarr.Close()
+
+	libHandler := &library.Handler{}
+	libHandler.SetRegistry(library.LibraryConfig{Libraries: []library.Library{
+		{Name: "TV 4K", Slug: "tv4k", Type: "tvshows", Arr: "sonarr", Processing: "full"},
+	}})
+	h := newHandlerWithLib(sonarr, nil, nil, libHandler, "")
+
+	body := `{"type":"series","tvdbId":422100,"title":"Dune: Prophecy","profileId":8,"rootPath":"/media/tv4k"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/search/add", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleSearchAdd(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if postedBody == nil {
+		t.Fatal("Sonarr never received the POST /api/v3/series add payload")
+	}
+	if got := int(postedBody["qualityProfileId"].(float64)); got != 8 {
+		t.Errorf("qualityProfileId = %d, want 8 (the override, not the env default of 1)", got)
+	}
+	if got := postedBody["rootFolderPath"]; got != "/media/tv4k" {
+		t.Errorf("rootFolderPath = %v, want /media/tv4k (the override, not the env default)", got)
 	}
 }
 

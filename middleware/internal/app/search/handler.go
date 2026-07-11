@@ -376,6 +376,14 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 		Title  string `json:"title"`
 		Year   int    `json:"year"`
 		Poster string `json:"poster"`
+		// ProfileID/RootPath are optional add-time overrides for the "Add with
+		// options…" dashboard modal. Absent/zero preserves today's default
+		// exactly (first quality profile / FirstLibraryPath, gated through the
+		// REQUESTS_*_PROFILE_ID / REQUESTS_*_ROOT env vars below). Both are
+		// validated server-side against the relevant *arr before use — see
+		// profileIDValid/rootPathValid.
+		ProfileID int    `json:"profileId"`
+		RootPath  string `json:"rootPath"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
@@ -393,6 +401,26 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch req.Type {
 	case "movie":
+		if req.ProfileID != 0 {
+			ok, verifyErr := h.profileIDValid(r.Context(), h.Services.RadarrClient(), req.ProfileID)
+			if verifyErr != nil {
+				slog.Error("validate radarr profileId failed", "component", "search", "error", verifyErr)
+				httputil.WriteError(w, "Radarr is unreachable — check service health", http.StatusBadGateway)
+				return
+			}
+			if !ok {
+				httputil.WriteError(w, fmt.Sprintf("profileId %d is not a valid Radarr quality profile", req.ProfileID), http.StatusBadRequest)
+				return
+			}
+			radarrProfileID = req.ProfileID
+		}
+		if req.RootPath != "" {
+			if !h.rootPathValid("radarr", req.RootPath) {
+				httputil.WriteError(w, fmt.Sprintf("rootPath %q is not a registered Radarr library", req.RootPath), http.StatusBadRequest)
+				return
+			}
+			radarrRoot = req.RootPath
+		}
 		arrID, err = h.addMovieInternal(r.Context(), req.TmdbID, radarrProfileID, radarrRoot)
 		if err != nil {
 			slog.Error("add movie failed", "component", "search", "tmdbId", req.TmdbID, "error", err)
@@ -400,6 +428,26 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "series":
+		if req.ProfileID != 0 {
+			ok, verifyErr := h.profileIDValid(r.Context(), h.Services.SonarrClient(), req.ProfileID)
+			if verifyErr != nil {
+				slog.Error("validate sonarr profileId failed", "component", "search", "error", verifyErr)
+				httputil.WriteError(w, "Sonarr is unreachable — check service health", http.StatusBadGateway)
+				return
+			}
+			if !ok {
+				httputil.WriteError(w, fmt.Sprintf("profileId %d is not a valid Sonarr quality profile", req.ProfileID), http.StatusBadRequest)
+				return
+			}
+			sonarrProfileID = req.ProfileID
+		}
+		if req.RootPath != "" {
+			if !h.rootPathValid("sonarr", req.RootPath) {
+				httputil.WriteError(w, fmt.Sprintf("rootPath %q is not a registered Sonarr library", req.RootPath), http.StatusBadRequest)
+				return
+			}
+			sonarrRoot = req.RootPath
+		}
 		arrID, err = h.addSeriesInternal(r.Context(), req.TvdbID, sonarrProfileID, sonarrRoot)
 		if err != nil {
 			slog.Error("add series failed", "component", "search", "tvdbId", req.TvdbID, "error", err)
@@ -412,6 +460,38 @@ func (h *Handler) HandleSearchAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, map[string]any{"status": "added", "arr_id": arrID})
+}
+
+// profileIDValid reports whether profileID matches an id returned by
+// client's GetQualityProfiles — the same source addMovieInternal/
+// addSeriesInternal's default (first profile) draws from, so a valid
+// override is always a value the default could have produced. The error
+// return is non-nil only when the profiles list itself could not be fetched
+// (upstream unreachable); callers must not treat that the same as a false,
+// nil-error mismatch.
+func (h *Handler) profileIDValid(ctx context.Context, client *arr.Client, profileID int) (bool, error) {
+	profiles, err := client.GetQualityProfiles(ctx, "/api/v3")
+	if err != nil {
+		return false, err
+	}
+	for _, p := range profiles {
+		if int(floatVal(p, "id")) == profileID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// rootPathValid reports whether rootPath matches a registered library's
+// container path for the given arr ("radarr" or "sonarr") — the same source
+// FirstLibraryPath (the default) draws from.
+func (h *Handler) rootPathValid(arrName, rootPath string) bool {
+	for _, lib := range h.LibHandler.GetLibraries() {
+		if lib.Arr == arrName && lib.ContainerPath() == rootPath {
+			return true
+		}
+	}
+	return false
 }
 
 // addMovieInternal adds a movie to Radarr and returns the Radarr internal ID.
