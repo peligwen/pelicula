@@ -592,8 +592,10 @@ func (h *Handler) addSeriesInternal(ctx context.Context, tvdbID, profileID int, 
 	return int(floatVal(added, "id")), nil
 }
 
-// HandleArrMeta returns quality profiles and root folders from Radarr and Sonarr.
-// Used by the admin settings UI to populate request profile dropdowns.
+// HandleArrMeta returns quality profiles and root folders from Radarr and
+// Sonarr, plus the registered Pelicula libraries for each arr. Used by the
+// admin settings UI to populate request profile dropdowns and by the search
+// "Add with options…" modal to populate its Target Library select.
 func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -607,9 +609,18 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 	type rootEntry struct {
 		Path string `json:"path"`
 	}
+	// libraryEntry is the registered-library counterpart to rootEntry: unlike
+	// RootFolders (the *arr's own root-folder list, which need not match a
+	// Pelicula library on custom-library setups), each entry here is exactly
+	// a value rootPathValid accepts — see that function's doc comment.
+	type libraryEntry struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
 	type arrMeta struct {
 		QualityProfiles []profileEntry `json:"qualityProfiles"`
 		RootFolders     []rootEntry    `json:"rootFolders"`
+		Libraries       []libraryEntry `json:"libraries"`
 	}
 
 	fetchProfiles := func(client *arr.Client) []profileEntry {
@@ -637,15 +648,31 @@ func (h *Handler) HandleArrMeta(w http.ResponseWriter, r *http.Request) {
 		}
 		return out
 	}
+	// fetchLibraries filters the registered library list down to the given
+	// arr ("radarr" or "sonarr"), mirroring rootPathValid's own filter so the
+	// modal only ever offers paths the backend will accept. Always returns a
+	// non-nil (possibly empty) slice so the field serializes as `[]`, never
+	// `null`.
+	fetchLibraries := func(arrName string) []libraryEntry {
+		out := []libraryEntry{}
+		for _, lib := range h.LibHandler.GetLibraries() {
+			if lib.Arr == arrName {
+				out = append(out, libraryEntry{Name: lib.Name, Path: lib.ContainerPath()})
+			}
+		}
+		return out
+	}
 
 	httputil.WriteJSON(w, map[string]any{
 		"radarr": arrMeta{
 			QualityProfiles: fetchProfiles(h.Services.RadarrClient()),
 			RootFolders:     fetchRoots(h.Services.RadarrClient()),
+			Libraries:       fetchLibraries("radarr"),
 		},
 		"sonarr": arrMeta{
 			QualityProfiles: fetchProfiles(h.Services.SonarrClient()),
 			RootFolders:     fetchRoots(h.Services.SonarrClient()),
+			Libraries:       fetchLibraries("sonarr"),
 		},
 	})
 }

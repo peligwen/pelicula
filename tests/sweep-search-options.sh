@@ -4,13 +4,19 @@
 #
 # Covers:
 #   A. GET /api/pelicula/arr-meta responds (now Manager+, was Admin) with the
-#      {radarr, sonarr}.{qualityProfiles, rootFolders} shape the modal expects.
+#      {radarr, sonarr}.{qualityProfiles, rootFolders, libraries} shape the
+#      modal expects.
 #   B. POST /api/pelicula/search/add rejects an out-of-range profileId with 400.
 #   C. POST /api/pelicula/search/add rejects an unregistered rootPath with 400.
 #   D. POST /api/pelicula/search/add accepts a *valid* profileId/rootPath
 #      override (drawn live from arr-meta's own response) — i.e. it is NOT
-#      rejected with 400. Skipped if arr-meta has no radarr quality profiles
-#      or root folders to test against (radarr not configured on this stack).
+#      rejected with 400. profileId is drawn from qualityProfiles; rootPath is
+#      drawn from arr-meta's `libraries` field (registered Pelicula libraries),
+#      NOT `rootFolders` — the backend validates rootPath against registered
+#      libraries, and a bare *arr root folder need not be one (custom-library
+#      setups). Each half is skipped gracefully when its own source array is
+#      empty on this stack (radarr not configured / no radarr library
+#      registered), same as test D's existing whole-test skip.
 #
 # Test D is deliberately side-effect-free: it uses tmdbId=0, which is not a
 # real TMDB id, so Radarr's movie lookup/add always fails downstream — every
@@ -100,6 +106,14 @@ for arr in radarr sonarr; do
             exit 1
         fi
     done
+    # libraries (registered Pelicula libraries for this arr) is populated
+    # purely from the local library registry — no *arr network call — so it
+    # is always an array, possibly empty, never null.
+    lib_type="$(echo "$arr_meta_resp" | jq -r --arg a "$arr" '.[$a].libraries | type' 2>/dev/null)"
+    if [[ "$lib_type" != "array" ]]; then
+        _peli_err "Test A FAIL: .${arr}.libraries is '${lib_type}' (expected 'array')"
+        exit 1
+    fi
 done
 _peli_ok "Test A passed: arr-meta responds at Manager+ with the expected shape"
 
@@ -131,23 +145,35 @@ if [[ "$c_code" != "400" ]]; then
 fi
 _peli_ok "Test C passed: unregistered rootPath rejected with 400"
 
-# ── Test D: valid override accepted (no side effect — see header comment) ────
+# ── Test D: valid override(s) accepted (no side effect — see header comment) ─
 _peli_log "Test D: POST /api/pelicula/search/add accepts a valid profileId/rootPath override"
 
 d_profile_id="$(echo "$arr_meta_resp" | jq -r '.radarr.qualityProfiles[0].id // empty' 2>/dev/null)"
-d_root_path="$(echo "$arr_meta_resp" | jq -r '.radarr.rootFolders[0].path // empty' 2>/dev/null)"
+# Drawn from libraries (registered Pelicula libraries), NOT rootFolders (the
+# *arr's own root-folder list) — rootPath is validated against registered
+# libraries, and the two can diverge on custom-library setups. See header.
+d_root_path="$(echo "$arr_meta_resp" | jq -r '.radarr.libraries[0].path // empty' 2>/dev/null)"
 
-if [[ -z "$d_profile_id" || -z "$d_root_path" ]]; then
-    _peli_log "Test D SKIPPED: no radarr quality profiles / root folders returned by arr-meta on this stack"
+if [[ -z "$d_profile_id" && -z "$d_root_path" ]]; then
+    _peli_log "Test D SKIPPED: no radarr quality profiles or registered radarr libraries returned by arr-meta on this stack"
 else
-    d_body_req="$(jq -n --argjson pid "$d_profile_id" --arg root "$d_root_path" \
-        '{type:"movie", tmdbId:0, profileId:$pid, rootPath:$root}')"
+    # Include whichever override(s) arr-meta actually gave us on this stack —
+    # gracefully drop the rootPath half when no radarr library is registered
+    # (a custom-library stack may have none), same style as the whole-test
+    # skip above.
+    d_body_req="$(jq -n \
+        --arg pid "$d_profile_id" \
+        --arg root "$d_root_path" \
+        '{type: "movie", tmdbId: 0}
+         + (if $pid  != "" then {profileId: ($pid | tonumber)} else {} end)
+         + (if $root != "" then {rootPath: $root} else {} end)')"
+
     d_resp="$(http_status POST /api/pelicula/search/add "$d_body_req" --auth pelicula)"
     d_code="$(echo "$d_resp" | head -1)"
     d_body="$(echo "$d_resp" | tail -n +2)"
 
     if [[ "$d_code" == "400" ]]; then
-        _peli_err "Test D FAIL: valid override (profileId=${d_profile_id}, rootPath=${d_root_path}) was rejected with 400: ${d_body:0:200}"
+        _peli_err "Test D FAIL: valid override (profileId=${d_profile_id:-<absent>}, rootPath=${d_root_path:-<absent>}) was rejected with 400: ${d_body:0:200}"
         exit 1
     fi
     if [[ "$d_code" == "200" ]]; then

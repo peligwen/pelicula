@@ -972,6 +972,99 @@ func TestHandleArrMeta_ReturnsProfilesAndRoots(t *testing.T) {
 	}
 }
 
+// TestHandleArrMeta_ReturnsLibrariesFilteredPerArr: the additive `libraries`
+// field on each per-arr payload must contain exactly the registered libraries
+// for that arr — the same {name, container path} values rootPathValid
+// accepts — and must not leak a library registered under the other arr (or
+// one with no arr at all). This is what the modal now reads for its Target
+// Library select, in place of rootFolders (see docs/API.md's search/add
+// Notes for why rootFolders is the wrong source).
+func TestHandleArrMeta_ReturnsLibrariesFilteredPerArr(t *testing.T) {
+	t.Parallel()
+
+	radarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/qualityprofile":
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case "/api/v3/rootfolder":
+			// Deliberately includes a path that is NOT a registered library,
+			// to prove libraries is drawn from the registry, not rootfolder.
+			w.Write([]byte(`[{"path":"/media/unregistered-radarr-root"}]`)) //nolint:errcheck
+		}
+	}))
+	defer radarr.Close()
+
+	sonarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/qualityprofile":
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case "/api/v3/rootfolder":
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		}
+	}))
+	defer sonarr.Close()
+
+	libHandler := &library.Handler{}
+	libHandler.SetRegistry(library.LibraryConfig{Libraries: []library.Library{
+		{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full"},
+		{Name: "Movies 4K", Slug: "movies4k", Type: "movies", Arr: "radarr", Processing: "full"},
+		{Name: "TV", Slug: "tv", Type: "tvshows", Arr: "sonarr", Processing: "full"},
+		{Name: "Unmanaged", Slug: "unmanaged", Type: "other", Arr: "none", Processing: "off"},
+	}})
+	h := newHandlerWithLib(sonarr, radarr, nil, libHandler, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/arr-meta", nil)
+	w := httptest.NewRecorder()
+	h.HandleArrMeta(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Radarr struct {
+			Libraries []struct {
+				Name string `json:"name"`
+				Path string `json:"path"`
+			} `json:"libraries"`
+		} `json:"radarr"`
+		Sonarr struct {
+			Libraries []struct {
+				Name string `json:"name"`
+				Path string `json:"path"`
+			} `json:"libraries"`
+		} `json:"sonarr"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(resp.Radarr.Libraries) != 2 {
+		t.Fatalf("radarr libraries = %d, want 2: %+v", len(resp.Radarr.Libraries), resp.Radarr.Libraries)
+	}
+	wantRadarr := map[string]string{"/media/movies": "Movies", "/media/movies4k": "Movies 4K"}
+	for _, lib := range resp.Radarr.Libraries {
+		if wantRadarr[lib.Path] != lib.Name {
+			t.Errorf("unexpected radarr library entry %+v", lib)
+		}
+		if lib.Path == "/media/unregistered-radarr-root" {
+			t.Errorf("radarr libraries leaked a bare rootfolder path not backed by a registered library: %+v", lib)
+		}
+	}
+
+	if len(resp.Sonarr.Libraries) != 1 {
+		t.Fatalf("sonarr libraries = %d, want 1: %+v", len(resp.Sonarr.Libraries), resp.Sonarr.Libraries)
+	}
+	if resp.Sonarr.Libraries[0].Path != "/media/tv" || resp.Sonarr.Libraries[0].Name != "TV" {
+		t.Errorf("sonarr library = %+v, want {Name: TV, Path: /media/tv}", resp.Sonarr.Libraries[0])
+	}
+	for _, lib := range resp.Sonarr.Libraries {
+		if lib.Path == "/media/movies" || lib.Path == "/media/movies4k" {
+			t.Errorf("sonarr libraries leaked a radarr-owned library: %+v", lib)
+		}
+	}
+}
+
 // TestEnrichSearchResult_PullsRatingFromImdb: IMDb rating is preferred; TMDB
 // is the fallback when IMDb is absent.
 func TestEnrichSearchResult_PullsRatingFromImdb(t *testing.T) {
