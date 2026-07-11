@@ -647,6 +647,142 @@ func TestDeleteStale_ChunksLargeIDLists(t *testing.T) {
 	}
 }
 
+// ── DeleteByArr ───────────────────────────────────────────────────────────────
+
+func TestDeleteByArr_DeletesMatchingRoot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	id, err := s.Upsert(ctx, repocat.Item{
+		Type: "movie", ArrID: 42, ArrType: "radarr",
+		Title: "The Matrix", Year: 1999, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	n, err := s.DeleteByArr(ctx, "radarr", 42)
+	if err != nil {
+		t.Fatalf("DeleteByArr: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 deletion, got %d", n)
+	}
+	if got, _ := s.Get(ctx, id); got != nil {
+		t.Error("row survived DeleteByArr")
+	}
+}
+
+func TestDeleteByArr_NoMatchIsNoop(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	n, err := s.DeleteByArr(ctx, "radarr", 9999)
+	if err != nil {
+		t.Fatalf("DeleteByArr: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 deletions, got %d", n)
+	}
+}
+
+// TestDeleteByArr_DoesNotTouchOtherArrType verifies (arr_id, arr_type) is a
+// compound match — a sonarr series with the same numeric ID as a radarr
+// movie must survive a radarr-targeted delete.
+func TestDeleteByArr_DoesNotTouchOtherArrType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	movieID, err := s.Upsert(ctx, repocat.Item{
+		Type: "movie", ArrID: 7, ArrType: "radarr",
+		Title: "Movie Seven", Year: 2020, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert movie: %v", err)
+	}
+	seriesID, err := s.Upsert(ctx, repocat.Item{
+		Type: "series", ArrID: 7, ArrType: "sonarr",
+		Title: "Series Seven", Year: 2020, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert series: %v", err)
+	}
+
+	if _, err := s.DeleteByArr(ctx, "radarr", 7); err != nil {
+		t.Fatalf("DeleteByArr: %v", err)
+	}
+
+	if got, _ := s.Get(ctx, movieID); got != nil {
+		t.Error("radarr movie survived its own DeleteByArr call")
+	}
+	if got, _ := s.Get(ctx, seriesID); got == nil {
+		t.Error("sonarr series with same arr_id was deleted by a radarr-scoped call")
+	}
+}
+
+// TestDeleteByArr_ThenDeleteOrphanedChildren_CascadesSeriesRemoval verifies the
+// documented two-step removal flow: DeleteByArr drops the series root, then
+// DeleteOrphanedChildren sweeps the now-parentless season/episode rows.
+func TestDeleteByArr_ThenDeleteOrphanedChildren_CascadesSeriesRemoval(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	seriesID, err := s.Upsert(ctx, repocat.Item{
+		Type: "series", ArrID: 10, ArrType: "sonarr",
+		Title: "Breaking Bad", Year: 2008, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert series: %v", err)
+	}
+	seasonID, err := s.Upsert(ctx, repocat.Item{
+		Type: "season", ParentID: seriesID, SeasonNumber: 1,
+		Title: "Breaking Bad Season 1", Year: 2008, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert season: %v", err)
+	}
+	epID, err := s.Upsert(ctx, repocat.Item{
+		Type: "episode", ParentID: seasonID, EpisodeID: 55,
+		SeasonNumber: 1, EpisodeNumber: 1, ArrType: "sonarr",
+		FilePath: "/media/bb/s01e01.mkv", Title: "Pilot", Year: 2008, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert episode: %v", err)
+	}
+
+	n, err := s.DeleteByArr(ctx, "sonarr", 10)
+	if err != nil {
+		t.Fatalf("DeleteByArr: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 root deletion, got %d", n)
+	}
+
+	// Children still present until the cascade sweep runs.
+	if got, _ := s.Get(ctx, seasonID); got == nil {
+		t.Fatal("season deleted before DeleteOrphanedChildren ran")
+	}
+
+	cascaded, err := s.DeleteOrphanedChildren(ctx)
+	if err != nil {
+		t.Fatalf("DeleteOrphanedChildren: %v", err)
+	}
+	if cascaded != 2 {
+		t.Errorf("expected 2 cascaded deletions (season+episode), got %d", cascaded)
+	}
+	if got, _ := s.Get(ctx, seasonID); got != nil {
+		t.Error("season survived cascade")
+	}
+	if got, _ := s.Get(ctx, epID); got != nil {
+		t.Error("episode survived cascade")
+	}
+}
+
 func TestDeleteOrphanedChildren_CascadesSeasonsThenEpisodes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

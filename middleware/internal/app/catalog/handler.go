@@ -59,9 +59,13 @@ type Handler struct {
 	Jf         JellyfinMetaClient
 	Client     ProxyClient // outbound HTTP client (for Procula calls)
 	ProculaURL string
-	RadarrURL  string
-	SonarrURL  string
-	Cache      *CatalogCache // optional shared cache; nil means fetch directly
+	// ProculaAPIKey gates HandleCatalogRemove, the Internal endpoint Procula's
+	// "remove" action calls. Checked exactly like hooks.Handler.ProculaAPIKey
+	// gates HandleJellyfinRefresh: empty means auth disabled (dev/back-compat).
+	ProculaAPIKey string
+	RadarrURL     string
+	SonarrURL     string
+	Cache         *CatalogCache // optional shared cache; nil means fetch directly
 	// RootCtx is the application-lifetime context used for goroutines that
 	// outlive the request (backfill, Jellyfin metadata sync). Set from the
 	// supervisor root ctx in bootstrap; nil falls back to context.Background().

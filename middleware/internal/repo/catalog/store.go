@@ -457,6 +457,22 @@ func (s *Store) DeleteOrphanedChildren(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
+// DeleteByArr deletes the catalog_items root row (movie or series) matching
+// (arr_id, arr_type). It does NOT cascade to season/episode children —
+// callers must follow up with DeleteOrphanedChildren to sweep rows left
+// parentless by a deleted series. arr_id uniquely identifies a root item
+// together with arr_type (episodes/seasons never set arr_id), so this
+// affects at most one row. Returns the number of rows deleted (0 or 1).
+func (s *Store) DeleteByArr(ctx context.Context, arrType string, arrID int) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM catalog_items WHERE arr_id=? AND arr_type=?`, arrID, arrType)
+	if err != nil {
+		return 0, fmt.Errorf("delete catalog item by arr (%s/%d): %w", arrType, arrID, err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // UpdateMetadata sets Jellyfin-sourced fields on a catalog item.
 func (s *Store) UpdateMetadata(ctx context.Context, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
 	result, err := s.db.ExecContext(ctx, `

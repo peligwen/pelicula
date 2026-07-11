@@ -62,6 +62,11 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.HandleFunc("/api/pelicula/hooks/import", cfg.Hooks.HandleImportHook)
 	// Jellyfin refresh — called by Procula internally
 	mux.HandleFunc("/api/pelicula/jellyfin/refresh", cfg.Hooks.HandleJellyfinRefresh)
+	// Whole-title removal — called by Procula's "remove" action internally.
+	// Bare HandleFunc + shared-key check inside (see HandleCatalogRemove), not
+	// GuardAdmin: the admin gate lives on the action-bus dispatch endpoint
+	// (/api/pelicula/actions), same as jellyfin/refresh above.
+	mux.HandleFunc("/api/pelicula/catalog/remove", cfg.Catalog.HandleCatalogRemove)
 
 	// public: Jellyfin discovery info (web URL + LAN URL for native apps).
 	// Non-secret; used by /register and the dashboard to point users at
