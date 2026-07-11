@@ -148,6 +148,18 @@ func UpsertFlagsForPath(db *sql.DB, path, jobID string, flags []Flag) error {
 	return err
 }
 
+// DeleteFlagsForPath removes any catalog_flags row for path, unconditionally.
+// Used by the "remove" action to purge flags for files whose title was just
+// deleted from Sonarr/Radarr. Safe to call for a path with no existing row
+// (no-op) — mirrors the DELETE UpsertFlagsForPath runs for an empty flag list.
+func DeleteFlagsForPath(db *sql.DB, path string) error {
+	if path == "" {
+		return fmt.Errorf("DeleteFlagsForPath: empty path")
+	}
+	_, err := db.Exec(`DELETE FROM catalog_flags WHERE path = ?`, path)
+	return err
+}
+
 // CatalogFlagRow is what the HTTP handler serves.
 type CatalogFlagRow struct {
 	Path      string    `json:"path"`

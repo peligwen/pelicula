@@ -126,6 +126,14 @@ func registerBuiltinActions() {
 		Description: "Delete this file, blocklist the release in Sonarr/Radarr, and trigger a fresh search.",
 		Handler:     runReplaceAction,
 	})
+	Register(&ActionDef{
+		Name:        "remove",
+		Label:       "Remove from library…",
+		AppliesTo:   []string{"movie", "series"},
+		Sync:        true,
+		Description: "Delete media files, remove the title from Sonarr/Radarr, refresh Jellyfin, and purge catalog records.",
+		Handler:     runRemoveAction,
+	})
 }
 
 // runValidateAction builds a synthetic Job and calls Validate.
