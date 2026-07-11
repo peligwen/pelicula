@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"pelicula-api/clients"
 	reporeqs "pelicula-api/internal/repo/requests"
 )
 
@@ -32,13 +35,21 @@ func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
 	if updatedAt.IsZero() {
 		updatedAt = now
 	}
+	seasonsText := ""
+	if req.Seasons != nil {
+		b, err := json.Marshal(req.Seasons)
+		if err != nil {
+			t.Fatalf("insertRequest: marshal seasons: %v", err)
+		}
+		seasonsText = string(b)
+	}
 	_, err := s.repo.DB().Exec(
 		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
-		                       requested_by, state, reason, arr_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       requested_by, state, reason, arr_id, created_at, updated_at, seasons)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
 		req.RequestedBy, string(req.State), req.Reason, req.ArrID,
-		now.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano), seasonsText,
 	)
 	if err != nil {
 		t.Fatalf("insertRequest: %v", err)
@@ -530,5 +541,281 @@ func TestApprove_ConcurrentRace(t *testing.T) {
 	}
 	if grabbedCount != 1 {
 		t.Errorf("grabbed events in history: got %d, want 1", grabbedCount)
+	}
+}
+
+// ── Phase 2.1: season-level request create/approve ──────────────────────────
+
+// TestHandleRequestCreate_SeriesWithSeasonsPersists verifies that a viewer's
+// seasons selection is shape-normalized (deduped, sorted) and persists
+// through to the stored request and the create response.
+func TestHandleRequestCreate_SeriesWithSeasonsPersists(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	deps := newTestRequestDeps(auth, s)
+
+	body, _ := json.Marshal(map[string]any{
+		"type":    "series",
+		"tvdb_id": 600,
+		"title":   "Seasons Show",
+		"seasons": []int{2, 1, 2}, // duplicate + unsorted, to prove normalize runs
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req, token)
+
+	w := httptest.NewRecorder()
+	deps.HandleRequestCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+	var resp MediaRequest
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if len(resp.Seasons) != 2 || resp.Seasons[0] != 1 || resp.Seasons[1] != 2 {
+		t.Errorf("response Seasons = %v, want [1 2] (deduped, sorted)", resp.Seasons)
+	}
+
+	got, err := s.repo.Get(context.Background(), resp.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Seasons) != 2 || got.Seasons[0] != 1 || got.Seasons[1] != 2 {
+		t.Errorf("persisted Seasons = %v, want [1 2]", got.Seasons)
+	}
+}
+
+// TestHandleRequestCreate_MovieWithSeasonsRejected verifies that seasons on a
+// movie request is rejected with 400 — mirrors HandleSearchAdd's rule.
+func TestHandleRequestCreate_MovieWithSeasonsRejected(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	deps := newTestRequestDeps(auth, s)
+
+	body, _ := json.Marshal(map[string]any{
+		"type":    "movie",
+		"tmdb_id": 601,
+		"title":   "Movie With Seasons",
+		"seasons": []int{1},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req, token)
+
+	w := httptest.NewRecorder()
+	deps.HandleRequestCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for seasons on a movie", w.Code)
+	}
+}
+
+// TestHandleRequestCreate_EmptySeasonsArrayRejected verifies that a non-nil
+// empty seasons array ("monitor nothing" has no meaning) is rejected with 400.
+func TestHandleRequestCreate_EmptySeasonsArrayRejected(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	deps := newTestRequestDeps(auth, s)
+
+	body, _ := json.Marshal(map[string]any{
+		"type":    "series",
+		"tvdb_id": 602,
+		"title":   "Empty Seasons Show",
+		"seasons": []int{},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req, token)
+
+	w := httptest.NewRecorder()
+	deps.HandleRequestCreate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for a non-nil empty seasons array", w.Code)
+	}
+}
+
+// TestHandleRequestApprove_ThreadsStoredSeasonsToFulfiller verifies that when
+// the approve body is empty (the common case — admin just clicks approve),
+// the request's stored season scope is threaded to AddSeries and persisted.
+func TestHandleRequestApprove_ThreadsStoredSeasonsToFulfiller(t *testing.T) {
+	var gotSeasons []int
+	ff := &fakeFulfiller{
+		addSeriesFn: func(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
+			gotSeasons = seasons
+			return 42, nil
+		},
+	}
+	db := testDB(t)
+	rs := NewRequestStore(reporeqs.New(db), ff)
+
+	insertRequest(t, rs, &MediaRequest{
+		ID:      "req_approve_stored_seasons",
+		Type:    "series",
+		TvdbID:  500,
+		Title:   "Stored Seasons Show",
+		State:   RequestPending,
+		Seasons: []int{1, 3},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/req_approve_stored_seasons/approve", nil)
+	w := httptest.NewRecorder()
+	rs.handleRequestApprove(w, req, "req_approve_stored_seasons", "admin", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if len(gotSeasons) != 2 || gotSeasons[0] != 1 || gotSeasons[1] != 3 {
+		t.Errorf("AddSeries seasons = %v, want [1 3] (the stored scope)", gotSeasons)
+	}
+
+	got, err := rs.repo.Get(context.Background(), "req_approve_stored_seasons")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Seasons) != 2 || got.Seasons[0] != 1 || got.Seasons[1] != 3 {
+		t.Errorf("persisted Seasons = %v, want [1 3]", got.Seasons)
+	}
+}
+
+// TestHandleRequestApprove_BodyOverrideWinsOverStored verifies that a
+// non-empty approve-body seasons array overrides the request's stored scope.
+func TestHandleRequestApprove_BodyOverrideWinsOverStored(t *testing.T) {
+	var gotSeasons []int
+	ff := &fakeFulfiller{
+		addSeriesFn: func(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
+			gotSeasons = seasons
+			return 43, nil
+		},
+	}
+	db := testDB(t)
+	rs := NewRequestStore(reporeqs.New(db), ff)
+
+	insertRequest(t, rs, &MediaRequest{
+		ID:      "req_approve_override",
+		Type:    "series",
+		TvdbID:  501,
+		Title:   "Override Show",
+		State:   RequestPending,
+		Seasons: []int{1},
+	})
+
+	body := bytes.NewReader([]byte(`{"seasons":[2,3]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/req_approve_override/approve", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	rs.handleRequestApprove(w, req, "req_approve_override", "admin", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if len(gotSeasons) != 2 || gotSeasons[0] != 2 || gotSeasons[1] != 3 {
+		t.Errorf("AddSeries seasons = %v, want [2 3] (the body override, not the stored [1])", gotSeasons)
+	}
+
+	got, err := rs.repo.Get(context.Background(), "req_approve_override")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Seasons) != 2 || got.Seasons[0] != 2 || got.Seasons[1] != 3 {
+		t.Errorf("persisted Seasons = %v, want [2 3] (override wins)", got.Seasons)
+	}
+}
+
+// TestHandleRequestApprove_EmptyArrayClearsToAll verifies that an explicit
+// empty seasons array in the approve body clears any stored scope to "all
+// seasons" (nil), both for the AddSeries call and the persisted row.
+func TestHandleRequestApprove_EmptyArrayClearsToAll(t *testing.T) {
+	var addSeriesCalled bool
+	var gotSeasons []int
+	ff := &fakeFulfiller{
+		addSeriesFn: func(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
+			addSeriesCalled = true
+			gotSeasons = seasons
+			return 44, nil
+		},
+	}
+	db := testDB(t)
+	rs := NewRequestStore(reporeqs.New(db), ff)
+
+	insertRequest(t, rs, &MediaRequest{
+		ID:      "req_approve_clear",
+		Type:    "series",
+		TvdbID:  502,
+		Title:   "Clear Scope Show",
+		State:   RequestPending,
+		Seasons: []int{1},
+	})
+
+	body := bytes.NewReader([]byte(`{"seasons":[]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/req_approve_clear/approve", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	rs.handleRequestApprove(w, req, "req_approve_clear", "admin", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if !addSeriesCalled {
+		t.Fatal("AddSeries was never called")
+	}
+	if gotSeasons != nil {
+		t.Errorf("AddSeries seasons = %v, want nil (explicit [] clears to all seasons)", gotSeasons)
+	}
+
+	got, err := rs.repo.Get(context.Background(), "req_approve_clear")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Seasons != nil {
+		t.Errorf("persisted Seasons = %v, want nil (cleared)", got.Seasons)
+	}
+}
+
+// TestHandleRequestApprove_InvalidSeasonsSentinelMapsTo400AndStaysPending
+// verifies that clients.ErrInvalidSeasons from the fulfiller maps to 400
+// (distinct from the 502 used for upstream-unreachable errors) and leaves
+// the request pending so the admin can fix the override and retry.
+func TestHandleRequestApprove_InvalidSeasonsSentinelMapsTo400AndStaysPending(t *testing.T) {
+	ff := &fakeFulfiller{
+		addSeriesFn: func(ctx context.Context, tvdbID, profileID int, rootPath string, seasons []int) (int, error) {
+			return 0, fmt.Errorf("%w: season(s) [9] not found for this series", clients.ErrInvalidSeasons)
+		},
+	}
+	db := testDB(t)
+	rs := NewRequestStore(reporeqs.New(db), ff)
+
+	insertRequest(t, rs, &MediaRequest{
+		ID:     "req_approve_invalid_seasons",
+		Type:   "series",
+		TvdbID: 503,
+		Title:  "Invalid Seasons Show",
+		State:  RequestPending,
+	})
+
+	body := bytes.NewReader([]byte(`{"seasons":[9]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/req_approve_invalid_seasons/approve", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	rs.handleRequestApprove(w, req, "req_approve_invalid_seasons", "admin", nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not found") {
+		t.Errorf("body = %q, want it to include the sentinel error text", w.Body.String())
+	}
+
+	got, err := rs.repo.Get(context.Background(), "req_approve_invalid_seasons")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.State != reporeqs.StatePending {
+		t.Errorf("State = %q, want still pending after ErrInvalidSeasons", got.State)
 	}
 }

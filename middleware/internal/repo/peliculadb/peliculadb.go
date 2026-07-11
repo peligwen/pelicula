@@ -19,6 +19,7 @@ var migrations = []dbutil.Migration{
 	{Version: 1, Up: migrate1},
 	{Version: 2, Up: migrate2},
 	{Version: 3, Up: migrate3},
+	{Version: 4, Up: migrate4},
 }
 
 func migrate1(tx *sql.Tx) error {
@@ -124,6 +125,20 @@ func migrate3(tx *sql.Tx) error {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
 		}
+	}
+	return nil
+}
+
+// migrate4 adds requests.seasons: a viewer/admin's desired season-level
+// scope for a series request. The empty string (the DEFAULT, and every
+// pre-migration row) means unspecified/all — the historical behavior before
+// season support existed; a non-empty value is a JSON int array as text,
+// e.g. "[1,2]". See internal/repo/requests/store.go's
+// seasonsToText/seasonsFromText helpers.
+func migrate4(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE requests ADD COLUMN seasons TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return fmt.Errorf("add requests.seasons column: %w", err)
 	}
 	return nil
 }

@@ -128,7 +128,8 @@ func testDB(t *testing.T) *sql.DB {
 			reason       TEXT,
 			arr_id       INTEGER,
 			created_at   TEXT NOT NULL,
-			updated_at   TEXT NOT NULL
+			updated_at   TEXT NOT NULL,
+			seasons      TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS request_events (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -505,6 +506,45 @@ func TestRequestStoreInsertFull(t *testing.T) {
 	})
 }
 
+// TestRequestStoreInsertFull_SeasonsRoundtrip verifies that a series
+// request's Seasons scope survives InsertFull → All (the backup restore
+// path). Phase 2.1.
+func TestRequestStoreInsertFull_SeasonsRoundtrip(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+	store := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
+
+	now := time.Now().UTC().Truncate(time.Second)
+	req := peligrosa.RequestExport{
+		ID:          "req_backup_seasons_001",
+		Type:        "series",
+		TvdbID:      54321,
+		Title:       "Test Show",
+		Year:        2024,
+		RequestedBy: "viewer1",
+		State:       peligrosa.RequestPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		History: []peligrosa.RequestEvent{
+			{At: now, State: peligrosa.RequestPending, Actor: "viewer1"},
+		},
+		Seasons: []int{1, 2, 3},
+	}
+
+	if err := store.InsertFull(context.Background(), req); err != nil {
+		t.Fatalf("InsertFull: %v", err)
+	}
+
+	all := store.All(context.Background())
+	if len(all) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(all))
+	}
+	got := all[0]
+	if len(got.Seasons) != 3 || got.Seasons[0] != 1 || got.Seasons[1] != 2 || got.Seasons[2] != 3 {
+		t.Errorf("Seasons = %v, want [1 2 3]", got.Seasons)
+	}
+}
+
 // ── v1 backup import compatibility test ───────────────────────────────────
 
 func TestImportV1BackupHasNoRolesInvitesRequests(t *testing.T) {
@@ -559,6 +599,19 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 				UpdatedAt:   now,
 				History:     []peligrosa.RequestEvent{{At: now, State: peligrosa.RequestPending, Actor: "alice"}},
 			},
+			{
+				ID:          "req_test_002_seasons",
+				Type:        "series",
+				TvdbID:      888,
+				Title:       "Some Show",
+				Year:        2025,
+				RequestedBy: "alice",
+				State:       peligrosa.RequestPending,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+				History:     []peligrosa.RequestEvent{{At: now, State: peligrosa.RequestPending, Actor: "alice"}},
+				Seasons:     []int{1, 2},
+			},
 		},
 	}
 
@@ -581,8 +634,15 @@ func TestBackupExportV2Roundtrip(t *testing.T) {
 	if len(got.Invites) != 1 || got.Invites[0].Token != "aaaabbbbccccddddeeeeffffgggghhhh123" {
 		t.Errorf("invites = %v", got.Invites)
 	}
-	if len(got.Requests) != 1 || got.Requests[0].ID != "req_test_001" {
+	if len(got.Requests) != 2 || got.Requests[0].ID != "req_test_001" {
 		t.Errorf("requests = %v", got.Requests)
+	}
+	seasonsReq := got.Requests[1]
+	if seasonsReq.ID != "req_test_002_seasons" {
+		t.Fatalf("requests[1].ID = %q, want req_test_002_seasons", seasonsReq.ID)
+	}
+	if len(seasonsReq.Seasons) != 2 || seasonsReq.Seasons[0] != 1 || seasonsReq.Seasons[1] != 2 {
+		t.Errorf("requests[1].Seasons = %v, want [1 2]", seasonsReq.Seasons)
 	}
 }
 

@@ -81,7 +81,8 @@ func createTestSchema(db *sql.DB) error {
 			reason       TEXT,
 			arr_id       INTEGER,
 			created_at   TEXT NOT NULL,
-			updated_at   TEXT NOT NULL
+			updated_at   TEXT NOT NULL,
+			seasons      TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS request_events (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,

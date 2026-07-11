@@ -44,7 +44,8 @@ func newTestDB(t *testing.T) *sql.DB {
 			reason       TEXT,
 			arr_id       INTEGER,
 			created_at   TEXT NOT NULL,
-			updated_at   TEXT NOT NULL
+			updated_at   TEXT NOT NULL,
+			seasons      TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS request_events (
 			request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
@@ -588,7 +589,7 @@ func TestMarkGrabbedIfPending_PendingTransitions(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 42, time.Now().UTC())
+	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 42, nil, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("MarkGrabbedIfPending: %v", err)
 	}
@@ -620,7 +621,7 @@ func TestMarkGrabbedIfPending_AlreadyGrabbed(t *testing.T) {
 	}
 
 	// Attempting to mark an already-grabbed request should return ok=false.
-	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 99, time.Now().UTC())
+	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 99, nil, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("MarkGrabbedIfPending: %v", err)
 	}
@@ -644,12 +645,164 @@ func TestMarkGrabbedIfPending_MissingID(t *testing.T) {
 	s := newStore(t)
 
 	// Non-existent id — should return ok=false, not error.
-	ok, err := s.MarkGrabbedIfPending(ctx, "does-not-exist", 1, time.Now().UTC())
+	ok, err := s.MarkGrabbedIfPending(ctx, "does-not-exist", 1, nil, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("MarkGrabbedIfPending: %v", err)
 	}
 	if ok {
 		t.Fatal("expected ok=false for non-existent request id")
+	}
+}
+
+// TestMarkGrabbedIfPending_PersistsSeasons verifies that a non-nil seasons
+// selection is persisted to the seasons column on the pending→grabbed
+// transition (the admin's final season scope from approve).
+func TestMarkGrabbedIfPending_PersistsSeasons(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_mgip_seasons", "series", "A Show", requests.StatePending)
+	req.TvdbID = 321
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 55, []int{1, 3}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("MarkGrabbedIfPending: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for pending request")
+	}
+
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Seasons) != 2 || got.Seasons[0] != 1 || got.Seasons[1] != 3 {
+		t.Errorf("Seasons: got %v, want [1 3]", got.Seasons)
+	}
+}
+
+// TestMarkGrabbedIfPending_NilSeasonsClearsColumn verifies that passing a nil
+// seasons selection (an admin's approve-time [] override, "all seasons")
+// clears any previously-stored scope back to ”/nil.
+func TestMarkGrabbedIfPending_NilSeasonsClearsColumn(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_mgip_clear", "series", "Another Show", requests.StatePending)
+	req.TvdbID = 654
+	req.Seasons = []int{2}
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	ok, err := s.MarkGrabbedIfPending(ctx, req.ID, 66, nil, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("MarkGrabbedIfPending: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for pending request")
+	}
+
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Seasons != nil {
+		t.Errorf("Seasons: got %v, want nil (cleared)", got.Seasons)
+	}
+}
+
+// ── Seasons roundtrip ────────────────────────────────────────────────────────
+
+// TestSeasons_InsertGetAllRoundtrip verifies that a non-nil Seasons value
+// survives Insert → Get and Insert → All.
+func TestSeasons_InsertGetAllRoundtrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_seasons_rt", "series", "Roundtrip Show", requests.StatePending)
+	req.TvdbID = 111
+	req.Seasons = []int{1, 2, 5}
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Seasons) != 3 || got.Seasons[0] != 1 || got.Seasons[1] != 2 || got.Seasons[2] != 5 {
+		t.Errorf("Get Seasons: got %v, want [1 2 5]", got.Seasons)
+	}
+
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(all))
+	}
+	if len(all[0].Seasons) != 3 || all[0].Seasons[0] != 1 || all[0].Seasons[1] != 2 || all[0].Seasons[2] != 5 {
+		t.Errorf("All()[0].Seasons: got %v, want [1 2 5]", all[0].Seasons)
+	}
+}
+
+// TestSeasons_NilRoundtrip verifies that a nil Seasons value (the common
+// case — movies, or series requests with no season-level scope) round-trips
+// to nil, not an empty-but-non-nil slice.
+func TestSeasons_NilRoundtrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("req_seasons_nil", "movie", "No Seasons Here", requests.StatePending)
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := s.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Seasons != nil {
+		t.Errorf("Seasons: got %v, want nil", got.Seasons)
+	}
+}
+
+// TestSeasons_EmptyColumnBackCompat verifies that a row written before
+// migrate4 added the seasons column — i.e. one where the column holds ”
+// (the DEFAULT) because it was inserted via raw SQL bypassing seasonsToText —
+// scans back to nil, not an error or a non-nil empty slice.
+func TestSeasons_EmptyColumnBackCompat(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err := s.DB().ExecContext(ctx,
+		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
+		                       requested_by, state, reason, arr_id, created_at, updated_at, seasons)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
+		"req_backcompat", "movie", 900, 0, "Pre-Migration Film", 2020, "",
+		"alice", string(requests.StatePending), "", 0,
+		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatalf("insert raw row: %v", err)
+	}
+
+	got, err := s.Get(ctx, "req_backcompat")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Seasons != nil {
+		t.Errorf("Seasons: got %v, want nil (back-compat '' column)", got.Seasons)
 	}
 }
 

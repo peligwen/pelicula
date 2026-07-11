@@ -115,6 +115,7 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 				CreatedAt:   req.CreatedAt,
 				UpdatedAt:   req.UpdatedAt,
 				History:     req.History,
+				Seasons:     req.Seasons,
 			})
 		}
 	}

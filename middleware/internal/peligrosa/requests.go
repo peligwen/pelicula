@@ -7,10 +7,14 @@ package peligrosa
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +60,11 @@ type MediaRequest struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	History     []RequestEvent `json:"history"`
+	// Seasons is the season-level scope for a series request; omitted (not
+	// null/[]) when unspecified — the request covers all seasons. Set by the
+	// viewer at creation (advisory) or the admin at approve (authoritative,
+	// see handleRequestApprove's absent/override/[]-clears protocol).
+	Seasons []int `json:"seasons,omitempty"`
 }
 
 // isTerminal returns true for states that are end-of-lifecycle.
@@ -93,6 +102,7 @@ type RequestExport struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	History     []RequestEvent `json:"history"`
+	Seasons     []int          `json:"seasons,omitempty"`
 }
 
 // RequestStore persists media requests in SQLite.
@@ -135,6 +145,7 @@ func toMediaRequest(r *reporeqs.Request) *MediaRequest {
 		CreatedAt:   r.CreatedAt,
 		UpdatedAt:   r.UpdatedAt,
 		History:     history,
+		Seasons:     r.Seasons,
 	}
 }
 
@@ -165,6 +176,7 @@ func toRepoRequest(m *MediaRequest) *reporeqs.Request {
 		CreatedAt:   m.CreatedAt,
 		UpdatedAt:   m.UpdatedAt,
 		History:     history,
+		Seasons:     m.Seasons,
 	}
 }
 
@@ -264,6 +276,7 @@ func (s *RequestStore) InsertFull(ctx context.Context, req RequestExport) error 
 		CreatedAt:   req.CreatedAt,
 		UpdatedAt:   req.UpdatedAt,
 		History:     history,
+		Seasons:     req.Seasons,
 	}
 	return s.repo.InsertFull(ctx, r)
 }
@@ -320,6 +333,56 @@ func (s *RequestStore) MarkAvailable(ctx context.Context, reqType string, tmdbID
 	return nil
 }
 
+// normalizeSeasons validates the shape of a seasons parameter: nil is valid
+// ("all seasons"); a non-nil empty slice is rejected (there is no "monitor
+// nothing" add/request); each number must be in [0,999]; at most 100
+// entries; duplicates are silently removed. Returns the deduped, sorted
+// slice and an empty error string on success, or (nil, message) with message
+// suitable for a 400 response body.
+//
+// This intentionally mirrors internal/app/search.normalizeSeasons rather
+// than importing it: peligrosa is structurally decoupled from the search
+// package (it depends only on the clients.Fulfiller interface — see that
+// interface's doc comment), and this is a small, stable, pure helper.
+func normalizeSeasons(seasons []int) ([]int, string) {
+	if seasons == nil {
+		return nil, ""
+	}
+	if len(seasons) == 0 {
+		return nil, "seasons must be a non-empty array of season numbers"
+	}
+	if len(seasons) > 100 {
+		return nil, "seasons must contain at most 100 entries"
+	}
+	seen := make(map[int]bool, len(seasons))
+	out := make([]int, 0, len(seasons))
+	for _, n := range seasons {
+		if n < 0 || n > 999 {
+			return nil, fmt.Sprintf("season number %d out of range (0-999)", n)
+		}
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	sort.Ints(out)
+	return out, ""
+}
+
+// formatSeasonsNote renders a non-nil seasons selection as an approve-event
+// Note suffix, e.g. " (seasons: 1, 2)". Returns "" for an empty slice.
+func formatSeasonsNote(seasons []int) string {
+	if len(seasons) == 0 {
+		return ""
+	}
+	parts := make([]string, len(seasons))
+	for i, n := range seasons {
+		parts[i] = strconv.Itoa(n)
+	}
+	return " (seasons: " + strings.Join(parts, ", ") + ")"
+}
+
 // --- HTTP handlers ---
 
 // HandleRequests dispatches GET (list) and POST (create) on /api/pelicula/requests.
@@ -367,6 +430,13 @@ func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		Title  string `json:"title"`
 		Year   int    `json:"year"`
 		Poster string `json:"poster"`
+		// Seasons is the viewer's desired season-level scope for a series
+		// request — advisory only. It's shape-validated here (mirroring
+		// search.HandleSearchAdd's rules) but NOT checked for existence
+		// against Sonarr: that requires a live lookup, and an unprivileged
+		// viewer request should not trigger one. Existence is the
+		// authoritative gate at approve time (handleRequestApprove).
+		Seasons []int `json:"seasons"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
@@ -387,6 +457,15 @@ func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Type == "series" && body.TvdbID == 0 {
 		httputil.WriteError(w, "tvdb_id is required for series", http.StatusBadRequest)
+		return
+	}
+	if body.Seasons != nil && body.Type != "series" {
+		httputil.WriteError(w, "seasons is only valid for series", http.StatusBadRequest)
+		return
+	}
+	seasons, seasonsErr := normalizeSeasons(body.Seasons)
+	if seasonsErr != "" {
+		httputil.WriteError(w, seasonsErr, http.StatusBadRequest)
 		return
 	}
 
@@ -410,6 +489,7 @@ func (p *Deps) HandleRequestCreate(w http.ResponseWriter, r *http.Request) {
 		State:       RequestPending,
 		CreatedAt:   now,
 		UpdatedAt:   now,
+		Seasons:     seasons,
 	}
 
 	if err := p.Requests.repo.Insert(r.Context(), toRepoRequest(req)); err != nil {
@@ -496,6 +576,41 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Optional body: {"seasons": [...]} — an admin override of the series
+	// request's stored season scope. Protocol (deliberately asymmetric with
+	// search/add and request-create, which have no "stored" value to fall
+	// back to — see API.md):
+	//   - absent body / JSON null → nil here → use the request's stored scope
+	//   - non-empty array → shape-validated and used as the final scope
+	//   - explicit []       → admin cleared the scope → all seasons (nil)
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var body struct {
+		Seasons *[]int `json:"seasons"`
+	}
+	if decodeErr := json.NewDecoder(r.Body).Decode(&body); decodeErr != nil && decodeErr != io.EOF {
+		httputil.WriteError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	finalSeasons := req.Seasons
+	if body.Seasons != nil {
+		if req.Type != "series" {
+			httputil.WriteError(w, "seasons is only valid for series", http.StatusBadRequest)
+			return
+		}
+		override := *body.Seasons
+		if len(override) == 0 {
+			finalSeasons = nil // admin cleared the scope → all seasons
+		} else {
+			normalized, seasonsErr := normalizeSeasons(override)
+			if seasonsErr != "" {
+				httputil.WriteError(w, seasonsErr, http.StatusBadRequest)
+				return
+			}
+			finalSeasons = normalized
+		}
+	}
+
 	// Snapshot what we need for the *arr call
 	reqType := req.Type
 	tmdbID := req.TmdbID
@@ -510,12 +625,17 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	case "movie":
 		arrID, addErr = rs.fulfiller.AddMovie(r.Context(), tmdbID, radarrProfileID, radarrRoot)
 	case "series":
-		arrID, addErr = rs.fulfiller.AddSeries(r.Context(), tvdbID, sonarrProfileID, sonarrRoot, nil)
+		arrID, addErr = rs.fulfiller.AddSeries(r.Context(), tvdbID, sonarrProfileID, sonarrRoot, finalSeasons)
 	default:
 		httputil.WriteError(w, "unknown request type", http.StatusInternalServerError)
 		return
 	}
 	if addErr != nil {
+		if errors.Is(addErr, clients.ErrInvalidSeasons) {
+			// Request stays pending — the admin fixes the override and retries.
+			httputil.WriteError(w, addErr.Error(), http.StatusBadRequest)
+			return
+		}
 		slog.Error("failed to add content to *arr", "component", "requests", "id", id, "error", addErr)
 		httputil.WriteError(w, "failed to add to *arr: "+addErr.Error(), http.StatusBadGateway)
 		return
@@ -524,8 +644,10 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 	// Layer 2: atomic conditional UPDATE — only transitions pending → grabbed.
 	// This is a second-line defense: if the mutex ever fails to serialize (e.g.
 	// separate process instances), the SQL WHERE state=? ensures only one writer wins.
+	// finalSeasons is also persisted here — the admin's final season selection,
+	// which may differ from what the viewer originally requested.
 	now := time.Now().UTC()
-	ok, err := rs.repo.MarkGrabbedIfPending(r.Context(), id, arrID, now)
+	ok, err := rs.repo.MarkGrabbedIfPending(r.Context(), id, arrID, finalSeasons, now)
 	if err != nil {
 		slog.Error("failed to save request after approve", "component", "requests", "error", err)
 		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
@@ -544,11 +666,12 @@ func (rs *RequestStore) handleRequestApprove(w http.ResponseWriter, r *http.Requ
 
 	// Persist the audit event BEFORE attempting the re-fetch — the history record
 	// must be durable regardless of whether we can build a rich response body.
+	// A non-nil finalSeasons appends a scope detail, e.g. " (seasons: 1, 2)".
 	ev := RequestEvent{
 		At:    now,
 		State: RequestGrabbed,
 		Actor: actorUsername,
-		Note:  "approved and added to *arr",
+		Note:  "approved and added to *arr" + formatSeasonsNote(finalSeasons),
 	}
 	if err := rs.insertEvent(r.Context(), id, ev); err != nil {
 		slog.Warn("failed to insert approve event", "component", "requests", "error", err)
