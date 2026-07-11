@@ -15,6 +15,7 @@ type Compose struct {
 	isSynology  bool
 	profiles    []string // active profiles (e.g. "vpn", "apprise")
 	projectName string   // --project-name passed to every docker compose invocation
+	nfsLibrary  bool     // LIBRARY_NFS=true — pick docker-compose.nfs.yml over local-library
 }
 
 // NewCompose creates a Compose helper rooted at scriptDir.
@@ -107,6 +108,18 @@ func (c *Compose) buildArgs(extra ...string) []string {
 		"--env-file", c.envFile,
 		"-f", filepath.Join(c.projectDir, "compose", "docker-compose.yml"),
 	}
+
+	// Library-source overlay: the base file mounts no /media anywhere (see
+	// its header comment) — exactly one of this pair supplies the library
+	// for every media service. Selected from LIBRARY_NFS via c.nfsLibrary
+	// (set in ctx.newCompose), and inserted directly after the base file so
+	// override.yml, libraries.yml, and the test overlay below all still win
+	// merges against it.
+	libOverlay := "docker-compose.local-library.yml"
+	if c.nfsLibrary {
+		libOverlay = "docker-compose.nfs.yml"
+	}
+	args = append(args, "-f", filepath.Join(c.projectDir, "compose", libOverlay))
 
 	// Optional override files
 	override := filepath.Join(c.projectDir, "compose", "docker-compose.override.yml")

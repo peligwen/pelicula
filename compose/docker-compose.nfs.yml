@@ -1,0 +1,56 @@
+# Library source: NFS export, mounted by the Docker engine — LIBRARY_NFS=true.
+#
+# One of exactly two library overlays (see the header in docker-compose.yml).
+# The Docker engine (Docker Desktop's Linux VM, or the Linux/Synology host)
+# mounts the export directly through a `local`-driver named volume, so
+# containers read/write it as a normal volume — no macOS Finder mount, no
+# /Volumes, no VirtioFS, no FUSE in the path.
+#
+# .env contract (all consumed only by this file):
+#   NFS_HOST     — NAS hostname/IP (required)
+#   NFS_EXPORT   — absolute export path, e.g. /volume1/media (required)
+#   NFS_OPTIONS  — mount options (optional; default below)
+#
+# Default options: hard-mount NFSv4 without locking. `hard` blocks I/O until
+# the NAS comes back instead of corrupting in-flight library writes the way
+# `soft` timeouts can; imports WRITE to this volume, so integrity wins over
+# liveness. Override via NFS_OPTIONS if your export needs e.g. nfsvers=3.
+#
+# WORK_DIR (downloads + processing) deliberately stays a local bind mount in
+# the base file: NFS breaks hardlinks and is a poor fit for active torrent
+# I/O, so Sonarr/Radarr fall back to copy-on-import across the boundary.
+#
+# Changing NFS_HOST/NFS_EXPORT/NFS_OPTIONS later does NOT update an existing
+# volume — the local driver bakes options in at creation. After `pelicula
+# down`, run `docker volume rm pelicula_library` and bring the stack back up.
+#
+# Keep the service list in lockstep with docker-compose.local-library.yml —
+# every media service must appear in both files with the same /media target.
+
+volumes:
+  library:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${NFS_HOST:?NFS_HOST not set in .env (required when LIBRARY_NFS=true)},${NFS_OPTIONS:-rw,nfsvers=4,nolock,hard}"
+      device: ":${NFS_EXPORT:?NFS_EXPORT not set in .env (required when LIBRARY_NFS=true)}"
+
+services:
+  sonarr:
+    volumes:
+      - library:/media
+  radarr:
+    volumes:
+      - library:/media
+  jellyfin:
+    volumes:
+      - library:/media
+  procula:
+    volumes:
+      - library:/media
+  bazarr:
+    volumes:
+      - library:/media
+  pelicula-api:
+    volumes:
+      - library:/media

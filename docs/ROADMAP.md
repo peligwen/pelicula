@@ -20,11 +20,18 @@ in `## Shipped` capture each pass.
 - **Test-stack durability beyond ~24h**: a `pelicula test --keep` stack left running ~24h wedges with `SQLite Error 14: 'unable to open database file'` from Jellyfin's user store, causing `/api/pelicula/auth/login` to return 503 and blocking every authenticated Playwright spec. Targeted `docker restart pelicula-test-jellyfin-1` doesn't recover (DB returns 404 for the seeded admin after restart — likely a state-rehydration gap). Workaround today is `down -v --remove-orphans` + fresh `bash tests/e2e.sh`. Worth investigating whether the Jellyfin SQLite WAL is being corrupted by container clock drift, or whether a periodic config-seed refresh would keep the admin user pinned. No timeline.
 
 - **Retire/retention/storage pruning**: storage management and dedup reporting. Deferred, no timeline.
-- **NFS-backed library (named volumes)**: host `movies/` and `tv/` on a NAS via NFS without a macOS Finder mount. Docker Desktop's Linux VM mounts the export directly through `local` volumes with `driver_opts: type=nfs`, so containers read/write it as normal named volumes — no `/Volumes`, no VirtioFS, no FUSE. Keep `WORK_DIR` (downloads + processing) local because NFS breaks hardlinks and is poorly suited to active torrent I/O; accept that Sonarr/Radarr will fall back to copy-on-import. Shape: new `compose/docker-compose.nfs.yml` + `compose/docker-compose.local-library.yml` override pair; `LIBRARY_NFS` / `NFS_HOST` / `NFS_EXPORT` / `NFS_OPTIONS` in `.env`; ``pelicula up`` picks the right overlay. Full plan: `~/.claude/plans/shiny-floating-cosmos.md`.
 
 ---
 
 ## Shipped
+
+### 2026-07-11 — NFS-backed library (named volumes)
+- The media library can now live on a NAS NFS export with no host-side mount: `LIBRARY_NFS=true` + `NFS_HOST`/`NFS_EXPORT`/`NFS_OPTIONS` in `.env`, and the Docker engine mounts the export as a `local`-driver named volume with `type=nfs` — no `/Volumes`, no VirtioFS, no FUSE in the media path.
+- Structural change: `compose/docker-compose.yml` mounts no `/media` anywhere; exactly one of the new `docker-compose.local-library.yml` (default bind mount) / `docker-compose.nfs.yml` overlay pair supplies it, selected in `Compose.buildArgs` so up/down/logs/restart all assemble the same file set. `WORK_DIR` deliberately stays a local bind — NFS breaks hardlinks, so *arr falls back to copy-on-import.
+- CLI: `pelicula up` requires `NFS_HOST`/`NFS_EXPORT` instead of `LIBRARY_DIR` in NFS mode, skips host library folders, and best-effort creates slug dirs inside the mounted volume via procula (runs as `PUID:PGID`); hard reset preserves the NFS quartet in the regenerated `.env`. Changing NFS settings requires recreating the baked volume (`docker volume rm pelicula_library`) — documented in `.env.example` and the overlay header.
+- Guards: e2e Stage 1 renders the NFS overlay with stub vars and asserts its `/media` mount count matches the local-library render (lockstep contract); 7 new CLI unit tests pin overlay selection, ordering ahead of the `PELICULA_COMPOSE_OVERLAY` seam, `isNFSLibrary` parsing, NFS-mode `setupDirs`, and `.env` regeneration.
+- Passing doc fixes: `.env.example` dropped the dead pre-2026-05 `REMOTE_*`/`CLOUDFLARE_*`/`TAILSCALE_*` block; ARCHITECTURE.md's overlay table gained the pair + `libraries.yml`, and its stale 8s/15s `stop_grace_period` note now reflects MWA-14's 16s/32s.
+- **Owner follow-up:** first real-NAS smoke — set the quartet against the Synology export and run `pelicula up`; the e2e gate can only prove render-correctness, not a live NFS mount.
 
 ### 2026-07-11 — post-campaign review round
 - Full review pass over the 2026-07 audit campaign's own merged output (~65 commits, ~1.9k production Go LOC + frontend/harness since baseline `7233732`): baseline gates all green (`go vet`, `gofmt`, unit + `-race` on procula and the hot middleware packages), no correctness findings — the campaign's fixes held up.

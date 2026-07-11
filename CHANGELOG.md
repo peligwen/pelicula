@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **NFS-backed media library** — `LIBRARY_NFS=true` + `NFS_HOST`/`NFS_EXPORT` (+ optional `NFS_OPTIONS`) serves `/media` from a NAS export mounted by the Docker engine as a named volume, replacing the `LIBRARY_DIR` bind mount. The base compose file no longer mounts `/media` itself; the CLI assembles exactly one of the new `docker-compose.local-library.yml` (default) / `docker-compose.nfs.yml` overlay pair into every invocation. `pelicula up` validates the NFS vars, skips host-side library folders, and best-effort creates `movies/`+`tv/` inside the volume; hard reset preserves the NFS quartet. `WORK_DIR` deliberately stays local (NFS breaks hardlinks — *arr copies on import).
+
 ### Removed
 - **Argos Translate dualsub fallback** — dual subtitles now require a human-authored secondary track (embedded stream or sidecar, typically via Bazarr); when none exists the pair records `dualsub_error` and the job completes without that sidecar, exactly as it already did with the default `DUALSUB_TRANSLATOR=none`. The fallback needed an undocumented `pip install argostranslate` inside the procula image, and machine-translated cue quality was never good enough to ship. `DUALSUB_TRANSLATOR` and the settings-UI translator toggle are gone; a leftover `dual_sub_translator` key in saved settings is ignored harmlessly on load.
 

@@ -4,6 +4,14 @@
 # in 2024). To bump, verify via `docker manifest inspect <tag>` and run
 # the e2e test stack first.
 
+# Library source: this file deliberately mounts NO /media volume. The
+# library comes from exactly one companion overlay, chosen by the CLI from
+# LIBRARY_NFS in .env (see cmd/pelicula/compose.go buildArgs):
+#   docker-compose.local-library.yml — ${LIBRARY_DIR} bind mount (default)
+#   docker-compose.nfs.yml           — NFS named volume (LIBRARY_NFS=true)
+# Never `docker compose -f docker-compose.yml ...` by hand without adding
+# one of the pair, or every media service starts without its library.
+
 # Default logging driver: json-file with rotation. Apply to every service
 # via `<<: *default-logging`. 10 MB × 3 files × ~14 services ≈ 420 MB
 # stack-wide ceiling — fits Synology comfortably while preserving
@@ -129,7 +137,6 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/sonarr:/config
-      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8989/ping || exit 1"]
@@ -151,7 +158,6 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/radarr:/config
-      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ping || exit 1"]
@@ -179,7 +185,6 @@ services:
       - "8920:8920"       # Jellyfin built-in HTTPS — operator port-forwards this for external access
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config
-      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
       # linuxserver/jellyfin is Ubuntu-based (no wget) — use curl.
       test: ["CMD-SHELL", "curl -sf http://localhost:8096/health || exit 1"]
@@ -226,7 +231,6 @@ services:
       - ${CONFIG_DIR}/procula:/config
       - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
-      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/processing:/processing
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8282/ping || exit 1"]
@@ -247,7 +251,6 @@ services:
       - TZ=${TZ}
     volumes:
       - ${CONFIG_DIR}/bazarr:/config
-      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:6767/bazarr/ || exit 1"]
       interval: 30s
@@ -328,7 +331,6 @@ services:
       # Writable mount so settings auto-apply can re-seed network.xml when the
       # Jellyfin published URL changes (then restart Jellyfin via docker-proxy).
       - ${CONFIG_DIR}/jellyfin:/config/jellyfin
-      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
     networks:
       default: {}
