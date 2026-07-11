@@ -84,7 +84,7 @@ func TestWriteEnvFile_SingleTimestampedBackup(t *testing.T) {
 
 	if err := writeEnvFile(envPath, "/new/config", "/new/lib", "/new/work",
 		"1000", "1000", "UTC", "wgkey", "Netherlands", "7354",
-		"admin", "proculakey", "jfpass"); err != nil {
+		"admin", "proculakey", "jfpass", nil); err != nil {
 		t.Fatalf("writeEnvFile: %v", err)
 	}
 

@@ -99,8 +99,17 @@ func (ctx *Context) projectName() string {
 // PELICULA_ENV_FILE override — see newContext) for --env-file rather than
 // re-deriving scriptDir/.env itself. Profiles are NOT set — callers that need
 // profile-aware compose should use composeInvocation(ctx) instead.
+//
+// The library-source selection (LIBRARY_NFS) is set here, not in
+// composeInvocation: unlike profiles, it is structural — every compose
+// invocation (up, down, logs, restart) must assemble the same file set or
+// service definitions silently lose their /media mount. When ctx.Env is nil
+// (pre-setup), the local-library default applies; that path never touches
+// media services.
 func (ctx *Context) newCompose() *Compose {
-	return NewCompose(ctx.ScriptDir, ctx.EnvFile, ctx.Plat.NeedsSudo, ctx.Plat.IsSynology, ctx.projectName())
+	c := NewCompose(ctx.ScriptDir, ctx.EnvFile, ctx.Plat.NeedsSudo, ctx.Plat.IsSynology, ctx.projectName())
+	c.nfsLibrary = ctx.Env != nil && isNFSLibrary(ctx.Env)
+	return c
 }
 
 // composeInvocation builds a fully configured *Compose with compose profiles

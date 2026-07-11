@@ -139,7 +139,15 @@ func resetConfigAll(ctx *Context) {
 		fatal("Unsafe CONFIG_DIR: '" + configDir + "' — aborting")
 	}
 
+	// In NFS mode there is no host library path — the export is mounted by
+	// the Docker engine (see docker-compose.nfs.yml) and its media files are
+	// untouchable from here either way.
 	libraryDir := env["LIBRARY_DIR"]
+	libraryLabel := libraryDir
+	if isNFSLibrary(env) {
+		libraryDir = ""
+		libraryLabel = "the NFS export (" + env["NFS_HOST"] + ":" + env["NFS_EXPORT"] + ")"
+	}
 	workDir := env["WORK_DIR"]
 
 	fmt.Printf("%s%sFull configuration reset%s\n", colorRed, colorBold, colorReset)
@@ -148,7 +156,7 @@ func resetConfigAll(ctx *Context) {
 	fmt.Println()
 	fmt.Printf("%sWhat will be cleared:%s\n", colorBold, colorReset)
 	fmt.Printf("  ALL service configs, databases, and caches under %s\n", configDir)
-	fmt.Printf("  Jellyfin library metadata (media files in %s are kept)\n", libraryDir)
+	fmt.Printf("  Jellyfin library metadata (media files in %s are kept)\n", libraryLabel)
 	fmt.Println("  Sonarr/Radarr API keys, series/movie databases")
 	fmt.Println("  Pelicula admin accounts and invite tokens")
 	fmt.Println("  Procula custom transcoding profiles and notification settings")
@@ -156,7 +164,7 @@ func resetConfigAll(ctx *Context) {
 	fmt.Printf("%sWhat is kept:%s\n", colorBold, colorReset)
 	fmt.Println("  Prowlarr indexer database (indexers survive)")
 	fmt.Println("  WireGuard key, VPN country, paths, PUID/PGID, TZ, port")
-	fmt.Printf("  %s — all media files\n", libraryDir)
+	fmt.Printf("  %s — all media files\n", libraryLabel)
 	fmt.Printf("  %s/downloads — torrents and seeding files\n", workDir)
 	fmt.Println()
 	fmt.Printf("%sType 'reset' to confirm, or anything else to abort:%s ", colorRed, colorReset)
@@ -224,13 +232,23 @@ func resetConfigAll(ctx *Context) {
 	// Admin password is left empty — the setup wizard handles that on next up.
 	newProculaKey := generateAPIKey()
 
+	// The NFS quartet counts as "paths" for the keep-promise above — without
+	// it a hard reset on an NFS install would write LIBRARY_DIR="" and no
+	// library source at all. env["LIBRARY_DIR"] (not the zeroed local var) is
+	// preserved too, in case the operator keeps one set for reference.
 	if err := writeEnvFile(
 		ctx.EnvFile,
-		configDir, libraryDir, workDir,
+		configDir, env["LIBRARY_DIR"], workDir,
 		env["PUID"], env["PGID"], env["TZ"],
 		savedWGKey, savedCountries,
 		envDefault(env, "PELICULA_PORT", "7354"),
 		"", newProculaKey, "",
+		EnvMap{
+			"LIBRARY_NFS": env["LIBRARY_NFS"],
+			"NFS_HOST":    env["NFS_HOST"],
+			"NFS_EXPORT":  env["NFS_EXPORT"],
+			"NFS_OPTIONS": env["NFS_OPTIONS"],
+		},
 	); err != nil {
 		fatal("Failed to write .env: " + err.Error())
 	}

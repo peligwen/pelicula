@@ -79,6 +79,11 @@ func readOrCreateLibraries(configPeliculaDir string) ([]cliLibrary, error) {
 // For each library in libs, it creates filepath.Join(libraryDir, lib.Slug) unless the
 // library has an explicit external path (lib.Path != ""), in which case the user manages
 // that directory.
+//
+// libraryDir == "" means the library is not host-visible (NFS mode — the
+// Docker engine mounts the export directly, see docker-compose.nfs.yml):
+// slug directories are skipped here and created inside the mounted volume
+// after the stack is up instead (see cmdUp's ensureNFSLibraryDirs).
 func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
 	dirs := []string{
 		filepath.Join(configDir, "gluetun"),
@@ -111,7 +116,7 @@ func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
 			warn(fmt.Sprintf("skipping library with unsafe slug %q (must match [a-z0-9][a-z0-9-]*)", lib.Slug))
 			continue
 		}
-		if lib.Path == "" {
+		if lib.Path == "" && libraryDir != "" {
 			dirs = append(dirs, filepath.Join(libraryDir, lib.Slug))
 		}
 	}
@@ -152,8 +157,12 @@ func firstExistingAncestor(path string) string {
 }
 
 // writeEnvFile writes a fresh .env file with the given parameters.
+// extra holds additional key/value pairs to preserve verbatim (e.g. the
+// LIBRARY_NFS/NFS_* quartet on NFS-mode installs — hard reset promises to
+// keep "paths", and in NFS mode those vars ARE the library path). Keys in
+// extra never override the explicit parameters; empty values are skipped.
 func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
-	wgKey, countries, port, adminUser, proculaKey, jfPass string) error {
+	wgKey, countries, port, adminUser, proculaKey, jfPass string, extra EnvMap) error {
 
 	// Back up if exists, under a timestamped name (survives repeated resets
 	// without being silently overwritten, unlike WriteEnv's plain ".bak").
@@ -183,6 +192,14 @@ func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
 		"NOTIFICATIONS_ENABLED": "false",
 		"NOTIFICATIONS_MODE":    "internal",
 		"PELICULA_PROJECT_NAME": "pelicula",
+	}
+	for k, v := range extra {
+		if v == "" {
+			continue
+		}
+		if _, exists := m[k]; !exists {
+			m[k] = v
+		}
 	}
 	return writeEnvNoBackup(envPath, m)
 }

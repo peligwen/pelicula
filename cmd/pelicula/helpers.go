@@ -127,6 +127,15 @@ func loadEnvOrFatal(envFile string) EnvMap {
 	return env
 }
 
+// isNFSLibrary reports whether the install serves its media library from an
+// NFS export mounted by the Docker engine (compose/docker-compose.nfs.yml)
+// instead of the default ${LIBRARY_DIR} bind mount. Strict "true" match,
+// consistent with the stack's other boolean env vars (TRANSCODING_ENABLED,
+// DUALSUB_ENABLED, PELICULA_OPEN_REGISTRATION).
+func isNFSLibrary(env EnvMap) bool {
+	return env["LIBRARY_NFS"] == "true"
+}
+
 // peliculaBaseURL returns the base URL for the pelicula-api on localhost using
 // the PELICULA_PORT from env, defaulting to 7354 if the key is absent or empty.
 // Callers append the path, e.g. peliculaBaseURL(env) + "/api/pelicula/health".

@@ -188,10 +188,15 @@ cmd_test() {
     # --profile vpn starts gluetun/qbittorrent/prowlarr, which the overlay
     # replaces with safe stubs (alpine for gluetun, real images with test names).
     test_compose() {
+        # File list mirrors the CLI's buildArgs assembly: base, then the
+        # library-source overlay (the base mounts no /media itself; the test
+        # env is bind-mount mode, so local-library), then the test overlay so
+        # it wins merges.
         $NEEDS_SUDO docker compose \
             --project-directory "$SCRIPT_DIR" \
             --env-file "$test_env" \
             -f "$COMPOSE_FILE" \
+            -f "$SCRIPT_DIR/compose/docker-compose.local-library.yml" \
             -f "$SCRIPT_DIR/compose/docker-compose.test.yml" \
             -p pelicula-test \
             --profile vpn \

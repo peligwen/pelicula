@@ -120,14 +120,29 @@ func cmdUp(ctx *Context, _ []string) {
 	libraryDir := env["LIBRARY_DIR"]
 	workDir := env["WORK_DIR"]
 	port := envDefault(env, "PELICULA_PORT", "7354")
+	nfsLibrary := isNFSLibrary(env)
 
 	// Validate critical path vars — empty values produce cryptic Docker Compose errors.
-	for _, check := range []struct{ key, val string }{
+	// LIBRARY_DIR is only required for the default bind-mount library: in NFS
+	// mode (LIBRARY_NFS=true) the Docker engine mounts the export itself and
+	// no host library path exists — NFS_HOST/NFS_EXPORT take its place.
+	pathChecks := []struct{ key, val string }{
 		{"CONFIG_DIR", configDir},
-		{"LIBRARY_DIR", libraryDir},
 		{"WORK_DIR", workDir},
-	} {
+	}
+	if nfsLibrary {
+		pathChecks = append(pathChecks,
+			struct{ key, val string }{"NFS_HOST", env["NFS_HOST"]},
+			struct{ key, val string }{"NFS_EXPORT", env["NFS_EXPORT"]},
+		)
+	} else {
+		pathChecks = append(pathChecks, struct{ key, val string }{"LIBRARY_DIR", libraryDir})
+	}
+	for _, check := range pathChecks {
 		if check.val == "" {
+			if nfsLibrary && (check.key == "NFS_HOST" || check.key == "NFS_EXPORT") {
+				fatal(check.key + ` is empty in .env — required when LIBRARY_NFS=true (NAS host and export path, e.g. NFS_HOST=nas.local NFS_EXPORT=/volume1/media)`)
+			}
 			fatal(check.key + ` is empty in .env — set it manually or run: pelicula reset-config`)
 		}
 	}
@@ -144,9 +159,15 @@ func cmdUp(ctx *Context, _ []string) {
 		libs = defaultLibraries().Libraries
 	}
 
-	// Create directory structure
+	// Create directory structure. In NFS mode there is no host library path —
+	// setupDirs skips slug dirs (libraryDir "") and ensureNFSLibraryDirs
+	// creates them inside the mounted volume once the stack is up.
 	progress("Setting up directories...")
-	if err := setupDirs(configDir, libraryDir, workDir, libs); err != nil {
+	setupLibraryDir := libraryDir
+	if nfsLibrary {
+		setupLibraryDir = ""
+	}
+	if err := setupDirs(configDir, setupLibraryDir, workDir, libs); err != nil {
 		var dce *dirCreateError
 		if errors.As(err, &dce) && os.IsPermission(dce.err) {
 			ancestor := firstExistingAncestor(dce.path)
@@ -188,6 +209,10 @@ func cmdUp(ctx *Context, _ []string) {
 	progress("Starting containers...")
 	if err := c.Run("up", "-d", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
+	}
+
+	if nfsLibrary {
+		ensureNFSLibraryDirs(c, libs)
 	}
 
 	wgKey := env["WIREGUARD_PRIVATE_KEY"]
@@ -334,4 +359,32 @@ func runUpSmoke(scriptDir, port string) {
 		warn("verify smoke reported failures")
 	}
 	fmt.Printf("  Run %s for details (this does not block 'up')\n", bold("pelicula verify"))
+}
+
+// ensureNFSLibraryDirs creates each managed library's slug directory inside
+// the NFS-backed /media volume (best-effort). In NFS mode the host never
+// sees the library filesystem, so setupDirs cannot pre-create movies/ and
+// tv/ the way it does for a bind mount — instead mkdir runs inside procula,
+// which mounts the volume read-write and runs as ${PUID}:${PGID}, the uid
+// the export is expected to grant. Failure is a warning, not fatal: the
+// export may be root-squashed or read-only for this uid, in which case the
+// operator creates the directories on the NAS themselves.
+func ensureNFSLibraryDirs(c *Compose, libs []cliLibrary) {
+	args := []string{"exec", "-T", "procula", "mkdir", "-p"}
+	n := 0
+	for _, lib := range libs {
+		if lib.Slug == "" || lib.Path != "" || !safeSlugRe.MatchString(lib.Slug) {
+			continue
+		}
+		args = append(args, "/media/"+lib.Slug)
+		n++
+	}
+	if n == 0 {
+		return
+	}
+	if out, err := c.RunSilent(args...); err != nil {
+		warn("could not create library folders on the NFS export: " + err.Error())
+		fmt.Fprintf(os.Stderr, "%s", out)
+		fmt.Println("  Create them on the NAS export manually (e.g. movies/ and tv/), then re-run: pelicula up")
+	}
 }
