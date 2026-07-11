@@ -1055,7 +1055,7 @@ assert 'Movies' in names and 'TV Shows' in names
     # first ran auth-free inside bin/pelicula up (Stage 1) as its own
     # post-deploy smoke. The isolated stack's own admin credentials (seeded
     # into test_env above) are known here, so this run uses real auth
-    # instead of --skip-auth — this unlocks the 8 authenticated suites
+    # instead of --skip-auth — this unlocks the 9 authenticated suites
     # (bug1-reconcile, bug4-registration, sweep-catalog/jobs/users/settings,
     # sweep-search-options, sweep-remove-action, sweep-search-seasons) instead
     # of silently skipping them. PELICULA_ENV_FILE, exported in
