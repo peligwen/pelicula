@@ -52,6 +52,27 @@
         </div>
     </div>
 
+    <!-- Remove-from-library modal (whole-title, destructive — see catalog.js
+         openRemoveConfirm / docs/PROCULA.md "Remove from library"). Typed
+         title confirmation gates the Remove button. -->
+    <div class="modal-overlay hidden" id="remove-modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Remove from library">
+            <h3>Remove from Library?</h3>
+            <div class="modal-sub" id="remove-name"></div>
+            <p style="font-size:0.8rem;color:var(--muted);margin:0 0 1rem">
+                This deletes the media files from disk, removes the title from Sonarr/Radarr,
+                and cannot be undone. Torrents already seeding in qBittorrent are left alone.
+            </p>
+            <label for="remove-confirm-input">Type the title to confirm</label>
+            <input type="text" id="remove-confirm-input" autocomplete="off" placeholder="Title">
+            <div class="modal-buttons">
+                <button class="modal-btn-cancel" id="remove-cancel-btn">Cancel</button>
+                <button class="modal-btn-confirm btn-danger" id="remove-confirm-btn" disabled>Remove</button>
+            </div>
+            <div class="no-items" id="remove-status" style="margin-top:0.5rem"></div>
+        </div>
+    </div>
+
     <!-- Cancel-download modal -->
     <div class="modal-overlay hidden" id="cancel-dl-modal">
         <div class="modal" role="dialog" aria-modal="true" aria-label="Cancel download">

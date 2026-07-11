@@ -541,6 +541,13 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 0l6 6 6-6' fill='%239080a8'/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: right 0.75rem center;
 }
+.modal input[type="text"] {
+    width: 100%; box-sizing: border-box; padding: 0.6rem 0.75rem; background: var(--panel2);
+    border: 1.5px solid var(--border2); border-radius: 12px; color: var(--ink); font-size: 0.85rem;
+    outline: none; margin-bottom: 1rem; font-family: var(--font-body, 'Nunito Sans', sans-serif);
+    transition: border-color 0.15s;
+}
+.modal input[type="text"]:focus { border-color: var(--pink); }
 .modal-buttons { display: flex; gap: 0.5rem; }
 .modal-buttons button {
     flex: 1; padding: 0.6rem; border-radius: 50px; font-size: 0.85rem; cursor: pointer;

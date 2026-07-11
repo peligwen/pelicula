@@ -412,34 +412,57 @@ component('catalog', function (el, store, _props) {
 
         const registry = await loadActionRegistry();
         const isFanout = level === 'series' || level === 'season';
-        const defs = isFanout
-            ? registry.filter(d => d.applies_to && d.applies_to.includes('episode'))
-            : registry.filter(d => d.applies_to && d.applies_to.includes(level));
+        // At series/season level, split the registry into two groups:
+        // episodeDefs fan out across every episode's file (validate,
+        // transcode, replace, ...), same as before. containerDefs are
+        // actions whose applies_to names the container level itself (e.g.
+        // "remove", which deletes the whole title rather than per-episode
+        // files) — these render as single, non-fanout actions. Movie level
+        // has no container/episode split: defs is just "applies to movie".
+        const episodeDefs = isFanout ? registry.filter(d => d.applies_to && d.applies_to.includes('episode')) : [];
+        const containerDefs = isFanout ? registry.filter(d => d.applies_to && d.applies_to.includes(level)) : [];
+        const defs = isFanout ? [] : registry.filter(d => d.applies_to && d.applies_to.includes(level));
 
-        if (defs.length) {
-            for (const def of defs) {
-                const btn = document.createElement('button');
-                btn.className = 'cat-ctx-item';
-                btn.textContent = def.label + (isFanout ? ' (all episodes)' : '');
-                btn.addEventListener('click', () => {
-                    closeMenu();
-                    if (def.name === 'replace') {
-                        openReplaceDrawer(item, level);
-                        return;
-                    }
-                    if (def.name === 'dualsub') {
-                        openDualsubDialog(item, level);
-                        return;
-                    }
-                    if (def.name === 'subtitle_search') {
-                        openSubSearchDialog(item, level);
-                        return;
-                    }
-                    isFanout ? runFanout(item, level, def) : runAction(def, item, level);
-                });
-                menu.appendChild(btn);
+        function addMenuItem(def, fanout) {
+            const btn = document.createElement('button');
+            btn.className = 'cat-ctx-item' + (def.name === 'remove' ? ' dangerous' : '');
+            btn.textContent = def.label + (fanout ? ' (all episodes)' : '');
+            btn.addEventListener('click', () => {
+                closeMenu();
+                if (def.name === 'remove') {
+                    openRemoveConfirm(item, level);
+                    return;
+                }
+                if (def.name === 'replace') {
+                    openReplaceDrawer(item, level);
+                    return;
+                }
+                if (def.name === 'dualsub') {
+                    openDualsubDialog(item, level);
+                    return;
+                }
+                if (def.name === 'subtitle_search') {
+                    openSubSearchDialog(item, level);
+                    return;
+                }
+                fanout ? runFanout(item, level, def) : runAction(def, item, level);
+            });
+            menu.appendChild(btn);
+        }
+
+        if (isFanout) {
+            for (const def of containerDefs) addMenuItem(def, false);
+            if (containerDefs.length && episodeDefs.length) {
+                const divider = document.createElement('div');
+                divider.className = 'cat-ctx-divider';
+                menu.appendChild(divider);
             }
+            for (const def of episodeDefs) addMenuItem(def, true);
         } else {
+            for (const def of defs) addMenuItem(def, false);
+        }
+
+        if (containerDefs.length + episodeDefs.length + defs.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'cat-ctx-item';
             empty.style.color = 'var(--muted)';
@@ -1422,6 +1445,69 @@ component('catalog', function (el, store, _props) {
         }
     };
 
+    // ── Remove-from-library confirmation (whole-title, destructive) ──────────
+    // See docs/PROCULA.md "Remove from library" for the design rationale
+    // (middleware-led *arr deletion, whole-title granularity only).
+
+    let _removeItem = null;
+    let _removeLevel = null;
+
+    function openRemoveConfirm(item, level) {
+        _removeItem = item;
+        _removeLevel = level;
+        const title = item.title || item.seriesTitle || '';
+        document.getElementById('remove-name').textContent = title;
+        const input = document.getElementById('remove-confirm-input');
+        input.value = '';
+        document.getElementById('remove-status').textContent = '';
+        document.getElementById('remove-confirm-btn').disabled = true;
+        document.getElementById('remove-modal').classList.remove('hidden');
+        input.focus();
+    }
+
+    window.removeClose = function () {
+        document.getElementById('remove-modal').classList.add('hidden');
+        _removeItem = null;
+        _removeLevel = null;
+    };
+
+    // Gate the Remove button on an exact (trimmed, case-insensitive) match
+    // against the item's title — the whole point of typed confirmation is
+    // that it can't be fat-fingered through.
+    window.removeInputChanged = function () {
+        const item = _removeItem;
+        const expected = (item && (item.title || item.seriesTitle) || '').trim().toLowerCase();
+        const typed = document.getElementById('remove-confirm-input').value.trim().toLowerCase();
+        document.getElementById('remove-confirm-btn').disabled = !(expected && typed === expected);
+    };
+
+    window.removeConfirm = async function () {
+        const item = _removeItem;
+        const level = _removeLevel;
+        if (!item) return;
+        const confirmBtn = document.getElementById('remove-confirm-btn');
+        const statusEl = document.getElementById('remove-status');
+        confirmBtn.disabled = true;
+        statusEl.textContent = 'Removing…';
+
+        const target = level === 'movie'
+            ? { arr_type: 'radarr', arr_id: item.id }
+            : { arr_type: 'sonarr', arr_id: item.id }; // series
+        try {
+            await post('/api/pelicula/actions?wait=10', { action: 'remove', target, params: {} });
+            statusEl.textContent = '';
+            window.removeClose();
+            toast('Removed');
+            store.set('catalog.loaded', false);
+            loadCatalog();
+        } catch (e) {
+            const errMsg = (e.body && e.body.error) || e.message || 'unknown';
+            statusEl.textContent = '';
+            toast('Remove failed: ' + errMsg, { error: true });
+            window.removeInputChanged(); // re-enable Remove if the typed title still matches
+        }
+    };
+
     // ── Component lifecycle ───────────────────────────────────────────────────
     return {
         render() { /* initial render handled via store subscriptions + loadOnce */ },
@@ -1486,3 +1572,8 @@ document.getElementById('replace-backdrop').addEventListener('click', () => wind
 document.getElementById('replace-close-btn').addEventListener('click', () => window.replaceClose?.());
 document.getElementById('replace-cancel-btn').addEventListener('click', () => window.replaceClose?.());
 document.getElementById('replace-confirm-btn').addEventListener('click', () => window.replaceConfirm?.());
+
+// Remove-from-library confirmation modal
+document.getElementById('remove-cancel-btn').addEventListener('click', () => window.removeClose?.());
+document.getElementById('remove-confirm-btn').addEventListener('click', () => window.removeConfirm?.());
+document.getElementById('remove-confirm-input').addEventListener('input', () => window.removeInputChanged?.());

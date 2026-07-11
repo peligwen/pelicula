@@ -196,6 +196,14 @@
 
 .cat-ctx-item.dangerous { color: #e00055; }
 
+/* Separator between container-level actions (e.g. "Remove from library…")
+   and the episode fan-out actions below them at series/season level. */
+.cat-ctx-divider {
+    height: 1px;
+    margin: 0.25rem 0;
+    background: var(--border2);
+}
+
 /* ── Fan-out progress strip ──────────────────────────────────────────────── */
 
 .cat-fanout-strip {
