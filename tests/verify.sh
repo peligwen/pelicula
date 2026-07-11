@@ -35,6 +35,11 @@
 #                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #   sweep-settings    Settings tab HTTP smoke: key count, 4 safe round-trip checks.
 #                     Requires PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
+#   sweep-search-options  Search "Add with options…" HTTP smoke: arr-meta responds at
+#                     Manager+, search/add rejects an invalid profileId/rootPath with
+#                     400, and accepts a valid override (side-effect-free — see the
+#                     script's header comment). Requires PELICULA_TEST_JELLYFIN_PASSWORD;
+#                     skipped under --skip-auth.
 #
 # Tests that require a running Jellyfin session need
 #   PELICULA_TEST_JELLYFIN_PASSWORD + PELICULA_TEST_JELLYFIN_USER.
@@ -53,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET=""           # empty → tests use their own defaults (localhost:7354)
 SKIP_AUTH=""        # empty → tests perform auth checks if password is present
-SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"  # comma-separated list of suites to run
+SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options"  # comma-separated list of suites to run
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 
@@ -86,7 +91,7 @@ _fail() { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
 
 # AUTH_REQUIRED_SUITES: suites that need PELICULA_TEST_JELLYFIN_PASSWORD.
 # When --skip-auth is set these suites are skipped (not counted as failures).
-AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings"
+AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options"
 
 run_suite() {
     local name="$1" script="$1"

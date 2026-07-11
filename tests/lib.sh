@@ -307,6 +307,97 @@ http_json() {
     return 0
 }
 
+# ── http_status ───────────────────────────────────────────────────────────────
+
+# http_status METHOD PATH [BODY] [--auth jellyfin|pelicula|procula]
+#
+#   http_json's twin for suites that need to assert a specific *non-2xx*
+#   status (e.g. "invalid input → 400") instead of treating it as a failure.
+#   Prints the HTTP status code on the first line and the response body (if
+#   any) on the remaining lines; never fails on a non-2xx response — only on
+#   a setup problem (e.g. the pelicula login itself failing) or an unknown
+#   --auth mode, matching http_json's own failure modes.
+#
+# Example:
+#   resp="$(http_status POST /api/pelicula/search/add "$body" --auth pelicula)"
+#   code="$(echo "$resp" | head -1)"
+#   respbody="$(echo "$resp" | tail -n +2)"
+#   [[ "$code" == "400" ]] || _peli_err "expected 400, got $code: $respbody"
+http_status() {
+    local method="${1:-GET}"
+    local path="${2:-}"
+    shift 2 || true
+
+    local body=""
+    local auth_mode=""
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --auth)
+                auth_mode="${2:-}"
+                shift 2
+                ;;
+            *)
+                body="$1"
+                shift
+                ;;
+        esac
+    done
+
+    local url
+    if [[ "$path" == http://* || "$path" == https://* ]]; then
+        url="$path"
+    else
+        url="${PELI_BASE_URL}${path}"
+    fi
+
+    local -a curl_args=(
+        -s
+        -w "\n%{http_code}"
+        -X "$method"
+    )
+
+    case "$auth_mode" in
+        jellyfin)
+            curl_args+=(-H "X-MediaBrowser-Token: ${JELLYFIN_API_KEY}")
+            ;;
+        procula)
+            curl_args+=(-H "X-API-Key: ${PROCULA_API_KEY}")
+            ;;
+        pelicula)
+            _peli_ensure_session || return 1
+            curl_args+=(
+                -c "$_PELI_SESSION_JAR"
+                -b "$_PELI_SESSION_JAR"
+                -H "Origin: ${PELI_BASE_URL}"
+            )
+            ;;
+        "")
+            # No auth
+            ;;
+        *)
+            _peli_err "http_status: unknown --auth mode: $auth_mode"
+            return 1
+            ;;
+    esac
+
+    if [[ -n "$body" ]]; then
+        curl_args+=(-H "Content-Type: application/json" -d "$body")
+    fi
+
+    curl_args+=("$url")
+
+    local raw
+    raw="$(curl "${curl_args[@]}" 2>/dev/null)"
+
+    local resp_body http_code
+    http_code="${raw##*$'\n'}"
+    resp_body="${raw%$'\n'*}"
+
+    printf '%s\n%s' "$http_code" "$resp_body"
+    return 0
+}
+
 # ── peli_url_encode ───────────────────────────────────────────────────────────
 
 # peli_url_encode STRING
