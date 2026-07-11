@@ -44,6 +44,10 @@ On `pelicula up`, the stack:
 
 The only manual step is **adding indexers in Prowlarr** — the dashboard warns if none are configured.
 
+### Media library on a NAS (NFS)
+
+Set `LIBRARY_NFS=true` with `NFS_HOST`/`NFS_EXPORT` in `.env` and the Docker engine mounts the export itself as the `/media` volume — no Finder/OS-level mount needed, and on macOS no VirtioFS in the media path. `WORK_DIR` (downloads + processing) stays on local disk because NFS breaks hardlinks; Sonarr/Radarr copy on import across that boundary. Details and mount options: [.env.example](.env.example) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compose-overlays).
+
 ## Dashboard
 
 The dashboard at `http://localhost:7354/` is the single interface for the whole stack:
