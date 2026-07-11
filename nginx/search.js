@@ -185,12 +185,18 @@ async function addMedia(type, id, btn) {
             if (hit) { hit.added = true; }
             btn.textContent = 'Added'; btn.classList.add('added');
         } else {
-            btn.textContent = 'Error'; setTimeout(function() { btn.textContent = 'Add'; btn.disabled = false; }, 2000);
+            // post() resolves to null only on a 401 from /api/pelicula/* \u2014 session expired/not logged in.
+            toast('Add failed: not authorized', {error: true});
+            btn.textContent = 'Add'; btn.disabled = false;
         }
-    } catch(e) { btn.textContent = 'Error'; setTimeout(function() { btn.textContent = 'Add'; btn.disabled = false; }, 2000); }
+    } catch(e) {
+        const msg = (e.body && e.body.error) || e.message || 'Add failed';
+        toast(msg, {error: true});
+        btn.textContent = 'Add'; btn.disabled = false;
+    }
 }
 
-async function submitRequest(type, tmdbId, tvdbId, title, year, poster) {
+async function submitRequest(type, tmdbId, tvdbId, title, year, poster, btn) {
     try {
         const body = {type: type, title: title, year: year, poster: poster};
         if (type === 'movie') body.tmdb_id = tmdbId;
@@ -198,16 +204,21 @@ async function submitRequest(type, tmdbId, tvdbId, title, year, poster) {
         const data = await post('/api/pelicula/requests', body);
         if (!data) {
             toast('Request failed: not authorized', {error: true});
-            return;
+            if (btn) { btn.textContent = 'Request'; btn.disabled = false; }
+            return false;
         }
+        if (btn) { btn.textContent = 'Requested'; btn.disabled = true; }
         if (window._users_setRequestsLoaded) window._users_setRequestsLoaded(false);
         if (window.loadRequests) await window.loadRequests();
         const requestsSection = document.getElementById('requests-section');
         if (requestsSection) requestsSection.scrollIntoView({behavior: 'smooth'});
+        return true;
     } catch (e) {
         const reason = e.status === 403 ? 'not authorized'
             : (e.body && e.body.error) || e.message || 'Network error';
         toast('Request failed: ' + reason, {error: true});
+        if (btn) { btn.textContent = 'Request'; btn.disabled = false; }
+        return false;
     }
 }
 
@@ -307,8 +318,8 @@ document.getElementById('search-results').addEventListener('click', e => {
     } else if (action === 'add-media') {
         addMedia(el.dataset.type, el.dataset.type === 'movie' ? parseInt(el.dataset.tmdb, 10) : parseInt(el.dataset.tvdb, 10), el);
     } else if (action === 'submit-request') {
-        el.textContent = 'Requested'; el.disabled = true;
-        submitRequest(el.dataset.type, parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.title, parseInt(el.dataset.year, 10), el.dataset.poster);
+        el.disabled = true; el.textContent = '…';
+        submitRequest(el.dataset.type, parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.title, parseInt(el.dataset.year, 10), el.dataset.poster, el);
     } else if (action === 'expand-results') {
         expandResults();
     }
