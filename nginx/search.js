@@ -49,16 +49,31 @@ function renderResultCard(r) {
     const added = r.added;
     const role = document.body.dataset.role;
     const isManager = role === 'manager' || role === 'admin';
-    const actionBtn = isManager
+    const addBtn = html`<button
+            class="${added ? 'search-add added' : 'search-add'}"
+            ${added ? raw('disabled') : raw('')}
+            data-action="add-media"
+            data-type="${r.type}"
+            data-tmdb="${tmdbId}"
+            data-tvdb="${tvdbId}"
+            data-testid="search-add-btn"
+          >${added ? 'Added' : 'Add'}</button>`;
+    // Secondary affordance next to Add — Manager+ only, never shown for
+    // viewers (submit-request is their only action) and never once the item
+    // is already added. Opens #add-options-modal (index.html) to override
+    // quality profile / target library before POSTing search/add.
+    const addOptionsBtn = (isManager && !added)
         ? html`<button
-                class="${added ? 'search-add added' : 'search-add'}"
-                ${added ? raw('disabled') : raw('')}
-                data-action="add-media"
+                class="search-add-options"
+                data-action="add-media-options"
                 data-type="${r.type}"
                 data-tmdb="${tmdbId}"
                 data-tvdb="${tvdbId}"
-                data-testid="search-add-btn"
-              >${added ? 'Added' : 'Add'}</button>`
+                data-testid="search-add-options-btn"
+              >Add with options…</button>`
+        : raw('');
+    const actionBtn = isManager
+        ? raw(addBtn.str + addOptionsBtn.str)
         : html`<button
                 class="search-request"
                 data-action="submit-request"
@@ -173,26 +188,107 @@ function showMediaDetail(tmdbId, tvdbId, type) {
     }
 }
 
-async function addMedia(type, id, btn) {
+// addMedia posts the add request and drives btn's loading/success/failure
+// states. overrides is optional — {profileId, rootPath} from the "Add with
+// options…" modal; omitted (or falsy fields) preserves the plain-Add
+// behavior exactly. Returns true on success, false on failure, so callers
+// (confirmAddOptions) can decide what to do with a second, related button.
+async function addMedia(type, id, btn, overrides) {
     btn.disabled = true; btn.textContent = '\u2026';
     try {
         const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
         const hit = lastResults.find(function(r) { return r[idKey] === id; });
         const body = type === 'movie' ? {type: type, tmdbId: id} : {type: type, tvdbId: id};
         if (hit) { body.title = hit.title; body.year = hit.year || 0; body.poster = hit.poster || ''; }
+        if (overrides && overrides.profileId) body.profileId = overrides.profileId;
+        if (overrides && overrides.rootPath) body.rootPath = overrides.rootPath;
         const data = await post('/api/pelicula/search/add', body);
         if (data !== null) {
             if (hit) { hit.added = true; }
             btn.textContent = 'Added'; btn.classList.add('added');
+            return true;
         } else {
             // post() resolves to null only on a 401 from /api/pelicula/* \u2014 session expired/not logged in.
             toast('Add failed: not authorized', {error: true});
             btn.textContent = 'Add'; btn.disabled = false;
+            return false;
         }
     } catch(e) {
         const msg = (e.body && e.body.error) || e.message || 'Add failed';
         toast(msg, {error: true});
         btn.textContent = 'Add'; btn.disabled = false;
+        return false;
+    }
+}
+
+// ── Add-with-options modal ──────────────────────────────────────────────
+// Manager+ only affordance next to Add: lets the operator override quality
+// profile / target library before the add, via GET /api/pelicula/arr-meta
+// (radarr or sonarr branch, by card type) and POST /api/pelicula/search/add's
+// optional profileId/rootPath fields. Reuses addMedia's toast-on-failure and
+// button-state handling — see addMedia above.
+//
+// #add-options-extra (index.html) is a deliberately empty extension slot: a
+// later phase mounts a series season picker there. This module intentionally
+// does not touch it beyond leaving it alone on open/close.
+let addOptionsState = null; // {type, id, addBtn, optionsBtn} while the modal is open
+
+function fillOptionsSelect(select, items, valueKey, labelKey) {
+    const defaultOpt = html`<option value="">Default</option>`.str;
+    if (!select) return;
+    if (!items || !items.length) { select.innerHTML = defaultOpt; return; }
+    const opts = items.map(function(item) {
+        return html`<option value="${item[valueKey]}">${item[labelKey]}</option>`.str;
+    }).join('');
+    select.innerHTML = defaultOpt + opts;
+}
+
+async function openAddOptionsModal(type, id, addBtn, optionsBtn) {
+    const idKey = type === 'movie' ? 'tmdbId' : 'tvdbId';
+    const hit = lastResults.find(function(r) { return r[idKey] === id; });
+    addOptionsState = {type: type, id: id, addBtn: addBtn, optionsBtn: optionsBtn};
+
+    const nameEl = document.getElementById('add-options-name');
+    if (nameEl) nameEl.textContent = hit ? (hit.title + (hit.year ? ' (' + hit.year + ')' : '')) : '';
+
+    const profileSelect = document.getElementById('add-options-profile');
+    const rootSelect = document.getElementById('add-options-root');
+    if (profileSelect) profileSelect.innerHTML = html`<option value="">Loading\u2026</option>`.str;
+    if (rootSelect) rootSelect.innerHTML = html`<option value="">Loading\u2026</option>`.str;
+    document.getElementById('add-options-modal').classList.remove('hidden');
+
+    try {
+        const meta = await get('/api/pelicula/arr-meta');
+        const arrMeta = (meta && (type === 'movie' ? meta.radarr : meta.sonarr)) || {};
+        fillOptionsSelect(profileSelect, arrMeta.qualityProfiles, 'id', 'name');
+        fillOptionsSelect(rootSelect, arrMeta.rootFolders, 'path', 'path');
+    } catch (e) {
+        console.warn('[pelicula] arr-meta error:', e);
+        if (profileSelect) profileSelect.innerHTML = html`<option value="">Default</option>`.str;
+        if (rootSelect) rootSelect.innerHTML = html`<option value="">Default</option>`.str;
+    }
+}
+
+function closeAddOptionsModal() {
+    document.getElementById('add-options-modal').classList.add('hidden');
+    addOptionsState = null;
+}
+
+async function confirmAddOptions() {
+    if (!addOptionsState) return;
+    const {type, id, addBtn, optionsBtn} = addOptionsState;
+    const profileVal = document.getElementById('add-options-profile').value;
+    const rootVal = document.getElementById('add-options-root').value;
+    closeAddOptionsModal();
+
+    if (optionsBtn) optionsBtn.disabled = true;
+    const ok = await addMedia(type, id, addBtn, {
+        profileId: profileVal ? parseInt(profileVal, 10) : 0,
+        rootPath: rootVal || ''
+    });
+    if (optionsBtn) {
+        if (ok) optionsBtn.style.display = 'none'; // card is now added — matches renderResultCard's !added gate
+        else optionsBtn.disabled = false;           // failed — addMedia already reset addBtn; let this be retried too
     }
 }
 
@@ -262,6 +358,11 @@ component('search', function (el, storeProxy) {
 
         // Collapse on click-away
         document.addEventListener('click', function(e) {
+            // Don't collapse while the add-options modal is open — it lives
+            // outside .search-box/.search-results, so clicks inside it (e.g.
+            // the quality-profile select) would otherwise register as
+            // "away" and collapse the results behind it.
+            if (document.querySelector('.modal-overlay:not(.hidden)')) return;
             if (!e.target.closest('.search-box') && !e.target.closest('.search-results')) {
                 if (searchResults.classList.contains('visible') && lastResults.length > 1) {
                     renderResults(lastResults, true);
@@ -317,6 +418,12 @@ document.getElementById('search-results').addEventListener('click', e => {
         showMediaDetail(parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.type);
     } else if (action === 'add-media') {
         addMedia(el.dataset.type, el.dataset.type === 'movie' ? parseInt(el.dataset.tmdb, 10) : parseInt(el.dataset.tvdb, 10), el);
+    } else if (action === 'add-media-options') {
+        const card = el.closest('.search-card');
+        const addBtn = card && card.querySelector('.search-add');
+        if (addBtn) {
+            openAddOptionsModal(el.dataset.type, el.dataset.type === 'movie' ? parseInt(el.dataset.tmdb, 10) : parseInt(el.dataset.tvdb, 10), addBtn, el);
+        }
     } else if (action === 'submit-request') {
         el.disabled = true; el.textContent = '…';
         submitRequest(el.dataset.type, parseInt(el.dataset.tmdb, 10), parseInt(el.dataset.tvdb, 10), el.dataset.title, parseInt(el.dataset.year, 10), el.dataset.poster, el);
@@ -324,4 +431,8 @@ document.getElementById('search-results').addEventListener('click', e => {
         expandResults();
     }
 });
+
+// Add-with-options modal buttons
+document.getElementById('add-options-cancel-btn').addEventListener('click', closeAddOptionsModal);
+document.getElementById('add-options-confirm-btn').addEventListener('click', confirmAddOptions);
 

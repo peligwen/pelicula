@@ -407,6 +407,9 @@ body[data-tab="settings"] #settings-section { display: block !important; }
         aspect-ratio: 2 / 3;
         flex-shrink: unset;
     }
+    .search-actions {
+        align-items: flex-start;
+    }
     .search-add {
         align-self: flex-start;
     }
@@ -422,6 +425,17 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .search-add:hover { background: var(--pink-l); border-color: rgba(240,96,168,0.4); color: var(--pink); }
 .search-add.added { background: var(--mint-l); border-color: rgba(64,200,168,0.35); color: var(--mint); cursor: default; }
 .search-add:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Manager+ actions column: the Add button plus the secondary "Add with
+   options…" affordance that opens #add-options-modal. */
+.search-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
+.search-add-options {
+    background: none; border: none; padding: 0; margin: 0;
+    color: var(--faint); font-size: 0.68rem; cursor: pointer; text-decoration: underline;
+    font-family: var(--font-body, 'Nunito Sans', sans-serif); white-space: nowrap;
+}
+.search-add-options:hover { color: var(--periwinkle); }
+.search-add-options:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Request button on search results */
 .search-request {
