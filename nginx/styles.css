@@ -581,9 +581,12 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     padding: 0.5rem 0.65rem; background: var(--panel2); border: 1.5px solid var(--border2);
     border-radius: 12px; margin-bottom: 0.5rem;
 }
-.season-picker-item {
+/* Scoped under .modal so this outranks the generic `.modal label` rule
+   (0-1-1), which would otherwise force block/bold/muted onto picker rows. */
+.modal .season-picker-item {
     display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--ink);
-    font-family: var(--font-body, 'Nunito Sans', sans-serif); cursor: pointer;
+    font-family: var(--font-body, 'Nunito Sans', sans-serif); font-weight: 400;
+    margin-bottom: 0; cursor: pointer;
 }
 .season-picker-checkbox { accent-color: var(--pink); cursor: pointer; flex-shrink: 0; }
 .season-picker-hint { font-size: 0.75rem; color: var(--pink); margin: -0.15rem 0 0.5rem; }

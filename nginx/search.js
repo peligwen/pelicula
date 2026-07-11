@@ -346,6 +346,8 @@ async function openAddOptionsModal(type, id, addBtn, optionsBtn, mode) {
 
     const confirmBtn = document.getElementById('add-options-confirm-btn');
     if (confirmBtn) confirmBtn.textContent = mode === 'request' ? 'Request' : 'Add';
+    const titleEl = document.getElementById('add-options-title');
+    if (titleEl) titleEl.textContent = mode === 'request' ? 'Request Seasons' : 'Add with Options';
 
     const arrFields = document.getElementById('add-options-arr-fields');
     if (arrFields) arrFields.classList.toggle('hidden', mode === 'request');
@@ -420,6 +422,10 @@ async function confirmAddOptions() {
         const hit = lastResults.find(function(r) { return r[idKey] === id; });
         closeAddOptionsModal();
         if (optionsBtn) optionsBtn.disabled = true;
+        // Interim state on the card's Request button while the POST is in
+        // flight — mirrors the one-click delegation handler, and prevents a
+        // double-click from posting twice. submitRequest owns the final state.
+        if (addBtn) { addBtn.disabled = true; addBtn.textContent = '…'; }
         const ok = await submitRequest(
             type,
             type === 'movie' ? id : 0,
