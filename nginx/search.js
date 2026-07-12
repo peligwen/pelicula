@@ -5,12 +5,24 @@
 
 import { component, html, raw, toast } from '/framework.js';
 import { get, post } from '/api.js';
+import { fetchJourney, journeyStatusLine } from '/journey.js';
 
 // ── Module-level state ────────────────────────────────────────────────────
 let searchTimeout;
 let searchType = '';
 let lastResults = [];
 let lockedResult = null;
+
+// ── Journey tracking (session-only, post-add status lines) ────────────────
+// Tracks only cards added THIS page session — no persistence; a reload
+// forgets tracking (honest, cheap — see nginx/journey.js). Each entry caches
+// its last known status line so renderResults (which wipes any injected
+// line on every re-render, since it rebuilds card markup from scratch) can
+// re-paint it without an extra fetch.
+const JOURNEY_TRACK_LIMIT_MS = 60 * 60 * 1000; // stop tracking after 60 minutes
+const JOURNEY_POLL_MS = 15_000; // matches the dashboard's own refresh cadence
+let _trackedAdds = []; // {type, tmdbId, tvdbId, addedAt, lastLine}
+let _journeyPollTimer = null;
 
 // Cached DOM refs — set during init(), after the DOM is available.
 let searchInput, searchResults, searchFilters;
@@ -149,6 +161,100 @@ function renderResults(results, collapsed) {
             }
         }
     }
+    // renderResults rebuilds every card's markup from scratch, which wipes
+    // any journey-status-line a tracked entry had injected — repaint them
+    // from cache (see reinjectJourneyLines).
+    reinjectJourneyLines();
+}
+
+// ── Journey tracking helpers ────────────────────────────────────────────────
+
+function findResultCard(type, tmdbId, tvdbId) {
+    for (const card of searchResults.querySelectorAll('.search-card')) {
+        if (card.dataset.type === type
+            && parseInt(card.dataset.tmdb, 10) === tmdbId
+            && parseInt(card.dataset.tvdb, 10) === tvdbId) {
+            return card;
+        }
+    }
+    return null;
+}
+
+// setCardJourneyLine paints `text` into a tracked entry's card
+// (.journey-status-line inside .search-info, created on first use) and
+// caches it on the entry itself. No-op on the DOM when the card isn't
+// currently rendered (e.g. the visitor searched something else) — the
+// cached text is what reinjectJourneyLines repaints on the next renderResults.
+function setCardJourneyLine(entry, text) {
+    entry.lastLine = text;
+    const card = findResultCard(entry.type, entry.tmdbId, entry.tvdbId);
+    if (!card) return;
+    const info = card.querySelector('.search-info');
+    if (!info) return;
+    let line = info.querySelector('.journey-status-line');
+    if (!line) {
+        line = document.createElement('div');
+        line.className = 'journey-status-line';
+        info.appendChild(line);
+    }
+    line.textContent = text;
+}
+
+// reinjectJourneyLines re-paints every tracked entry's last known line after
+// a renderResults call has rebuilt the card DOM from scratch.
+function reinjectJourneyLines() {
+    for (const entry of _trackedAdds) {
+        if (entry.lastLine) setCardJourneyLine(entry, entry.lastLine);
+    }
+}
+
+// pollJourneyOnce fetches every tracked entry's journey in parallel and
+// updates its line. Stops tracking an entry once it reaches "available"
+// (its final line is left in place) or after JOURNEY_TRACK_LIMIT_MS — either
+// way the last known line stays painted; only future polling stops.
+async function pollJourneyOnce() {
+    if (!_trackedAdds.length) return;
+    const now = Date.now();
+    const results = await Promise.allSettled(
+        _trackedAdds.map(entry => fetchJourney({ type: entry.type, tmdbId: entry.tmdbId, tvdbId: entry.tvdbId }))
+    );
+    const stillTracking = [];
+    _trackedAdds.forEach((entry, i) => {
+        const result = results[i];
+        const j = (result.status === 'fulfilled') ? result.value : null;
+        if (j) setCardJourneyLine(entry, journeyStatusLine(j));
+        const available = j && j.current_stage === 'available';
+        const expired = (now - entry.addedAt) > JOURNEY_TRACK_LIMIT_MS;
+        if (!available && !expired) stillTracking.push(entry);
+    });
+    _trackedAdds = stillTracking;
+    if (!_trackedAdds.length) stopJourneyPoll();
+}
+
+function startJourneyPoll() {
+    if (_journeyPollTimer) return;
+    _journeyPollTimer = setInterval(function () {
+        if (!_trackedAdds.length) { stopJourneyPoll(); return; }
+        if (document.visibilityState !== 'visible') return;
+        pollJourneyOnce();
+    }, JOURNEY_POLL_MS);
+}
+
+function stopJourneyPoll() {
+    if (_journeyPollTimer) { clearInterval(_journeyPollTimer); _journeyPollTimer = null; }
+}
+
+// trackAdd starts tracking a just-added card's journey for the rest of this
+// page session. Called only from addMedia's success path (confirmAddOptions's
+// 'add' mode reuses addMedia, so it's covered too) — never for viewer
+// requests, which have their own status-line surface on the request cards
+// (users.js).
+function trackAdd(type, tmdbId, tvdbId) {
+    const entry = { type: type, tmdbId: tmdbId || 0, tvdbId: tvdbId || 0, addedAt: Date.now(), lastLine: '' };
+    _trackedAdds.push(entry);
+    setCardJourneyLine(entry, 'added — tracking status…');
+    startJourneyPoll();
+    pollJourneyOnce(); // paint a real status line without waiting a full 15s
 }
 
 // ── Public functions ──────────────────────────────────────────────────────
@@ -226,6 +332,7 @@ async function addMedia(type, id, btn, overrides) {
         if (data !== null) {
             if (hit) { hit.added = true; }
             btn.textContent = 'Added'; btn.classList.add('added');
+            trackAdd(type, type === 'movie' ? id : 0, type === 'movie' ? 0 : id);
             return true;
         } else {
             // post() resolves to null only on a 401 from /api/pelicula/* \u2014 session expired/not logged in.
