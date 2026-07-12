@@ -79,6 +79,10 @@ These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env`
 | `POST` | `/api/pelicula/requests/{id}/approve` | Admin | Approve a request; adds to Radarr/Sonarr and marks available. Optional body `{"seasons": [...]}` (series only) lets the admin override the viewer's requested scope at approval time: **absent/null** uses the request's stored `seasons`; a **non-empty array** is shape-validated and used as the final scope (existence against Sonarr's lookup is validated here — a season number that doesn't exist on the series is rejected with 400); an **explicit `[]`** clears the scope to all seasons. This is intentionally asymmetric with `search/add` and request-create (where `[]` is rejected) — the approval UI has no per-series season list to enumerate against ahead of the Sonarr lookup, so `[]` here means "no override, use everything" rather than "invalid input" |
 | `POST` | `/api/pelicula/requests/{id}/deny` | Admin | Deny a pending request |
 | `DELETE` | `/api/pelicula/requests/{id}` | Admin | Hard-delete a request record |
+| `GET` | `/api/pelicula/requests/unseen` | Viewer+ | The caller's own available-but-unacknowledged requests: `{count, items:[{id, title, type, year, poster}]}`. Registered as an exact-path + method route so it is not shadowed by the admin-gated `/api/pelicula/requests/{id}` subtree above. Polled by the dashboard every 15s for the users-tab badge/toast |
+| `POST` | `/api/pelicula/requests/acknowledge` | Viewer+, CSRF-soft | Marks the caller's unseen-available requests as seen: an empty body (or `{}`) acknowledges all of them; an optional `{"ids": [...]}` restricts it to a subset. Ownership is enforced server-side via `requested_by` — an id belonging to another user is silently ignored (matches 0 rows) rather than erroring. Returns `{acknowledged: <n>}` |
+
+Requests now additionally carry `available_seen_at` (RFC3339, omitted from the JSON entirely while unseen — never a zero-value timestamp): set once the requester acknowledges an `available` request via the endpoint above.
 
 ### Search and discovery
 
@@ -251,6 +255,8 @@ Backups are versioned JSON files produced by `POST /api/pelicula/export` and con
 **Forward compatibility:** Newer versions always accept older backups. Fields added in later versions get sensible defaults when importing from an older version. The `version` field is always present and always an integer.
 
 **Requests entries (v2, additive):** each entry in `requests` now optionally carries a `seasons` int array — the season-level scope recorded for a series request (absent/omitted means all seasons). This is an additive field on the existing v2 format, not a new backup version; older v2 backups without `seasons` restore with an empty (all-seasons) scope.
+
+**Requests entries (v2, additive):** each entry may also carry `available_seen_at` (RFC3339) — when the requester acknowledged an `available` request in-app; omitted when never acknowledged. Restores round-trip the value via `InsertFull`; older backups without it restore as unseen.
 
 ---
 
