@@ -109,3 +109,67 @@
     color: #fff; font-size: 0.75rem;
     font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
 }
+
+/* ── Journey timeline (shared: catalog drawer, search cards, request cards) ──
+   Consumed by nginx/journey.js's renderJourneyHtml (rail) and
+   journeyStatusLine (compact one-liner, styled via .journey-status-line
+   alone — no per-state modifier, callers just set its textContent). */
+.journey-rail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.25rem 0 0.75rem;
+}
+.journey-step {
+    flex: 1 1 auto;
+    min-width: 5.5rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 10px;
+    border: 1.5px solid var(--border, rgba(180,140,220,0.25));
+    background: var(--panel2, #fdf5ff);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.journey-step-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted, #9080a8);
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
+.journey-step-meta {
+    font-size: 0.72rem;
+    color: var(--muted, #9080a8);
+}
+/* Done: mirrors .request-state-available's mint "arrived" semantic. */
+.journey-step-done {
+    border-color: rgba(64,200,168,0.4);
+    background: var(--mint-l, #e4f8f4);
+}
+.journey-step-done .journey-step-label { color: var(--mint, #40c8a8); }
+/* Active: mirrors .request-state-grabbed's periwinkle "in motion" semantic. */
+.journey-step-active {
+    border-color: rgba(112,128,232,0.45);
+    background: var(--peri-l, #eaecfd);
+}
+.journey-step-active .journey-step-label { color: var(--periwinkle, #7080e8); }
+.journey-step-active .journey-step-meta { color: var(--ink, #2a1f35); font-weight: 600; }
+/* Pending: not yet reached — de-emphasized, no color claim. */
+.journey-step-pending { opacity: 0.6; }
+
+.journey-degraded-note,
+.journey-unavailable {
+    font-size: 0.72rem;
+    color: var(--muted, #9080a8);
+    font-style: italic;
+    margin-top: 0.25rem;
+}
+
+/* Compact one-liner used on search-result and request cards. */
+.journey-status-line {
+    font-size: 0.75rem;
+    color: var(--periwinkle, #7080e8);
+    margin-top: 0.25rem;
+}

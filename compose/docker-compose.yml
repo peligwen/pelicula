@@ -397,6 +397,7 @@ services:
       - ./nginx/import.html:/usr/share/nginx/html/import.html:ro
       - ./nginx/import.js:/usr/share/nginx/html/import.js:ro
       - ./nginx/import.css:/usr/share/nginx/html/import.css:ro
+      - ./nginx/journey.js:/usr/share/nginx/html/journey.js:ro
       - ./nginx/catalog.js:/usr/share/nginx/html/catalog.js:ro
       - ./nginx/catalog.css:/usr/share/nginx/html/catalog.css:ro
       - ./nginx/jobs.js:/usr/share/nginx/html/jobs.js:ro
