@@ -14,6 +14,7 @@ import (
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
+	"pelicula-api/internal/app/journey"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/search"
@@ -40,6 +41,7 @@ type Config struct {
 	Library       *library.Handler
 	Catalog       *catalog.Handler
 	Search        *search.Handler
+	Journey       *journey.Handler
 	Settings      *settings.Handler
 	Actions       *actions.Handler
 	Admin         *adminops.Handler
@@ -89,6 +91,9 @@ func Register(mux *http.ServeMux, cfg Config) {
 	mux.Handle("/api/pelicula/procula-settings", auth.GuardAdmin(http.HandlerFunc(cfg.Hooks.HandleProculaSettingsProxy)))
 	mux.Handle("/api/pelicula/storage/scan", auth.GuardAdmin(http.HandlerFunc(cfg.Hooks.HandleStorageScanProxy)))
 	mux.Handle("/api/pelicula/updates", auth.Guard(http.HandlerFunc(cfg.Hooks.HandleUpdatesProxy)))
+	// viewer+: per-title journey rail. Request-derived fields are further
+	// scoped inside the handler (owner or admin only — see journey.Handler).
+	mux.Handle("GET /api/pelicula/journey", auth.Guard(http.HandlerFunc(cfg.Journey.HandleJourney)))
 
 	// manager+: *arr metadata for settings dropdowns and the search "Add with
 	// options…" modal. Non-sensitive (quality-profile names/ids, root-folder

@@ -24,6 +24,7 @@ import (
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
+	"pelicula-api/internal/app/journey"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/search"
@@ -41,6 +42,7 @@ import (
 	"pelicula-api/internal/cryptogen"
 	"pelicula-api/internal/peligrosa"
 	"pelicula-api/internal/remoteconfig"
+	repocatalog "pelicula-api/internal/repo/catalog"
 	"pelicula-api/internal/repo/peliculadb"
 	reporeqs "pelicula-api/internal/repo/requests"
 
@@ -197,7 +199,11 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 	searchHandler.ArrCache = arrCatalogCache
 
 	invites := peligrosa.NewInviteStore(db, jellyfinClient)
-	requests := peligrosa.NewRequestStore(reporeqs.New(db), search.NewArrFulfiller(searchHandler))
+	// reqRepo is shared between the peligrosa request queue and the journey
+	// handler (which reads request rows directly for its rail).
+	reqRepo := reporeqs.New(db)
+	requests := peligrosa.NewRequestStore(reqRepo, search.NewArrFulfiller(searchHandler))
+	catStore := repocatalog.New(cdb)
 
 	hub := sse.NewHub()
 
@@ -276,7 +282,20 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 			Cache:         arrCatalogCache,
 			RootCtx:       ctx,
 		},
-		SearchHandler:   searchHandler,
+		SearchHandler: searchHandler,
+		JourneyHandler: &journey.Handler{
+			Svc:      svc,
+			ArrCache: arrCatalogCache,
+			Procula:  procClient,
+			Requests: reqRepo,
+			Catalog:  catStore,
+			// Viewer scoping: only RoleAdmin sees every request's fields;
+			// managers are scoped like viewers, matching HandleRequestList.
+			SessionFor: func(r *http.Request) (string, bool) {
+				username, role, _ := auth.SessionFor(r)
+				return username, role == peligrosa.RoleAdmin
+			},
+		},
 		SettingsHandler: newSettingsHandler(envPath, dockerCli, &envMu),
 		ActionsHandler:  actions.New(svc.HTTPClient(), urls.Procula, strings.TrimSpace(cfg.ProculaAPIKey)),
 		AdminHandler: adminops.New(dockerCli, func(r *http.Request) (string, bool) {

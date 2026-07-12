@@ -80,6 +80,7 @@ func main() {
 		Library:       a.LibHandler,
 		Catalog:       a.CatalogHandler,
 		Search:        a.SearchHandler,
+		Journey:       a.JourneyHandler,
 		Settings:      a.SettingsHandler,
 		Actions:       a.ActionsHandler,
 		Admin:         a.AdminHandler,

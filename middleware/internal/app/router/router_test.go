@@ -19,6 +19,7 @@ import (
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
+	"pelicula-api/internal/app/journey"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/router"
@@ -172,6 +173,7 @@ func buildTestMux(t *testing.T) (mux *http.ServeMux, viewerToken, managerToken s
 		Library:       &library.Handler{},
 		Catalog:       &catalog.Handler{},
 		Search:        search.New(stubArrClient{}, "", "", "", &library.Handler{}, ""),
+		Journey:       &journey.Handler{},
 		Settings:      &settings.Handler{},
 		Actions:       &actions.Handler{},
 		Admin:         &adminops.Handler{},
@@ -223,6 +225,7 @@ func TestRouterAuthGates_ViewerGuardedPaths(t *testing.T) {
 		"/api/pelicula/sse",
 		"/api/pelicula/catalog",
 		"/api/pelicula/sessions",
+		"/api/pelicula/journey",
 	}
 
 	for _, path := range paths {

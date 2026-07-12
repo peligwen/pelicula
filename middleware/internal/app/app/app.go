@@ -20,6 +20,7 @@ import (
 	"pelicula-api/internal/app/health"
 	"pelicula-api/internal/app/hooks"
 	jfapp "pelicula-api/internal/app/jellyfin"
+	"pelicula-api/internal/app/journey"
 	"pelicula-api/internal/app/library"
 	"pelicula-api/internal/app/network"
 	"pelicula-api/internal/app/search"
@@ -56,6 +57,7 @@ type App struct {
 	JFHandler       *jfapp.Handler
 	JFInfoHandler   *jfapp.InfoHandler
 	SearchHandler   *search.Handler
+	JourneyHandler  *journey.Handler
 	SettingsHandler *settings.Handler
 	ActionsHandler  *actions.Handler
 	AdminHandler    *adminops.Handler
