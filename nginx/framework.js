@@ -239,14 +239,29 @@ function releaseFocus(el) {
 
 // ── Drawer ────────────────────────────────────────────────────────────────────
 // Standardised open/close for backdrop+drawer pairs with focus trapping.
+//
+// A drawer can be closed three ways — backdrop click, an explicit close
+// button, or Escape (via trapFocus's onClose, wired below) — and callers
+// that need teardown on close (e.g. catalog.js stopping its journey-refresh
+// interval) must run it on all three, not just the ones they happen to wire
+// up themselves. openDrawer's optional third argument registers a per-drawer
+// onClose hook, keyed on the drawer element, that closeDrawer invokes
+// exactly once per close regardless of which path triggered it — a single
+// choke point instead of duplicated teardown calls at each call site.
 
-function openDrawer(drawer, backdrop) {
+const _drawerCloseHooks = new WeakMap();
+
+function openDrawer(drawer, backdrop, onClose) {
     backdrop.classList.remove('hidden');
     drawer.classList.remove('hidden');
+    if (onClose) _drawerCloseHooks.set(drawer, onClose);
+    else _drawerCloseHooks.delete(drawer);
     trapFocus(drawer, function () { closeDrawer(drawer, backdrop); });
 }
 
 function closeDrawer(drawer, backdrop) {
+    const onClose = _drawerCloseHooks.get(drawer);
+    if (onClose) { _drawerCloseHooks.delete(drawer); onClose(); }
     backdrop.classList.add('hidden');
     drawer.classList.add('hidden');
     releaseFocus(drawer);

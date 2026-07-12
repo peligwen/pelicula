@@ -40,15 +40,27 @@ document.addEventListener('click', () => { if (_openMenu) { _openMenu.remove(); 
 // ── Journey section (drawer, module-level) ─────────────────────────────────────
 // Live-refresh state for the drawer's journey rail. Module-level (not per
 // component-instance state) because there is exactly one drawer in the DOM
-// and this timer must be reachable from the drawer's close handler
-// (window.catCloseDetail) regardless of which openDetail/openMissingDetail
-// call started it.
+// and this timer must be reachable from every close path (backdrop click,
+// close button, Escape) regardless of which openDetail/openMissingDetail
+// call started it — see _onJourneyDrawerClose below, registered as
+// framework.js's closeDrawer onClose hook so all three paths share it.
 let _journeyRefreshTimer = null;
 let _journeyGen = 0;
 const JOURNEY_LIVE_STAGES = new Set(['searching', 'downloading', 'processing']);
 
 function stopJourneyRefresh() {
     if (_journeyRefreshTimer) { clearInterval(_journeyRefreshTimer); _journeyRefreshTimer = null; }
+}
+
+// Registered with openDrawer(drawer, backdrop, onClose) below so EVERY close
+// path — backdrop click, the close button, and Escape (framework.js's
+// trapFocus → closeDrawer) — tears down the live refresh the same way.
+// Previously only window.catCloseDetail ran this, which Escape bypassed
+// entirely (trapFocus calls closeDrawer directly), leaking the 10s interval
+// into a hidden drawer and leaving _journeyGen un-bumped for the next open.
+function _onJourneyDrawerClose() {
+    stopJourneyRefresh();
+    _journeyGen++; // invalidate any in-flight journey fetch for the drawer being closed
 }
 
 // appendJourneySection: appends a titled "Journey" section (drawer-section
@@ -568,7 +580,7 @@ component('catalog', function (el, store, _props) {
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
         stopJourneyRefresh(); // kill any live refresh from a previously open drawer
-        openDrawer(drawer, backdrop);
+        openDrawer(drawer, backdrop, _onJourneyDrawerClose);
         const filename = path.split('/').slice(-1)[0] || 'Details';
         // Strip extension for display; keep raw filename in title attr for hover
         titleEl.textContent = filename.replace(/\.[^.]+$/, '');
@@ -607,7 +619,7 @@ component('catalog', function (el, store, _props) {
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
         stopJourneyRefresh(); // kill any live refresh from a previously open drawer
-        openDrawer(drawer, backdrop);
+        openDrawer(drawer, backdrop, _onJourneyDrawerClose);
         titleEl.textContent = item.title || '(untitled)';
         titleEl.title = item.title || '';
         sub.textContent = item.monitored ? 'Monitored \u2014 not downloaded' : 'Not monitored';
@@ -1334,8 +1346,10 @@ component('catalog', function (el, store, _props) {
     // ── Public API (window.*) ─────────────────────────────────────────────────
     // These are called by the static dialog listeners at the bottom of this file.
     window.catCloseDetail = function () {
-        stopJourneyRefresh();
-        _journeyGen++; // invalidate any in-flight journey fetch for the drawer being closed
+        // closeDrawer itself now runs the journey teardown (registered as
+        // an onClose hook by openDrawer in openDetail/openMissingDetail),
+        // so this stays a thin wrapper — and Escape, which calls closeDrawer
+        // directly via framework.js's trapFocus, gets the same teardown.
         closeDrawer(
             document.getElementById('cat-drawer'),
             document.getElementById('cat-drawer-backdrop')
