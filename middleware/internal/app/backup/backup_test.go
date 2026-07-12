@@ -546,6 +546,74 @@ func TestRequestStoreInsertFull_SeasonsRoundtrip(t *testing.T) {
 	}
 }
 
+// TestRequestStoreInsertFull_AvailableSeenAtRoundtrip verifies that a
+// non-nil AvailableSeenAt survives InsertFull -> All (the backup restore
+// path), and that a nil value (the common case — never acknowledged)
+// round-trips to nil, not a zero-value timestamp. Phase 5.
+func TestRequestStoreInsertFull_AvailableSeenAtRoundtrip(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+	store := peligrosa.NewRequestStore(reporeqs.New(db), &stubFulfiller{})
+
+	now := time.Now().UTC().Truncate(time.Second)
+	seenAt := now.Add(-time.Hour)
+	req := peligrosa.RequestExport{
+		ID:              "req_backup_seen_001",
+		Type:            "movie",
+		TmdbID:          99887,
+		Title:           "Seen Movie",
+		Year:            2024,
+		RequestedBy:     "viewer1",
+		State:           peligrosa.RequestAvailable,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		AvailableSeenAt: &seenAt,
+	}
+	unseenReq := peligrosa.RequestExport{
+		ID:          "req_backup_unseen_001",
+		Type:        "movie",
+		TmdbID:      99888,
+		Title:       "Unseen Movie",
+		Year:        2024,
+		RequestedBy: "viewer1",
+		State:       peligrosa.RequestAvailable,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := store.InsertFull(context.Background(), req); err != nil {
+		t.Fatalf("InsertFull (seen): %v", err)
+	}
+	if err := store.InsertFull(context.Background(), unseenReq); err != nil {
+		t.Fatalf("InsertFull (unseen): %v", err)
+	}
+
+	all := store.All(context.Background())
+	byID := make(map[string]*peligrosa.MediaRequest, len(all))
+	for _, r := range all {
+		byID[r.ID] = r
+	}
+
+	gotSeen := byID["req_backup_seen_001"]
+	if gotSeen == nil {
+		t.Fatal("seen request not found after InsertFull")
+	}
+	if gotSeen.AvailableSeenAt == nil {
+		t.Fatal("AvailableSeenAt = nil, want a non-nil restored timestamp")
+	}
+	if !gotSeen.AvailableSeenAt.Equal(seenAt) {
+		t.Errorf("AvailableSeenAt = %v, want %v", gotSeen.AvailableSeenAt, seenAt)
+	}
+
+	gotUnseen := byID["req_backup_unseen_001"]
+	if gotUnseen == nil {
+		t.Fatal("unseen request not found after InsertFull")
+	}
+	if gotUnseen.AvailableSeenAt != nil {
+		t.Errorf("AvailableSeenAt = %v, want nil (never acknowledged)", gotUnseen.AvailableSeenAt)
+	}
+}
+
 // ── v1 backup import compatibility test ───────────────────────────────────
 
 func TestImportV1BackupHasNoRolesInvitesRequests(t *testing.T) {

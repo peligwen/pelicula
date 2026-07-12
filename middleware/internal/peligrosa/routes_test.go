@@ -91,3 +91,64 @@ func TestRequestOpRoute_NoOrigin_PassesToHandler(t *testing.T) {
 		t.Error("DELETE /requests/{id} with no origin should reach the handler, got 403 from the origin wrapper")
 	}
 }
+
+// ── Phase 5: unseen/acknowledge routes must win the admin subtree ──────────
+
+// TestRequestUnseenRoute_ViewerNotBlockedByAdminSubtree proves the
+// method+exact-path registration for GET /api/pelicula/requests/unseen wins
+// Go's ServeMux precedence over the admin-gated "/api/pelicula/requests/"
+// subtree — a viewer session must reach the handler (200), not get 403'd by
+// auth.GuardAdmin.
+func TestRequestUnseenRoute_ViewerNotBlockedByAdminSubtree(t *testing.T) {
+	mux, a := newRequestsRouteMux(t)
+	token := insertSession(a, "alice", RoleViewer, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests/unseen", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code == http.StatusForbidden {
+		t.Fatal("GET /requests/unseen: viewer session got 403 — the admin subtree shadowed the viewer route")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestRequestAcknowledgeRoute_ViewerNotBlockedByAdminSubtree is the POST
+// twin of the above for /api/pelicula/requests/acknowledge.
+func TestRequestAcknowledgeRoute_ViewerNotBlockedByAdminSubtree(t *testing.T) {
+	mux, a := newRequestsRouteMux(t)
+	token := insertSession(a, "alice", RoleViewer, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/acknowledge", bytes.NewReader([]byte(`{}`)))
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code == http.StatusForbidden {
+		t.Fatal("POST /requests/acknowledge: viewer session got 403 — the admin subtree shadowed the viewer route")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestRequestAcknowledgeRoute_ForeignOrigin_Rejected verifies the new
+// acknowledge route carries the same CSRF origin wrap as its create-request
+// sibling.
+func TestRequestAcknowledgeRoute_ForeignOrigin_Rejected(t *testing.T) {
+	mux, a := newRequestsRouteMux(t)
+	token := insertSession(a, "alice", RoleViewer, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/acknowledge", bytes.NewReader([]byte(`{}`)))
+	addSessionCookie(req, token)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST /requests/acknowledge with foreign origin: status = %d, want 403", w.Code)
+	}
+}

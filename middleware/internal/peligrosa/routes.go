@@ -19,6 +19,11 @@ func RegisterRoutes(mux *http.ServeMux, d *Deps) {
 
 	// viewer+: request queue (list own requests + create)
 	mux.Handle("/api/pelicula/requests", auth.Guard(httputil.RequireLocalOriginSoft(http.HandlerFunc(d.HandleRequests))))
+	// viewer+: availability notifications (own rows only). Registered as
+	// method+exact-path patterns so Go's ServeMux precedence (more-specific
+	// wins) routes them here rather than into the admin-gated subtree below.
+	mux.Handle("GET /api/pelicula/requests/unseen", auth.Guard(http.HandlerFunc(d.HandleRequestUnseen)))
+	mux.Handle("POST /api/pelicula/requests/acknowledge", auth.Guard(httputil.RequireLocalOriginSoft(http.HandlerFunc(d.HandleRequestAcknowledge))))
 	// admin only: per-request approve/deny/delete
 	mux.Handle("/api/pelicula/requests/", auth.GuardAdmin(httputil.RequireLocalOriginSoft(http.HandlerFunc(d.HandleRequestOp))))
 

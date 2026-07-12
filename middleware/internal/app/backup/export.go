@@ -101,21 +101,22 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	if h.Requests != nil {
 		for _, req := range h.Requests.All(r.Context()) {
 			requests = append(requests, peligrosa.RequestExport{
-				ID:          req.ID,
-				Type:        req.Type,
-				TmdbID:      req.TmdbID,
-				TvdbID:      req.TvdbID,
-				Title:       req.Title,
-				Year:        req.Year,
-				Poster:      req.Poster,
-				RequestedBy: req.RequestedBy,
-				State:       req.State,
-				Reason:      req.Reason,
-				ArrID:       req.ArrID,
-				CreatedAt:   req.CreatedAt,
-				UpdatedAt:   req.UpdatedAt,
-				History:     req.History,
-				Seasons:     req.Seasons,
+				ID:              req.ID,
+				Type:            req.Type,
+				TmdbID:          req.TmdbID,
+				TvdbID:          req.TvdbID,
+				Title:           req.Title,
+				Year:            req.Year,
+				Poster:          req.Poster,
+				RequestedBy:     req.RequestedBy,
+				State:           req.State,
+				Reason:          req.Reason,
+				ArrID:           req.ArrID,
+				CreatedAt:       req.CreatedAt,
+				UpdatedAt:       req.UpdatedAt,
+				History:         req.History,
+				Seasons:         req.Seasons,
+				AvailableSeenAt: req.AvailableSeenAt,
 			})
 		}
 	}

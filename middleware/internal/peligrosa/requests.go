@@ -65,6 +65,12 @@ type MediaRequest struct {
 	// viewer at creation (advisory) or the admin at approve (authoritative,
 	// see handleRequestApprove's absent/override/[]-clears protocol).
 	Seasons []int `json:"seasons,omitempty"`
+	// AvailableSeenAt is when the requester acknowledged (in-app) that this
+	// request became available. A pointer so nil (unseen) is omitted from
+	// the JSON response entirely — a zero time.Time would otherwise
+	// serialize as "0001-01-01T00:00:00Z". See HandleRequestUnseen/
+	// HandleRequestAcknowledge.
+	AvailableSeenAt *time.Time `json:"available_seen_at,omitempty"`
 }
 
 // isTerminal returns true for states that are end-of-lifecycle.
@@ -88,21 +94,22 @@ type InviteExport struct {
 
 // RequestExport captures the full state of a media request for backup/restore.
 type RequestExport struct {
-	ID          string         `json:"id"`
-	Type        string         `json:"type"`
-	TmdbID      int            `json:"tmdb_id"`
-	TvdbID      int            `json:"tvdb_id"`
-	Title       string         `json:"title"`
-	Year        int            `json:"year"`
-	Poster      string         `json:"poster,omitempty"`
-	RequestedBy string         `json:"requested_by"`
-	State       RequestState   `json:"state"`
-	Reason      string         `json:"reason,omitempty"`
-	ArrID       int            `json:"arr_id,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	History     []RequestEvent `json:"history"`
-	Seasons     []int          `json:"seasons,omitempty"`
+	ID              string         `json:"id"`
+	Type            string         `json:"type"`
+	TmdbID          int            `json:"tmdb_id"`
+	TvdbID          int            `json:"tvdb_id"`
+	Title           string         `json:"title"`
+	Year            int            `json:"year"`
+	Poster          string         `json:"poster,omitempty"`
+	RequestedBy     string         `json:"requested_by"`
+	State           RequestState   `json:"state"`
+	Reason          string         `json:"reason,omitempty"`
+	ArrID           int            `json:"arr_id,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	History         []RequestEvent `json:"history"`
+	Seasons         []int          `json:"seasons,omitempty"`
+	AvailableSeenAt *time.Time     `json:"available_seen_at,omitempty"`
 }
 
 // RequestStore persists media requests in SQLite.
@@ -130,7 +137,7 @@ func toMediaRequest(r *reporeqs.Request) *MediaRequest {
 			Note:  ev.Note,
 		}
 	}
-	return &MediaRequest{
+	out := &MediaRequest{
 		ID:          r.ID,
 		Type:        r.Type,
 		TmdbID:      r.TmdbID,
@@ -147,6 +154,11 @@ func toMediaRequest(r *reporeqs.Request) *MediaRequest {
 		History:     history,
 		Seasons:     r.Seasons,
 	}
+	if !r.AvailableSeenAt.IsZero() {
+		t := r.AvailableSeenAt
+		out.AvailableSeenAt = &t
+	}
+	return out
 }
 
 // toRepoRequest converts a peligrosa MediaRequest to a repo Request.
@@ -161,7 +173,7 @@ func toRepoRequest(m *MediaRequest) *reporeqs.Request {
 			Note:      ev.Note,
 		}
 	}
-	return &reporeqs.Request{
+	out := &reporeqs.Request{
 		ID:          m.ID,
 		Type:        m.Type,
 		TmdbID:      m.TmdbID,
@@ -178,6 +190,10 @@ func toRepoRequest(m *MediaRequest) *reporeqs.Request {
 		History:     history,
 		Seasons:     m.Seasons,
 	}
+	if m.AvailableSeenAt != nil {
+		out.AvailableSeenAt = *m.AvailableSeenAt
+	}
+	return out
 }
 
 func (s *RequestStore) All(ctx context.Context) []*MediaRequest {
@@ -237,6 +253,30 @@ func (s *RequestStore) updateRequest(ctx context.Context, req *MediaRequest) err
 	return s.repo.Update(ctx, toRepoRequest(req))
 }
 
+// ListUnseenAvailableByUser returns user's available-but-unacknowledged
+// requests, converted to MediaRequest form. Returns a non-nil empty slice on
+// query error (logged) or when there are none — mirrors All's convention.
+func (s *RequestStore) ListUnseenAvailableByUser(ctx context.Context, user string) []*MediaRequest {
+	rows, err := s.repo.ListUnseenAvailableByUser(ctx, user)
+	if err != nil {
+		slog.Warn("requests: ListUnseenAvailableByUser query error", "component", "requests", "error", err)
+		return []*MediaRequest{}
+	}
+	result := make([]*MediaRequest, len(rows))
+	for i, r := range rows {
+		result[i] = toMediaRequest(r)
+	}
+	return result
+}
+
+// MarkAvailableSeen marks user's unseen-available requests as acknowledged
+// as of now — all of them, or only ids when non-empty. Ownership is
+// enforced server-side by the repo's requested_by filter, not by this
+// method: a foreign id in ids simply matches 0 rows.
+func (s *RequestStore) MarkAvailableSeen(ctx context.Context, user string, ids []string) (int, error) {
+	return s.repo.MarkAvailableSeen(ctx, user, time.Now().UTC(), ids)
+}
+
 func generateRequestID() string {
 	// Use a random token suffix; no dependency on main-package generateAPIKey.
 	t, err := generateToken()
@@ -277,6 +317,9 @@ func (s *RequestStore) InsertFull(ctx context.Context, req RequestExport) error 
 		UpdatedAt:   req.UpdatedAt,
 		History:     history,
 		Seasons:     req.Seasons,
+	}
+	if req.AvailableSeenAt != nil {
+		r.AvailableSeenAt = *req.AvailableSeenAt
 	}
 	return s.repo.InsertFull(ctx, r)
 }
@@ -765,4 +808,83 @@ func (rs *RequestStore) HandleRequestDelete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	httputil.WriteJSON(w, map[string]string{"status": "deleted"})
+}
+
+// --- Availability notifications (viewer-scoped) ---
+//
+// A viewer's request eventually flips to "available" (MarkAvailable, above)
+// and fires an Apprise notification to the operator's global channel — but
+// the requester themselves gets nothing in-app. These two endpoints close
+// that gap: the dashboard polls HandleRequestUnseen every 15s for a small
+// badge/toast payload, and calls HandleRequestAcknowledge to clear it once
+// the viewer has looked. Both are registered in routes.go as method+exact-path
+// patterns so they win Go's ServeMux precedence over the admin-gated
+// "/api/pelicula/requests/" subtree.
+
+// unseenRequestItem is the trimmed shape returned by HandleRequestUnseen —
+// polled every 15s, so the payload is kept deliberately small (no history,
+// no reason, no seasons).
+type unseenRequestItem struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Type   string `json:"type"`
+	Year   int    `json:"year"`
+	Poster string `json:"poster,omitempty"`
+}
+
+// HandleRequestUnseen returns the count and trimmed detail of the session
+// user's available-but-unacknowledged requests. GET only (enforced by the
+// "GET /api/pelicula/requests/unseen" mux pattern in routes.go).
+func (p *Deps) HandleRequestUnseen(w http.ResponseWriter, r *http.Request) {
+	username, _, ok := p.Auth.SessionFor(r)
+	if !ok {
+		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	rows := p.Requests.ListUnseenAvailableByUser(r.Context(), username)
+	items := make([]unseenRequestItem, len(rows))
+	for i, req := range rows {
+		items[i] = unseenRequestItem{
+			ID:     req.ID,
+			Title:  req.Title,
+			Type:   req.Type,
+			Year:   req.Year,
+			Poster: req.Poster,
+		}
+	}
+	httputil.WriteJSON(w, map[string]any{"count": len(items), "items": items})
+}
+
+// HandleRequestAcknowledge marks the session user's unseen-available
+// requests as seen — all of them, or an optional {"ids": [...]} subset.
+// POST only (enforced by the "POST /api/pelicula/requests/acknowledge" mux
+// pattern in routes.go, but also checked here defensively since this
+// handler could in principle be wired directly by a future caller).
+func (p *Deps) HandleRequestAcknowledge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username, _, ok := p.Auth.SessionFor(r)
+	if !ok {
+		httputil.WriteError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck — best-effort; empty body = "acknowledge all"
+
+	n, err := p.Requests.MarkAvailableSeen(r.Context(), username, body.IDs)
+	if err != nil {
+		slog.Error("failed to acknowledge requests", "component", "requests", "error", err)
+		httputil.WriteError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("requests acknowledged", "component", "requests", "user", username, "n", n)
+	httputil.WriteJSON(w, map[string]any{"acknowledged": n})
 }

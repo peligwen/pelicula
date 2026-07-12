@@ -43,13 +43,17 @@ func insertRequest(t *testing.T, s *RequestStore, req *MediaRequest) {
 		}
 		seasonsText = string(b)
 	}
+	seenAtText := ""
+	if req.AvailableSeenAt != nil {
+		seenAtText = req.AvailableSeenAt.Format(time.RFC3339Nano)
+	}
 	_, err := s.repo.DB().Exec(
 		`INSERT INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
-		                       requested_by, state, reason, arr_id, created_at, updated_at, seasons)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
 		req.RequestedBy, string(req.State), req.Reason, req.ArrID,
-		now.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano), seasonsText,
+		now.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano), seasonsText, seenAtText,
 	)
 	if err != nil {
 		t.Fatalf("insertRequest: %v", err)
@@ -817,5 +821,218 @@ func TestHandleRequestApprove_InvalidSeasonsSentinelMapsTo400AndStaysPending(t *
 	}
 	if got.State != reporeqs.StatePending {
 		t.Errorf("State = %q, want still pending after ErrInvalidSeasons", got.State)
+	}
+}
+
+// ── Phase 5: availability notifications (unseen/acknowledge) ────────────────
+
+// TestHandleRequestUnseen_ScopesToSessionUser verifies that alice sees only
+// her own available-and-unseen requests: her already-seen and pending rows
+// are excluded, and bob's available-unseen row is invisible to her.
+func TestHandleRequestUnseen_ScopesToSessionUser(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	deps := newTestRequestDeps(auth, s)
+
+	insertRequest(t, s, &MediaRequest{
+		ID:          "req_unseen_alice",
+		Type:        "movie",
+		TmdbID:      701,
+		Title:       "Alice Unseen Film",
+		State:       RequestAvailable,
+		RequestedBy: "alice",
+	})
+	seenAt := time.Now().UTC()
+	insertRequest(t, s, &MediaRequest{
+		ID:              "req_seen_alice",
+		Type:            "movie",
+		TmdbID:          702,
+		Title:           "Alice Seen Film",
+		State:           RequestAvailable,
+		RequestedBy:     "alice",
+		AvailableSeenAt: &seenAt,
+	})
+	insertRequest(t, s, &MediaRequest{
+		ID:          "req_pending_alice",
+		Type:        "movie",
+		TmdbID:      703,
+		Title:       "Alice Pending Film",
+		State:       RequestPending,
+		RequestedBy: "alice",
+	})
+	insertRequest(t, s, &MediaRequest{
+		ID:          "req_unseen_bob",
+		Type:        "movie",
+		TmdbID:      704,
+		Title:       "Bob Unseen Film",
+		State:       RequestAvailable,
+		RequestedBy: "bob",
+	})
+
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests/unseen", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	deps.HandleRequestUnseen(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Count int `json:"count"`
+		Items []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if resp.Count != 1 {
+		t.Fatalf("count = %d, want 1", resp.Count)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ID != "req_unseen_alice" {
+		t.Errorf("items = %+v, want exactly [req_unseen_alice]", resp.Items)
+	}
+}
+
+// TestHandleRequestUnseen_Unauthenticated401 verifies the 401 path.
+func TestHandleRequestUnseen_Unauthenticated401(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	deps := newTestRequestDeps(auth, s)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests/unseen", nil)
+	w := httptest.NewRecorder()
+	deps.HandleRequestUnseen(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+// TestHandleRequestAcknowledge_NoBodyMarksAllSeen verifies that acking with
+// no body marks all of the caller's unseen-available requests as seen, and
+// that a subsequent unseen fetch then returns zero.
+func TestHandleRequestAcknowledge_NoBodyMarksAllSeen(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	deps := newTestRequestDeps(auth, s)
+
+	insertRequest(t, s, &MediaRequest{
+		ID: "req_ack_all_1", Type: "movie", TmdbID: 801,
+		Title: "Ack Film 1", State: RequestAvailable, RequestedBy: "alice",
+	})
+	insertRequest(t, s, &MediaRequest{
+		ID: "req_ack_all_2", Type: "movie", TmdbID: 802,
+		Title: "Ack Film 2", State: RequestAvailable, RequestedBy: "alice",
+	})
+
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	ackReq := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/acknowledge", bytes.NewReader([]byte(`{}`)))
+	addSessionCookie(ackReq, token)
+	w := httptest.NewRecorder()
+	deps.HandleRequestAcknowledge(w, ackReq)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var ackResp struct {
+		Acknowledged int `json:"acknowledged"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &ackResp); err != nil {
+		t.Fatalf("parse ack response: %v", err)
+	}
+	if ackResp.Acknowledged != 2 {
+		t.Errorf("acknowledged = %d, want 2", ackResp.Acknowledged)
+	}
+
+	unseenReq := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests/unseen", nil)
+	addSessionCookie(unseenReq, token)
+	w2 := httptest.NewRecorder()
+	deps.HandleRequestUnseen(w2, unseenReq)
+	var unseenResp struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(w2.Body.Bytes(), &unseenResp); err != nil {
+		t.Fatalf("parse unseen response: %v", err)
+	}
+	if unseenResp.Count != 0 {
+		t.Errorf("unseen count after acknowledging all = %d, want 0", unseenResp.Count)
+	}
+}
+
+// TestHandleRequestAcknowledge_ForeignIDDoesNotMutateOtherUser is the
+// security-critical case: alice acking with bob's request id must not mark
+// bob's row seen, and the response must report acknowledged: 0.
+func TestHandleRequestAcknowledge_ForeignIDDoesNotMutateOtherUser(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	deps := newTestRequestDeps(auth, s)
+
+	insertRequest(t, s, &MediaRequest{
+		ID: "req_bob_owned", Type: "movie", TmdbID: 901,
+		Title: "Bob's Film", State: RequestAvailable, RequestedBy: "bob",
+	})
+
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	body, _ := json.Marshal(map[string]any{"ids": []string{"req_bob_owned"}})
+	ackReq := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/acknowledge", bytes.NewReader(body))
+	addSessionCookie(ackReq, token)
+	w := httptest.NewRecorder()
+	deps.HandleRequestAcknowledge(w, ackReq)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var ackResp struct {
+		Acknowledged int `json:"acknowledged"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &ackResp); err != nil {
+		t.Fatalf("parse ack response: %v", err)
+	}
+	if ackResp.Acknowledged != 0 {
+		t.Errorf("acknowledged = %d, want 0 (alice must not ack bob's request)", ackResp.Acknowledged)
+	}
+
+	got, err := s.repo.Get(context.Background(), "req_bob_owned")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.AvailableSeenAt.IsZero() {
+		t.Errorf("bob's AvailableSeenAt = %v, want zero (unmutated by alice's request)", got.AvailableSeenAt)
+	}
+}
+
+// TestHandleRequestAcknowledge_Unauthenticated401 verifies the 401 path.
+func TestHandleRequestAcknowledge_Unauthenticated401(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	deps := newTestRequestDeps(auth, s)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pelicula/requests/acknowledge", bytes.NewReader([]byte(`{}`)))
+	w := httptest.NewRecorder()
+	deps.HandleRequestAcknowledge(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+// TestHandleRequestAcknowledge_GetMethodNotAllowed405 verifies GET is
+// rejected with 405 (POST only).
+func TestHandleRequestAcknowledge_GetMethodNotAllowed405(t *testing.T) {
+	s := newRequestStore(t)
+	auth := newTestAuth()
+	token := insertSession(auth, "alice", RoleViewer, time.Now().Add(time.Hour))
+	deps := newTestRequestDeps(auth, s)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pelicula/requests/acknowledge", nil)
+	addSessionCookie(req, token)
+	w := httptest.NewRecorder()
+	deps.HandleRequestAcknowledge(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
 	}
 }
