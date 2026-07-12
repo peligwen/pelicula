@@ -58,6 +58,13 @@
 #                     non-empty current_stage (skipped gracefully on an empty
 #                     catalog). Read-only. Requires PELICULA_TEST_JELLYFIN_PASSWORD;
 #                     skipped under --skip-auth.
+#   sweep-request-notify  In-app availability-notification HTTP smoke: GET
+#                     /api/pelicula/requests/unseen returns {count, items};
+#                     POST /api/pelicula/requests/acknowledge (empty body)
+#                     returns {acknowledged}. Cross-viewer ownership scoping
+#                     is covered exhaustively by Go tests (no second viewer
+#                     identity in this harness). Requires
+#                     PELICULA_TEST_JELLYFIN_PASSWORD; skipped under --skip-auth.
 #
 # Tests that require a running Jellyfin session need
 #   PELICULA_TEST_JELLYFIN_PASSWORD + PELICULA_TEST_JELLYFIN_USER.
@@ -76,7 +83,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET=""           # empty → tests use their own defaults (localhost:7354)
 SKIP_AUTH=""        # empty → tests perform auth checks if password is present
-SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action,sweep-search-seasons,sweep-journey"  # comma-separated list of suites to run
+SUITES="bug1-reconcile,bug2-storage,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action,sweep-search-seasons,sweep-journey,sweep-request-notify"  # comma-separated list of suites to run
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 
@@ -109,7 +116,7 @@ _fail() { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
 
 # AUTH_REQUIRED_SUITES: suites that need PELICULA_TEST_JELLYFIN_PASSWORD.
 # When --skip-auth is set these suites are skipped (not counted as failures).
-AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action,sweep-search-seasons,sweep-journey"
+AUTH_REQUIRED_SUITES="bug1-reconcile,bug4-registration,sweep-catalog,sweep-jobs,sweep-users,sweep-settings,sweep-search-options,sweep-remove-action,sweep-search-seasons,sweep-journey,sweep-request-notify"
 
 run_suite() {
     local name="$1" script="$1"
