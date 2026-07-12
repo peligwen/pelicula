@@ -31,8 +31,8 @@ func currentVersion(t *testing.T, db *sql.DB) int {
 func TestOpen_CreatesTablesAndSetsVersion(t *testing.T) {
 	db := testDB(t)
 
-	if got := currentVersion(t, db); got != 4 {
-		t.Errorf("user_version = %d, want 4", got)
+	if got := currentVersion(t, db); got != 5 {
+		t.Errorf("user_version = %d, want 5", got)
 	}
 
 	for _, table := range []string{
@@ -62,15 +62,15 @@ func TestOpen_MigratesForwardFromZero(t *testing.T) {
 	}
 	raw.Close()
 
-	// Open via peliculadb.Open — must migrate 0 → 3.
+	// Open via peliculadb.Open — must migrate 0 → 5.
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 
-	if got := currentVersion(t, db); got != 4 {
-		t.Errorf("user_version = %d, want 4", got)
+	if got := currentVersion(t, db); got != 5 {
+		t.Errorf("user_version = %d, want 5", got)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestOpen_IdempotentOnSecondOpen(t *testing.T) {
 	}
 	defer db2.Close()
 
-	if got := currentVersion(t, db2); got != 4 {
-		t.Errorf("user_version = %d after second open, want 4", got)
+	if got := currentVersion(t, db2); got != 5 {
+		t.Errorf("user_version = %d after second open, want 5", got)
 	}
 }
 
@@ -189,5 +189,28 @@ func TestMigrate4_AddsSeasonsColumnWithEmptyDefault(t *testing.T) {
 	}
 	if seasons != "" {
 		t.Errorf("seasons = %q, want '' (default)", seasons)
+	}
+}
+
+// TestMigrate5_AddsAvailableSeenAtColumnWithEmptyDefault verifies migrate5:
+// the requests table gains an available_seen_at column that defaults to the
+// empty string (unseen) for both existing and newly-inserted rows.
+func TestMigrate5_AddsAvailableSeenAtColumnWithEmptyDefault(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+
+	if _, err := db.Exec(
+		`INSERT INTO requests (id, type, title, state, created_at, updated_at)
+		 VALUES ('req-1', 'movie', 'Test Movie', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+	); err != nil {
+		t.Fatalf("insert request: %v", err)
+	}
+
+	var seenAt string
+	if err := db.QueryRow(`SELECT available_seen_at FROM requests WHERE id = 'req-1'`).Scan(&seenAt); err != nil {
+		t.Fatalf("select available_seen_at: %v", err)
+	}
+	if seenAt != "" {
+		t.Errorf("available_seen_at = %q, want '' (default/unseen)", seenAt)
 	}
 }

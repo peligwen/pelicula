@@ -129,7 +129,8 @@ func testDB(t *testing.T) *sql.DB {
 			arr_id       INTEGER,
 			created_at   TEXT NOT NULL,
 			updated_at   TEXT NOT NULL,
-			seasons      TEXT NOT NULL DEFAULT ''
+			seasons      TEXT NOT NULL DEFAULT '',
+			available_seen_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS request_events (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,

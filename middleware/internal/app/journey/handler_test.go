@@ -146,7 +146,8 @@ func newRequestsStore(t *testing.T) *reporeqs.Store {
 			arr_id       INTEGER,
 			created_at   TEXT NOT NULL,
 			updated_at   TEXT NOT NULL,
-			seasons      TEXT NOT NULL DEFAULT ''
+			seasons      TEXT NOT NULL DEFAULT '',
+			available_seen_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE request_events (
 			request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,

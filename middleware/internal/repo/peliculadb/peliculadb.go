@@ -20,6 +20,7 @@ var migrations = []dbutil.Migration{
 	{Version: 2, Up: migrate2},
 	{Version: 3, Up: migrate3},
 	{Version: 4, Up: migrate4},
+	{Version: 5, Up: migrate5},
 }
 
 func migrate1(tx *sql.Tx) error {
@@ -139,6 +140,20 @@ func migrate4(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE requests ADD COLUMN seasons TEXT NOT NULL DEFAULT ''`)
 	if err != nil {
 		return fmt.Errorf("add requests.seasons column: %w", err)
+	}
+	return nil
+}
+
+// migrate5 adds requests.available_seen_at: tracks whether the requester has
+// seen/acknowledged an "available" request in the dashboard. The empty
+// string (the DEFAULT, and every pre-migration row) means unseen; a
+// non-empty value is an RFC3339Nano timestamp recording when the requester
+// acknowledged it. See internal/repo/requests/store.go's
+// ListUnseenAvailableByUser/MarkAvailableSeen.
+func migrate5(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE requests ADD COLUMN available_seen_at TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return fmt.Errorf("add requests.available_seen_at column: %w", err)
 	}
 	return nil
 }

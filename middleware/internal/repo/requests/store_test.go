@@ -45,7 +45,8 @@ func newTestDB(t *testing.T) *sql.DB {
 			arr_id       INTEGER,
 			created_at   TEXT NOT NULL,
 			updated_at   TEXT NOT NULL,
-			seasons      TEXT NOT NULL DEFAULT ''
+			seasons      TEXT NOT NULL DEFAULT '',
+			available_seen_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS request_events (
 			request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
@@ -1038,5 +1039,193 @@ func TestUpdateAndInsertEvent_RollbackOnEventFailure(t *testing.T) {
 	}
 	if len(got.History) != 0 {
 		t.Errorf("expected 0 history events after rollback, got %d", len(got.History))
+	}
+}
+
+// ── ListUnseenAvailableByUser / MarkAvailableSeen ────────────────────────────
+
+// TestListUnseenAvailableByUser_ScopesToUserStateAndUnseen verifies the
+// query's three filters together: it must match only requestedBy's own rows,
+// only state=available, and only available_seen_at=”.
+func TestListUnseenAvailableByUser_ScopesToUserStateAndUnseen(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	// alice: available + unseen — included.
+	aliceUnseen := makeRequest("req_alice_unseen", "movie", "Alice Unseen Film", requests.StateAvailable)
+	aliceUnseen.TmdbID = 1001
+	if err := s.Insert(ctx, aliceUnseen); err != nil {
+		t.Fatalf("Insert aliceUnseen: %v", err)
+	}
+
+	// alice: available + already seen — excluded.
+	aliceSeen := makeRequest("req_alice_seen", "movie", "Alice Seen Film", requests.StateAvailable)
+	aliceSeen.TmdbID = 1002
+	if err := s.Insert(ctx, aliceSeen); err != nil {
+		t.Fatalf("Insert aliceSeen: %v", err)
+	}
+	if _, err := s.MarkAvailableSeen(ctx, "alice", time.Now().UTC(), []string{"req_alice_seen"}); err != nil {
+		t.Fatalf("MarkAvailableSeen (seed seen row): %v", err)
+	}
+
+	// alice: pending — excluded (wrong state).
+	alicePending := makeRequest("req_alice_pending", "movie", "Alice Pending Film", requests.StatePending)
+	alicePending.TmdbID = 1003
+	if err := s.Insert(ctx, alicePending); err != nil {
+		t.Fatalf("Insert alicePending: %v", err)
+	}
+
+	// bob: available + unseen — excluded (wrong owner).
+	bobUnseen := makeRequest("req_bob_unseen", "movie", "Bob Unseen Film", requests.StateAvailable)
+	bobUnseen.RequestedBy = "bob"
+	bobUnseen.TmdbID = 1004
+	if err := s.Insert(ctx, bobUnseen); err != nil {
+		t.Fatalf("Insert bobUnseen: %v", err)
+	}
+
+	got, err := s.ListUnseenAvailableByUser(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ListUnseenAvailableByUser: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "req_alice_unseen" {
+		t.Errorf("got %+v, want exactly [req_alice_unseen]", ids(got))
+	}
+	if got[0].History == nil {
+		t.Error("History must be a non-nil empty slice (matches ListByState's contract)")
+	}
+}
+
+// TestListUnseenAvailableByUser_EmptyReturnsNonNilSlice verifies the
+// no-match case returns a non-nil empty slice, not nil.
+func TestListUnseenAvailableByUser_EmptyReturnsNonNilSlice(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	got, err := s.ListUnseenAvailableByUser(ctx, "nobody")
+	if err != nil {
+		t.Fatalf("ListUnseenAvailableByUser: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0 requests, got %d", len(got))
+	}
+}
+
+// TestMarkAvailableSeen_ForeignRequestedByAffectsZeroRows is the
+// security-critical case: a caller passing another user's request id must
+// not have that row mutated — the requested_by filter is the ownership
+// guarantee, not the id list.
+func TestMarkAvailableSeen_ForeignRequestedByAffectsZeroRows(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	bobReq := makeRequest("req_bob_owned", "movie", "Bob's Film", requests.StateAvailable)
+	bobReq.RequestedBy = "bob"
+	bobReq.TmdbID = 2001
+	if err := s.Insert(ctx, bobReq); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	n, err := s.MarkAvailableSeen(ctx, "alice", time.Now().UTC(), []string{"req_bob_owned"})
+	if err != nil {
+		t.Fatalf("MarkAvailableSeen: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("rows affected = %d, want 0 (alice must not be able to ack bob's row)", n)
+	}
+
+	got, err := s.Get(ctx, "req_bob_owned")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.AvailableSeenAt.IsZero() {
+		t.Errorf("AvailableSeenAt = %v, want zero (bob's row must remain unseen)", got.AvailableSeenAt)
+	}
+}
+
+// TestMarkAvailableSeen_NoIDsMarksAllUnseenForUser verifies that an empty ids
+// slice acknowledges every one of the user's unseen-available rows, and none
+// belonging to another user.
+func TestMarkAvailableSeen_NoIDsMarksAllUnseenForUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	for i, id := range []string{"req_mas_all_1", "req_mas_all_2"} {
+		r := makeRequest(id, "movie", "Film "+id, requests.StateAvailable)
+		r.TmdbID = 3000 + i
+		if err := s.Insert(ctx, r); err != nil {
+			t.Fatalf("Insert %q: %v", id, err)
+		}
+	}
+	otherUser := makeRequest("req_mas_other_user", "movie", "Other User Film", requests.StateAvailable)
+	otherUser.RequestedBy = "bob"
+	otherUser.TmdbID = 3099
+	if err := s.Insert(ctx, otherUser); err != nil {
+		t.Fatalf("Insert otherUser: %v", err)
+	}
+
+	n, err := s.MarkAvailableSeen(ctx, "alice", time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatalf("MarkAvailableSeen: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("rows affected = %d, want 2", n)
+	}
+
+	remaining, err := s.ListUnseenAvailableByUser(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ListUnseenAvailableByUser: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("alice's unseen list = %+v, want empty after acknowledging all", ids(remaining))
+	}
+
+	bobRemaining, err := s.ListUnseenAvailableByUser(ctx, "bob")
+	if err != nil {
+		t.Fatalf("ListUnseenAvailableByUser(bob): %v", err)
+	}
+	if len(bobRemaining) != 1 {
+		t.Errorf("bob's unseen list = %+v, want unaffected (still 1)", ids(bobRemaining))
+	}
+}
+
+// TestMarkAvailableSeen_RestrictsToGivenIDs verifies that a non-empty ids
+// slice only acknowledges the named rows, leaving the user's other unseen
+// rows untouched.
+func TestMarkAvailableSeen_RestrictsToGivenIDs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	first := makeRequest("req_mas_restrict_1", "movie", "First Film", requests.StateAvailable)
+	first.TmdbID = 4001
+	second := makeRequest("req_mas_restrict_2", "movie", "Second Film", requests.StateAvailable)
+	second.TmdbID = 4002
+	for _, r := range []*requests.Request{first, second} {
+		if err := s.Insert(ctx, r); err != nil {
+			t.Fatalf("Insert %q: %v", r.ID, err)
+		}
+	}
+
+	n, err := s.MarkAvailableSeen(ctx, "alice", time.Now().UTC(), []string{"req_mas_restrict_1"})
+	if err != nil {
+		t.Fatalf("MarkAvailableSeen: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows affected = %d, want 1", n)
+	}
+
+	remaining, err := s.ListUnseenAvailableByUser(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ListUnseenAvailableByUser: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].ID != "req_mas_restrict_2" {
+		t.Errorf("got %+v, want exactly [req_mas_restrict_2] (the un-acknowledged id)", ids(remaining))
 	}
 }

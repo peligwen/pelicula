@@ -56,6 +56,10 @@ type Request struct {
 	// unspecified/all (also the historical behavior before season support
 	// existed). See seasonsToText/seasonsFromText for the DB encoding.
 	Seasons []int
+	// AvailableSeenAt is when the requester acknowledged (in-app) that this
+	// request became available; the zero value means unseen. See
+	// ListUnseenAvailableByUser/MarkAvailableSeen.
+	AvailableSeenAt time.Time
 }
 
 // seasonsToText serializes a season-number slice to the requests.seasons
@@ -89,6 +93,17 @@ func seasonsFromText(s string) []int {
 	return out
 }
 
+// seenAtStr encodes an AvailableSeenAt value for the available_seen_at
+// column: the zero Time (unseen) becomes "", matching the column's DEFAULT
+// and seasonsToText's nil-becomes-"" convention; anything else is formatted
+// as RFC3339Nano via dbutil.FormatTime.
+func seenAtStr(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return dbutil.FormatTime(t)
+}
+
 // ErrNotFound is returned when a request ID does not exist in the table.
 var ErrNotFound = errors.New("request not found")
 
@@ -116,7 +131,7 @@ func (s *Store) DB() *sql.DB {
 func (s *Store) All(ctx context.Context) ([]*Request, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
-		        requested_by, state, reason, arr_id, created_at, updated_at, seasons
+		        requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at
 		 FROM requests ORDER BY created_at`,
 	)
 	if err != nil {
@@ -185,7 +200,7 @@ func (s *Store) All(ctx context.Context) ([]*Request, error) {
 func (s *Store) Get(ctx context.Context, id string) (*Request, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, type, tmdb_id, tvdb_id, title, year, poster,
-		        requested_by, state, reason, arr_id, created_at, updated_at, seasons
+		        requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at
 		 FROM requests WHERE id = ?`, id,
 	)
 	req, err := scanRequestRowSingle(row)
@@ -248,11 +263,12 @@ func (s *Store) Insert(ctx context.Context, req *Request) error {
 func (s *Store) InsertFull(ctx context.Context, req *Request) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO requests (id, type, tmdb_id, tvdb_id, title, year, poster,
-		                                  requested_by, state, reason, arr_id, created_at, updated_at, seasons)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                                  requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.ID, req.Type, req.TmdbID, req.TvdbID, req.Title, req.Year, req.Poster,
 		req.RequestedBy, string(req.State), req.Reason, req.ArrID,
 		dbutil.FormatTime(req.CreatedAt), dbutil.FormatTime(req.UpdatedAt), seasonsToText(req.Seasons),
+		seenAtStr(req.AvailableSeenAt),
 	)
 	if err != nil {
 		return err
@@ -375,7 +391,7 @@ func (s *Store) ListByState(ctx context.Context, states ...State) ([]*Request, e
 		args[i] = string(st)
 	}
 	query := "SELECT id, type, tmdb_id, tvdb_id, title, year, poster, " +
-		"requested_by, state, reason, arr_id, created_at, updated_at, seasons " +
+		"requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at " +
 		"FROM requests WHERE state IN (" + strings.Join(placeholders, ",") + ") ORDER BY created_at"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -421,7 +437,7 @@ func (s *Store) ListActiveByKey(ctx context.Context, reqType string, key int) ([
 		keyCol = "tvdb_id"
 	}
 	query := "SELECT id, type, tmdb_id, tvdb_id, title, year, poster, " +
-		"requested_by, state, reason, arr_id, created_at, updated_at, seasons " +
+		"requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at " +
 		"FROM requests WHERE type = ? AND " + keyCol + " = ? AND state NOT IN (?, ?) " +
 		"ORDER BY created_at"
 
@@ -469,7 +485,7 @@ func (s *Store) LatestByKey(ctx context.Context, reqType string, key int) (*Requ
 		keyCol = "tvdb_id"
 	}
 	query := "SELECT id, type, tmdb_id, tvdb_id, title, year, poster, " +
-		"requested_by, state, reason, arr_id, created_at, updated_at, seasons " +
+		"requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at " +
 		"FROM requests WHERE type = ? AND " + keyCol + " = ? " +
 		"ORDER BY created_at DESC LIMIT 1"
 
@@ -496,6 +512,70 @@ func (s *Store) LatestByKey(ctx context.Context, reqType string, key int) (*Requ
 	return req, nil
 }
 
+// ListUnseenAvailableByUser returns requestedBy's "available" requests that
+// have not yet been acknowledged (available_seen_at = ”), newest first.
+// History is NOT loaded (matches ListByState/ListActiveByKey's contract) —
+// this feeds the viewer-facing unseen-count/toast poll, which needs neither.
+func (s *Store) ListUnseenAvailableByUser(ctx context.Context, requestedBy string) ([]*Request, error) {
+	query := "SELECT id, type, tmdb_id, tvdb_id, title, year, poster, " +
+		"requested_by, state, reason, arr_id, created_at, updated_at, seasons, available_seen_at " +
+		"FROM requests WHERE requested_by = ? AND state = ? AND available_seen_at = '' " +
+		"ORDER BY updated_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, requestedBy, string(StateAvailable))
+	if err != nil {
+		return []*Request{}, err
+	}
+	defer rows.Close()
+
+	var result []*Request
+	for rows.Next() {
+		req, err := scanRequestRow(rows)
+		if err != nil {
+			continue
+		}
+		req.History = []Event{}
+		result = append(result, req)
+	}
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+	if result == nil {
+		return []*Request{}, nil
+	}
+	return result, nil
+}
+
+// MarkAvailableSeen marks requestedBy's unseen-available requests as
+// acknowledged as of at, restricted to ids when non-empty (all matching rows
+// otherwise). The requested_by = ? clause is the ownership guarantee — an id
+// belonging to a different user matches 0 rows regardless of what the caller
+// passed in. Returns the number of rows updated.
+func (s *Store) MarkAvailableSeen(ctx context.Context, requestedBy string, at time.Time, ids []string) (int, error) {
+	query := "UPDATE requests SET available_seen_at = ? " +
+		"WHERE requested_by = ? AND state = ? AND available_seen_at = ''"
+	args := []any{dbutil.FormatTime(at), requestedBy, string(StateAvailable)}
+
+	if len(ids) > 0 {
+		placeholders := make([]string, len(ids))
+		for i, id := range ids {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		query += " AND id IN (" + strings.Join(placeholders, ",") + ")"
+	}
+
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // ── scan helpers ─────────────────────────────────────────────────────────────
 
 // rowScanner is satisfied by both *sql.Rows and *sql.Row.
@@ -509,12 +589,13 @@ func scanRequestRow(r rowScanner) (*Request, error) {
 	var poster, reason sql.NullString
 	var arrID sql.NullInt64
 	var seasonsText sql.NullString
+	var availableSeenAt sql.NullString
 
 	err := r.Scan(
 		&req.ID, &req.Type, &req.TmdbID, &req.TvdbID,
 		&req.Title, &req.Year, &poster,
 		&req.RequestedBy, &req.State, &reason, &arrID,
-		&createdAt, &updatedAt, &seasonsText,
+		&createdAt, &updatedAt, &seasonsText, &availableSeenAt,
 	)
 	if err != nil {
 		return nil, err
@@ -531,6 +612,9 @@ func scanRequestRow(r rowScanner) (*Request, error) {
 	req.CreatedAt, _ = dbutil.ParseTime(createdAt)
 	req.UpdatedAt, _ = dbutil.ParseTime(updatedAt)
 	req.Seasons = seasonsFromText(seasonsText.String)
+	if availableSeenAt.Valid && availableSeenAt.String != "" {
+		req.AvailableSeenAt, _ = dbutil.ParseTime(availableSeenAt.String)
+	}
 	return &req, nil
 }
 
@@ -542,12 +626,13 @@ func scanRequestRowSingle(r *sql.Row) (*Request, error) {
 	var poster, reason sql.NullString
 	var arrID sql.NullInt64
 	var seasonsText sql.NullString
+	var availableSeenAt sql.NullString
 
 	err := r.Scan(
 		&req.ID, &req.Type, &req.TmdbID, &req.TvdbID,
 		&req.Title, &req.Year, &poster,
 		&req.RequestedBy, &req.State, &reason, &arrID,
-		&createdAt, &updatedAt, &seasonsText,
+		&createdAt, &updatedAt, &seasonsText, &availableSeenAt,
 	)
 	if err != nil {
 		return nil, err
@@ -564,5 +649,8 @@ func scanRequestRowSingle(r *sql.Row) (*Request, error) {
 	req.CreatedAt, _ = dbutil.ParseTime(createdAt)
 	req.UpdatedAt, _ = dbutil.ParseTime(updatedAt)
 	req.Seasons = seasonsFromText(seasonsText.String)
+	if availableSeenAt.Valid && availableSeenAt.String != "" {
+		req.AvailableSeenAt, _ = dbutil.ParseTime(availableSeenAt.String)
+	}
 	return &req, nil
 }
