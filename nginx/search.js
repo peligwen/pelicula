@@ -215,19 +215,28 @@ function reinjectJourneyLines() {
 async function pollJourneyOnce() {
     if (!_trackedAdds.length) return;
     const now = Date.now();
+    // Snapshot before the await — trackAdd (fired from a fresh addMedia
+    // success while this poll is in flight, or a caller's un-awaited
+    // pollJourneyOnce()) can push new entries onto the live _trackedAdds
+    // array in the meantime. Iterating the live array after the await would
+    // walk entries with no matching results[i] slot and throw. Reconciling
+    // via a Set keyed on entry identity (rather than reassigning
+    // _trackedAdds to a list built only from this snapshot) also makes sure
+    // any such new entry survives this poll's bookkeeping untouched.
+    const entries = _trackedAdds.slice();
     const results = await Promise.allSettled(
-        _trackedAdds.map(entry => fetchJourney({ type: entry.type, tmdbId: entry.tmdbId, tvdbId: entry.tvdbId }))
+        entries.map(entry => fetchJourney({ type: entry.type, tmdbId: entry.tmdbId, tvdbId: entry.tvdbId }))
     );
-    const stillTracking = [];
-    _trackedAdds.forEach((entry, i) => {
+    const toDrop = new Set();
+    entries.forEach((entry, i) => {
         const result = results[i];
         const j = (result.status === 'fulfilled') ? result.value : null;
         if (j) setCardJourneyLine(entry, journeyStatusLine(j));
         const available = j && j.current_stage === 'available';
         const expired = (now - entry.addedAt) > JOURNEY_TRACK_LIMIT_MS;
-        if (!available && !expired) stillTracking.push(entry);
+        if (available || expired) toDrop.add(entry);
     });
-    _trackedAdds = stillTracking;
+    if (toDrop.size) _trackedAdds = _trackedAdds.filter(entry => !toDrop.has(entry));
     if (!_trackedAdds.length) stopJourneyPoll();
 }
 
@@ -332,7 +341,18 @@ async function addMedia(type, id, btn, overrides) {
         if (data !== null) {
             if (hit) { hit.added = true; }
             btn.textContent = 'Added'; btn.classList.add('added');
-            trackAdd(type, type === 'movie' ? id : 0, type === 'movie' ? 0 : id);
+            // Track by the card's REAL ids, not a fabricated 0 for the
+            // off-type key — series cards render data-tmdb with a real tmdb
+            // id too (the backend populates TmdbID for series), so passing
+            // tmdbId=0 here would make findResultCard's exact-match-on-both
+            // lookup fail forever and no status line would ever paint.
+            // hit (looked up above by the type-appropriate key) is the same
+            // object lastResults/renderResultCard already carry both real
+            // ids on; fall back to the type-appropriate `id` only in the
+            // (normally unreachable) case hit went missing mid-flight.
+            const tmdbId = hit ? (hit.tmdbId || 0) : (type === 'movie' ? id : 0);
+            const tvdbId = hit ? (hit.tvdbId || 0) : (type === 'series' ? id : 0);
+            trackAdd(type, tmdbId, tvdbId);
             return true;
         } else {
             // post() resolves to null only on a 401 from /api/pelicula/* \u2014 session expired/not logged in.
