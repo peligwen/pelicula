@@ -146,6 +146,7 @@ Dashboard JS modules (all served from `/nginx/`):
 | `notif-helpers.js` | in-page notification rendering |
 | `dashboard.js` | search, pipeline, settings, user management |
 | `catalog.js` | catalog browser and detail views |
+| `journey.js` | per-title journey rail/status-line rendering (`GET /api/pelicula/journey`), shared by catalog.js/search.js/users.js |
 | `downloads.js` | download queue management |
 | `jobs.js` | job drawer and job history |
 | `activity.js` | activity/event log |
