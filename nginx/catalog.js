@@ -3,6 +3,7 @@
 
 import { component, html, raw, toast, onTab, mount, openDrawer, closeDrawer } from '/framework.js';
 import { get, post, put, del } from '/api.js';
+import { fetchJourney, renderJourneyHtml } from '/journey.js';
 
 const REGISTRY_TTL = 60_000;
 const SUB_REQ_DEFAULT_LANGS = ['en', 'es', 'fr', 'de', 'pt', 'it', 'ja', 'zh'];
@@ -35,6 +36,57 @@ function setHTML(el, htmlResult) {
 // ── Context menu (module-level singleton) ─────────────────────────────────────
 let _openMenu = null;
 document.addEventListener('click', () => { if (_openMenu) { _openMenu.remove(); _openMenu = null; } });
+
+// ── Journey section (drawer, module-level) ─────────────────────────────────────
+// Live-refresh state for the drawer's journey rail. Module-level (not per
+// component-instance state) because there is exactly one drawer in the DOM
+// and this timer must be reachable from the drawer's close handler
+// (window.catCloseDetail) regardless of which openDetail/openMissingDetail
+// call started it.
+let _journeyRefreshTimer = null;
+let _journeyGen = 0;
+const JOURNEY_LIVE_STAGES = new Set(['searching', 'downloading', 'processing']);
+
+function stopJourneyRefresh() {
+    if (_journeyRefreshTimer) { clearInterval(_journeyRefreshTimer); _journeyRefreshTimer = null; }
+}
+
+// appendJourneySection: appends a titled "Journey" section (drawer-section
+// convention, matching "Status"/"Encoding"/etc. above it) with a
+// #journey-section rail to `body`, then loads and — while the title is
+// actively searching/downloading/processing — live-refreshes it every 10s
+// (the backend's snapshot caches make this cheap; see docs/API.md). `gen`
+// guards against a stale in-flight fetch from a since-closed or
+// since-reopened drawer clobbering a newer one — same pattern as
+// _replaceGen/the dualsub path-guard elsewhere in this file.
+function appendJourneySection(body, identity) {
+    const gen = ++_journeyGen;
+    const section = document.createElement('div');
+    section.className = 'drawer-section';
+    setHTML(section, html`<div class="drawer-section-title">Journey</div>`);
+    const rail = document.createElement('div');
+    rail.id = 'journey-section';
+    rail.textContent = 'Loading…';
+    section.appendChild(rail);
+    body.appendChild(section);
+
+    async function tick() {
+        const [result] = await Promise.allSettled([fetchJourney(identity)]);
+        if (gen !== _journeyGen) return; // superseded by a later drawer open/close
+        if (result.status === 'fulfilled' && result.value) {
+            setHTML(rail, renderJourneyHtml(result.value));
+            if (JOURNEY_LIVE_STAGES.has(result.value.current_stage)) {
+                if (!_journeyRefreshTimer) _journeyRefreshTimer = setInterval(tick, 10_000);
+            } else {
+                stopJourneyRefresh();
+            }
+        } else {
+            setHTML(rail, html`<div class="journey-unavailable">Journey unavailable.</div>`);
+            stopJourneyRefresh();
+        }
+    }
+    tick();
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 component('catalog', function (el, store, _props) {
@@ -263,7 +315,7 @@ component('catalog', function (el, store, _props) {
         div.addEventListener('click', (e) => {
             if (e.target.closest('.cat-ctx-btn')) return;
             const path = item.movieFile ? item.movieFile.path : '';
-            if (path) openDetail(path, item.movieFile && item.movieFile.mediaInfo);
+            if (path) openDetail(path, item.movieFile && item.movieFile.mediaInfo, { arrType: 'radarr', arrId: item.id });
         });
         div.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -385,7 +437,7 @@ component('catalog', function (el, store, _props) {
             div.querySelector('.cat-ctx-btn').addEventListener('click', (e) => { e.stopPropagation(); openContextMenu(e, epItem, 'episode'); });
             div.addEventListener('click', (e) => {
                 if (e.target.closest('.cat-ctx-btn')) return;
-                openDetail(filePath, ep.file && ep.file.mediaInfo);
+                openDetail(filePath, ep.file && ep.file.mediaInfo, { arrType: 'sonarr', arrId: series.id });
             });
             div.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
@@ -507,7 +559,7 @@ component('catalog', function (el, store, _props) {
         return (c.video || c.audio) ? c : null;
     }
 
-    async function openDetail(path, mediaInfo) {
+    async function openDetail(path, mediaInfo, identity) {
         if (!path) return;
         const backdrop = document.getElementById('cat-drawer-backdrop');
         const drawer = document.getElementById('cat-drawer');
@@ -515,6 +567,7 @@ component('catalog', function (el, store, _props) {
         const sub = document.getElementById('cat-drawer-sub');
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
+        stopJourneyRefresh(); // kill any live refresh from a previously open drawer
         openDrawer(drawer, backdrop);
         const filename = path.split('/').slice(-1)[0] || 'Details';
         // Strip extension for display; keep raw filename in title attr for hover
@@ -538,6 +591,7 @@ component('catalog', function (el, store, _props) {
                 titleEl.title = filename;
             }
             setHTML(body, renderDetailHtml(data, mediaInfo, drawerDualsubs));
+            if (identity) appendJourneySection(body, identity);
         } catch (e) {
             setHTML(body, html`<div style="color:var(--danger);padding:1rem 0">Failed to load details: ${e.message}</div>`);
         }
@@ -552,6 +606,7 @@ component('catalog', function (el, store, _props) {
         const sub = document.getElementById('cat-drawer-sub');
         const body = document.getElementById('cat-drawer-body');
         if (!drawer) return;
+        stopJourneyRefresh(); // kill any live refresh from a previously open drawer
         openDrawer(drawer, backdrop);
         titleEl.textContent = item.title || '(untitled)';
         titleEl.title = item.title || '';
@@ -572,6 +627,7 @@ component('catalog', function (el, store, _props) {
         }
 
         setHTML(body, renderMissingDetailHtml(item, arrType, profilesData));
+        appendJourneySection(body, { arrType, arrId: item.id });
     }
 
     function renderMissingDetailHtml(item, arrType, profilesData) {
@@ -1278,6 +1334,8 @@ component('catalog', function (el, store, _props) {
     // ── Public API (window.*) ─────────────────────────────────────────────────
     // These are called by the static dialog listeners at the bottom of this file.
     window.catCloseDetail = function () {
+        stopJourneyRefresh();
+        _journeyGen++; // invalidate any in-flight journey fetch for the drawer being closed
         closeDrawer(
             document.getElementById('cat-drawer'),
             document.getElementById('cat-drawer-backdrop')
