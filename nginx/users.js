@@ -4,10 +4,33 @@
 
 import { component, html, raw } from '/framework.js';
 import { get, post, del } from '/api.js';
+import { fetchJourney, journeyStatusLine } from '/journey.js';
 
 // ── Module-level state ────────────────────────────────────────────────────
 let usersLoaded = false;
 let requestsLoaded = false;
+
+// ── Request-card journey status lines ──────────────────────────────────────
+// Requests whose state is one of these are "in flight" between a viewer's
+// request and availability — worth a live journey status line on the "mine"
+// list. Pending/denied/available cards get no journey call (pending/denied
+// have no meaningful journey yet or ever; available already says so via its
+// own request-state pill). "approved" isn't reachable through today's
+// approve flow (which jumps straight to "grabbed" — see
+// middleware/internal/peligrosa/requests.go's handleRequestApprove) but is a
+// real RequestState value (e.g. a restored backup), so it's handled too.
+const REQUEST_JOURNEY_STATES = new Set(['approved', 'grabbed']);
+let _requestJourneyTimer = null;
+
+function startRequestJourneyPoll() {
+    if (_requestJourneyTimer) return;
+    _requestJourneyTimer = setInterval(loadRequests, 15_000);
+}
+
+function stopRequestJourneyPoll() {
+    if (_requestJourneyTimer) { clearInterval(_requestJourneyTimer); _requestJourneyTimer = null; }
+}
+
 // arrMetaLoaded / _arrMeta / populateRequestsSettings / saveRequestsSettings
 // live in settings.js (canonical owner). users.js calls them via window.*.
 
@@ -278,6 +301,13 @@ function renderRequests(requests) {
             const seasonsScope = (r.type === 'series' && r.seasons && r.seasons.length)
                 ? html`<div class="request-seasons-scope">seasons: ${r.seasons.join(', ')}</div>`.str
                 : '';
+            // Journey status line: only for requests actually in flight between
+            // approval and availability (see REQUEST_JOURNEY_STATES) — a
+            // placeholder here, filled in below via fetchJourney once this
+            // innerHTML assignment lands. Pending/denied/available get nothing.
+            const journeyLine = REQUEST_JOURNEY_STATES.has(r.state)
+                ? html`<div class="journey-status-line" data-request-id="${r.id}">${r.state}…</div>`.str
+                : '';
             return html`<li class="request-item request-item-${r.state}" data-id="${r.id}">
                 ${raw(poster)}
                 <div class="request-info">
@@ -285,11 +315,39 @@ function renderRequests(requests) {
                     <div class="request-meta">${r.type}</div>
                     ${raw(reasonDiv)}
                     ${raw(seasonsScope)}
+                    ${raw(journeyLine)}
                 </div>
                 <span class="request-state request-state-${r.state}">${r.state}</span>
             </li>`.str;
         }).join('');
         if (mineEmpty) mineEmpty.classList.toggle('hidden', mine.length > 0);
+
+        // Closing the approved→available gap ("approved → searching →
+        // downloading 45% → processing"): fetch each in-flight request's
+        // journey and fill its placeholder line. The 15s poll (start/stopped
+        // here, based on whether any such card is currently rendered) simply
+        // re-calls loadRequests → renderRequests, reusing this same path —
+        // it does NOT touch dashboard.js's refresh() batch or sse.js.
+        const inFlight = mine.filter(r => REQUEST_JOURNEY_STATES.has(r.state));
+        if (inFlight.length) {
+            startRequestJourneyPoll();
+            Promise.allSettled(inFlight.map(r => fetchJourney({ type: r.type, tmdbId: r.tmdb_id, tvdbId: r.tvdb_id })))
+                .then(results => {
+                    inFlight.forEach((r, i) => {
+                        const result = results[i];
+                        const line = mineList.querySelector('.journey-status-line[data-request-id="' + r.id + '"]');
+                        if (!line) return; // a later renderRequests already replaced this DOM
+                        if (result.status === 'fulfilled' && result.value) {
+                            line.textContent = journeyStatusLine(result.value);
+                        } else {
+                            line.textContent = 'journey unavailable';
+                            line.classList.add('journey-unavailable');
+                        }
+                    });
+                });
+        } else {
+            stopRequestJourneyPoll();
+        }
     }
 }
 
