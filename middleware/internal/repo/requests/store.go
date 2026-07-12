@@ -449,6 +449,53 @@ func (s *Store) ListActiveByKey(ctx context.Context, reqType string, key int) ([
 	return result, nil
 }
 
+// LatestByKey returns the single newest request row (ANY state — unlike
+// ListActiveByKey, terminal states are included) of the given type
+// ("movie" | "series") matching key — tmdb_id for movies, tvdb_id for
+// series — with its full event history loaded. Returns (nil, nil) if no row
+// matches (not an error — callers treat "no request for this title" as a
+// normal, common case, e.g. journey.Handler's aggregation).
+//
+// Used by the per-title journey endpoint, which needs the request's whole
+// lifecycle (including denied/available) to render the requested/approved
+// stages — ListActiveByKey's active-only filter would hide exactly the
+// terminal states journey most needs to distinguish.
+func (s *Store) LatestByKey(ctx context.Context, reqType string, key int) (*Request, error) {
+	if key == 0 {
+		return nil, nil
+	}
+	keyCol := "tmdb_id"
+	if reqType == "series" {
+		keyCol = "tvdb_id"
+	}
+	query := "SELECT id, type, tmdb_id, tvdb_id, title, year, poster, " +
+		"requested_by, state, reason, arr_id, created_at, updated_at, seasons " +
+		"FROM requests WHERE type = ? AND " + keyCol + " = ? " +
+		"ORDER BY created_at DESC LIMIT 1"
+
+	row := s.db.QueryRowContext(ctx, query, reqType, key)
+	req, err := scanRequestRowSingle(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// row is a *sql.Row — Scan already closed its underlying cursor, so this
+	// second query is safe under the MaxOpenConns=1 single-connection
+	// discipline (matches Get's history-after-row-close pattern above).
+	history, err := s.loadHistory(ctx, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	if history == nil {
+		history = []Event{}
+	}
+	req.History = history
+	return req, nil
+}
+
 // ── scan helpers ─────────────────────────────────────────────────────────────
 
 // rowScanner is satisfied by both *sql.Rows and *sql.Row.

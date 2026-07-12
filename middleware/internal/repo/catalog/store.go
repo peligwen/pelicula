@@ -473,6 +473,15 @@ func (s *Store) DeleteByArr(ctx context.Context, arrType string, arrID int) (int
 	return n, nil
 }
 
+// GetByArr fetches the catalog_items root row (movie or series — never a
+// season/episode child, which never carries arr_id) matching (arr_type,
+// arr_id). Returns (nil, nil) if no root item matches. Purely additive
+// alongside DeleteByArr, which targets the same (arr_id, arr_type) key.
+func (s *Store) GetByArr(ctx context.Context, arrType string, arrID int) (*Item, error) {
+	return scanItem(s.db.QueryRowContext(ctx,
+		selectItem+` WHERE arr_id=? AND arr_type=? AND type IN ('movie','series')`, arrID, arrType))
+}
+
 // UpdateMetadata sets Jellyfin-sourced fields on a catalog item.
 func (s *Store) UpdateMetadata(ctx context.Context, id, jellyfinID, artworkURL, synopsis, syncedAt string) error {
 	result, err := s.db.ExecContext(ctx, `

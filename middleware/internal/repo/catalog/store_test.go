@@ -723,6 +723,108 @@ func TestDeleteByArr_DoesNotTouchOtherArrType(t *testing.T) {
 	}
 }
 
+// ── GetByArr ──────────────────────────────────────────────────────────────────
+
+// TestGetByArr_FetchesMatchingRoot verifies the (arr_type, arr_id) lookup
+// returns the matching movie root with its fields intact.
+func TestGetByArr_FetchesMatchingRoot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	id, err := s.Upsert(ctx, repocat.Item{
+		Type: "movie", ArrID: 42, ArrType: "radarr",
+		Title: "The Matrix", Year: 1999, Tier: "library",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetByArr(ctx, "radarr", 42)
+	if err != nil {
+		t.Fatalf("GetByArr: %v", err)
+	}
+	if got == nil {
+		t.Fatal("got nil, want the movie root")
+	}
+	if got.ID != id || got.Title != "The Matrix" || got.Tier != "library" {
+		t.Errorf("got %+v, want id=%s title=The Matrix tier=library", got, id)
+	}
+}
+
+// TestGetByArr_NoMatchReturnsNilNil verifies the not-found contract:
+// (nil, nil), never an error.
+func TestGetByArr_NoMatchReturnsNilNil(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	got, err := s.GetByArr(ctx, "radarr", 9999)
+	if err != nil {
+		t.Fatalf("GetByArr: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %+v, want nil", got)
+	}
+}
+
+// TestGetByArr_ArrTypeScoped mirrors TestDeleteByArr_DoesNotTouchOtherArrType:
+// (arr_id, arr_type) is a compound key — a sonarr series sharing a radarr
+// movie's numeric ID must not satisfy a radarr lookup.
+func TestGetByArr_ArrTypeScoped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := repocat.New(newTestDB(t))
+
+	if _, err := s.Upsert(ctx, repocat.Item{
+		Type: "movie", ArrID: 7, ArrType: "radarr",
+		Title: "Movie Seven", Year: 2020, Tier: "library",
+	}); err != nil {
+		t.Fatalf("insert movie: %v", err)
+	}
+	if _, err := s.Upsert(ctx, repocat.Item{
+		Type: "series", ArrID: 7, ArrType: "sonarr",
+		Title: "Series Seven", Year: 2020, Tier: "queue",
+	}); err != nil {
+		t.Fatalf("insert series: %v", err)
+	}
+
+	got, err := s.GetByArr(ctx, "sonarr", 7)
+	if err != nil {
+		t.Fatalf("GetByArr: %v", err)
+	}
+	if got == nil || got.Type != "series" || got.Title != "Series Seven" {
+		t.Errorf("got %+v, want the sonarr series root", got)
+	}
+}
+
+// TestGetByArr_IgnoresChildRows verifies the type IN ('movie','series')
+// guard: even if a hypothetical child row carried an arr_id, GetByArr only
+// ever returns roots. Seed a season row with an arr_id directly (the write
+// paths never do this — the guard is defense-in-depth).
+func TestGetByArr_IgnoresChildRows(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := repocat.New(db)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO catalog_items (id, type, parent_id, arr_id, arr_type, title, tier, created_at, updated_at)
+		VALUES ('season_1', 'season', 'series_x', 11, 'sonarr', 'Season 1', 'library',
+		        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed season row: %v", err)
+	}
+
+	got, err := s.GetByArr(ctx, "sonarr", 11)
+	if err != nil {
+		t.Fatalf("GetByArr: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %+v, want nil — season rows must never satisfy a root lookup", got)
+	}
+}
+
 // TestDeleteByArr_ThenDeleteOrphanedChildren_CascadesSeriesRemoval verifies the
 // documented two-step removal flow: DeleteByArr drops the series root, then
 // DeleteOrphanedChildren sweeps the now-parentless season/episode rows.

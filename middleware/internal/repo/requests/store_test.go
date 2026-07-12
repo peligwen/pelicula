@@ -521,6 +521,131 @@ func ids(rs []*requests.Request) []string {
 	return out
 }
 
+// ── LatestByKey ───────────────────────────────────────────────────────────────
+
+// TestLatestByKey_ReturnsNewestIncludingTerminal verifies LatestByKey's core
+// distinction from ListActiveByKey: it must return the newest row regardless
+// of state, including terminal ones (denied/available) — journey needs to
+// see a request's full lifecycle, not just its active state.
+func TestLatestByKey_ReturnsNewestIncludingTerminal(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	older := makeRequest("older", "movie", "Older", requests.StateDenied)
+	older.TmdbID = 900
+	older.CreatedAt = time.Now().UTC().Add(-time.Hour)
+	older.UpdatedAt = older.CreatedAt
+	if err := s.Insert(ctx, older); err != nil {
+		t.Fatalf("Insert older: %v", err)
+	}
+
+	newer := makeRequest("newer", "movie", "Newer", requests.StateAvailable)
+	newer.TmdbID = 900
+	newer.CreatedAt = time.Now().UTC()
+	newer.UpdatedAt = newer.CreatedAt
+	if err := s.Insert(ctx, newer); err != nil {
+		t.Fatalf("Insert newer: %v", err)
+	}
+
+	got, err := s.LatestByKey(ctx, "movie", 900)
+	if err != nil {
+		t.Fatalf("LatestByKey: %v", err)
+	}
+	if got == nil || got.ID != "newer" {
+		t.Fatalf("got %+v, want the newer (terminal, state=available) row", got)
+	}
+	if got.State != requests.StateAvailable {
+		t.Errorf("State = %q, want available", got.State)
+	}
+}
+
+// TestLatestByKey_LoadsHistory verifies that LatestByKey populates History
+// (unlike ListActiveByKey/ListByState, which deliberately leave it empty).
+func TestLatestByKey_LoadsHistory(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	req := makeRequest("with_history", "series", "Show", requests.StateGrabbed)
+	req.TvdbID = 555
+	if err := s.Insert(ctx, req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	ev := requests.Event{RequestID: req.ID, At: time.Now().UTC(), State: requests.StateGrabbed, Actor: "admin"}
+	if err := s.InsertEvent(ctx, ev); err != nil {
+		t.Fatalf("InsertEvent: %v", err)
+	}
+
+	got, err := s.LatestByKey(ctx, "series", 555)
+	if err != nil {
+		t.Fatalf("LatestByKey: %v", err)
+	}
+	if got == nil {
+		t.Fatal("got nil, want a match")
+	}
+	if len(got.History) != 1 || got.History[0].Actor != "admin" {
+		t.Errorf("History = %+v, want one event with Actor=admin", got.History)
+	}
+}
+
+// TestLatestByKey_TypeScoped verifies type is part of the match key — a
+// series row with the same numeric value in tvdb_id must not satisfy a
+// movie lookup on tmdb_id and vice versa (mirrors
+// TestListActiveByKey's "wrong type" case).
+func TestLatestByKey_TypeScoped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	seriesReq := makeRequest("series_row", "series", "Show", requests.StatePending)
+	seriesReq.TmdbID = 300 // same numeric value as the movie lookup below, wrong column
+	seriesReq.TvdbID = 0
+	if err := s.Insert(ctx, seriesReq); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := s.LatestByKey(ctx, "movie", 300)
+	if err != nil {
+		t.Fatalf("LatestByKey: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %+v, want nil (series row must not satisfy a movie lookup)", got)
+	}
+}
+
+// TestLatestByKey_NoMatchReturnsNilNil verifies the "not found" contract:
+// (nil, nil), not an error — callers treat "no request for this title" as
+// the common case.
+func TestLatestByKey_NoMatchReturnsNilNil(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	got, err := s.LatestByKey(ctx, "movie", 123456)
+	if err != nil {
+		t.Fatalf("LatestByKey: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %+v, want nil", got)
+	}
+}
+
+// TestLatestByKey_ZeroKeyReturnsNilWithoutQuerying verifies key=0 short-circuits.
+func TestLatestByKey_ZeroKeyReturnsNilWithoutQuerying(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	got, err := s.LatestByKey(ctx, "movie", 0)
+	if err != nil {
+		t.Fatalf("LatestByKey: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %+v, want nil for key=0", got)
+	}
+}
+
 // ── Claim CAS: only one concurrent writer wins ─────────────────────────────
 
 // TestClaim_CAS verifies that when two goroutines race to claim (Update) a
