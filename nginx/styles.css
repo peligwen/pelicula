@@ -212,6 +212,7 @@ body {
     position: sticky; top: 58px; z-index: 99;
 }
 .tab {
+    position: relative;
     padding: 0.6rem 1.25rem;
     font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700;
     font-size: 0.72rem; letter-spacing: 0.04em;
@@ -221,6 +222,16 @@ body {
 }
 .tab.active { color: var(--pink); border-bottom-color: var(--pink); }
 .tab:hover  { color: var(--muted); }
+
+/* Tab badge (e.g. unseen-availability count on the users tab) — modeled on .bell-badge */
+.tab-badge {
+    position: absolute; top: 0.2rem; right: 0.2rem;
+    background: var(--pink); color: #fff;
+    font-size: 0.55rem; font-weight: 700; border-radius: 50%;
+    min-width: 15px; height: 15px; padding: 0 2px;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.tab-badge.hidden { display: none; }
 
 /* ── Tab visibility (CSS-driven, wins over dashboard.js classList) ─────── */
 /* Hide all managed sections by default when tabs are active. !important
@@ -1360,6 +1371,11 @@ details[open] .add-user-summary::before { content: '− '; }
 .request-item-grabbed   { border-left: 3px solid rgba(112,128,232,0.5); }
 .request-item-available { border-left: 3px solid rgba(64,200,168,0.5); }
 .request-item-denied    { border-left: 3px solid rgba(240,96,168,0.4); opacity: 0.65; }
+/* Unseen-availability highlight (Phase 5) — an available request the viewer
+   hasn't acknowledged yet; cleared once acknowledgeUnseenRequests() re-renders
+   the list. Same left-border treatment as .request-item-available, just
+   brighter, plus a faint background tint so it stands out in the list. */
+.request-item-unseen { border-left-color: var(--mint); background: var(--mint-l); }
 .request-poster { width: 36px; height: 54px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
 .request-poster-placeholder { width: 36px; height: 54px; background: var(--panel2); border-radius: 6px; flex-shrink: 0; }
 .request-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
@@ -1388,6 +1404,13 @@ details[open] .add-user-summary::before { content: '− '; }
 .request-state-grabbed   { background: var(--peri-l);  color: var(--periwinkle); }
 .request-state-available { background: var(--mint-l);  color: var(--mint); }
 .request-state-denied    { background: var(--pink-l);  color: var(--pink); }
+/* "New" pill next to the state badge on an unseen-available request (Phase 5) */
+.request-new-pill {
+    font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    background: var(--mint); color: #fff; border-radius: 20px; padding: 0.1rem 0.45rem;
+    align-self: flex-start; margin-top: 0.25rem; margin-left: 0.3rem;
+    font-family: var(--font-display, 'Nunito', sans-serif);
+}
 .request-actions { display: flex; flex-direction: column; gap: 0.25rem; flex-shrink: 0; }
 .request-btn {
     font-size: 0.7rem; padding: 0.25rem 0.65rem;

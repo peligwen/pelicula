@@ -121,6 +121,7 @@ function applyRole(role, username) {
     const requestsSection = document.getElementById('requests-section');
     if (requestsSection) {
         requestsSection.classList.remove('hidden');
+        if (window.checkUnseenRequests) window.checkUnseenRequests();
         if (window._users_getRequestsLoaded && !window._users_getRequestsLoaded()) {
             if (window.loadRequests) window.loadRequests();
             if (window._users_setRequestsLoaded) window._users_setRequestsLoaded(true);
@@ -867,7 +868,8 @@ async function refresh() {
     console.log('[pelicula] refresh start');
     const results = await Promise.allSettled([
         window.checkServices(), window.checkVPN(), window.checkDownloads(), checkStatus(),
-        checkNotifications(), checkStorage(), window.loadSessions(), window.checkHost()
+        checkNotifications(), checkStorage(), window.loadSessions(), window.checkHost(),
+        window.checkUnseenRequests()
     ]);
     const failed = results.filter(r => r.status === 'rejected').length;
     console.log('[pelicula] refresh done' + (failed ? ' (' + failed + ' failed)' : ''));
@@ -1097,6 +1099,8 @@ window.switchTab = function(tab, fromHash) {
     }
     // Lazy-load storage explorer on first visit
     if (tab === 'storage') _ensureStorageExplorerLoaded();
+    // Switching onto the users tab clears any unseen-availability badge/highlights.
+    if (tab === 'users' && window.acknowledgeUnseenRequests) window.acknowledgeUnseenRequests();
     document.dispatchEvent(new CustomEvent('pelicula:tab-changed', { detail: { tab: tab } }));
 };
 
@@ -1135,7 +1139,12 @@ document.getElementById('tabbar').addEventListener('keydown', function(e) {
             tabs.forEach(function(tab) {
                 const li = document.createElement('li');
                 const btn = document.createElement('button');
-                btn.textContent = tab.textContent.trim();
+                // Label text only — strip the users tab's unseen-count badge
+                // (e.g. "users3") so the mobile drawer shows a clean "users".
+                const labelSrc = tab.cloneNode(true);
+                const badge = labelSrc.querySelector('.tab-badge');
+                if (badge) badge.remove();
+                btn.textContent = labelSrc.textContent.trim();
                 btn.dataset.tab = tab.dataset.tab;
                 if (tab.classList.contains('active')) btn.classList.add('active');
                 if (tab.classList.contains('admin-only')) btn.classList.add('admin-only');

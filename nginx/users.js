@@ -2,13 +2,25 @@
 // Users component — registered with PeliculaFW; mounted by dashboard.js.
 // Depends on: framework.js, api.js.
 
-import { component, html, raw } from '/framework.js';
+import { component, html, raw, toast } from '/framework.js';
 import { get, post, del } from '/api.js';
 import { fetchJourney, journeyStatusLine } from '/journey.js';
 
 // ── Module-level state ────────────────────────────────────────────────────
 let usersLoaded = false;
 let requestsLoaded = false;
+
+// ── Availability notifications (Phase 5) ──────────────────────────────────
+// _toastedUnseen: ids already toasted this page load — in-memory only (a
+// reload re-toasts still-unseen items, which is fine; nothing persists to
+// localStorage). _hasUnseenMine: set by renderRequests whenever the "mine"
+// list currently has an available-and-unseen card; read by loadRequests to
+// decide whether an acknowledge-on-reload is warranted, guarding against an
+// acknowledge -> loadRequests -> acknowledge infinite loop (the second
+// loadRequests always finds nothing left unseen, so the flag goes false and
+// the recursion stops after one extra round-trip).
+const _toastedUnseen = new Set();
+let _hasUnseenMine = false;
 
 // ── Request-card journey status lines ──────────────────────────────────────
 // Requests whose state is one of these are "in flight" between a viewer's
@@ -225,6 +237,14 @@ async function loadRequests() {
         const requests = await get('/api/pelicula/requests');
         if (!requests) return;
         renderRequests(requests || []);
+        // Covers "already on the users tab when a request became available"
+        // and post-approve/deny reloads. _hasUnseenMine (set by
+        // renderRequests) guards against acknowledging when nothing is
+        // actually unseen — without it, this would recurse forever, since
+        // acknowledgeUnseenRequests() itself calls loadRequests() again.
+        if (_hasUnseenMine && document.body.dataset.tab === 'users') {
+            acknowledgeUnseenRequests();
+        }
     } catch (e) { console.warn('[pelicula] loadRequests error', e); }
 }
 
@@ -239,6 +259,8 @@ function renderRequests(requests) {
 
     const pending = requests.filter(r => r.state === 'pending' && isAdmin);
     const mine = requests.filter(r => r.requested_by === username || (!username && !isAdmin));
+
+    _hasUnseenMine = mine.some(r => r.state === 'available' && !r.available_seen_at);
 
     if (pendingList) {
         pendingList.innerHTML = pending.map(r => {
@@ -308,7 +330,15 @@ function renderRequests(requests) {
             const journeyLine = REQUEST_JOURNEY_STATES.has(r.state)
                 ? html`<div class="journey-status-line" data-request-id="${r.id}">${r.state}…</div>`.str
                 : '';
-            return html`<li class="request-item request-item-${r.state}" data-id="${r.id}">
+            // Unseen-availability highlight (Phase 5): an available request
+            // the viewer hasn't acknowledged yet gets an extra class on the
+            // <li> and a small "New" pill next to the state badge. Cleared
+            // by acknowledgeUnseenRequests() (via a loadRequests re-render),
+            // never by CSS/timeout alone.
+            const isUnseen = r.state === 'available' && !r.available_seen_at;
+            const unseenClass = isUnseen ? ' request-item-unseen' : '';
+            const newPill = isUnseen ? html`<span class="request-new-pill">New</span>`.str : '';
+            return html`<li class="request-item request-item-${r.state}${raw(unseenClass)}" data-id="${r.id}">
                 ${raw(poster)}
                 <div class="request-info">
                     <div class="request-title">${r.title}${raw(yearSpan)}</div>
@@ -317,7 +347,7 @@ function renderRequests(requests) {
                     ${raw(seasonsScope)}
                     ${raw(journeyLine)}
                 </div>
-                <span class="request-state request-state-${r.state}">${r.state}</span>
+                <span class="request-state request-state-${r.state}">${r.state}</span>${raw(newPill)}
             </li>`.str;
         }).join('');
         if (mineEmpty) mineEmpty.classList.toggle('hidden', mine.length > 0);
@@ -349,6 +379,52 @@ function renderRequests(requests) {
             stopRequestJourneyPoll();
         }
     }
+}
+
+// checkUnseenRequests polls the viewer-scoped unseen-availability count:
+// badges the users tab, and toasts once per newly-seen id this page load.
+// Called from dashboard.js's 15s refresh() batch and once shortly after
+// auth succeeds; no-ops (via api.js's 401 → null) when unauthenticated.
+async function checkUnseenRequests() {
+    const data = await get('/api/pelicula/requests/unseen');
+    if (!data) return;
+
+    const badge = document.getElementById('requests-unseen-badge');
+    if (badge) {
+        const count = data.count || 0;
+        if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : String(count);
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+
+    const items = data.items || [];
+    const freshItems = items.filter(item => !_toastedUnseen.has(item.id));
+    freshItems.forEach(item => _toastedUnseen.add(item.id));
+    if (freshItems.length === 1) {
+        toast(`'${freshItems[0].title}' is ready to watch`);
+    } else if (freshItems.length > 1) {
+        toast(`${freshItems.length} requests are ready to watch`);
+    }
+}
+
+// acknowledgeUnseenRequests marks all of the viewer's unseen-available
+// requests as seen: best-effort POST, then clears the badge/toast-dedup and
+// re-renders the "mine" list without highlights. Called when the users tab
+// is switched to, and from loadRequests when unseen items are rendered
+// while already on the users tab (see loadRequests's _hasUnseenMine guard).
+async function acknowledgeUnseenRequests() {
+    try {
+        await post('/api/pelicula/requests/acknowledge', {});
+    } catch (e) {
+        console.warn('[pelicula] acknowledgeUnseenRequests error:', e);
+    }
+    const badge = document.getElementById('requests-unseen-badge');
+    if (badge) badge.classList.add('hidden');
+    _toastedUnseen.clear();
+    await loadRequests();
 }
 
 // approveRequest parses the admin's free-text seasons input (series only)
@@ -795,6 +871,8 @@ window._users_getUsersLoaded    = getUsersLoaded;
 window._users_setUsersLoaded    = setUsersLoaded;
 window._users_getRequestsLoaded = getRequestsLoaded;
 window._users_setRequestsLoaded = setRequestsLoaded;
+window.checkUnseenRequests      = checkUnseenRequests;
+window.acknowledgeUnseenRequests = acknowledgeUnseenRequests;
 
 // ── Invite modal button listeners ────────────────────────────────────────────
 document.getElementById('invite-open-btn').addEventListener('click', openInviteModal);
