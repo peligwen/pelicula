@@ -13,6 +13,7 @@ package journey
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -67,6 +68,14 @@ func (c *snapCache[T]) get(now time.Time, fetch func() (T, error)) (T, error) {
 		return c.val, c.err
 	}
 	c.val, c.err = fetch()
+	// A caller-cancelled request context is not an upstream fact — caching it
+	// would show every other viewer a degraded upstream for the rest of the
+	// window just because one client disconnected mid-fetch. Leave fetchedAt
+	// zeroed so the next caller retries immediately.
+	if errors.Is(c.err, context.Canceled) {
+		c.fetchedAt = time.Time{}
+		return c.val, c.err
+	}
 	c.fetchedAt = now
 	return c.val, c.err
 }
