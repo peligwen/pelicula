@@ -416,10 +416,20 @@ async function checkUnseenRequests() {
 // is switched to, and from loadRequests when unseen items are rendered
 // while already on the users tab (see loadRequests's _hasUnseenMine guard).
 async function acknowledgeUnseenRequests() {
+    let acked = false;
     try {
         await post('/api/pelicula/requests/acknowledge', {});
+        acked = true;
     } catch (e) {
         console.warn('[pelicula] acknowledgeUnseenRequests error:', e);
+    }
+    if (!acked) {
+        // The POST failed (e.g. transient 500) but the GETs may still succeed,
+        // so the rows stay unseen and loadRequests's tail-gate would call us
+        // right back — a no-backoff retry loop. Skip the reload and keep
+        // _toastedUnseen intact (clearing it would re-toast the same items on
+        // the next 15s poll). The next tab switch or poll retries naturally.
+        return;
     }
     const badge = document.getElementById('requests-unseen-badge');
     if (badge) badge.classList.add('hidden');
