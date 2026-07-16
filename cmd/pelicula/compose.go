@@ -61,16 +61,26 @@ func (c *Compose) synologyEnv() []string {
 }
 
 // dockerCmd returns an exec.Cmd for "docker <args...>", prefixed with sudo if needed.
+//
+// Every invocation carries PELICULA_VERSION so the compose files' build args
+// (`VERSION: ${PELICULA_VERSION:-dev}`) resolve to the real git version —
+// including implicit first-run image builds by `up`, which would otherwise
+// stamp "dev" and defeat the image-staleness check.
 func (c *Compose) dockerCmd(args ...string) *exec.Cmd {
+	versionAssign := "PELICULA_VERSION=" + cachedGitVersion(c.projectDir)
 	var cmd *exec.Cmd
 	if c.needsSudo {
-		cmd = exec.Command("sudo", append([]string{"docker"}, args...)...)
+		// sudo resets the environment; pass the assignment through sudo's
+		// own VAR=value support so compose interpolation still sees it.
+		cmd = exec.Command("sudo", append([]string{versionAssign, "docker"}, args...)...)
 	} else {
 		cmd = exec.Command("docker", args...)
 	}
+	env := os.Environ()
 	if c.isSynology {
-		cmd.Env = c.synologyEnv()
+		env = c.synologyEnv()
 	}
+	cmd.Env = append(env, versionAssign)
 	return cmd
 }
 
@@ -226,7 +236,7 @@ func (c *Compose) runSetupBuild(setupCompose string, env []string) error {
 		env = append(out, "HOME="+c.projectDir)
 	}
 
-	buildCmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "build", "--build-arg", "VERSION="+gitDescribe())
+	buildCmd := c.dockerCmd("compose", "--project-directory", c.projectDir, "-f", setupCompose, "build", "--build-arg", "VERSION="+gitDescribe(c.projectDir))
 	buildCmd.Env = env
 	buildCmd.Stdin = os.Stdin
 	buildCmd.Stdout = os.Stdout

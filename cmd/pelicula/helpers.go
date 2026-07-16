@@ -94,11 +94,12 @@ func capitalize(s string) string {
 	return s
 }
 
-// gitDescribe returns the output of `git describe --tags --always --dirty`,
-// trimmed of whitespace. Falls back to "dev" if git is unavailable or the
-// working tree is not a git repository.
-func gitDescribe() string {
-	out, err := exec.Command("git", "describe", "--tags", "--always", "--dirty").Output()
+// gitDescribe returns the output of `git describe --tags --always --dirty`
+// for the repo at dir, trimmed of whitespace. Falls back to "dev" if git is
+// unavailable or dir is not a git repository. The directory is explicit —
+// never rely on the process cwd, which is wherever the binary was invoked.
+func gitDescribe(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "describe", "--tags", "--always", "--dirty").Output()
 	if err != nil || len(out) == 0 {
 		return "dev"
 	}

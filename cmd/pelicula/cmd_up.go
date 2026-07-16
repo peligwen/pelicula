@@ -266,6 +266,17 @@ func cmdUp(ctx *Context, _ []string) {
 	// Set PELICULA_SKIP_VERIFY=1 to suppress (e.g. pelicula test isolated stack startup).
 	runUpSmoke(ctx.ScriptDir, port)
 
+	// Image staleness: a git pull updates nginx's bind-mounted dashboard
+	// files in place, but pelicula-api/procula run from images built at
+	// rebuild/redeploy time. Warn — last, so it is the most visible line —
+	// when those images lag the repo, so a half-deployed stack (new
+	// frontend, old API) never goes unnoticed.
+	for _, r := range checkImageSkews(c, ctx.ScriptDir) {
+		if r.needsRedeploy() {
+			warn(r.verdict())
+		}
+	}
+
 	fmt.Println()
 
 }

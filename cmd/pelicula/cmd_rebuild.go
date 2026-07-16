@@ -28,7 +28,7 @@ func cmdRedeploy(ctx *Context, args []string) {
 	}
 
 	info("Building images: " + strings.Join(targets, ", "))
-	buildArgs := []string{"build", "--build-arg", "VERSION=" + gitDescribe()}
+	buildArgs := []string{"build", "--build-arg", "VERSION=" + gitDescribe(c.projectDir)}
 	buildArgs = append(buildArgs, targets...)
 	if err := c.Run(buildArgs...); err != nil {
 		fatal("build failed: " + err.Error())
@@ -59,7 +59,7 @@ func cmdRebuild(ctx *Context, args []string) {
 
 		case "pelicula-api", "middleware":
 			info("Rebuilding pelicula-api...")
-			if err := c.Run("build", "--build-arg", "VERSION="+gitDescribe(), "pelicula-api"); err != nil {
+			if err := c.Run("build", "--build-arg", "VERSION="+gitDescribe(c.projectDir), "pelicula-api"); err != nil {
 				fatal("build pelicula-api failed: " + err.Error())
 			}
 			if err := c.Run("up", "-d", "--no-deps", "pelicula-api"); err != nil {
@@ -69,7 +69,7 @@ func cmdRebuild(ctx *Context, args []string) {
 
 		case "procula":
 			info("Rebuilding procula...")
-			if err := c.Run("build", "--build-arg", "VERSION="+gitDescribe(), "procula"); err != nil {
+			if err := c.Run("build", "--build-arg", "VERSION="+gitDescribe(c.projectDir), "procula"); err != nil {
 				fatal("build procula failed: " + err.Error())
 			}
 			if err := c.Run("up", "-d", "--no-deps", "procula"); err != nil {

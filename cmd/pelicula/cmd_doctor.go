@@ -50,10 +50,14 @@ func cmdDoctor(ctx *Context, _ []string) {
 	ctx.LoadEnv()
 	c := composeInvocation(ctx)
 
-	// Header
+	// Header. CLI and Repo are reported separately: the binary's baked-in
+	// version only changes when cmd/pelicula sources change (the wrapper
+	// rebuilds on source mtime, not on git pull), so it routinely lags the
+	// checkout without anything being wrong.
 	fmt.Println("=== pelicula doctor ===")
 	fmt.Println("Timestamp :", time.Now().Format(time.RFC3339))
-	fmt.Println("Version   :", version)
+	fmt.Println("CLI       :", version, "(binary build)")
+	fmt.Println("Repo      :", gitDescribe(ctx.ScriptDir))
 	if out, err := c.DockerRaw("version", "--format", "{{.Client.Version}} (client) / {{.Server.Version}} (server)"); err == nil {
 		fmt.Print("Docker    : ", string(bytes.TrimSpace(out)), "\n")
 	} else {
@@ -63,6 +67,15 @@ func cmdDoctor(ctx *Context, _ []string) {
 		fmt.Print("Compose   : ", string(bytes.TrimSpace(out)), "\n")
 	} else {
 		fmt.Println("Compose   : unavailable")
+	}
+	if reports := checkImageSkews(c, ctx.ScriptDir); len(reports) == 0 {
+		fmt.Println("Images    : (repo state unavailable — staleness check skipped)")
+	} else {
+		prefix := "Images    : "
+		for _, r := range reports {
+			fmt.Println(prefix + r.verdict())
+			prefix = "            "
+		}
 	}
 
 	// Container status

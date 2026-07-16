@@ -199,7 +199,14 @@ services:
   # Procula — media processing pipeline
   # ═══════════════════════════════════════════════════
   procula:
-    build: ./procula
+    # VERSION stamps the binary (ldflags) and the org.pelicula.version image
+    # label used by the CLI's image-staleness check. The CLI exports
+    # PELICULA_VERSION on every compose invocation, so even an implicit
+    # first-run build by `pelicula up` gets a real version, not "dev".
+    build:
+      context: ./procula
+      args:
+        VERSION: ${PELICULA_VERSION:-dev}
     logging: *default-logging
     restart: unless-stopped
     # Worst-case graceful shutdown in procula/main.go: 10s HTTP drain
@@ -294,7 +301,11 @@ services:
   # Middleware — auto-wiring, search, downloads API
   # ═══════════════════════════════════════════════════
   pelicula-api:
-    build: ./middleware
+    # See procula's build block for what VERSION does here.
+    build:
+      context: ./middleware
+      args:
+        VERSION: ${PELICULA_VERSION:-dev}
     logging: *default-logging
     # Run as the operator's user — config/jellyfin and .env mounts stay
     # host-owned, and the API needs no root privileges (Docker access goes

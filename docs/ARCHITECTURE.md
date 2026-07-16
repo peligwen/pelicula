@@ -95,6 +95,18 @@ qBittorrent v5 renamed the pause/resume API to stop/start — the middleware use
 
 The `cmd/pelicula/` package compiles to a single binary per platform (macOS/Linux/Windows/Synology). Zero external dependencies — stdlib only. Handles all lifecycle commands: up, down, restart, rebuild, redeploy, reset-config, status, logs, update, export, import-backup, import, check-vpn. The `test` command delegates to `tests/e2e.sh`. A thin wrapper script at the repo root (`./pelicula`) auto-builds the Go binary on first run.
 
+### Deploy version surfaces
+
+Three independently-versioned surfaces exist on a running host, and only one of them updates on `git pull`:
+
+| Surface | Updates when | Version visible via |
+|---|---|---|
+| nginx dashboard files | `git pull` (bind-mounted; container restart to pick up) | n/a |
+| pelicula-api / procula images | `pelicula rebuild` / `redeploy` (or first `up`) | `org.pelicula.version` image label |
+| CLI binary (`bin/pelicula`) | wrapper rebuild when `cmd/pelicula/*.go` mtimes change | `pelicula --version` (build-time ldflags) |
+
+Every image build stamps `git describe` into the binary (ldflags) **and** the `org.pelicula.version` image label: `rebuild`/`redeploy` pass `--build-arg VERSION=…` explicitly, and the compose files default the arg from `PELICULA_VERSION`, which `dockerCmd` exports on every invocation so even implicit first-run builds are stamped. `pelicula up` and `pelicula doctor` compare each image's label against the repo (`git rev-list <image-rev>..HEAD -- <src-dir>`, so unrelated commits don't nag) and tell the operator to `pelicula redeploy` when the images lag — closing the pull-then-up gap where a current frontend calls an API image built from older sources (`cmd/pelicula/version_skew.go`).
+
 ## Verify Ritual
 
 Three triggers cover the full verification surface:
