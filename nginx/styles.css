@@ -638,6 +638,9 @@ body[data-tab="settings"] #settings-section { display: block !important; }
     background: var(--lemon); color: var(--ink);
     vertical-align: middle; white-space: nowrap;
 }
+/* An explicit author display beats the UA stylesheet's [hidden] rule, so
+   restate it — services.js toggles this badge via the hidden attribute. */
+.svc-badge[hidden] { display: none; }
 
 /* ── Sidebar services header ───────────────────────────────────────────── */
 .svc-totals { font-variant-numeric: tabular-nums; flex: 1; font-size: 0.68rem; color: var(--muted); }
