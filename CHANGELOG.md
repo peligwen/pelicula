@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`pelicula doctor` leaked API keys in its log dump** — Sonarr and Prowlarr echo the Prowlarr API key verbatim in logged request URLs (`apikey=<key>`; only Radarr self-redacts), and doctor printed those lines untouched — into output that exists precisely to be pasted into bug reports and chats. Doctor now scrubs credential values (`apikey`/`api_key`/`passkey`/`token`/`password`/`secret` params, and `X-Api-Key`/`Authorization` headers, plain or JSON-quoted) to `REDACTED` before printing, keeping the key names visible. If a doctor dump has already been shared, rotate the Prowlarr API key.
 - **VPN watchdog read tunnel status from the wrong Gluetun route** — `GetTunnelStatus` queried the legacy `/v1/openvpn/status`, which reports the OpenVPN loop only; on WireGuard deployments (Pelicula's default) it answered `stopped` even while the tunnel was up, poisoning the health endpoint's `VPNTunnelStatus` field and the watchdog's `tunnel=` log annotations (the restart decision itself keys off the forwarded port and was never affected). Now queries the protocol-agnostic `/v1/vpn/status`.
 - **nginx "duplicate MIME type" warning** — `nginx/snippets/arr_theme.conf` declared `sub_filter_types text/html;`, which is already sub_filter's default type; nginx logged a `duplicate MIME type "text/html"` warning for every include of the snippet on every start/reload. The redundant directive is removed (no behavior change — the snippet only ever filtered HTML).
 

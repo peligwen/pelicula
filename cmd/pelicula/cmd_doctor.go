@@ -9,6 +9,28 @@ import (
 
 var errPattern = regexp.MustCompile(`(?i)(error|warn|fatal|panic)`)
 
+// Doctor output is written to be pasted into bug reports and chat, so any
+// credential material in container logs must be scrubbed before printing.
+// The *arr services echo their API keys in request URLs (Sonarr and Prowlarr
+// log `apikey=<key>` verbatim; only Radarr self-redacts), and tracker URLs
+// carry passkeys. Two shapes cover what the stack logs:
+//   - query/assignment params: apikey=..., passkey=..., token=..., etc.
+//     No leading \b — JSON-escaped URLs log the separator as &, which
+//     puts a word character right before the key name.
+//   - headers: X-Api-Key: ..., Authorization: ... (plain or JSON-quoted).
+var (
+	scrubParamPattern  = regexp.MustCompile(`(?i)(apikey|api_key|api-key|passkey|token|password|secret)=[^&\s"'\\\]),;}(]+`)
+	scrubHeaderPattern = regexp.MustCompile(`(?i)(x-api-key|authorization)(["']?\s*[:=]\s*["']?)[A-Za-z0-9+/=._-]+`)
+)
+
+// scrubSecrets redacts credential values from a log line while leaving the
+// key names in place, so the reader still sees *that* a key was sent.
+func scrubSecrets(line string) string {
+	line = scrubParamPattern.ReplaceAllString(line, "${1}=REDACTED")
+	line = scrubHeaderPattern.ReplaceAllString(line, "${1}${2}REDACTED")
+	return line
+}
+
 // filterErrorLines scans log output and returns lines that match the error
 // pattern (case-insensitive: error, warn, fatal, panic). Matching is by
 // substring, so "errored" also matches — this is intentional and reflects
@@ -60,7 +82,7 @@ func cmdDoctor(ctx *Context, _ []string) {
 	}
 	lines := filterErrorLines(out)
 	for _, line := range lines {
-		fmt.Println(line)
+		fmt.Println(scrubSecrets(line))
 	}
 	if len(lines) == 0 {
 		fmt.Println("(no error or warning lines found)")
