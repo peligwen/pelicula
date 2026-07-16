@@ -169,6 +169,7 @@ async function checkStatus() {
             if (statusBar) statusBar.classList.remove('visible');
             if (hint) hint.textContent = '';
         }
+        updatePausedIndexerBar(data);
         // Render library access warnings returned by the middleware preflight.
         const warns = Array.isArray(data.warnings) ? data.warnings : [];
         const main = document.querySelector('.main-content') || document.body;
@@ -180,6 +181,41 @@ async function checkStatus() {
             main.prepend(banner);
         });
     } catch (e) { console.warn('[pelicula] error:', e); }
+}
+
+// \u2500\u2500 Paused-indexer banner \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Shows which indexers Prowlarr has temporarily disabled after repeated
+// failures (typically remote rate limiting) \u2014 data.indexers_paused entries
+// carry {id, name, disabledTill}. Message is set via textContent, so
+// indexer names (user-defined in Prowlarr) can't inject markup.
+function fmtDisabledTill(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return sameDay
+        ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function updatePausedIndexerBar(data) {
+    const bar = document.getElementById('indexer-paused-status');
+    const msg = document.getElementById('indexer-paused-msg');
+    if (!bar || !msg) return;
+    const paused = Array.isArray(data.indexers_paused) ? data.indexers_paused : [];
+    if (paused.length === 0) {
+        bar.classList.remove('visible');
+        msg.textContent = '';
+        return;
+    }
+    const parts = paused.map(p => {
+        const till = fmtDisabledTill(p.disabledTill);
+        return p.name + (till ? ' (until ' + till + ')' : '');
+    });
+    msg.textContent = (paused.length === 1
+        ? 'Prowlarr paused an indexer after repeated failures \u2014 often a rate limit: '
+        : 'Prowlarr paused ' + paused.length + ' indexers after repeated failures \u2014 often rate limits: ')
+        + parts.join(', ') + '.';
+    bar.classList.add('visible');
 }
 
 // Search code is in search.js (PeliculaFW component 'search').

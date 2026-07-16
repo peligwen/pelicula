@@ -39,6 +39,19 @@ function updateServicesFromData(data) {
         const row = pip.closest('.svc-row');
         if (row) { row.classList.remove('svc-up', 'svc-down', 'svc-unknown'); row.classList.add(up ? 'svc-up' : 'svc-down'); }
     });
+    // Prowlarr row badge: indexers paused by failure backoff (see the
+    // paused-indexer banner in dashboard.js for the detailed message).
+    const idxBadge = document.getElementById('svc-badge-prowlarr');
+    if (idxBadge) {
+        const paused = Array.isArray(data.indexers_paused) ? data.indexers_paused : [];
+        if (paused.length > 0) {
+            idxBadge.textContent = paused.length + ' paused';
+            idxBadge.title = paused.map(p => p.name).join(', ');
+            idxBadge.hidden = false;
+        } else {
+            idxBadge.hidden = true;
+        }
+    }
     updateSvcTotals();
     const radarrUp = svcMap['radarr'] === 'up';
     const sonarrUp = svcMap['sonarr'] === 'up';

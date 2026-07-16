@@ -6,7 +6,9 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -45,7 +47,7 @@ type App struct {
 	MainDB          *sql.DB
 	Auth            *peligrosa.Auth
 	Deps            *peligrosa.Deps
-	IdxCache        IndexerCountCache
+	IdxCache        IndexerStatusCache
 	StatusTTL       StatusTTLCache
 	BackupHandler   *backup.Handler
 	DLHandler       *downloads.Handler
@@ -87,44 +89,115 @@ func (a *App) Close() error {
 	return firstErr
 }
 
-// ── IndexerCountCache ──────────────────────────────────────────────────────────
+// ── IndexerStatusCache ─────────────────────────────────────────────────────────
 
-const indexerCountTTL = 5 * time.Minute
+const indexerStatusTTL = 5 * time.Minute
 
-// IndexerCountCache caches the Prowlarr indexer count with a TTL.
-type IndexerCountCache struct {
-	mu          sync.Mutex
-	count       *int
-	fetchedAt   time.Time
-	ProwlarrURL string // set by bootstrap
+// PausedIndexer is one Prowlarr indexer currently inside a failure-driven
+// disable window (repeated errors or remote rate limiting — Prowlarr backs
+// off with an escalating disabledTill). Manual enable/disable is a user
+// choice and is deliberately not reported here.
+type PausedIndexer struct {
+	ID           int       `json:"id"`
+	Name         string    `json:"name"`
+	DisabledTill time.Time `json:"disabledTill"`
 }
 
-// Get returns the cached count if fresh, or fetches it from Prowlarr.
-func (c *IndexerCountCache) Get(ctx context.Context, svc *appservices.Clients) *int {
+// IndexerStatusCache caches the Prowlarr indexer count and the list of
+// failure-paused indexers with a TTL.
+type IndexerStatusCache struct {
+	mu        sync.Mutex
+	count     *int
+	paused    []PausedIndexer
+	fetchedAt time.Time
+}
+
+// Get returns the cached count and paused list if fresh, or fetches both
+// from Prowlarr. Errors keep the previous values — a stale answer beats a
+// flapping one on the 30s dashboard poll. The paused list is re-filtered
+// against the clock on every call so an expired backoff window never
+// lingers for the remainder of the TTL.
+func (c *IndexerStatusCache) Get(ctx context.Context, svc *appservices.Clients) (*int, []PausedIndexer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.count != nil && time.Since(c.fetchedAt) < indexerCountTTL {
-		return c.count
+	if c.count != nil && time.Since(c.fetchedAt) < indexerStatusTTL {
+		return c.count, activePauses(c.paused, time.Now())
 	}
 	_, _, prowlarrKey := svc.Keys()
 	if prowlarrKey == "" {
-		return c.count
+		return c.count, activePauses(c.paused, time.Now())
 	}
 	indexers, err := svc.ProwlarrClient().ListIndexers(ctx, "/api/v1")
 	if err != nil {
-		return c.count
+		return c.count, activePauses(c.paused, time.Now())
 	}
+	statuses, err := svc.ProwlarrClient().ListIndexerStatuses(ctx, "/api/v1")
+	if err != nil {
+		return c.count, activePauses(c.paused, time.Now())
+	}
+	now := time.Now()
 	n := len(indexers)
 	c.count = &n
-	c.fetchedAt = time.Now()
-	return c.count
+	c.paused = mergePausedIndexers(indexers, statuses, now)
+	c.fetchedAt = now
+	return c.count, c.paused
 }
 
-// Invalidate clears the cached count so the next Get re-fetches.
-func (c *IndexerCountCache) Invalidate() {
+// Invalidate clears the cache so the next Get re-fetches.
+func (c *IndexerStatusCache) Invalidate() {
 	c.mu.Lock()
 	c.fetchedAt = time.Time{}
 	c.mu.Unlock()
+}
+
+// mergePausedIndexers joins Prowlarr's indexer list (names) with its
+// indexerstatus records (failure backoff windows) into the PausedIndexer
+// list: only records whose disabledTill is in the future count, since
+// status records persist after an indexer recovers. Unparseable or absent
+// timestamps are skipped — no false banner beats a wrong one. Results are
+// sorted by name for stable output.
+func mergePausedIndexers(indexers, statuses []map[string]any, now time.Time) []PausedIndexer {
+	names := make(map[int]string, len(indexers))
+	for _, idx := range indexers {
+		if id, ok := idx["id"].(float64); ok {
+			name, _ := idx["name"].(string)
+			names[int(id)] = name
+		}
+	}
+	out := []PausedIndexer{}
+	for _, st := range statuses {
+		id, ok := st["indexerId"].(float64)
+		if !ok {
+			continue
+		}
+		tillStr, _ := st["disabledTill"].(string)
+		if tillStr == "" {
+			continue
+		}
+		till, err := time.Parse(time.RFC3339, tillStr)
+		if err != nil || !till.After(now) {
+			continue
+		}
+		name := names[int(id)]
+		if name == "" {
+			name = fmt.Sprintf("indexer %d", int(id))
+		}
+		out = append(out, PausedIndexer{ID: int(id), Name: name, DisabledTill: till.UTC()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// activePauses filters paused down to entries whose window is still open at
+// now. Returns a fresh slice; the cached one is never mutated.
+func activePauses(paused []PausedIndexer, now time.Time) []PausedIndexer {
+	out := make([]PausedIndexer, 0, len(paused))
+	for _, p := range paused {
+		if p.DisabledTill.After(now) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ── statusTTLCache ─────────────────────────────────────────────────────────────
@@ -177,20 +250,22 @@ func (a *App) HandleStatus(w http.ResponseWriter, r *http.Request) {
 
 	_, _, prowlarrKey := a.Svc.Keys()
 	var idxCount *int
+	idxPaused := []PausedIndexer{}
 	if prowlarrKey != "" {
-		idxCount = a.IdxCache.Get(r.Context(), a.Svc)
+		idxCount, idxPaused = a.IdxCache.Get(r.Context(), a.Svc)
 	}
 
 	svcHealth, _ := a.StatusTTL.Get(func() (map[string]string, error) {
 		return a.Svc.CheckHealth(), nil
 	})
 	status := map[string]any{
-		"status":         "ok",
-		"services":       svcHealth,
-		"wired":          a.Svc.IsWired(),
-		"indexers":       idxCount,
-		"vpn_configured": a.VPNConfigured,
-		"warnings":       a.LibHandler.CheckLibraryAccess(),
+		"status":          "ok",
+		"services":        svcHealth,
+		"wired":           a.Svc.IsWired(),
+		"indexers":        idxCount,
+		"indexers_paused": idxPaused,
+		"vpn_configured":  a.VPNConfigured,
+		"warnings":        a.LibHandler.CheckLibraryAccess(),
 	}
 	httputil.WriteJSON(w, status)
 }

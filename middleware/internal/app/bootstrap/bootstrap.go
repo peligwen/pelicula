@@ -233,7 +233,7 @@ func New(ctx context.Context, cfg *config.Config, genPassword func() string) (*p
 		Deps:          deps,
 		StatusTTL:     pelapp.NewStatusTTLCache(5 * time.Second),
 		VPNConfigured: cfg.WireguardPrivateKey != "",
-		IdxCache:      pelapp.IndexerCountCache{ProwlarrURL: urls.Prowlarr},
+		IdxCache:      pelapp.IndexerStatusCache{},
 		SysinfoHandler: &sysinfo.Handler{
 			Svc:          svc,
 			DockerClient: dockerCli,

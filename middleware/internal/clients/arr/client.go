@@ -545,3 +545,19 @@ func (c *Client) ListIndexers(ctx context.Context, apiVer string) ([]map[string]
 	}
 	return out, nil
 }
+
+// ListIndexerStatuses returns the indexer failure-tracking records
+// ("/api/v1/indexerstatus" for Prowlarr): one entry per indexer that has
+// failed recently, with indexerId and a disabledTill timestamp while the
+// backoff window is active. Healthy deployments return an empty array.
+func (c *Client) ListIndexerStatuses(ctx context.Context, apiVer string) ([]map[string]any, error) {
+	raw, err := c.Get(ctx, apiVer+"/indexerstatus")
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse indexer statuses: %w", err)
+	}
+	return out, nil
+}

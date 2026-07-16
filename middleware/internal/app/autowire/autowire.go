@@ -88,7 +88,7 @@ type Config struct {
 	// WireJellyfin is called during Run() to wire Jellyfin.
 	// It may be nil if Jellyfin wiring is not needed (e.g. tests).
 	WireJellyfin func()
-	// InvalidateIndexerCache clears any cached indexer count.
+	// InvalidateIndexerCache clears any cached indexer count/health state.
 	// May be nil (no-op in that case).
 	InvalidateIndexerCache func()
 }

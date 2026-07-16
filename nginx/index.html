@@ -190,6 +190,12 @@
                 <span>No indexers configured — you can browse titles, but downloads won't work. <a href="/prowlarr/" target="_blank" rel="noopener">Add indexers in Prowlarr</a></span>
             </div>
 
+            <!-- Paused-indexer bar: indexers Prowlarr disabled after repeated failures (message text set by dashboard.js) -->
+            <div class="toast" id="indexer-paused-status">
+                <span class="toast-icon">&#9888;</span>
+                <span><span id="indexer-paused-msg"></span> <a href="/prowlarr/" target="_blank" rel="noopener">Manage in Prowlarr</a></span>
+            </div>
+
             <!-- Search -->
             <div class="search-section" id="search-section" data-testid="search-section">
                 <div class="pane-hdr">Find something to watch ✨</div>
@@ -716,7 +722,7 @@
             <div class="svc-list" id="svc-sidebar-list">
                 <a class="svc-row" href="/prowlarr/" target="_blank" rel="noopener" data-check="/prowlarr/ping" data-svc="prowlarr">
                     <span class="svc-pip unknown" id="svc-pip-prowlarr"></span>
-                    <span class="svc-name">Prowlarr</span>
+                    <span class="svc-name">Prowlarr<span class="svc-badge" id="svc-badge-prowlarr" hidden></span></span>
                     <span class="svc-desc">Indexers</span>
                     <button class="svc-row-log admin-only" data-svc="prowlarr" title="View logs">logs</button>
                 </a>

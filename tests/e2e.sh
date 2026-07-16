@@ -865,6 +865,18 @@ except Exception:
     assert_http 200 "http://localhost:${test_port}/settings" "$cookie_file"
     assert_http 200 "http://localhost:${test_port}/api/pelicula/status" "$cookie_file"
 
+    # Status payload must carry the paused-indexer health field (an array —
+    # [] on a healthy stack), which drives the dashboard's paused-indexer
+    # banner and Prowlarr sidebar badge.
+    local status_resp
+    status_resp="$(curl -sf --max-time 5 -b "$cookie_file" \
+        "http://localhost:${test_port}/api/pelicula/status" 2>/dev/null || echo "{}")"
+    if echo "$status_resp" | grep -q '"indexers_paused":\['; then
+        t_pass "GET /api/pelicula/status returns 'indexers_paused' array"
+    else
+        t_fail "GET /api/pelicula/status response missing 'indexers_paused' array"
+    fi
+
     # GET /api/pelicula/network — bandwidth stats endpoint (auth-gated)
     assert_http 200 "http://localhost:${test_port}/api/pelicula/network" "$cookie_file"
     local net_resp

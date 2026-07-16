@@ -632,6 +632,12 @@ body[data-tab="settings"] #settings-section { display: block !important; }
 .svc-pip.unknown { background: var(--faint); }
 .svc-name { font-family: var(--font-display, 'Nunito', sans-serif); font-weight: 700; font-size: 0.8rem; color: var(--ink); }
 .svc-desc { font-size: 0.62rem; color: var(--muted); }
+.svc-badge {
+    display: inline-block; margin-left: 0.35rem; padding: 0.05rem 0.4rem;
+    border-radius: 8px; font-size: 0.58rem; font-weight: 700;
+    background: var(--lemon); color: var(--ink);
+    vertical-align: middle; white-space: nowrap;
+}
 
 /* ── Sidebar services header ───────────────────────────────────────────── */
 .svc-totals { font-variant-numeric: tabular-nums; flex: 1; font-size: 0.68rem; color: var(--muted); }
