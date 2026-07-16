@@ -119,8 +119,13 @@ func (c *Client) GetPortForward(ctx context.Context) (int, error) {
 
 // GetTunnelStatus fetches the VPN tunnel connection status from Gluetun.
 // Returns a status string such as "running" or "stopped", or "" on error.
+//
+// This must use /v1/vpn/status (the protocol-agnostic VPN loop route), not
+// the legacy /v1/openvpn/status: the latter reports the OpenVPN loop only,
+// so WireGuard deployments — Pelicula's default — read "stopped" from it
+// even while the tunnel is up.
 func (c *Client) GetTunnelStatus(ctx context.Context) (string, error) {
-	body, err := c.base.RawGet(ctx, "/v1/openvpn/status")
+	body, err := c.base.RawGet(ctx, "/v1/vpn/status")
 	if err != nil {
 		return "", err
 	}

@@ -81,7 +81,7 @@ The audit exists to:
 | Source | Target endpoint | Trigger | Cadence | Impact class | Status |
 |---|---|---|---|---|---|
 | `vpnwatchdog/watchdog.go:21` | `GET {gluetun}/v1/openvpn/portforwarded` | Always-on ticker | Every 30s | `cross-service` | ✅ accepted — see Known Exceptions |
-| `vpnwatchdog/watchdog.go` | `GET {gluetun}/v1/openvpn/status` | Port == 0 | On condition | `cross-service` | ✅ accepted |
+| `vpnwatchdog/watchdog.go` | `GET {gluetun}/v1/vpn/status` | Port == 0 | On condition | `cross-service` | ✅ accepted |
 | `vpnwatchdog/watchdog.go` | `POST {qbt}/api/v2/app/setPreferences` | Port change detected | On event | `cross-service` | ✅ accepted |
 
 ### middleware (pelicula-api) — dashboard page loads (effectively passive for open tabs)

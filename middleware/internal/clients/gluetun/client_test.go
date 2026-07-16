@@ -49,6 +49,31 @@ func TestGetForwardedPort_HappyPath(t *testing.T) {
 	}
 }
 
+func TestGetTunnelStatus_UsesProtocolAgnosticRoute(t *testing.T) {
+	// The legacy /v1/openvpn/status route reports the OpenVPN loop only and
+	// reads "stopped" on WireGuard deployments even while the tunnel is up.
+	// Pin the protocol-agnostic route so a regression fails here.
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"running"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", "")
+	got, err := c.GetTunnelStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "running" {
+		t.Errorf("expected status running, got %q", got)
+	}
+	if gotPath != "/v1/vpn/status" {
+		t.Errorf("expected route /v1/vpn/status, got %q", gotPath)
+	}
+}
+
 func TestRetryOn5xx(t *testing.T) {
 	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
