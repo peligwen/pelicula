@@ -39,6 +39,9 @@ func main() {
 	case "help", "-h", "--help":
 		usage()
 		return
+	case "seed":
+		cmdSeed(args[1:])
+		return
 	}
 
 	ctx := newContext()
@@ -115,6 +118,7 @@ Commands:
                          Delete a service's config dir (all = every service;
                          .env and media are kept), then run 'pelicula up'
   doctor                 Print a support report (secrets redacted)
+  seed <config_dir>      Write and re-enforce service configs only (no Docker)
   version                Print the CLI version
   help                   Show this help
 

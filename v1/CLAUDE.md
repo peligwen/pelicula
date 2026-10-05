@@ -37,6 +37,7 @@ docs/                    ARCHITECTURE.md, API.md, ROADMAP.md
 pelicula up                  # first run: terminal wizard writes .env; then seed configs, compose up, wait for VPN and /api/health
 pelicula down|status|logs [svc]|restart [svc]|update|check-vpn|doctor|version
 pelicula reset-config [svc|all]   # asks y/N (--yes skips); removes seeded config dirs, keeps .env
+pelicula seed <config_dir>        # write/re-enforce service configs only; no Docker (the e2e test uses it)
 pelicula help
 ```
 

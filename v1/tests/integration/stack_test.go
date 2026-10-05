@@ -201,21 +201,14 @@ func newStack(t *testing.T) *stack {
 	mkdir(t, filepath.Join(s.workDir, "downloads", "radarr"))
 	mkdir(t, filepath.Join(s.workDir, "downloads", "tv-sonarr"))
 
-	// The CLI normally seeds these (cmd/pelicula/seed.go); this test starts
-	// compose directly, so it writes the minimum: the *arr URL bases and
-	// Jellyfin's BaseUrl, without which nginx paths and the server's service
-	// URLs would not line up and autowire would never finish.
-	for name, urlBase := range map[string]string{"sonarr": "/sonarr", "radarr": "/radarr"} {
-		writeFile(t, filepath.Join(s.configDir, name, "config.xml"),
-			"<Config><UrlBase>"+urlBase+"</UrlBase>"+
-				"<AuthenticationMethod>External</AuthenticationMethod>"+
-				"<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>")
+	// Seed the service configs exactly as `pelicula up` does (the *arr URL
+	// bases, Jellyfin's BaseUrl, qBittorrent's subnet whitelist), via the CLI
+	// itself so this test never carries its own copy of the seeds.
+	seed := exec.CommandContext(t.Context(), "go", "run", "./cmd/pelicula", "seed", s.configDir)
+	seed.Dir = root
+	if out, err := seed.CombinedOutput(); err != nil {
+		t.Fatalf("pelicula seed: %v\n%s", err, out)
 	}
-	networkXML := `<?xml version="1.0" encoding="utf-8"?>` +
-		`<NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">` +
-		`<BaseUrl>/jellyfin</BaseUrl></NetworkConfiguration>`
-	writeFile(t, filepath.Join(s.configDir, "jellyfin", "config", "network.xml"), networkXML)
-	writeFile(t, filepath.Join(s.configDir, "jellyfin", "network.xml"), networkXML)
 
 	s.env = append(os.Environ(),
 		"CONFIG_DIR="+s.configDir,

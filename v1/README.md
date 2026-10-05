@@ -75,6 +75,7 @@ Run `./pelicula help` for the full list.
 | `pelicula check-vpn` | Print the VPN public IP and forwarded port from gluetun |
 | `pelicula reset-config [svc\|all]` | Delete seeded service configs (`all` = every service dir; `.env` is kept). Asks first; `--yes` skips |
 | `pelicula doctor` | Container status, docker version, and recent logs of unhealthy containers, with secrets redacted |
+| `pelicula seed <config_dir>` | Write and re-enforce the seeded service configs only, no Docker involved (`up` does this on every start) |
 | `pelicula version` | Print the CLI version |
 
 Global flag: `--debug` enables verbose output.
