@@ -3,8 +3,9 @@
 // Jellyfin authenticates with an X-Emby-Authorization header rather than a
 // plain API key, and tokens differ per call (an end user's login, the admin's
 // cached token), so the token is a per-call argument instead of client state.
-// This package deliberately does not retry: login and user-management calls
-// are not safe to repeat blindly.
+// The device id in that header is client state, see DeviceDashboard and
+// DeviceServer. This package deliberately does not retry: login and
+// user-management calls are not safe to repeat blindly.
 package jellyfin
 
 import (
@@ -19,8 +20,20 @@ import (
 	"time"
 )
 
+// Device ids sent to Jellyfin. Jellyfin keeps one session per user and device
+// id: a login that reuses the device id of an existing session logs that
+// session out, and a request that presents a token under another device id
+// moves the token to that device. The server's cached admin token therefore
+// lives on a device of its own. If it shared DeviceDashboard with interactive
+// logins, the admin signing in to the dashboard would revoke the server's
+// token, and every call made with that token has to carry DeviceServer or the
+// next dashboard login would revoke it again (see (*Admin).Client).
 const (
-	embyAuthHeader = `MediaBrowser Client="Pelicula", Device="pelicula-api", DeviceId="pelicula-autowire", Version="1.0"`
+	DeviceDashboard = "pelicula-dashboard" // interactive logins through the dashboard
+	DeviceServer    = "pelicula-server"    // the server's own admin token
+)
+
+const (
 	defaultTimeout = 10 * time.Second
 	maxBody        = 32 << 20
 )
@@ -52,18 +65,29 @@ func (e *HTTPError) Is(target error) bool {
 	return target == ErrUnauthorized && e.StatusCode == http.StatusUnauthorized
 }
 
-// Client talks to one Jellyfin server.
+// Client talks to one Jellyfin server as one device.
 type Client struct {
 	BaseURL    string // includes the URL base, e.g. http://jellyfin:8096/jellyfin
 	HTTPClient *http.Client
+	DeviceID   string // sent as DeviceId; New sets DeviceDashboard
 }
 
-// New returns a client for baseURL with a 10s timeout.
+// New returns a client for baseURL with a 10s timeout that identifies itself
+// as DeviceDashboard, the device for interactive logins.
 func New(baseURL string) *Client {
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{Timeout: defaultTimeout},
+		DeviceID:   DeviceDashboard,
 	}
+}
+
+// ForDevice returns a copy of c that identifies itself to Jellyfin as
+// deviceID. The copy shares c's HTTP client.
+func (c *Client) ForDevice(deviceID string) *Client {
+	cp := *c
+	cp.DeviceID = deviceID
+	return &cp
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -89,7 +113,7 @@ func (c *Client) Do(ctx context.Context, method, path, token string, payload any
 	if err != nil {
 		return nil, err
 	}
-	setEmbyAuth(req, token)
+	req.Header.Set("X-Emby-Authorization", c.embyAuth(token))
 	req.Header.Set("User-Agent", "pelicula")
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -121,13 +145,18 @@ func (c *Client) Delete(ctx context.Context, path, token string) ([]byte, error)
 	return c.Do(ctx, http.MethodDelete, path, token, nil)
 }
 
-// setEmbyAuth sets X-Emby-Authorization, adding Token="..." when token is set.
-func setEmbyAuth(req *http.Request, token string) {
-	auth := embyAuthHeader
+// embyAuth builds the X-Emby-Authorization value for c's device, adding
+// Token="..." when token is set.
+func (c *Client) embyAuth(token string) string {
+	device := c.DeviceID
+	if device == "" {
+		device = DeviceDashboard
+	}
+	auth := fmt.Sprintf(`MediaBrowser Client="Pelicula", Device="%s", DeviceId="%s", Version="1.0"`, device, device)
 	if token != "" {
 		auth += fmt.Sprintf(`, Token="%s"`, token)
 	}
-	req.Header.Set("X-Emby-Authorization", auth)
+	return auth
 }
 
 // AuthResult is a successful login.

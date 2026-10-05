@@ -98,7 +98,7 @@ func TestEmbyAuthHeader(t *testing.T) {
 	if _, err := c.Get(context.Background(), "/Users", ""); err != nil {
 		t.Fatal(err)
 	}
-	want := `MediaBrowser Client="Pelicula", Device="pelicula-api", DeviceId="pelicula-autowire", Version="1.0"`
+	want := `MediaBrowser Client="Pelicula", Device="pelicula-dashboard", DeviceId="pelicula-dashboard", Version="1.0"`
 	if got := f.last().Auth; got != want {
 		t.Fatalf("no token: header = %q", got)
 	}
@@ -107,6 +107,50 @@ func TestEmbyAuthHeader(t *testing.T) {
 	}
 	if got := f.last().Auth; got != want+`, Token="tok123"` {
 		t.Fatalf("with token: header = %q", got)
+	}
+
+	srv := c.ForDevice(DeviceServer)
+	if _, err := srv.Get(context.Background(), "/Users", "tok123"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last().Auth; !strings.Contains(got, `DeviceId="pelicula-server"`) || strings.Contains(got, "dashboard") {
+		t.Fatalf("ForDevice header = %q", got)
+	}
+	if c.DeviceID != DeviceDashboard {
+		t.Fatalf("ForDevice must copy, original DeviceID = %q", c.DeviceID)
+	}
+}
+
+// The admin logs in and is used on its own device: Jellyfin logs an existing
+// session out when the same user logs in again with the same device id, so a
+// shared id would let an admin's dashboard login revoke the server's token.
+func TestAdmin_UsesServerDevice(t *testing.T) {
+	c, f := newFake(t, map[string]http.HandlerFunc{
+		"POST /jellyfin/Users/AuthenticateByName": authOK("tok", true),
+		"GET /jellyfin/Users":                     body(`[]`),
+	})
+	a := NewAdmin(c, "alice", "secret")
+	if _, err := a.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last().Auth; !strings.Contains(got, `DeviceId="pelicula-server"`) {
+		t.Fatalf("admin login header = %q", got)
+	}
+	if a.Client().DeviceID != DeviceServer {
+		t.Fatalf("Client().DeviceID = %q", a.Client().DeviceID)
+	}
+	if _, err := a.Client().ListUsers(context.Background(), "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last().Auth; !strings.Contains(got, `DeviceId="pelicula-server"`) {
+		t.Fatalf("admin call header = %q", got)
+	}
+	// The dashboard client is untouched.
+	if _, err := c.Get(context.Background(), "/Users", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last().Auth; !strings.Contains(got, `DeviceId="pelicula-dashboard"`) {
+		t.Fatalf("dashboard header = %q", got)
 	}
 }
 

@@ -62,8 +62,13 @@ func run(log *slog.Logger) error {
 	// once the apps have written their config.xml.
 	sonarr := arr.New(cfg.SonarrURL, "", "v3")
 	radarr := arr.New(cfg.RadarrURL, "", "v3")
+	// jf logs dashboard users in. jfAdmin holds the server's own admin token on
+	// a separate Jellyfin device, and jfSrv is the client every call made with
+	// that token goes through; mixing the two lets a dashboard login revoke
+	// the server's token (see jellyfin.DeviceServer).
 	jf := jellyfin.New(cfg.JellyfinURL)
 	jfAdmin := jellyfin.NewAdmin(jf, cfg.JellyfinAdminUser, cfg.JellyfinAdminPassword)
+	jfSrv := jfAdmin.Client()
 	var (
 		prowlarr *arr.Client
 		qb       *qbt.Client
@@ -88,7 +93,7 @@ func run(log *slog.Logger) error {
 		Store:    st,
 		Jellyfin: identity(jf),
 		Admin:    jfAdmin,
-		Users:    jf,
+		Users:    jfSrv,
 		Log:      log,
 	})
 
@@ -96,7 +101,7 @@ func run(log *slog.Logger) error {
 		Store:    st,
 		Sonarr:   sonarr,
 		Radarr:   radarr,
-		Jellyfin: jf,
+		Jellyfin: jfSrv,
 		JFAdmin:  jfAdmin,
 		FFprobe:  "ffprobe",
 		Log:      log,
@@ -110,7 +115,7 @@ func run(log *slog.Logger) error {
 		Session:  auth.SessionFrom,
 		Sonarr:   sonarr,
 		Radarr:   radarr,
-		Jellyfin: jfUsers{jf},
+		Jellyfin: jfUsers{jfSrv},
 		JFAdmin:  jfAdmin,
 		Wired:    wired.Load,
 		Kick:     worker.Kick,
@@ -129,7 +134,7 @@ func run(log *slog.Logger) error {
 	handler := recoverer(log, auth.CSRF(mux))
 
 	// Background work.
-	go wire(ctx, cfg, log, &wired, sonarr, radarr, prowlarr, qb, jf, jfAdmin)
+	go wire(ctx, cfg, log, &wired, sonarr, radarr, prowlarr, qb, jfSrv, jfAdmin)
 	go worker.Run(ctx)
 	if cfg.VPNEnabled {
 		go portsync.Run(ctx, gl, qb, time.Minute, log)

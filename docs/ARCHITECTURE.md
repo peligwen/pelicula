@@ -95,6 +95,8 @@ Deliberately **not stored**:
 
 **Roles** rank viewer < manager < admin. `auth.Guard(min, handler)` returns 401 without a session and 403 below the minimum, and puts the `*store.Session` in the request context. Route minimums are in [API.md](API.md).
 
+**Two Jellyfin devices.** Jellyfin keeps one session per user and device id, logs the old session out when the same user logs in again from the same device id, and moves a token to whatever device id presents it. Dashboard logins therefore identify as `pelicula-dashboard`, while the server's own admin token is issued to and only ever used from `pelicula-server` (`jellyfin.NewAdmin` and `(*Admin).Client`). With one shared id, an administrator signing in to the dashboard would revoke the server's token and every admin-token call (register, user list, library refresh) would fail with 401 until the next login.
+
 **Invites.** Admins create single-use codes (16 random bytes, base64url; default 72 h, max 720 h). `POST /api/register` validates the code, creates the Jellyfin user with the admin token, atomically marks the invite used, stores the role, and signs the new user in. A used, expired or unknown code is a 410. There is no open registration.
 
 **nginx layer.** `/api/auth/login`, `/api/register` and the invite lookup `/api/register/{code}` share one rate-limit budget of 10 requests per minute per IP (burst 5, 3 and 5 respectively; excess requests get 429) with an 8 KB body cap; the server does not rate limit itself. `/api/hooks/import` accepts only loopback and private ranges (127.0.0.1, 10/8, 172.16/12, 192.168/16) and additionally needs the `X-Webhook-Secret` header, compared in constant time. The webhook returns 503 if no secret is configured.
