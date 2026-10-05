@@ -1,0 +1,68 @@
+# CI for the v1 rescope living in v1/. GitHub only reads workflows from the
+# repository root, so this file mirrors v1/.github/workflows/test.yml with
+# every step scoped to the v1/ directory. When v1/ is promoted to the root,
+# delete this file and keep v1's own copy.
+name: v1 test
+
+on:
+  push:
+    branches: [main, 'rescope/**']
+    paths:
+      - 'v1/**'
+      - '.github/workflows/v1.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'v1/**'
+      - '.github/workflows/v1.yml'
+
+defaults:
+  run:
+    working-directory: v1
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: v1/go.mod
+          cache-dependency-path: v1/go.sum
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt needed on:"
+            echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - name: go test (race, coverage)
+        run: go test -race -cover ./...
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck wrapper
+        run: shellcheck -S warning pelicula
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: v1/go.mod
+          cache-dependency-path: v1/go.sum
+      - name: docker compose plugin
+        run: |
+          docker version
+          docker compose version
+      - name: integration test
+        run: make e2e
