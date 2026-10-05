@@ -7,7 +7,9 @@ import (
 )
 
 // Admin caches the Jellyfin administrator's token so server-side calls (user
-// management, library refresh) do not log in every time.
+// management, library refresh) do not log in every time. It logs in as
+// DeviceServer, a device of its own, so dashboard logins by the same
+// administrator (DeviceDashboard) do not revoke the cached token.
 type Admin struct {
 	c        *Client
 	username string
@@ -17,9 +19,18 @@ type Admin struct {
 	token string
 }
 
-// NewAdmin returns an Admin that authenticates as username/password via c.
+// NewAdmin returns an Admin that authenticates as username/password against
+// c's server, as DeviceServer.
 func NewAdmin(c *Client, username, password string) *Admin {
-	return &Admin{c: c, username: username, password: password}
+	return &Admin{c: c.ForDevice(DeviceServer), username: username, password: password}
+}
+
+// Client returns the client every call made with the admin token must go
+// through. It carries DeviceServer; Jellyfin moves a token to whatever device
+// id presents it, so using the token through a DeviceDashboard client would
+// hand it to the dashboard device, where the next login revokes it.
+func (a *Admin) Client() *Client {
+	return a.c
 }
 
 // Token returns the cached token, logging in first if there is none.
