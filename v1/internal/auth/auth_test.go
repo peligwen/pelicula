@@ -377,6 +377,27 @@ func TestMeAndCheck(t *testing.T) {
 	if rec.Code != 204 || rec.Body.Len() != 0 {
 		t.Errorf("check = %d body %q", rec.Code, rec.Body)
 	}
+
+	// ?min raises the bar: a viewer is 403 against min=admin, 204 against
+	// min=viewer, and a bad role name is 400.
+	if rec = e.do("GET", "/api/auth/check?min=admin", "", c); rec.Code != 403 {
+		t.Errorf("viewer check min=admin = %d, want 403", rec.Code)
+	}
+	if rec = e.do("GET", "/api/auth/check?min=viewer", "", c); rec.Code != 204 {
+		t.Errorf("viewer check min=viewer = %d, want 204", rec.Code)
+	}
+	if rec = e.do("GET", "/api/auth/check?min=root", "", c); rec.Code != 400 {
+		t.Errorf("check min=root = %d, want 400", rec.Code)
+	}
+	if rec = e.do("GET", "/api/auth/check?min=admin", ""); rec.Code != 401 {
+		t.Errorf("anonymous check min=admin = %d, want 401", rec.Code)
+	}
+	if err := e.st.SetRole(context.Background(), "bob", store.RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if rec = e.do("GET", "/api/auth/check?min=admin", "", c); rec.Code != 204 {
+		t.Errorf("admin check min=admin = %d, want 204", rec.Code)
+	}
 }
 
 func TestExpiredSessionRejected(t *testing.T) {

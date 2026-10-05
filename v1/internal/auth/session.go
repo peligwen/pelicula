@@ -136,7 +136,21 @@ func (a *Auth) handleMe(w http.ResponseWriter, r *http.Request) {
 
 // handleCheck is nginx's auth_request target: status only, no body, one store
 // lookup.
+// handleCheck backs nginx's auth_request. An optional ?min=<role> raises
+// the bar above "any session": nginx uses min=admin in front of the Sonarr,
+// Radarr, Prowlarr and qBittorrent UIs, which run with their own auth off.
+// 403 is returned for a live session below the minimum so nginx can tell a
+// signed-in viewer apart from no session at all.
 func (a *Auth) handleCheck(w http.ResponseWriter, r *http.Request) {
+	min := store.RoleViewer
+	if q := r.URL.Query().Get("min"); q != "" {
+		role, ok := store.ParseRole(q)
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		min = role
+	}
 	sess, err := a.sessionFor(r)
 	switch {
 	case err != nil:
@@ -144,6 +158,8 @@ func (a *Auth) handleCheck(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	case sess == nil:
 		w.WriteHeader(http.StatusUnauthorized)
+	case !sess.Role.AtLeast(min):
+		w.WriteHeader(http.StatusForbidden)
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
