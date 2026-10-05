@@ -9,417 +9,119 @@ import (
 	"strings"
 )
 
-// xmlEscape escapes special XML characters in s so it is safe to interpolate
-// into an XML element value.
+// dockerSubnet is the Docker bridge range trusted by qBittorrent (WebUI
+// subnet whitelist) and Jellyfin (KnownProxies, so nginx's X-Forwarded-For is
+// honoured).
+const dockerSubnet = "172.16.0.0/12"
+
+// arrServices maps each *arr service to its URL base behind nginx.
+var arrServices = []struct{ name, urlBase string }{
+	{"sonarr", "/sonarr"},
+	{"radarr", "/radarr"},
+	{"prowlarr", "/prowlarr"},
+}
+
+// xmlEscape escapes the characters that are special in XML text.
 func xmlEscape(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, `"`, "&quot;")
-	s = strings.ReplaceAll(s, "'", "&apos;")
-	return s
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;").Replace(s)
 }
 
-// jellyfinNetworkXML returns the contents of Jellyfin's network.xml.
-// When JELLYFIN_PUBLISHED_URL is set in the environment, it is included as a
-// <PublishedServerUrl> element so LAN clients discovering the server via UDP
-// 7359 broadcast see the correct host-reachable URL instead of the container's
-// internal IP. When unset, the element is omitted — Jellyfin falls back to its
-// default advertising behavior, and the file stays byte-identical to prior
-// versions (backwards compatible for existing installs).
-//
-// KnownProxies is included so nginx's Docker-network IP is trusted for
-// X-Forwarded-For (required for remote-access auth to log real client IPs).
-// PELICULA_KNOWN_PROXIES overrides the default Docker subnet CIDR.
-func jellyfinNetworkXML() string {
-	const header = `<?xml version="1.0" encoding="utf-8"?><NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><BaseUrl>/jellyfin</BaseUrl>`
-	const footer = `</NetworkConfiguration>`
-
-	knownProxies := jellyfinKnownProxiesXML()
-
-	var middle string
-	if url := os.Getenv("JELLYFIN_PUBLISHED_URL"); url != "" {
-		middle = "<PublishedServerUrl>" + xmlEscape(url) + "</PublishedServerUrl>"
-	}
-	return header + middle + knownProxies + footer
-}
-
-// jellyfinKnownProxiesXML returns the <KnownProxies> XML fragment.
-// Uses PELICULA_KNOWN_PROXIES (comma-separated) when set; otherwise defaults
-// to the Docker bridge subnet 172.16.0.0/12 (matches qBittorrent auth whitelist).
-func jellyfinKnownProxiesXML() string {
-	raw := os.Getenv("PELICULA_KNOWN_PROXIES")
-	var entries []string
-	if raw != "" {
-		for _, e := range strings.Split(raw, ",") {
-			e = strings.TrimSpace(e)
-			if e != "" {
-				entries = append(entries, "<string>"+xmlEscape(e)+"</string>")
-			}
-		}
-	}
-	if len(entries) == 0 {
-		entries = []string{"<string>172.16.0.0/12</string>"}
-	}
-	return "<KnownProxies>" + strings.Join(entries, "") + "</KnownProxies>"
-}
-
-// enforceJellyfinNetwork patches Jellyfin's network.xml to re-assert
-// KnownProxies when PELICULA_KNOWN_PROXIES is set in the environment.
-// When the env var is unset, the function is a no-op — the seeded default
-// is left in place and the user can modify it freely.
-func enforceJellyfinNetwork(configDir string) error {
-	if os.Getenv("PELICULA_KNOWN_PROXIES") == "" {
-		return nil
-	}
-	path := filepath.Join(configDir, "jellyfin", "network.xml")
-	knownProxies := jellyfinKnownProxiesXML()
-	return patchXMLFile(path, []xmlPatch{
-		{
-			matchRe:        regexp.MustCompile(`<KnownProxies>.*?</KnownProxies>`),
-			replacement:    knownProxies,
-			insertBeforeRe: regexp.MustCompile(`</NetworkConfiguration>`),
-			insertText:     knownProxies + "</NetworkConfiguration>",
-		},
-	})
-}
-
-// seedConfig writes content to file only if the file does not already exist.
+// seedConfig writes content to file only if the file does not exist yet.
 func seedConfig(file, content string) error {
-	if _, err := os.Stat(file); err == nil {
-		// Already exists — skip
+	if fileExists(file) {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
-		return fmt.Errorf("seedConfig mkdir %s: %w", filepath.Dir(file), err)
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(file), err)
 	}
 	return os.WriteFile(file, []byte(content), 0644)
 }
 
-// xmlPatch describes one targeted substitution in an XML config file.
-//
-// Behavior:
-//   - If condRe is non-nil the patch is skipped unless condRe matches the
-//     current file content (used for guarded patches like auth bypass).
-//   - matchRe is used with ReplaceAllString to replace existing elements.
-//   - If matchRe does not match and insertBeforeRe is non-nil, insertText is
-//     inserted immediately before the first match of insertBeforeRe.
-type xmlPatch struct {
-	condRe         *regexp.Regexp // optional guard: skip if this does NOT match
-	matchRe        *regexp.Regexp // replace all occurrences when present
-	replacement    string         // replacement string for matchRe
-	insertBeforeRe *regexp.Regexp // fallback insert anchor
-	insertText     string         // text to insert before insertBeforeRe
+// setXMLElement sets <tag>value</tag> in doc. An existing element (including
+// the self-closing form) is replaced; otherwise the element is inserted just
+// before the last occurrence of rootClose. Applying it twice is a no-op.
+func setXMLElement(doc, tag, value, rootClose string) string {
+	elem := "<" + tag + ">" + xmlEscape(value) + "</" + tag + ">"
+	t := regexp.QuoteMeta(tag)
+	re := regexp.MustCompile(`<` + t + `>[^<]*</` + t + `>|<` + t + `\s*/>`)
+	if re.MatchString(doc) {
+		return re.ReplaceAllLiteralString(doc, elem)
+	}
+	if i := strings.LastIndex(doc, rootClose); i >= 0 {
+		return doc[:i] + "  " + elem + "\n" + doc[i:]
+	}
+	return doc
 }
 
-// patchXMLFile reads path, applies patches in order, and writes the result only
-// if the content changed. Returns nil if the file does not exist (treated as
-// not-yet-created) or if no patches changed the content.
-func patchXMLFile(path string, patches []xmlPatch) error {
-	if _, err := os.Stat(path); err != nil {
-		return nil // file doesn't exist yet — nothing to do
-	}
+// patchFile applies fn to the file's content and writes the result only when
+// it changed. A missing file is not an error: the service has not created it
+// yet, and the seed step will.
+func patchFile(path string, fn func(string) string) error {
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	original := string(data)
-	patched := original
-
-	for _, p := range patches {
-		// Honour guard condition.
-		if p.condRe != nil && !p.condRe.MatchString(patched) {
-			continue
-		}
-		if p.matchRe.MatchString(patched) {
-			patched = p.matchRe.ReplaceAllString(patched, p.replacement)
-		} else if p.insertBeforeRe != nil {
-			patched = p.insertBeforeRe.ReplaceAllString(patched, p.insertText)
-		}
-	}
-
-	if patched == original {
+	patched := fn(string(data))
+	if patched == string(data) {
 		return nil
 	}
 	return os.WriteFile(path, []byte(patched), 0644)
 }
 
-// enforceArrConfig patches an *arr config.xml to use External authentication
-// (DisabledForLocalAddresses), enforce dark theme, disable analytics, and
-// ensure the log level is not set to debug.
-// This is idempotent and safe to call on every startup.
-func enforceArrConfig(configPath string) error {
-	return patchXMLFile(configPath, []xmlPatch{
-		// Fix auth bypass — only when still set to Enabled.
-		{
-			condRe:      regexp.MustCompile(`<AuthenticationRequired>Enabled</AuthenticationRequired>`),
-			matchRe:     regexp.MustCompile(`<AuthenticationMethod>[^<]*</AuthenticationMethod>`),
-			replacement: "<AuthenticationMethod>External</AuthenticationMethod>",
-		},
-		{
-			condRe:      regexp.MustCompile(`<AuthenticationRequired>Enabled</AuthenticationRequired>`),
-			matchRe:     regexp.MustCompile(`<AuthenticationRequired>[^<]*</AuthenticationRequired>`),
-			replacement: "<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>",
-		},
-		// Enforce dark theme (only if element exists).
-		{
-			condRe:      regexp.MustCompile(`<Theme>`),
-			matchRe:     regexp.MustCompile(`<Theme>[^<]*</Theme>`),
-			replacement: "<Theme>dark</Theme>",
-		},
-		// Disable analytics telemetry; insert before </Config> if absent.
-		{
-			matchRe:        regexp.MustCompile(`<AnalyticsEnabled>[^<]*</AnalyticsEnabled>`),
-			replacement:    "<AnalyticsEnabled>False</AnalyticsEnabled>",
-			insertBeforeRe: regexp.MustCompile(`(\s*)</Config>\s*$`),
-			insertText:     "${1}<AnalyticsEnabled>False</AnalyticsEnabled>${1}</Config>",
-		},
-		// Silence debug log level — replace debug→info only.
-		{
-			matchRe:     regexp.MustCompile(`(?i)<LogLevel>debug</LogLevel>`),
-			replacement: "<LogLevel>info</LogLevel>",
-		},
+// arrConfigXML is the config.xml seeded for an *arr service: UrlBase for the
+// nginx sub-path, and External authentication with local addresses exempt so
+// Pelicula's own login (nginx auth_request) is the only gate while the
+// services can still call each other over the Docker network. Analytics are
+// off.
+func arrConfigXML(urlBase string) string {
+	return "<Config><UrlBase>" + urlBase + "</UrlBase>" +
+		"<AuthenticationMethod>External</AuthenticationMethod>" +
+		"<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>" +
+		"<AnalyticsEnabled>False</AnalyticsEnabled></Config>"
+}
+
+// enforceArrConfig re-asserts UrlBase and the authentication settings in an
+// *arr config.xml (the apps rewrite the file and can re-enable their own
+// login) and disables analytics. Idempotent; a missing file is skipped.
+func enforceArrConfig(path, urlBase string) error {
+	return patchFile(path, func(doc string) string {
+		doc = setXMLElement(doc, "UrlBase", urlBase, "</Config>")
+		doc = setXMLElement(doc, "AuthenticationMethod", "External", "</Config>")
+		doc = setXMLElement(doc, "AuthenticationRequired", "DisabledForLocalAddresses", "</Config>")
+		return setXMLElement(doc, "AnalyticsEnabled", "False", "</Config>")
 	})
 }
 
-// purgeSentryDirs removes Sentry crash-report cache directories for the *arr
-// services. These are safe to delete at startup (the arrs recreate them on
-// next crash); they must NOT be removed while the services are running.
-func purgeSentryDirs(configDir string) {
-	for _, svc := range []string{"sonarr", "radarr", "prowlarr"} {
-		_ = os.RemoveAll(filepath.Join(configDir, svc, "Sentry"))
-	}
+// jellyfinNetworkXML is the seeded network.xml: BaseUrl so Jellyfin serves
+// under nginx's /jellyfin, and the Docker subnet as a known proxy.
+func jellyfinNetworkXML() string {
+	return `<?xml version="1.0" encoding="utf-8"?>` +
+		`<NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">` +
+		`<BaseUrl>/jellyfin</BaseUrl>` +
+		`<KnownProxies><string>` + dockerSubnet + `</string></KnownProxies>` +
+		`</NetworkConfiguration>`
 }
 
-// enforceJellyfinSystem patches Jellyfin's system.xml on every startup to:
-//   - Disable client log uploads.
-//   - Disable QuickConnect (6-digit-code auth bypass; unwanted for remote installs).
-//   - Populate an empty ServerName from PELICULA_DASHBOARD_NAME or os.Hostname
-//     on first boot (seed-only: regex only matches the empty element, so it's
-//     a no-op once a non-empty value is present).
-//
-// The file lives inside the config subdirectory (linuxserver image maps
-// CONFIG_DIR/jellyfin → /config; system.xml is at /config/config/).
-// This is idempotent and safe to call on every startup.
-func enforceJellyfinSystem(configDir string) error {
-	path := filepath.Join(configDir, "jellyfin", "config", "system.xml")
-
-	serverName := os.Getenv("PELICULA_DASHBOARD_NAME")
-	if serverName == "" {
-		if h, err := os.Hostname(); err == nil {
-			serverName = h
-		} else {
-			serverName = "Pelicula"
-		}
-	}
-
-	return patchXMLFile(path, []xmlPatch{
-		// Disable client log uploads.
-		{
-			matchRe:        regexp.MustCompile(`<AllowClientLogUpload>[^<]*</AllowClientLogUpload>`),
-			replacement:    "<AllowClientLogUpload>false</AllowClientLogUpload>",
-			insertBeforeRe: regexp.MustCompile(`</ServerConfiguration>`),
-			insertText:     "  <AllowClientLogUpload>false</AllowClientLogUpload>\n</ServerConfiguration>",
-		},
-		// Disable QuickConnect (present in Jellyfin 10.8+).
-		{
-			matchRe:        regexp.MustCompile(`<QuickConnectAvailable>[^<]*</QuickConnectAvailable>`),
-			replacement:    "<QuickConnectAvailable>false</QuickConnectAvailable>",
-			insertBeforeRe: regexp.MustCompile(`</ServerConfiguration>`),
-			insertText:     "  <QuickConnectAvailable>false</QuickConnectAvailable>\n</ServerConfiguration>",
-		},
-		// Some older Jellyfin versions use EnableQuickConnect — patch if present,
-		// do not insert (avoid duplicating the element across versions).
-		{
-			matchRe:     regexp.MustCompile(`<EnableQuickConnect>[^<]*</EnableQuickConnect>`),
-			replacement: "<EnableQuickConnect>false</EnableQuickConnect>",
-		},
-		// Seed ServerName on first boot only — regex matches the empty self-closing
-		// or empty-body forms; once set, the regex no longer matches.
-		{
-			matchRe:     regexp.MustCompile(`<ServerName\s*/>|<ServerName>\s*</ServerName>`),
-			replacement: "<ServerName>" + xmlEscape(serverName) + "</ServerName>",
-		},
-	})
-}
-
-// extractAPIKey reads the <ApiKey> value from an *arr config.xml.
-// Returns "" if not found.
-func extractAPIKey(configPath string) string {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return ""
-	}
-	re := regexp.MustCompile(`<ApiKey>([^<]*)</ApiKey>`)
-	match := re.FindSubmatch(data)
-	if match == nil {
-		return ""
-	}
-	return string(match[1])
-}
-
-// SeedAllConfigs seeds all service configs under configDir.
-// This mirrors the seeding done in cmd_up in the bash CLI.
-func SeedAllConfigs(configDir string) error {
-	// *arr configs
-	if err := seedConfig(
-		filepath.Join(configDir, "sonarr", "config.xml"),
-		`<Config><UrlBase>/sonarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>`,
-	); err != nil {
-		return fmt.Errorf("seed sonarr: %w", err)
-	}
-	if err := seedConfig(
-		filepath.Join(configDir, "radarr", "config.xml"),
-		`<Config><UrlBase>/radarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>`,
-	); err != nil {
-		return fmt.Errorf("seed radarr: %w", err)
-	}
-	if err := seedConfig(
-		filepath.Join(configDir, "prowlarr", "config.xml"),
-		`<Config><UrlBase>/prowlarr</UrlBase><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>`,
-	); err != nil {
-		return fmt.Errorf("seed prowlarr: %w", err)
-	}
-
-	// Enforce auth bypass and privacy settings on existing arr configs
-	// (*arr apps rewrite config.xml on first boot, re-enabling auth)
-	for _, svc := range []string{"sonarr", "radarr", "prowlarr"} {
-		if err := enforceArrConfig(filepath.Join(configDir, svc, "config.xml")); err != nil {
-			return fmt.Errorf("enforceArrConfig %s: %w", svc, err)
-		}
-	}
-
-	// Purge Sentry crash-report cache dirs (safe at startup; arrs recreate on next crash)
-	purgeSentryDirs(configDir)
-
-	// Disable Jellyfin client log uploads (system.xml; no-op if Jellyfin hasn't run yet)
-	if err := enforceJellyfinSystem(configDir); err != nil {
-		return fmt.Errorf("enforceJellyfinSystem: %w", err)
-	}
-
-	// Jellyfin network.xml
-	if err := seedConfig(
+// jellyfinNetworkPaths lists where network.xml may be read from. The
+// linuxserver image keeps Jellyfin's configuration in <config>/config/, but
+// the file has historically also been placed at the config root; seeding both
+// is harmless (Jellyfin reads one, ignores the other) and guarantees BaseUrl.
+func jellyfinNetworkPaths(configDir string) []string {
+	return []string{
+		filepath.Join(configDir, "jellyfin", "config", "network.xml"),
 		filepath.Join(configDir, "jellyfin", "network.xml"),
-		jellyfinNetworkXML(),
-	); err != nil {
-		return fmt.Errorf("seed jellyfin network.xml: %w", err)
 	}
-
-	// Re-assert env-driven KnownProxies every boot when env is set.
-	if err := enforceJellyfinNetwork(configDir); err != nil {
-		return fmt.Errorf("enforceJellyfinNetwork: %w", err)
-	}
-
-	// Jellyfin branding.xml (Cotton Candy CSS theme)
-	jellyfinConfigDir := filepath.Join(configDir, "jellyfin", "config")
-	if err := os.MkdirAll(jellyfinConfigDir, 0755); err != nil {
-		return err
-	}
-	if err := seedConfig(
-		filepath.Join(jellyfinConfigDir, "branding.xml"),
-		jellyfinBrandingXML,
-	); err != nil {
-		return fmt.Errorf("seed jellyfin branding.xml: %w", err)
-	}
-
-	if err := seedConfig(
-		filepath.Join(jellyfinConfigDir, "dlna.xml"),
-		jellyfinDlnaXML,
-	); err != nil {
-		return fmt.Errorf("seed jellyfin dlna.xml: %w", err)
-	}
-
-	// Bazarr config.ini
-	bazarrConfigDir := filepath.Join(configDir, "bazarr", "config")
-	if err := os.MkdirAll(bazarrConfigDir, 0755); err != nil {
-		return err
-	}
-	if err := seedConfig(
-		filepath.Join(bazarrConfigDir, "config.ini"),
-		bazarrConfigIni,
-	); err != nil {
-		return fmt.Errorf("seed bazarr config.ini: %w", err)
-	}
-
-	// qBittorrent config
-	qbtConfigDir := filepath.Join(configDir, "qbittorrent", "qBittorrent")
-	if err := os.MkdirAll(qbtConfigDir, 0755); err != nil {
-		return err
-	}
-	if err := seedConfig(
-		filepath.Join(qbtConfigDir, "qBittorrent.conf"),
-		qbtConf,
-	); err != nil {
-		return fmt.Errorf("seed qBittorrent.conf: %w", err)
-	}
-	if err := seedConfig(
-		filepath.Join(qbtConfigDir, "categories.json"),
-		`{"radarr":{"save_path":"/downloads/radarr/"},"tv-sonarr":{"save_path":"/downloads/tv-sonarr/"}}`,
-	); err != nil {
-		return fmt.Errorf("seed qBittorrent categories.json: %w", err)
-	}
-
-	if err := enforceQBittorrentConf(filepath.Join(qbtConfigDir, "qBittorrent.conf")); err != nil {
-		return fmt.Errorf("enforceQBittorrentConf: %w", err)
-	}
-
-	return nil
 }
 
-// ResetArrService wipes an *arr service directory and re-seeds config.xml,
-// preserving the given API key.
-func ResetArrService(name, dir, urlBase, apiKey string) error {
-	info(fmt.Sprintf("Resetting %s...", name))
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	keyXML := ""
-	if apiKey != "" {
-		keyXML = "<ApiKey>" + xmlEscape(apiKey) + "</ApiKey>"
-	}
-	content := fmt.Sprintf(
-		"<Config><UrlBase>%s</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
-		urlBase, keyXML,
-	)
-	return os.WriteFile(filepath.Join(dir, "config.xml"), []byte(content), 0644)
-}
-
-// jellyfinBrandingXML is the Cotton Candy CSS theme for Jellyfin.
-// This must match the exact content from the bash CLI.
-var jellyfinBrandingXML = strings.Join([]string{
-	`<?xml version="1.0" encoding="utf-8"?>`,
-	`<BrandingOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">`,
-	`  <CustomCss>`,
-	`:root {`,
-	`  --accent: #f060a8;`,
-	`  --accent2: #7080e8;`,
-	`  --success: #40c8a8;`,
-	`  --warning: #f8d040;`,
-	`  --error: #f060a8;`,
-	`  --background-input: #ffffff;`,
-	`  --background-page: #f8f0fb;`,
-	`  --color-text-body: #2a1f35;`,
-	`  --color-text-header: #2a1f35;`,
-	`  --background-header: rgba(255,255,255,0.92);`,
-	`  --theme-border: rgba(180,140,220,0.3);`,
-	`}`,
-	`@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Nunito+Sans:wght@400;600&display=swap");`,
-	`body { font-family: "Nunito Sans", sans-serif !important; background: #f8f0fb !important; }`,
-	`.jellyfin-header-bar { background: rgba(255,255,255,0.92) !important; backdrop-filter: blur(16px) !important; }`,
-	`  </CustomCss>`,
-	`</BrandingOptions>`,
-}, "\n")
-
-var jellyfinDlnaXML = `<DlnaOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><EnableServer>false</EnableServer><EnablePlayTo>false</EnablePlayTo></DlnaOptions>`
-
-var bazarrConfigIni = "[general]\nbase_url=/bazarr\n"
-
+// qbtConf is the seeded qBittorrent.conf: no authentication for requests from
+// Docker subnets (Pelicula's server and the *arr apps reach the WebUI that
+// way), queueing limits, and peer discovery and RSS off.
 var qbtConf = "[Preferences]\n" +
 	`WebUI\AuthSubnetWhitelistEnabled=true` + "\n" +
-	`WebUI\AuthSubnetWhitelist=172.16.0.0/12` + "\n" +
+	`WebUI\AuthSubnetWhitelist=` + dockerSubnet + "\n" +
 	`WebUI\LocalHostAuth=false` + "\n" +
 	`WebUI\CSRFProtection=false` + "\n" +
 	`Queueing\QueueingEnabled=true` + "\n" +
@@ -438,32 +140,27 @@ var qbtConf = "[Preferences]\n" +
 	`Session\TempPathEnabled=true` + "\n" +
 	`Session\TempPath=/downloads/incomplete/`
 
-// patchINIKey replaces or inserts a key=value line in an INI file content blob.
-// When the key is already present (any value), it is replaced with key=value.
-// When absent, the line is inserted at the end of the named section block
-// (just before the next section header or end of file).
-// The section parameter must be the bare header name without brackets, e.g. "Preferences".
-// Uses regexp.QuoteMeta on key to correctly handle backslash-delimited Qt key paths.
+const qbtCategories = `{"radarr":{"save_path":"/downloads/radarr/"},"tv-sonarr":{"save_path":"/downloads/tv-sonarr/"}}`
+
+// patchINIKey sets key=value in an INI blob. An existing key (any value) is
+// replaced in place; otherwise the line is appended to the end of [section],
+// creating the section when needed. Applying it twice is a no-op.
 func patchINIKey(content []byte, section, key, value string) []byte {
 	line := key + "=" + value
 
-	// Replace in-place if key already exists anywhere in the file.
 	keyRe := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `=.*$`)
 	if keyRe.Match(content) {
-		return keyRe.ReplaceAll(content, []byte(line))
+		return keyRe.ReplaceAllLiteral(content, []byte(line))
 	}
 
-	// Key absent — insert at end of [section] block.
-	// Walk through lines, find [section] header, then find end of that block.
 	text := string(content)
-	sectionHeader := "[" + section + "]"
+	header := "[" + section + "]"
 	lines := strings.Split(text, "\n")
 
-	inSection := false
-	insertBefore := -1
+	inSection, insertBefore := false, -1
 	for i, l := range lines {
 		stripped := strings.TrimSpace(l)
-		if stripped == sectionHeader {
+		if stripped == header {
 			inSection = true
 			continue
 		}
@@ -473,169 +170,88 @@ func patchINIKey(content []byte, section, key, value string) []byte {
 		}
 	}
 
-	if !inSection {
-		// Section not found — append section and key.
-		if len(text) > 0 && !strings.HasSuffix(text, "\n") {
+	switch {
+	case !inSection:
+		if text != "" && !strings.HasSuffix(text, "\n") {
 			text += "\n"
 		}
-		text += "\n" + sectionHeader + "\n" + line + "\n"
-		return []byte(text)
-	}
-
-	if insertBefore == -1 {
-		// Section runs to EOF — append before trailing empty lines.
-		// Find last non-empty line index within the section, insert after it.
-		lastContent := len(lines) - 1
-		for lastContent > 0 && strings.TrimSpace(lines[lastContent]) == "" {
-			lastContent--
+		return []byte(text + "\n" + header + "\n" + line + "\n")
+	case insertBefore == -1:
+		// Section runs to EOF: insert after its last non-empty line.
+		last := len(lines) - 1
+		for last > 0 && strings.TrimSpace(lines[last]) == "" {
+			last--
 		}
-		result := make([]string, 0, len(lines)+1)
-		result = append(result, lines[:lastContent+1]...)
-		result = append(result, line)
-		result = append(result, lines[lastContent+1:]...)
-		return []byte(strings.Join(result, "\n"))
+		out := append(append(append([]string{}, lines[:last+1]...), line), lines[last+1:]...)
+		return []byte(strings.Join(out, "\n"))
+	default:
+		out := append(append(append([]string{}, lines[:insertBefore]...), line), lines[insertBefore:]...)
+		return []byte(strings.Join(out, "\n"))
 	}
-
-	// Insert before the next section header.
-	// Place on its own line just before insertBefore.
-	result := make([]string, 0, len(lines)+1)
-	result = append(result, lines[:insertBefore]...)
-	result = append(result, line)
-	result = append(result, lines[insertBefore:]...)
-	return []byte(strings.Join(result, "\n"))
 }
 
-// enforceQBittorrentConf re-asserts security-sensitive keys in qBittorrent.conf
-// on every boot. It is idempotent and safe to call repeatedly.
-//
-// Always enforced:
-//   - RSS\AutoDownloader\enabled=false
-//   - RSS\Session\Enabled=false
-//
-// Enforced unless PELICULA_QBIT_PRIVATE_PEERS=false (user opts into peer discovery):
-//   - Bittorrent\DHT=false
-//   - Bittorrent\PeX=false
-//   - Bittorrent\LSD=false
-func enforceQBittorrentConf(configPath string) error {
-	if _, err := os.Stat(configPath); err != nil {
-		return nil // file doesn't exist yet — nothing to enforce
-	}
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-	original := data
-
-	// RSS keys: always enforced.
-	data = patchINIKey(data, "Preferences", `RSS\AutoDownloader\enabled`, "false")
-	data = patchINIKey(data, "Preferences", `RSS\Session\Enabled`, "false")
-
-	// Peer discovery keys: enforced unless user has opted out of the default-off posture.
-	if os.Getenv("PELICULA_QBIT_PRIVATE_PEERS") != "false" {
-		data = patchINIKey(data, "Preferences", `Bittorrent\DHT`, "false")
-		data = patchINIKey(data, "Preferences", `Bittorrent\PeX`, "false")
-		data = patchINIKey(data, "Preferences", `Bittorrent\LSD`, "false")
-	}
-
-	if bytes.Equal(data, original) {
+// enforceQBittorrentConf re-asserts RSS off and DHT/PeX/LSD off in
+// qBittorrent.conf (qBittorrent rewrites the file and the WebUI can flip
+// them). Idempotent; a missing file is skipped.
+func enforceQBittorrentConf(path string) error {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
 		return nil
 	}
-	return os.WriteFile(configPath, data, 0644)
-}
-
-// resetProwlarr resets Prowlarr's config.xml, preserving the API key and
-// the indexer database. The database is left in place; only config.xml is
-// rewritten.
-func resetProwlarr(configDir, apiKey string) error {
-	info("Resetting Prowlarr config (keeping indexer database)...")
-	keyXML := ""
-	if apiKey != "" {
-		keyXML = "<ApiKey>" + xmlEscape(apiKey) + "</ApiKey>"
-	}
-	content := fmt.Sprintf(
-		"<Config><UrlBase>/prowlarr</UrlBase>%s<AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired></Config>",
-		keyXML,
-	)
-	return os.WriteFile(filepath.Join(configDir, "prowlarr", "config.xml"), []byte(content), 0644)
-}
-
-// resetJellyfin wipes the Jellyfin config dir and re-seeds the base files.
-func resetJellyfin(configDir string) error {
-	info("Resetting Jellyfin...")
-	jellyfinDir := filepath.Join(configDir, "jellyfin")
-	if err := os.RemoveAll(jellyfinDir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(jellyfinDir, "config"), 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(
-		filepath.Join(jellyfinDir, "network.xml"),
-		[]byte(jellyfinNetworkXML()),
-		0644,
-	); err != nil {
-		return err
-	}
-	if err := os.WriteFile(
-		filepath.Join(jellyfinDir, "config", "branding.xml"),
-		[]byte(jellyfinBrandingXML),
-		0644,
-	); err != nil {
-		return err
-	}
-	return os.WriteFile(
-		filepath.Join(jellyfinDir, "config", "dlna.xml"),
-		[]byte(jellyfinDlnaXML),
-		0644,
-	)
-}
-
-// resetQBittorrent wipes and re-seeds the qBittorrent config dir.
-func resetQBittorrent(configDir string) error {
-	info("Resetting qBittorrent...")
-	qbtDir := filepath.Join(configDir, "qbittorrent")
-	if err := os.RemoveAll(qbtDir); err != nil {
-		return err
-	}
-	subDir := filepath.Join(qbtDir, "qBittorrent")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		return err
-	}
-	confPath := filepath.Join(subDir, "qBittorrent.conf")
-	if err := os.WriteFile(confPath, []byte(qbtConf), 0644); err != nil {
-		return err
-	}
-	if err := enforceQBittorrentConf(confPath); err != nil {
-		return err
-	}
-	return os.WriteFile(
-		filepath.Join(subDir, "categories.json"),
-		[]byte(`{"radarr":{"save_path":"/downloads/radarr/"},"tv-sonarr":{"save_path":"/downloads/tv-sonarr/"}}`),
-		0644,
-	)
-}
-
-// resetProculaJobs clears the Procula job queue (SQLite database and legacy JSON directory).
-func resetProculaJobs(configDir string) error {
-	info("Clearing Procula job queue...")
-	proculaDir := filepath.Join(configDir, "procula")
-	// Remove SQLite database and WAL files (schema is auto-recreated on next startup)
-	for _, suffix := range []string{"", "-wal", "-shm"} {
-		os.Remove(filepath.Join(proculaDir, "procula.db"+suffix))
-	}
-	// Remove legacy JSON jobs directory
-	jobsDir := filepath.Join(proculaDir, "jobs")
-	if err := os.RemoveAll(jobsDir); err != nil {
-		return err
-	}
-	return os.MkdirAll(jobsDir, 0755)
-}
-
-// isStackRunning checks if any compose services are running using docker compose ps.
-func isStackRunning(c *Compose) bool {
-	out, err := c.RunSilent("ps", "--services", "--filter", "status=running")
 	if err != nil {
-		return false
+		return err
 	}
-	return len(bytes.TrimSpace(out)) > 0
+	patched := data
+	for _, key := range []string{
+		`RSS\AutoDownloader\enabled`,
+		`RSS\Session\Enabled`,
+		`Bittorrent\DHT`,
+		`Bittorrent\PeX`,
+		`Bittorrent\LSD`,
+	} {
+		patched = patchINIKey(patched, "Preferences", key, "false")
+	}
+	if bytes.Equal(patched, data) {
+		return nil
+	}
+	return os.WriteFile(path, patched, 0644)
+}
+
+// SeedAllConfigs seeds every service's config under configDir (files that
+// already exist are left alone) and re-enforces the security-relevant
+// settings in the ones that do. Safe to run on every `up`.
+func SeedAllConfigs(configDir string) error {
+	for _, s := range arrServices {
+		path := filepath.Join(configDir, s.name, "config.xml")
+		if err := seedConfig(path, arrConfigXML(s.urlBase)); err != nil {
+			return fmt.Errorf("seed %s: %w", s.name, err)
+		}
+		if err := enforceArrConfig(path, s.urlBase); err != nil {
+			return fmt.Errorf("enforce %s config: %w", s.name, err)
+		}
+	}
+
+	for _, path := range jellyfinNetworkPaths(configDir) {
+		if err := seedConfig(path, jellyfinNetworkXML()); err != nil {
+			return fmt.Errorf("seed jellyfin network.xml: %w", err)
+		}
+		err := patchFile(path, func(doc string) string {
+			return setXMLElement(doc, "BaseUrl", "/jellyfin", "</NetworkConfiguration>")
+		})
+		if err != nil {
+			return fmt.Errorf("enforce jellyfin BaseUrl: %w", err)
+		}
+	}
+
+	qbtDir := filepath.Join(configDir, "qbittorrent", "qBittorrent")
+	if err := seedConfig(filepath.Join(qbtDir, "qBittorrent.conf"), qbtConf); err != nil {
+		return fmt.Errorf("seed qBittorrent.conf: %w", err)
+	}
+	if err := seedConfig(filepath.Join(qbtDir, "categories.json"), qbtCategories); err != nil {
+		return fmt.Errorf("seed qBittorrent categories.json: %w", err)
+	}
+	if err := enforceQBittorrentConf(filepath.Join(qbtDir, "qBittorrent.conf")); err != nil {
+		return fmt.Errorf("enforce qBittorrent.conf: %w", err)
+	}
+	return nil
 }

@@ -1,291 +1,221 @@
-# API Reference
-
-All `pelicula-api` endpoints are proxied through nginx at `/api/pelicula/`. Internal endpoints are restricted to Docker networks in nginx config — not reachable from the LAN.
-
-All mutating endpoints require an admin or manager session. A session is either cookie-based (from `POST /api/pelicula/auth/login`) or the loopback auto-session granted to requests from the host machine — see [docs/PELIGROSA.md](PELIGROSA.md#loopback-auto-session-middlewarepeligrosaloopbackgo).
-
-Auth levels: **Admin** = session with admin role; **Manager+** = manager or admin session; **Viewer+** = any authenticated session; **Public** = no auth required; **Internal** = Docker-network-only.
-
-## Stability Policy
-
-**Stable since v0.1.** All endpoints below are part of the public API contract:
-
-- **Fields are additive only** — response fields are never removed or renamed
-- **New endpoints may be added** in minor releases
-- **Breaking changes** (field removal, type changes, endpoint removal) only at major version bumps
-- **Frontend treats unknown fields as ignorable** — new fields won't break older dashboard versions
-
-## Endpoint catalog
-
-### Setup mode (pre-.env)
-
-These endpoints are only registered when `SETUP_MODE=true` (i.e., when no `.env` file exists). They run on a separate mux; once the wizard completes the container is replaced by the normal stack.
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/health` | Public | Returns `{"status":"setup"}` in setup mode |
-| `GET` | `/api/pelicula/setup/detect` | Public | Returns host platform, timezone, UID/GID suggestions for the wizard |
-| `POST` | `/api/pelicula/setup` | Public, CSRF-strict | Validates wizard inputs, generates `.env`, creates directories. Requires local Origin header |
-
-### Authentication
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `POST` | `/api/pelicula/auth/login` | Public | Authenticate with Jellyfin credentials; sets session cookie. **Rate-limited** (10 r/m, burst=5) |
-| `POST` | `/api/pelicula/auth/logout` | Public (handler-gated) | Clears session cookie |
-| `GET` | `/api/pelicula/auth/check` | Public (handler-gated) | Returns `{authenticated, role, username}`. Used by nginx `auth_request` subrequest (`/auth-check`) |
-
-### Registration and invites
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/register/check` | Public | Returns `{open_registration: bool}` — whether open registration is enabled |
-| `GET` | `/api/pelicula/generate-password` | Public | Returns a random passphrase suggestion. **Rate-limited** (10 r/m, burst=5) |
-| `POST` | `/api/pelicula/register` | Public, CSRF-strict | Open registration — create viewer account without invite token. Requires local Origin. **Rate-limited** (10 r/m, burst=3) |
-| `GET` | `/api/pelicula/invites` | Admin, CSRF-soft | List active invite links |
-| `POST` | `/api/pelicula/invites` | Admin, CSRF-soft | Create invite link |
-| `GET` | `/api/pelicula/invites/{token}/check` | Public | Check invite validity. **Rate-limited** (10 r/m, burst=5) |
-| `POST` | `/api/pelicula/invites/{token}/redeem` | Public (invite-gated) | Self-service viewer registration via invite token. **Rate-limited** (10 r/m, burst=5) |
-| `POST` | `/api/pelicula/invites/{token}/revoke` | Admin, CSRF-soft | Revoke (deactivate) an active invite |
-| `DELETE` | `/api/pelicula/invites/{token}` | Admin, CSRF-soft | Hard-delete an invite record |
-
-### Operators (role management)
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/operators` | Admin, CSRF-soft | List all pelicula role entries (Jellyfin user ID → role mapping) |
-| `POST` | `/api/pelicula/operators/{id}` | Admin, CSRF-soft | Set or update a user's role (`viewer`, `manager`, `admin`) |
-| `DELETE` | `/api/pelicula/operators/{id}` | Admin, CSRF-soft | Remove a role entry |
-
-### User management (Jellyfin)
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/users` | Admin, CSRF-soft | List Jellyfin users (hides internal service account) |
-| `POST` | `/api/pelicula/users` | Admin, CSRF-soft | Create Jellyfin user (username + password required) |
-| `DELETE` | `/api/pelicula/users/{id}` | Admin, CSRF-soft | Delete user; rejects deletion of the last admin |
-| `POST` | `/api/pelicula/users/{id}/password` | Admin, CSRF-soft | Reset a user's Jellyfin password |
-| `POST` | `/api/pelicula/users/{id}/disable` | Admin, CSRF-soft | Disable a Jellyfin user account |
-| `POST` | `/api/pelicula/users/{id}/enable` | Admin, CSRF-soft | Re-enable a disabled Jellyfin user account |
-| `POST` | `/api/pelicula/users/{id}/library` | Admin, CSRF-soft | Set Jellyfin library access (`{"movies": bool, "tv": bool}`) |
-| `GET` | `/api/pelicula/sessions` | Viewer+ | Active Jellyfin sessions (now-playing card) |
-
-### Request queue
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/requests` | Viewer+ | List requests. Admins see all; viewers see only their own |
-| `POST` | `/api/pelicula/requests` | Viewer+ | Create a media request (`type`, `tmdb_id`/`tvdb_id`, `title`, `year`). Optional `seasons` (int array, series only) is the viewer's desired season-level scope — absent/null means all seasons, `[]` is rejected with 400, and each number is shape-validated (0-999, deduped, ≤100 entries) but **not** checked for existence against Sonarr; that check happens at approve, the authoritative gate. `seasons` on a movie is rejected with 400 |
-| `POST` | `/api/pelicula/requests/{id}/approve` | Admin | Approve a request; adds to Radarr/Sonarr and marks available. Optional body `{"seasons": [...]}` (series only) lets the admin override the viewer's requested scope at approval time: **absent/null** uses the request's stored `seasons`; a **non-empty array** is shape-validated and used as the final scope (existence against Sonarr's lookup is validated here — a season number that doesn't exist on the series is rejected with 400); an **explicit `[]`** clears the scope to all seasons. This is intentionally asymmetric with `search/add` and request-create (where `[]` is rejected) — the approval UI has no per-series season list to enumerate against ahead of the Sonarr lookup, so `[]` here means "no override, use everything" rather than "invalid input" |
-| `POST` | `/api/pelicula/requests/{id}/deny` | Admin | Deny a pending request |
-| `DELETE` | `/api/pelicula/requests/{id}` | Admin | Hard-delete a request record |
-| `GET` | `/api/pelicula/requests/unseen` | Viewer+ | The caller's own available-but-unacknowledged requests: `{count, items:[{id, title, type, year, poster}]}`. Registered as an exact-path + method route so it is not shadowed by the admin-gated `/api/pelicula/requests/{id}` subtree above. Polled by the dashboard every 15s for the users-tab badge/toast |
-| `POST` | `/api/pelicula/requests/acknowledge` | Viewer+, CSRF-soft | Marks the caller's unseen-available requests as seen: an empty body (or `{}`) acknowledges all of them; an optional `{"ids": [...]}` restricts it to a subset. Ownership is enforced server-side via `requested_by` — an id belonging to another user is silently ignored (matches 0 rows) rather than erroring. Returns `{acknowledged: <n>}` |
-
-Requests now additionally carry `available_seen_at` (RFC3339, omitted from the JSON entirely while unseen — never a zero-value timestamp): set once the requester acknowledges an `available` request via the endpoint above.
-
-### Search and discovery
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/search` | Manager+ | Unified TMDB/TVDB/Prowlarr search. Query: `?q=…&type=movie|series`. Series results carry an additive `seasons` array (`seasonNumber`, plus `episodeCount` when Sonarr's lookup provides `statistics.totalEpisodeCount` — never fabricated when absent) |
-| `POST` | `/api/pelicula/search/add` | Manager+ | Add a movie (`tmdbId`) or series (`tvdbId`) to Radarr/Sonarr. Optional `profileId` (int) / `rootPath` (string) override the default quality profile / root folder — absent or zero preserves today's default exactly. `profileId` must match an id from `GET /api/pelicula/arr-meta`'s `qualityProfiles` for that arr; `rootPath` must match a **registered library's container path for that arr**, as returned in arr-meta's `libraries` field (not `rootFolders`, which is the *arr's own root-folder list and may not coincide with registered libraries on custom-library setups). Either mismatch is rejected with 400. Optional `seasons` (int array, series only) selects which seasons to monitor — absent/null means all seasons (the payload sent to Sonarr is unchanged from before season support existed); `[]` is rejected with 400; each number is shape-validated (0-999, deduped, ≤100 entries) and then checked for existence against Sonarr's own lookup, with a 400 on any number that doesn't exist for that series. `seasons` on a movie is rejected with 400 |
-
-### Catalog (Radarr/Sonarr + Procula)
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/catalog` | Viewer+ | List movies and series from Radarr+Sonarr. Optional `?q=…&type=movie|series` filter. Response: `{movies, series, errors?}` — `errors` (e.g. `{"radarr": "unreachable"}`) is present only when a service fetch failed, so an empty list with `errors` set means "unavailable", not "empty library" |
-| `GET` | `/api/pelicula/catalog/series/{id}` | Viewer+ | Sonarr series detail by Sonarr internal ID |
-| `GET` | `/api/pelicula/catalog/series/{id}/season/{n}` | Viewer+ | Episode + episodefile list for a specific season |
-| `GET` | `/api/pelicula/catalog/item/history` | Viewer+ | Procula job history for a file path (`?path=…`) |
-| `GET` | `/api/pelicula/catalog/flags` | Viewer+ | Proxies Procula's catalog flags |
-| `GET` | `/api/pelicula/catalog/detail` | Viewer+ | Detail for a file path: flags, active job, synopsis, artwork (`?path=…`) |
-| `GET` | `/api/pelicula/catalog/items` | Viewer+ | List catalog items with optional `?type=…&tier=…&q=…` filters |
-| `GET` | `/api/pelicula/catalog/items/{id}` | Viewer+ | Single catalog item by ID |
-| `POST` | `/api/pelicula/catalog/backfill` | Admin | Trigger background backfill from Radarr+Sonarr into the catalog DB. A full resync: ends with the orphan reconciler and the stale-row sweep, so rows whose media left Radarr/Sonarr/Jellyfin are removed |
-| `POST` | `/api/pelicula/catalog/reconcile` | Admin | Run the orphan reconciler synchronously and return the result |
-| `POST` | `/api/pelicula/catalog/command` | Admin | Proxy force-search, rescan, or unmonitor to Radarr/Sonarr (`arr_type`, `arr_id`, `command`) |
-| `POST` | `/api/pelicula/catalog/replace` | Admin | Mark release as failed in *arr, rescan, and re-search (`arr_type`, `arr_id`, `episode_id`, `path`) |
-| `DELETE` | `/api/pelicula/catalog/blocklist/{id}` | Admin | Remove an entry from the *arr blocklist (`?arr_type=radarr|sonarr`). 204 on success, 502 if the *arr delete fails |
-| `GET` | `/api/pelicula/catalog/qualityprofiles` | Viewer+ | Returns `{radarr: {id: name}, sonarr: {id: name}}` quality profile maps |
-| `GET` | `/api/pelicula/jobs` | Viewer+ | Procula job list grouped by state (proxied) |
-
-### Libraries
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/libraries` | Public | List registered libraries (path and built-in flag omitted for unauthenticated callers) |
-| `POST` | `/api/pelicula/libraries` | Admin, CSRF-strict | Add a new library (slug, name, type, arr, processing) |
-| `PUT` | `/api/pelicula/libraries/{slug}` | Admin, CSRF-strict | Update an existing library (slug and built-in flag are immutable) |
-| `DELETE` | `/api/pelicula/libraries/{slug}` | Admin, CSRF-strict | Delete a non-built-in library |
-
-### Local import wizard
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/browse` | Admin | Server-side folder browser. Returns directory entries under `/downloads`, `/media`, and `IMPORT_SOURCE_DIR`. Resolves symlinks and re-checks against allowlist to prevent path escape |
-| `POST` | `/api/pelicula/library/scan` | Admin, CSRF-strict | Match local media files (or folders) against Radarr/Sonarr. Returns per-file match plan with confidence levels |
-| `POST` | `/api/pelicula/library/apply` | Admin, CSRF-strict | Apply matched items — add to *arr. Moves files on disk |
-| `GET` | `/api/pelicula/library/suggest-path` | Manager+ | Suggest a library destination path for a title. Query: `?type=movie|series&title=…&year=…&season=…` |
-
-### Transcoding and subtitle re-acquisition
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/transcode/profiles` | Admin | List transcode profiles from Procula |
-| `POST` | `/api/pelicula/transcode/profiles` | Admin | Create or update a transcode profile |
-| `DELETE` | `/api/pelicula/transcode/profiles/{name}` | Admin | Delete a transcode profile by name |
-| `POST` | `/api/pelicula/library/retranscode` | Admin | Enqueue manual transcode jobs for a list of file paths (`files`, `profile`) |
-| `POST` | `/api/pelicula/library/resub` | Admin | Trigger Bazarr subtitle search for a file path via Procula (`{"path": "…"}`) |
-| `POST` | `/api/pelicula/procula/jobs/{id}/resub` | Admin | Re-trigger subtitle search for a specific Procula job |
-| `POST` | `/api/pelicula/procula/jobs/{id}/retry` | Admin | Re-queue a failed Procula job |
-| `POST` | `/api/pelicula/procula/jobs/{id}/cancel` | Admin | Cancel an in-progress or queued Procula job |
-
-### Download management
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/downloads` | Viewer+ | Current torrent list with per-torrent state |
-| `GET` | `/api/pelicula/downloads/stats` | Viewer+ | Aggregate download/upload speed and active/queued counts |
-| `POST` | `/api/pelicula/downloads/pause` | Manager+ | Pause or resume a torrent (`hash`, `paused: bool`). Uses qBittorrent v5 stop/start API |
-| `POST` | `/api/pelicula/downloads/cancel` | Admin | Remove torrent + files, remove from *arr queue, optionally blocklist (`hash`, `category`, `blocklist: bool`) |
-
-### Settings
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/settings` | Admin, CSRF-strict | Read runtime config (`.env` values). Sensitive fields (WireGuard key, Procula key) are masked |
-| `POST` | `/api/pelicula/settings` | Admin, CSRF-strict | Write runtime config. Requires local Origin header (RFC1918 or localhost) |
-| `POST` | `/api/pelicula/settings/reset` | Admin, CSRF-strict | Full settings reset from a new WireGuard key. Same Origin guard |
-| `GET` | `/api/pelicula/procula-settings` | Admin | Read Procula settings (proxied) |
-| `POST` | `/api/pelicula/procula-settings` | Admin | Write Procula settings (proxied, with API key) |
-| `GET` | `/api/pelicula/arr-meta` | Manager+ | Quality profiles and root folders from Radarr + Sonarr, plus a `libraries` field (`{name, path}` per registered library for that arr — the container paths `search/add`'s `rootPath` validates against), for settings dropdowns and the search "Add with options…" modal. Non-sensitive on a LAN-only stack; relaxed from Admin since search/add is already Manager+ |
-
-### Dashboard data
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/health` | Public | Service health check. Returns `{"status":"ok"}` |
-| `GET` | `/api/pelicula/status` | Viewer+ | VPN status, service health, wired flag, indexer health. `indexers` is the configured-indexer count (null until Prowlarr has been reached); `indexers_paused` lists indexers currently inside a Prowlarr failure-backoff window (repeated errors / remote rate limits) as `[{id, name, disabledTill}]` — manual disables are not included. Prowlarr data is cached for 5 minutes |
-| `GET` | `/api/pelicula/host` | Viewer+ | Container uptime, disk usage, library counts (movie + series totals) |
-| `GET` | `/api/pelicula/processing` | Viewer+ | Procula status + job queue (merged, for dashboard Processing section) |
-| `GET` | `/api/pelicula/journey` | Viewer+ | Per-title journey through the canonical six-stage rail. Two query forms: `?type=movie\|series&tmdb_id=…`/`tvdb_id=…`, or `?arr_type=radarr\|sonarr&arr_id=…` (400 when neither is complete; 404 for an unknown title). Response: `{type, title, year, tmdb_id, tvdb_id, arr_type, arr_id, monitored, has_file, current_stage, progress?, stages, request?, degraded?}` — `stages` is always all six of `requested, approved, searching, downloading, processing, available` in order, each `{stage, status: done\|active\|pending\|skipped}` with optional `at`/`by`/`progress`/`detail`/`eta`. Request-derived fields are scoped server-side: only the request's owner or an admin gets the `request` object and `requested`/`approved` timestamps — other viewers see those two stages as `skipped` with no attribution. Unreachable upstreams degrade instead of failing: still 200, with `degraded` listing them (e.g. `["qbt"]`). Upstream fan-out is bounded by 10s in-memory snapshot caches (*arr queues, qBittorrent torrents, Procula jobs) |
-| `GET` | `/api/pelicula/storage` | Viewer+ | Procula storage stats (proxied) |
-| `POST` | `/api/pelicula/storage/scan` | Admin | Trigger Procula storage scan (proxied) |
-| `GET` | `/api/pelicula/updates` | Viewer+ | Procula update check result (proxied) |
-| `GET` | `/api/pelicula/notifications` | Viewer+ | Merged Procula + *arr history feed |
-| `GET` | `/api/pelicula/network` | Admin | Per-container bandwidth stats. Response: `{containers: [{name, bytes_in, bytes_out, vpn_routed}…], as_of}`. 10s in-memory cache. VPN-profile containers (`gluetun`, `qbittorrent`, `prowlarr`) are flagged `vpn_routed: true` |
-| `POST` | `/api/pelicula/speedtest` | Admin | Run VPN speed test via gluetun HTTP proxy |
-| `GET` | `/api/pelicula/logs/aggregate` | Admin | Fan-in log lines from all containers |
-| `GET` | `/api/pelicula/sse` | Viewer+ | Server-Sent Events stream for real-time dashboard updates |
-
-### Action bus
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/actions/registry` | Viewer+ | List registered Procula action handlers (60s cache) |
-| `POST` | `/api/pelicula/actions` | Admin | Dispatch an action to the Procula action bus (proxied with API key). Optional `?wait=…` |
-
-The registry currently returns six actions: `validate`, `transcode`, `subtitle_search`, `dualsub`, and `replace` (all `applies_to: ["movie","episode"]`, fan out per-episode at series/season level in the dashboard), plus `remove` (`applies_to: ["movie","series"]` — whole-title deletion, rendered as a single non-fanout action at series level). See docs/PROCULA.md's Action Bus section for the full catalog and the `remove` design decision.
-
-### Admin / container control
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `POST` | `/api/pelicula/admin/stack/restart` | Admin | Restart all stack containers in dependency order; restarts `pelicula-api` last (async). Rate-limited (30 r/m, burst=10) at nginx layer |
-| `POST` | `/api/pelicula/admin/vpn/restart` | Admin | Restart VPN stack (`gluetun`, `qbittorrent`, `prowlarr`). Rate-limited (30 r/m, burst=10) |
-| `GET` | `/api/pelicula/admin/logs` | Admin | Recent log lines for a named container (`?svc=…&tail=…`). Rate-limited (30 r/m, burst=10) |
-
-### Backup and export
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/export` | Admin | Download backup (watchlist + roles + invites + requests) |
-| `POST` | `/api/pelicula/export` | Admin | Trigger and return a backup |
-| `POST` | `/api/pelicula/import-backup` | Admin | Restore from a backup produced by `GET/POST /api/pelicula/export` |
-
-### Jellyfin integration
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/pelicula/jellyfin/info` | Public | Jellyfin discovery info: `{web_url, lan_url}`. Used by `/register` and native apps. No API key returned |
-
-### Internal (Docker-network-only)
-
-| Method | Path | Auth | Notes |
-|--------|------|------|-------|
-| `POST` | `/api/pelicula/hooks/import` | Internal | Receives Radarr/Sonarr import webhooks, normalizes payload, forwards to Procula. Validates `X-Webhook-Secret` header against `WEBHOOK_SECRET` env var (check skipped when unset) |
-| `POST` | `/api/pelicula/jellyfin/refresh` | Internal | Triggers Jellyfin library scan. Called by Procula; requires `X-API-Key: <PROCULA_API_KEY>` |
-| `POST` | `/api/pelicula/catalog/remove` | Internal | Deletes a whole title — files, *arr entry (`DELETE .../movie\|series/{id}?deleteFiles=true`), and catalog rows. Called by Procula's `remove` action handler; requires `X-API-Key: <PROCULA_API_KEY>`. Request: `{"arr_type":"radarr"\|"sonarr","arr_id":N}`. Response: `{"removed":true,"arr_type":…,"arr_id":…,"title":…,"file_paths":[…]}`. Idempotent — a 404 from the *arr delete (already gone) is treated as success |
-
----
-
-### Rate-limited endpoints (nginx layer)
-
-The following endpoints are rate-limited at the nginx proxy layer (zone `peli_auth`: 10 requests/minute per source IP). Bursts shown are the `nodelay` burst headroom before requests start receiving HTTP 429.
-
-| Endpoint | Burst |
-|----------|-------|
-| `POST /api/pelicula/auth/login` | 5 |
-| `POST /api/pelicula/register` | 3 |
-| `GET /api/pelicula/invites/{token}/check` | 5 |
-| `POST /api/pelicula/invites/{token}/redeem` | 5 |
-| `GET /api/pelicula/generate-password` | 5 |
-
-The `/api/pelicula/admin/*` endpoints use a separate zone (`admin`: 30 r/m, burst=10).
-
----
-
-## Procula API (port 8282, proxied at /api/procula/)
-
-See PROCULA.md for full Procula endpoint reference and pipeline details.
-
----
-
-## Backup Format
-
-Backups are versioned JSON files produced by `POST /api/pelicula/export` and consumed by `POST /api/pelicula/import-backup`. The import endpoint accepts any version from 1 to the current version and auto-migrates forward.
-
-| Version | Fields | Notes |
-|---------|--------|-------|
-| v1 | `version`, `exported`, `movies`, `series` | Original format — watchlist only |
-| v2 | v1 + `pelicula_version`, `roles`, `invites`, `requests` | Full data export including auth and request queue state |
-
-**Forward compatibility:** Newer versions always accept older backups. Fields added in later versions get sensible defaults when importing from an older version. The `version` field is always present and always an integer.
-
-**Requests entries (v2, additive):** each entry in `requests` now optionally carries a `seasons` int array — the season-level scope recorded for a series request (absent/omitted means all seasons). This is an additive field on the existing v2 format, not a new backup version; older v2 backups without `seasons` restore with an empty (all-seasons) scope.
-
-**Requests entries (v2, additive):** each entry may also carry `available_seen_at` (RFC3339) — when the requester acknowledged an `available` request in-app; omitted when never acknowledged. Restores round-trip the value via `InsertFull`; older backups without it restore as unseen.
-
----
-
-## Environment Variable Overrides
-
-Service URLs default to Docker-internal addresses. Override these when running services on non-standard ports or external hosts.
-
-### Service URLs (middleware)
-
-| Variable | Default | Used by |
-|----------|---------|---------|
-| `SONARR_URL` | `http://sonarr:8989/sonarr` | autowire, health checks |
-| `RADARR_URL` | `http://radarr:7878/radarr` | autowire, health checks |
-| `PROWLARR_URL` | `http://gluetun:9696/prowlarr` | autowire, health checks |
-| `BAZARR_URL` | `http://bazarr:6767/bazarr` | autowire, health checks |
-| `JELLYFIN_URL` | `http://jellyfin:8096/jellyfin` | auth, user management, sessions |
-| `QBITTORRENT_URL` | `http://gluetun:8080` | download management |
-| `GLUETUN_CONTROL_URL` | `http://gluetun:8000` | VPN health checks |
-| `APPRISE_URL` | `http://apprise:8000/notify` | notifications |
-| `PELICULA_API_URL` | `http://pelicula-api:8181` | webhook callback URL wired into *arr apps |
-
-### Host detection (passed by CLI to middleware in setup mode)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `HOST_PLATFORM` | `linux` | Platform label for setup wizard |
-| `HOST_TZ` | `America/New_York` | Timezone default |
-| `HOST_PUID` | `1000` | Default UID for containers |
-| `HOST_PGID` | `1000` | Default GID for containers |
-| `HOST_CONFIG_DIR` | `./config` | Default config path suggestion |
-| `HOST_LIBRARY_DIR` | `~/media` | Default library path suggestion |
-| `HOST_WORK_DIR` | `~/media` | Default work path suggestion |
+# API
+
+All routes are served by the `pelicula` server on `:8181` and reached through nginx at `http://<host>:7354/api/...`. Everything is JSON. Source of truth for behaviour is `internal/auth` and `internal/api`; this file mirrors the contract they implement.
+
+Conventions:
+
+- **Auth.** A session cookie, `pelicula_session` (HttpOnly, SameSite=Lax), set by login or register. "Min role" is the lowest role allowed: viewer < manager < admin. No session is a 401; a role that is too low is a 403.
+- **CSRF.** For POST, PUT, PATCH and DELETE, a present `Origin` (else `Referer`) header must match the request host, otherwise 403. Requests with neither header pass.
+- **Errors.** Every error is `{"error":"message"}` with a status that matches the cause: 400 bad input, 401 no session or bad credentials, 403 role too low or CSRF, 404 missing, 409 conflict, 410 gone, 413 body too large, 500 server error, 502 an upstream (Radarr, Sonarr) did not answer, 503 dependency unavailable. One error carries extra data: a duplicate request is `409 {"error":"already requested","request":{...}}`.
+- **Timestamps** are RFC 3339 (UTC).
+- **Rate limits** on login, register and the invite lookup are applied by nginx, not the server: 10 requests per minute per IP across the three, excess answered with `429` (not the JSON error format). See [ARCHITECTURE.md](ARCHITECTURE.md#nginx-route-map).
+
+## Auth routes
+
+| Method and path | Min role | Request | Response |
+|---|---|---|---|
+| `POST /api/auth/login` | public | `{"username","password"}` | `200 {"username","role"}` and a session cookie. 401 bad credentials; 503 Jellyfin unreachable. Role is the stored role, else `admin` for a Jellyfin administrator, else `viewer` (and the default is saved). |
+| `POST /api/auth/logout` | any | none | `204`; clears the session |
+| `GET /api/auth/me` | any | none | `200 {"username","role"}` or 401 |
+| `GET /api/auth/check` | any | none | `204` with a valid session cookie, else 401. Used by nginx `auth_request`. |
+| `GET /api/register/{code}` | public | none | `200 {"valid":bool,"role":"viewer"}`. `valid` means the invite exists, is unused and is unexpired. |
+| `POST /api/register` | public | `{"code","username","password"}` | `201 {"username","role"}` and a session cookie. Username must match `^[A-Za-z0-9._-]{3,32}$`, password at least 8 characters (400 otherwise). 409 if the Jellyfin user exists; 410 if the invite is unavailable. |
+| `GET /api/invites` | admin | none | `200 {"invites":[{"code","role","created_by","created_at","expires_at","used_by","used_at"}]}` |
+| `POST /api/invites` | admin | `{"role","expires_hours"}`; role defaults to `viewer`, hours to 72, maximum 720 | `201 {"code","role","expires_at","path":"/register?code=<code>"}`. The code is 16 random bytes, base64url. |
+| `DELETE /api/invites/{code}` | admin | none | `204`, or 404 |
+
+## API routes
+
+| Method and path | Min role | Request | Response |
+|---|---|---|---|
+| `GET /api/health` | public | none | `{"ok":true,"wired":bool,"version":"..."}`. `wired` turns true when autowire has finished. |
+| `GET /api/status` | viewer | none | `{"services":[{"name","ok","path"}],"vpn":{"enabled","tunnel","public_ip","country","forwarded_port"},"wired","version","pending_requests","queued_jobs"}`. Services are sonarr (`/sonarr/`), radarr, jellyfin, plus prowlarr (`/prowlarr/`) and qbittorrent (`/qbt/`) when the VPN is on. Each is pinged with a 2 s timeout, in parallel, cached for 5 s. `pending_requests` is 0 unless the caller is a manager or above. |
+| `GET /api/search?q=` | viewer | query `q` (empty is 400); 502 when both Radarr and Sonarr lookups fail | `{"results":[{"type":"movie"\|"series","title","year","overview","poster","tmdb_id","tvdb_id","in_library","arr_id","has_file"}]}`. Radarr and Sonarr lookups run in parallel and are interleaved movie, series, movie, ... with a maximum of 40. `in_library` is true when the lookup result has a non-zero `id`; `has_file` comes from `hasFile` (movie) or `statistics.episodeFileCount > 0` (series). |
+| `POST /api/search/add` | manager | `{"type","tmdb_id","tvdb_id"}` | `{"arr_id":N}`. Adds the title to Radarr or Sonarr and starts a search. |
+| `GET /api/requests` | viewer | none | `{"requests":[Request]}`. Viewers get their own; managers and admins get all. |
+| `POST /api/requests` | viewer | `{"type","tmdb_id","tvdb_id","title","year","poster"}` | `201 Request`. 409 duplicate (see Errors). If the `auto_approve_requests` setting is true the title is added immediately and the request is stored `approved` with `decided_by` `"auto"`. |
+| `POST /api/requests/{id}/approve` | manager | none | `200 Request` with `status` `approved`, `decided_by` the approver and `arr_id` set. Adds the title to Radarr or Sonarr. |
+| `POST /api/requests/{id}/decline` | manager | `{"note"}` | `200 Request` with `status` `declined` |
+| `GET /api/downloads` | viewer | none | `{"vpn":bool,"downloads":[{"hash","name","state","progress","dlspeed","upspeed","eta","size","category"}],"transfer":{"dl_speed","up_speed"}}`. Without the VPN: `{"vpn":false,"downloads":[],"transfer":{zeros}}`. |
+| `POST /api/downloads/{hash}/pause` | manager | none | `204` (qBittorrent v5 `stop`) |
+| `POST /api/downloads/{hash}/resume` | manager | none | `204` (qBittorrent v5 `start`) |
+| `DELETE /api/downloads/{hash}?blocklist=true` | admin | optional `blocklist` query | `204`. Finds the Radarr then Sonarr queue record whose `downloadId` equals the hash (case-insensitive) and deletes it with `removeFromClient=true` and the given blocklist flag; if none matches, deletes the torrent and its files from qBittorrent. |
+| `GET /api/jobs?limit=50` | viewer | `limit` optional | `{"jobs":[Job]}`, newest first |
+| `POST /api/jobs/{id}/retry` | manager | none | `204`; requeues a finished job and wakes the worker. 404 unknown job; 409 if the job is still `queued` or `running`. |
+| `GET /api/settings` | admin | none | `{"settings":{"validation_enabled":"true",...},"info":{"config_dir","library_dir","work_dir","server_countries","vpn_enabled","version","tz"}}` |
+| `PUT /api/settings` | admin | `{"<key>":"true"\|"false",...}`; keys must be in `store.SettingDefaults` and values must parse as booleans (400 otherwise) | `200` the full settings map as a bare object, e.g. `{"validation_enabled":"true",...}` (not wrapped in `settings`) |
+| `GET /api/users` | admin | none | `{"users":[{"id","name","is_admin","is_disabled","role","last_login"}]}`: Jellyfin's users joined with the `roles` table (default role `admin` if `is_admin`, else `viewer`) |
+| `PUT /api/users/{username}/role` | admin | `{"role"}` | `204`. 400 when changing your own role or an invalid role. |
+| `DELETE /api/users/{username}` | admin | none | `204`. 400 when deleting yourself. Deletes the Jellyfin user, the role row and the user's sessions. |
+| `POST /api/hooks/import` | none, secret | Sonarr or Radarr webhook; see below | see below |
+
+Settings keys:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `validation_enabled` | `true` | run the ffprobe check on import |
+| `auto_blocklist` | `true` | on a failed check, mark the release failed in *arr (blocklist), delete the bad file via the *arr API and search again |
+| `auto_approve_requests` | `false` | viewer requests are added without a manager's approval |
+
+### Request
+
+`store.Request`, as returned by `/api/requests`:
+
+```json
+{
+  "id": 7,
+  "media_type": "movie",
+  "tmdb_id": 603,
+  "tvdb_id": 0,
+  "title": "The Matrix",
+  "year": 1999,
+  "poster": "https://...",
+  "requested_by": "alice",
+  "status": "approved",
+  "arr_id": 12,
+  "decided_by": "admin",
+  "note": "",
+  "created_at": "2026-01-01T12:00:00Z",
+  "updated_at": "2026-01-01T12:05:00Z"
+}
+```
+
+`media_type` is `movie` or `series`. Status is `pending`, `approved`, `declined` or `available`. `tmdb_id`, `tvdb_id`, `year`, `poster`, `arr_id`, `decided_by` and `note` are omitted when empty or zero. Note that the request body of `POST /api/requests` and `POST /api/search/add` names the media type `type`, while the stored request and the response use `media_type`. A pass in the pipeline flips `approved` requests for that *arr item to `available`.
+
+### Job
+
+`store.Job`, as returned by `/api/jobs`:
+
+```json
+{
+  "id": 3,
+  "arr_type": "radarr",
+  "arr_id": 12,
+  "episode_id": 0,
+  "title": "The Matrix",
+  "path": "/media/movies/The Matrix (1999)/The Matrix (1999).mkv",
+  "size": 8123456789,
+  "download_id": "ABCDEF0123",
+  "runtime_min": 136,
+  "status": "failed",
+  "result": "{\"passed\":false,...}",
+  "error": "no video stream",
+  "attempts": 1,
+  "created_at": "2026-01-01T12:00:00Z",
+  "started_at": "2026-01-01T12:00:01Z",
+  "finished_at": "2026-01-01T12:00:03Z"
+}
+```
+
+`status` is `queued`, `running`, `passed` or `failed`. `episode_id`, `download_id`, `runtime_min`, `result`, `error`, `started_at` and `finished_at` are omitted when empty. `result` is a **string containing JSON** (parse it client-side) once the pipeline has finished the job, with the shape below. `error` holds the failure reason for a failed job.
+
+#### Job `result` JSON
+
+Written by `pipeline.Result`:
+
+```json
+{
+  "passed": true,
+  "skipped": false,
+  "integrity": "pass",
+  "sample": "pass",
+  "duration": "warn",
+  "video": "h264",
+  "audio": ["aac(eng)", "ac3(spa)"],
+  "subtitles": ["eng", "spa"],
+  "width": 1920,
+  "height": 1080,
+  "duration_sec": 8160.4,
+  "reason": ""
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `passed` | bool | overall outcome |
+| `skipped` | bool, omitted when false | validation was disabled; the job passed without checks |
+| `integrity` | `pass` \| `fail` \| `skip` | file exists and ffprobe found a video stream |
+| `sample` | `pass` \| `fail` \| `skip` | size is not sample-like (at least 50 MB, and at least 3 MB per expected minute when the runtime is known) |
+| `duration` | `pass` \| `warn` \| `fail` \| `skip` | within 10% of the expected runtime passes, over 10% warns, over 50% fails, unknown skips |
+| `video` | string, omitted if empty | video codec |
+| `audio` | string array, omitted if empty | `codec(lang)` per audio track |
+| `subtitles` | string array, omitted if empty | subtitle languages |
+| `width`, `height` | int, omitted if 0 | video dimensions |
+| `duration_sec` | number, omitted if 0 | measured duration |
+| `reason` | string, omitted if empty | why it failed |
+
+## Webhook contract
+
+`POST /api/hooks/import` is called by Sonarr and Radarr, not by browsers. nginx only lets loopback and private ranges reach it.
+
+- **Header** `X-Webhook-Secret` must equal the server's `WEBHOOK_SECRET` (constant-time comparison). A wrong or missing secret is rejected with 401. If the server has no secret configured, every call is rejected with 503.
+- **Body** is at most 1 MB of JSON (413 above that, 400 if it is not JSON), selected by `eventType` (case-insensitive):
+  - `Test`: `200 {"status":"ok"}` (sent by the *arr "Test" button).
+  - `Download`: enqueue a job and return `200 {"status":"queued","job_id":N}`. If a queued or running job for the same `path` exists, its id is returned instead of inserting a duplicate.
+  - anything else: `200 {"status":"ignored"}`.
+
+A `Download` payload must carry a `movie` (Radarr) or `series` (Sonarr) object with a non-zero `id` and a file with a non-empty `path`; otherwise the call is a 400.
+
+Fields read from a Radarr payload:
+
+| Field | Becomes |
+|---|---|
+| `movie.id` | `job.arr_id` |
+| `movie.title`, `movie.year`, `movie.tmdbId` | `job.title` (the others are informational) |
+| `movieFile.path` | `job.path` (must be a path as seen inside the containers, under `/media/movies`) |
+| `movieFile.size` | `job.size` |
+| `downloadId` | `job.download_id` |
+
+Fields read from a Sonarr payload:
+
+| Field | Becomes |
+|---|---|
+| `series.id` | `job.arr_id` |
+| `series.title`, `series.tvdbId` | `job.title` |
+| `episodes[0].id` | `job.episode_id` (first episode only) |
+| `episodeFile.path` | `job.path` (under `/media/tv`) |
+| `episodeFile.size` | `job.size` |
+| `downloadId` | `job.download_id` |
+
+`job.arr_type` is `radarr` or `sonarr`. `job.runtime_min` is looked up best-effort (`GetMovie(id).runtime` or `GetSeriesByID(id).runtime`) and is 0 when the lookup fails. After enqueuing, the worker is woken.
+
+Example (Radarr):
+
+```json
+{
+  "eventType": "Download",
+  "movie": {"id": 12, "title": "The Matrix", "year": 1999, "tmdbId": 603},
+  "movieFile": {"path": "/media/movies/The Matrix (1999)/The Matrix (1999).mkv", "size": 8123456789},
+  "downloadId": "ABCDEF0123"
+}
+```
+
+## Environment variables
+
+Read by `cmd/pelicula-server` through `config.FromEnv`. Compose sets them from `.env`; the CLI writes `.env`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PELICULA_LISTEN` | `:8181` | API listen address |
+| `CONFIG_DIR` | `/config` | mounted config root: `pelicula/` (read-write), `sonarr/ radarr/ prowlarr/` (read-only; API keys are read from `config.xml`) |
+| `PELICULA_DB` | `$CONFIG_DIR/pelicula/pelicula.db` | SQLite file (override mainly for tests) |
+| `SONARR_URL` | `http://sonarr:8989/sonarr` | Sonarr base URL |
+| `RADARR_URL` | `http://radarr:7878/radarr` | Radarr base URL |
+| `PROWLARR_URL` | `http://gluetun:9696/prowlarr` | only used when `PELICULA_VPN=true` |
+| `QBITTORRENT_URL` | `http://gluetun:8080` | only used when `PELICULA_VPN=true`; no auth (subnet whitelist seeded by the CLI) |
+| `JELLYFIN_URL` | `http://jellyfin:8096/jellyfin` | Jellyfin base URL |
+| `GLUETUN_CONTROL_URL` | `http://gluetun:8000` | gluetun control API, basic auth with the two variables below |
+| `GLUETUN_HTTP_USER` | `pelicula` | gluetun control API user |
+| `GLUETUN_HTTP_PASS` | | gluetun control API password |
+| `PELICULA_URL` | `http://pelicula:8181` | URL Sonarr and Radarr use to call the import webhook |
+| `WEBHOOK_SECRET` | | sent by *arr in `X-Webhook-Secret`; empty makes the webhook return 503 |
+| `JELLYFIN_ADMIN_USER` | `admin` | Jellyfin admin created by autowire; the server authenticates as it |
+| `JELLYFIN_PASSWORD` | | that admin's password |
+| `PELICULA_VPN` | `false` | `true` enables the Prowlarr, qBittorrent and gluetun clients and port sync; the CLI exports `true` when `WIREGUARD_PRIVATE_KEY` is set |
+| `MOVIES_PATH` | `/media/movies` | movies root folder inside the containers |
+| `TV_PATH` | `/media/tv` | TV root folder inside the containers |
+| `SERVER_COUNTRIES` | | display only (shown in settings info) |
+| `HOST_CONFIG_DIR`, `HOST_LIBRARY_DIR`, `HOST_WORK_DIR` | | display only: the host paths behind the mounts |
+| `TZ` | `UTC` | time zone, also shown in settings info |
+
+Variables read by the CLI and compose only (not the server): `PELICULA_PORT` (host port for nginx, default 7354), `PUID`, `PGID`, `LIBRARY_DIR`, `WORK_DIR`, `WIREGUARD_PRIVATE_KEY`, `SERVER_COUNTRIES`, `PELICULA_PROJECT_NAME` (compose project, default `pelicula`), `PELICULA_VERSION` (stamped into the image build). See `.env.example`.

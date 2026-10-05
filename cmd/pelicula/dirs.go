@@ -1,126 +1,31 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"time"
 )
 
-// safeSlugRe matches valid library slugs. Used in setupDirs and generateLibrariesOverride.
-var safeSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+// configSubdirs are the per-service directories under CONFIG_DIR. `up`
+// creates them; `reset-config` deletes them.
+var configSubdirs = []string{"sonarr", "radarr", "prowlarr", "qbittorrent", "jellyfin", "pelicula", "gluetun"}
 
-// cliLibrary is a minimal representation of a library entry used by the CLI
-// to create directories and generate compose overrides.
-// It mirrors the on-disk schema in libraries.json (written by middleware).
-type cliLibrary struct {
-	Name       string `json:"name"`
-	Slug       string `json:"slug"`
-	Path       string `json:"path,omitempty"` // host path; empty = LIBRARY_DIR/slug
-	Type       string `json:"type"`
-	Arr        string `json:"arr"`
-	Processing string `json:"processing"`
-	BuiltIn    bool   `json:"builtin,omitempty"`
-}
-
-// cliLibraryConfig is the top-level on-disk schema for libraries.json.
-type cliLibraryConfig struct {
-	Libraries []cliLibrary `json:"libraries"`
-}
-
-// defaultLibraries returns the built-in two-library default config.
-// SYNC: keep slug/name/type/arr/processing in sync with defaultLibraries() in procula/libraries.go.
-func defaultLibraries() cliLibraryConfig {
-	return cliLibraryConfig{
-		Libraries: []cliLibrary{
-			{Name: "Movies", Slug: "movies", Type: "movies", Arr: "radarr", Processing: "full", BuiltIn: true},
-			{Name: "TV Shows", Slug: "tv", Type: "tvshows", Arr: "sonarr", Processing: "full", BuiltIn: true},
-		},
-	}
-}
-
-// readOrCreateLibraries reads libraries.json from configPeliculaDir.
-// If the file does not exist, it writes the default (movies + tv) and returns those.
-// If the file exists, it parses and returns the libraries.
-func readOrCreateLibraries(configPeliculaDir string) ([]cliLibrary, error) {
-	librariesPath := filepath.Join(configPeliculaDir, "libraries.json")
-
-	data, err := os.ReadFile(librariesPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("read libraries.json: %w", err)
-		}
-
-		// File absent — write default and return built-ins.
-		defaults := defaultLibraries()
-		out, err := json.MarshalIndent(defaults, "", "  ")
-		if err != nil {
-			return nil, fmt.Errorf("marshal default libraries.json: %w", err)
-		}
-		if err := os.MkdirAll(configPeliculaDir, 0755); err != nil {
-			return nil, fmt.Errorf("mkdir %s: %w", configPeliculaDir, err)
-		}
-		if err := os.WriteFile(librariesPath, append(out, '\n'), 0644); err != nil {
-			return nil, fmt.Errorf("write default libraries.json: %w", err)
-		}
-		return defaults.Libraries, nil
-	}
-
-	var cfg cliLibraryConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse libraries.json: %w", err)
-	}
-	return cfg.Libraries, nil
-}
-
-// setupDirs creates the required directory tree for configDir, libraryDir, and workDir.
-// For each library in libs, it creates filepath.Join(libraryDir, lib.Slug) unless the
-// library has an explicit external path (lib.Path != ""), in which case the user manages
-// that directory.
+// setupDirs creates the directory tree the stack expects:
 //
-// libraryDir == "" means the library is not host-visible (NFS mode — the
-// Docker engine mounts the export directly, see docker-compose.nfs.yml):
-// slug directories are skipped here and created inside the mounted volume
-// after the stack is up instead (see cmdUp's ensureNFSLibraryDirs).
-func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
-	dirs := []string{
-		filepath.Join(configDir, "gluetun"),
-		filepath.Join(configDir, "qbittorrent"),
-		filepath.Join(configDir, "prowlarr"),
-		filepath.Join(configDir, "sonarr"),
-		filepath.Join(configDir, "radarr"),
-		filepath.Join(configDir, "jellyfin"),
-		filepath.Join(configDir, "bazarr"),
-		filepath.Join(configDir, "procula", "jobs"),
-		filepath.Join(configDir, "procula", "profiles"),
-		filepath.Join(configDir, "pelicula"),
-		filepath.Join(workDir, "downloads"),
-		filepath.Join(workDir, "downloads", "incomplete"),
+//	CONFIG_DIR/{sonarr,radarr,prowlarr,qbittorrent,jellyfin,pelicula,gluetun}
+//	LIBRARY_DIR/{movies,tv}
+//	WORK_DIR/downloads/{radarr,tv-sonarr}
+func setupDirs(configDir, libraryDir, workDir string) error {
+	var dirs []string
+	for _, s := range configSubdirs {
+		dirs = append(dirs, filepath.Join(configDir, s))
+	}
+	dirs = append(dirs,
+		filepath.Join(libraryDir, "movies"),
+		filepath.Join(libraryDir, "tv"),
 		filepath.Join(workDir, "downloads", "radarr"),
 		filepath.Join(workDir, "downloads", "tv-sonarr"),
-		filepath.Join(workDir, "processing"),
-	}
-
-	if len(libs) == 0 {
-		warn("no libraries configured — media directories will not be created")
-	}
-
-	// Create a directory under libraryDir for each managed library (no external path).
-	for _, lib := range libs {
-		if lib.Slug == "" {
-			continue
-		}
-		if !safeSlugRe.MatchString(lib.Slug) {
-			warn(fmt.Sprintf("skipping library with unsafe slug %q (must match [a-z0-9][a-z0-9-]*)", lib.Slug))
-			continue
-		}
-		if lib.Path == "" && libraryDir != "" {
-			dirs = append(dirs, filepath.Join(libraryDir, lib.Slug))
-		}
-	}
-
+	)
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return &dirCreateError{path: d, err: err}
@@ -129,77 +34,24 @@ func setupDirs(configDir, libraryDir, workDir string, libs []cliLibrary) error {
 	return nil
 }
 
-// dirCreateError wraps a directory creation failure with actionable guidance.
+// dirCreateError wraps a directory creation failure with its path.
 type dirCreateError struct {
 	path string
 	err  error
 }
 
-func (e *dirCreateError) Error() string {
-	return fmt.Sprintf("mkdir %s: %s", e.path, e.err)
-}
-
+func (e *dirCreateError) Error() string { return fmt.Sprintf("mkdir %s: %s", e.path, e.err) }
 func (e *dirCreateError) Unwrap() error { return e.err }
 
-// firstExistingAncestor walks up from path and returns the deepest ancestor
-// that already exists on the filesystem, or "" if none found.
+// firstExistingAncestor returns the deepest existing ancestor of path, or ""
+// when none exists. Used to explain permission errors.
 func firstExistingAncestor(path string) string {
 	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
-		if _, err := os.Stat(p); err == nil {
+		if fileExists(p) {
 			return p
 		}
-		parent := filepath.Dir(p)
-		if parent == p {
-			break // reached filesystem root
+		if filepath.Dir(p) == p {
+			return ""
 		}
 	}
-	return ""
-}
-
-// writeEnvFile writes a fresh .env file with the given parameters.
-// extra holds additional key/value pairs to preserve verbatim (e.g. the
-// LIBRARY_NFS/NFS_* quartet on NFS-mode installs — hard reset promises to
-// keep "paths", and in NFS mode those vars ARE the library path). Keys in
-// extra never override the explicit parameters; empty values are skipped.
-func writeEnvFile(envPath, configDir, libraryDir, workDir, puid, pgid, tz,
-	wgKey, countries, port, adminUser, proculaKey, jfPass string, extra EnvMap) error {
-
-	// Back up if exists, under a timestamped name (survives repeated resets
-	// without being silently overwritten, unlike WriteEnv's plain ".bak").
-	// We write via writeEnvNoBackup below to avoid a second, redundant
-	// ".bak" backup of the same pre-write content.
-	if _, err := os.Stat(envPath); err == nil {
-		bak := fmt.Sprintf("%s.bak.%d", envPath, time.Now().Unix())
-		_ = copyFile(envPath, bak)
-	}
-
-	m := EnvMap{
-		"CONFIG_DIR":            configDir,
-		"LIBRARY_DIR":           libraryDir,
-		"WORK_DIR":              workDir,
-		"PUID":                  puid,
-		"PGID":                  pgid,
-		"TZ":                    tz,
-		"WIREGUARD_PRIVATE_KEY": wgKey,
-		"SERVER_COUNTRIES":      countries,
-		"GLUETUN_HTTP_USER":     "pelicula",
-		"GLUETUN_HTTP_PASS":     generateAPIKey(),
-		"PELICULA_PORT":         port,
-		"JELLYFIN_ADMIN_USER":   adminUser,
-		"JELLYFIN_PASSWORD":     jfPass,
-		"PROCULA_API_KEY":       proculaKey,
-		"TRANSCODING_ENABLED":   "false",
-		"NOTIFICATIONS_ENABLED": "false",
-		"NOTIFICATIONS_MODE":    "internal",
-		"PELICULA_PROJECT_NAME": "pelicula",
-	}
-	for k, v := range extra {
-		if v == "" {
-			continue
-		}
-		if _, exists := m[k]; !exists {
-			m[k] = v
-		}
-	}
-	return writeEnvNoBackup(envPath, m)
 }

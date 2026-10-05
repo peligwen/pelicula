@@ -2,18 +2,19 @@ package main
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"math/big"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"strings"
+	"sync"
 )
 
-// walkUpForMarker walks up the directory tree from start, returning the first
-// directory that contains marker (a relative path). Returns start unchanged
-// if the marker is not found anywhere in the ancestor chain.
+// composeMarker is the file whose presence identifies the repository root.
+var composeMarker = filepath.Join("compose", "docker-compose.yml")
+
+// walkUpForMarker walks up from start and returns the first directory that
+// contains marker (a relative path), or start unchanged if none does.
 func walkUpForMarker(start, marker string) string {
 	dir := start
 	for {
@@ -22,23 +23,18 @@ func walkUpForMarker(start, marker string) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			break
+			return start
 		}
 		dir = parent
 	}
-	return start
 }
 
-// getScriptDir returns the pelicula project root directory.
-// It walks up from the binary's location looking for compose/docker-compose.yml.
-// Falls back to the binary's directory if not found.
+// getScriptDir returns the repository root: the nearest ancestor of the
+// binary's location (bin/pelicula) that holds compose/docker-compose.yml.
 func getScriptDir() string {
-	// Start from the binary's resolved location
 	start := ""
-	exe, err := os.Executable()
-	if err == nil {
-		resolved, err := filepath.EvalSymlinks(exe)
-		if err == nil {
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 			start = filepath.Dir(resolved)
 		} else {
 			start = filepath.Dir(exe)
@@ -47,73 +43,58 @@ func getScriptDir() string {
 	if start == "" {
 		start, _ = os.Getwd()
 	}
-
-	return walkUpForMarker(start, filepath.Join("compose", "docker-compose.yml"))
+	return walkUpForMarker(start, composeMarker)
 }
 
-// openBrowser opens url in the default browser.
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	_ = cmd.Start() // best-effort, ignore errors
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
-// generateAPIKey generates a 32-character alphanumeric random key.
-func generateAPIKey() string {
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, 32)
+const secretAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+// generateSecret returns n random alphanumeric characters from crypto/rand.
+// Alphanumeric keeps values safe inside .env, shell healthchecks and headers.
+func generateSecret(n int) string {
+	limit := big.NewInt(int64(len(secretAlphabet)))
+	b := make([]byte, n)
 	for i := range b {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		v, err := rand.Int(rand.Reader, limit)
 		if err != nil {
-			// Fall back to base64 if crypto/rand fails
-			fb := make([]byte, 24)
-			_, _ = rand.Read(fb)
-			return base64.RawURLEncoding.EncodeToString(fb)[:32]
+			// crypto/rand failing means the OS entropy source is broken;
+			// a predictable secret would be worse than stopping.
+			fatal("cannot read system randomness: " + err.Error())
 		}
-		b[i] = chars[n.Int64()]
+		b[i] = secretAlphabet[v.Int64()]
 	}
 	return string(b)
 }
 
-// capitalize uppercases the first byte of s if it is a lowercase ASCII letter.
-// Returns s unchanged if s is empty or the first byte is not a–z.
-func capitalize(s string) string {
-	if len(s) == 0 {
-		return s
-	}
-	if s[0] >= 'a' && s[0] <= 'z' {
-		return string(s[0]-32) + s[1:]
-	}
-	return s
-}
+var (
+	gitVersionOnce sync.Once
+	gitVersionVal  string
+)
 
-// gitDescribe returns the output of `git describe --tags --always --dirty`
-// for the repo at dir, trimmed of whitespace. Falls back to "dev" if git is
-// unavailable or dir is not a git repository. The directory is explicit —
-// never rely on the process cwd, which is wherever the binary was invoked.
+// gitDescribe returns `git describe --tags --always --dirty` for the repo at
+// dir. When git is unavailable it falls back to the version baked into this
+// binary, so compose still gets a meaningful PELICULA_VERSION.
 func gitDescribe(dir string) string {
 	out, err := exec.Command("git", "-C", dir, "describe", "--tags", "--always", "--dirty").Output()
-	if err != nil || len(out) == 0 {
-		return "dev"
+	if v := strings.TrimSpace(string(out)); err == nil && v != "" {
+		return v
 	}
-	v := string(out)
-	// trim newline
-	for len(v) > 0 && (v[len(v)-1] == '\n' || v[len(v)-1] == '\r') {
-		v = v[:len(v)-1]
-	}
-	return v
+	return version
 }
 
-// requireEnv prints an error and exits if the .env file does not exist.
+// cachedGitVersion runs gitDescribe once per process.
+func cachedGitVersion(dir string) string {
+	gitVersionOnce.Do(func() { gitVersionVal = gitDescribe(dir) })
+	return gitVersionVal
+}
+
+// requireEnv exits with a pointer to `pelicula up` when .env does not exist.
 func requireEnv(envFile string) {
-	if _, err := os.Stat(envFile); err != nil {
+	if !fileExists(envFile) {
 		fatal("No .env file found. Run " + bold("pelicula up") + " first.")
 	}
 }
@@ -128,28 +109,8 @@ func loadEnvOrFatal(envFile string) EnvMap {
 	return env
 }
 
-// isNFSLibrary reports whether the install serves its media library from an
-// NFS export mounted by the Docker engine (compose/docker-compose.nfs.yml)
-// instead of the default ${LIBRARY_DIR} bind mount. Strict "true" match,
-// consistent with the stack's other boolean env vars (TRANSCODING_ENABLED,
-// DUALSUB_ENABLED, PELICULA_OPEN_REGISTRATION).
-func isNFSLibrary(env EnvMap) bool {
-	return env["LIBRARY_NFS"] == "true"
-}
-
-// peliculaBaseURL returns the base URL for the pelicula-api on localhost using
-// the PELICULA_PORT from env, defaulting to 7354 if the key is absent or empty.
-// Callers append the path, e.g. peliculaBaseURL(env) + "/api/pelicula/health".
+// peliculaBaseURL returns the local dashboard URL for env's PELICULA_PORT
+// (default 7354). Append a path such as "/api/health".
 func peliculaBaseURL(env EnvMap) string {
-	port := envDefault(env, "PELICULA_PORT", "7354")
-	return "http://localhost:" + port
-}
-
-// checkAuthError exits with an actionable message when resp indicates
-// authentication is required (HTTP 401 or 403).
-func checkAuthError(resp *http.Response) {
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		fail("Authentication required — run: pelicula up")
-		os.Exit(1)
-	}
+	return "http://localhost:" + envDefault(env, "PELICULA_PORT", "7354")
 }

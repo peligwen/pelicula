@@ -3,72 +3,73 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
-// TestWalkUpForMarker covers the walkUpForMarker helper extracted from getScriptDir.
 func TestWalkUpForMarker(t *testing.T) {
-	// Build a small directory tree:
-	//   root/
-	//     marker/target          ← the marker we're looking for
-	//     level1/
-	//       level2/              ← walk starting point for the "found after N hops" case
 	root := t.TempDir()
-	markerDir := filepath.Join(root, "marker")
-	if err := os.MkdirAll(markerDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	markerFile := filepath.Join(markerDir, "target")
-	if err := os.WriteFile(markerFile, []byte(""), 0644); err != nil {
-		t.Fatal(err)
-	}
-	level2 := filepath.Join(root, "level1", "level2")
-	if err := os.MkdirAll(level2, 0755); err != nil {
+	writeFileT(t, filepath.Join(root, "compose", "docker-compose.yml"), "services: {}\n")
+	deep := filepath.Join(root, "bin", "nested")
+	if err := os.MkdirAll(deep, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	cases := []struct {
-		name   string
-		start  string
-		marker string
-		want   string // expected return value; "" means "same as start" (not-found fallback)
-	}{
-		{
-			name:   "found at current directory",
-			start:  root,
-			marker: filepath.Join("marker", "target"),
-			want:   root,
-		},
-		{
-			name:   "found after walking up two levels",
-			start:  level2,
-			marker: filepath.Join("marker", "target"),
-			want:   root,
-		},
-		{
-			name:   "not found — returns start",
-			start:  level2,
-			marker: filepath.Join("nonexistent", "file"),
-			want:   level2, // fallback to start
-		},
+	if got := walkUpForMarker(deep, composeMarker); got != root {
+		t.Errorf("from bin/nested: %q, want %q", got, root)
+	}
+	if got := walkUpForMarker(root, composeMarker); got != root {
+		t.Errorf("from the root: %q, want %q", got, root)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := walkUpForMarker(tc.start, tc.marker)
-			if got != tc.want {
-				t.Errorf("walkUpForMarker(%q, %q) = %q, want %q", tc.start, tc.marker, got, tc.want)
-			}
-		})
+	// Not found anywhere: the start directory comes back unchanged.
+	other := t.TempDir()
+	if got := walkUpForMarker(other, filepath.Join("no", "such", "marker")); got != other {
+		t.Errorf("no marker: %q, want %q", got, other)
 	}
 }
 
-// TestGetScriptDir_ReturnsNonEmpty is a smoke test: the binary is built from
-// the cmd/pelicula directory which lives under the repo root that contains
-// compose/docker-compose.yml, so getScriptDir() must return a non-empty string.
-func TestGetScriptDir_ReturnsNonEmpty(t *testing.T) {
-	got := getScriptDir()
-	if got == "" {
-		t.Error("getScriptDir() returned empty string")
+func TestGenerateSecret(t *testing.T) {
+	alnum := regexp.MustCompile(`^[A-Za-z0-9]+$`)
+	seen := map[string]bool{}
+	for _, n := range []int{1, 16, 32, 64} {
+		s := generateSecret(n)
+		if len(s) != n || !alnum.MatchString(s) {
+			t.Errorf("generateSecret(%d) = %q", n, s)
+		}
+	}
+	for i := 0; i < 50; i++ {
+		s := generateSecret(32)
+		if seen[s] {
+			t.Fatalf("duplicate secret %q", s)
+		}
+		seen[s] = true
+	}
+}
+
+func TestGitDescribeFallsBackToVersion(t *testing.T) {
+	// A directory that is not a git repository (or no git binary at all).
+	orig := version
+	defer func() { version = orig }()
+	version = "v0.0.0-test"
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir)) // never find an enclosing repo
+	if got := gitDescribe(dir); got != "v0.0.0-test" {
+		t.Errorf("gitDescribe outside a repo = %q, want the baked-in version", got)
+	}
+}
+
+func TestRequireEnvAndFileExists(t *testing.T) {
+	dir := t.TempDir()
+	if fileExists(filepath.Join(dir, ".env")) {
+		t.Error("fileExists on a missing file")
+	}
+	writeFileT(t, filepath.Join(dir, ".env"), "A=1\n")
+	if !fileExists(filepath.Join(dir, ".env")) {
+		t.Error("fileExists on an existing file")
+	}
+	env := loadEnvOrFatal(filepath.Join(dir, ".env"))
+	if env["A"] != "1" {
+		t.Errorf("env = %v", env)
 	}
 }

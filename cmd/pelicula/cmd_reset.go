@@ -3,278 +3,117 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
-func cmdResetConfig(ctx *Context, args []string) {
-	ctx.LoadEnv()
+// resetNotes says what deleting each config directory loses.
+var resetNotes = map[string]string{
+	"sonarr":      "series library, history, API key",
+	"radarr":      "movie library, history, API key",
+	"prowlarr":    "indexers and API key",
+	"qbittorrent": "client settings and torrent state",
+	"jellyfin":    "users, libraries, watch history (media files are untouched)",
+	"pelicula":    "Pelicula's database: roles, sessions, invites, requests, job history",
+	"gluetun":     "cached VPN server list",
+}
 
-	arg := ""
-	if len(args) > 0 {
-		arg = args[0]
+const resetUsage = "Usage: pelicula reset-config <svc|all> [--yes]\n  svc: sonarr | radarr | prowlarr | qbittorrent | jellyfin | pelicula | gluetun"
+
+// parseResetArgs splits `reset-config` arguments into the target and --yes.
+func parseResetArgs(args []string) (target string, yes bool, err error) {
+	for _, a := range args {
+		switch {
+		case a == "--yes" || a == "-y":
+			yes = true
+		case strings.HasPrefix(a, "-"):
+			return "", false, fmt.Errorf("unknown option %s", a)
+		case target == "":
+			target = a
+		default:
+			return "", false, fmt.Errorf("unexpected argument %s", a)
+		}
 	}
+	if target == "" {
+		return "", false, fmt.Errorf("missing target")
+	}
+	return target, yes, nil
+}
 
-	switch arg {
-	case "":
-		resetConfigSoft(ctx)
-	case "all", "full":
-		resetConfigAll(ctx)
-	case "sonarr", "radarr", "prowlarr", "jellyfin", "qbittorrent", "procula-jobs":
-		resetConfigService(ctx, arg)
+// resetDirs returns the directories to delete for target ("all" or one name
+// from configSubdirs), refusing a CONFIG_DIR that is not a safe place to
+// delete from (empty, relative, the filesystem root, or the home directory).
+func resetDirs(configDir, home, target string) ([]string, error) {
+	clean := filepath.Clean(configDir)
+	if configDir == "" || !filepath.IsAbs(clean) || filepath.Dir(clean) == clean || (home != "" && clean == filepath.Clean(home)) {
+		return nil, fmt.Errorf("unsafe CONFIG_DIR %q — refusing to delete anything", configDir)
+	}
+	var names []string
+	switch {
+	case target == "all":
+		names = configSubdirs
+	case slices.Contains(configSubdirs, target):
+		names = []string{target}
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown reset target: %s\n", arg)
-		fmt.Fprintln(os.Stderr, "Usage: pelicula reset-config [sonarr|radarr|prowlarr|jellyfin|qbittorrent|procula-jobs|all]")
+		return nil, fmt.Errorf("unknown target %q", target)
+	}
+	dirs := make([]string, len(names))
+	for i, n := range names {
+		dirs[i] = filepath.Join(clean, n)
+	}
+	return dirs, nil
+}
+
+// confirm asks a y/N question; anything but y/yes (or end of input) is no.
+func confirm(in io.Reader, out io.Writer, prompt string) bool {
+	fmt.Fprintf(out, "%s [y/N] ", prompt)
+	line, _ := bufio.NewReader(in).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+// cmdResetConfig stops the stack and deletes one service's config directory
+// (or all of them). .env and the media library are never touched.
+func cmdResetConfig(ctx *Context, args []string) {
+	target, yes, err := parseResetArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n%s\n", err, resetUsage)
 		os.Exit(1)
 	}
-}
+	ctx.LoadEnv()
 
-// resetConfigSoft wipes service configs, preserving API keys / gluetun / user auth.
-func resetConfigSoft(ctx *Context) {
-	env := ctx.Env
-	configDir := env["CONFIG_DIR"]
-
-	fmt.Printf("%sReset configuration%s\n", colorBold, colorReset)
-	fmt.Println()
-	fmt.Println("This wipes service config and databases so auto-wiring runs fresh.")
-	fmt.Println("Your API keys, VPN config, and user auth are preserved.")
-	fmt.Println()
-	fmt.Printf("%sWhat will be cleared:%s\n", colorBold, colorReset)
-	fmt.Println("  sonarr/      — all config except API key")
-	fmt.Println("  radarr/      — all config except API key")
-	fmt.Println("  prowlarr/    — config only (indexer database kept)")
-	fmt.Println("  jellyfin/    — full wipe (wizard re-runs on next up)")
-	fmt.Println("  qbittorrent/ — full wipe (re-seeded on next up)")
-	fmt.Println("  procula/jobs/ — pending job queue")
-	fmt.Println()
-	fmt.Printf("%sWhat is kept:%s\n", colorBold, colorReset)
-	fmt.Println("  gluetun/   — WireGuard config")
-	fmt.Println("  pelicula/  — users and auth config")
-	fmt.Println("  procula/profiles/, procula/notifications.json")
-	fmt.Println()
-	fmt.Printf("%sContinue? [y/N]%s ", colorRed, colorReset)
-
-	if !confirmYN() {
-		info("Aborted.")
-		return
-	}
-
-	ensureStackDown(ctx)
-
-	// Extract API keys before wiping
-	sonarrKey := extractAPIKey(filepath.Join(configDir, "sonarr", "config.xml"))
-	radarrKey := extractAPIKey(filepath.Join(configDir, "radarr", "config.xml"))
-	prowlarrKey := extractAPIKey(filepath.Join(configDir, "prowlarr", "config.xml"))
-
-	if err := ResetArrService("Sonarr", filepath.Join(configDir, "sonarr"), "/sonarr", sonarrKey); err != nil {
-		warn("sonarr reset: " + err.Error())
-	}
-	if err := ResetArrService("Radarr", filepath.Join(configDir, "radarr"), "/radarr", radarrKey); err != nil {
-		warn("radarr reset: " + err.Error())
-	}
-
-	// Prowlarr: only reset config.xml — preserve database (indexers live there)
-	if err := resetProwlarr(configDir, prowlarrKey); err != nil {
-		warn("prowlarr reset: " + err.Error())
-	}
-
-	_ = resetJellyfin(configDir)
-	_ = resetQBittorrent(configDir)
-	_ = resetProculaJobs(configDir)
-
-	fmt.Println()
-	pass("Config reset — run " + bold("pelicula up") + " to start fresh with auto-wiring.")
-}
-
-// resetConfigService resets a single named service.
-func resetConfigService(ctx *Context, svc string) {
-	env := ctx.Env
-	configDir := env["CONFIG_DIR"]
-
-	ensureStackDown(ctx)
-
-	switch svc {
-	case "sonarr":
-		key := extractAPIKey(filepath.Join(configDir, "sonarr", "config.xml"))
-		if err := ResetArrService("Sonarr", filepath.Join(configDir, "sonarr"), "/sonarr", key); err != nil {
-			fatal(err.Error())
-		}
-	case "radarr":
-		key := extractAPIKey(filepath.Join(configDir, "radarr", "config.xml"))
-		if err := ResetArrService("Radarr", filepath.Join(configDir, "radarr"), "/radarr", key); err != nil {
-			fatal(err.Error())
-		}
-	case "prowlarr":
-		key := extractAPIKey(filepath.Join(configDir, "prowlarr", "config.xml"))
-		if err := resetProwlarr(configDir, key); err != nil {
-			fatal(err.Error())
-		}
-	case "jellyfin":
-		if err := resetJellyfin(configDir); err != nil {
-			fatal(err.Error())
-		}
-	case "qbittorrent":
-		if err := resetQBittorrent(configDir); err != nil {
-			fatal(err.Error())
-		}
-	case "procula-jobs":
-		if err := resetProculaJobs(configDir); err != nil {
-			fatal(err.Error())
-		}
-	}
-
-	fmt.Println()
-	pass(svc + " reset — run " + bold("pelicula up") + " to apply.")
-}
-
-// resetConfigAll does a full wipe: CONFIG_DIR + regenerate .env,
-// preserving WireGuard key, VPN country, and path/host vars.
-func resetConfigAll(ctx *Context) {
-	env := ctx.Env
-	configDir := env["CONFIG_DIR"]
-
-	// Safety guard
-	if configDir == "" || configDir == "/" || configDir == os.Getenv("HOME") {
-		fatal("Unsafe CONFIG_DIR: '" + configDir + "' — aborting")
-	}
-
-	// In NFS mode there is no host library path — the export is mounted by
-	// the Docker engine (see docker-compose.nfs.yml) and its media files are
-	// untouchable from here either way.
-	libraryDir := env["LIBRARY_DIR"]
-	libraryLabel := libraryDir
-	if isNFSLibrary(env) {
-		libraryDir = ""
-		libraryLabel = "the NFS export (" + env["NFS_HOST"] + ":" + env["NFS_EXPORT"] + ")"
-	}
-	workDir := env["WORK_DIR"]
-
-	fmt.Printf("%s%sFull configuration reset%s\n", colorRed, colorBold, colorReset)
-	fmt.Println()
-	fmt.Println("This wipes the entire config directory and .env credentials, then rebuilds from scratch.")
-	fmt.Println()
-	fmt.Printf("%sWhat will be cleared:%s\n", colorBold, colorReset)
-	fmt.Printf("  ALL service configs, databases, and caches under %s\n", configDir)
-	fmt.Printf("  Jellyfin library metadata (media files in %s are kept)\n", libraryLabel)
-	fmt.Println("  Sonarr/Radarr API keys, series/movie databases")
-	fmt.Println("  Pelicula admin accounts and invite tokens")
-	fmt.Println("  Procula custom transcoding profiles and notification settings")
-	fmt.Println()
-	fmt.Printf("%sWhat is kept:%s\n", colorBold, colorReset)
-	fmt.Println("  Prowlarr indexer database (indexers survive)")
-	fmt.Println("  WireGuard key, VPN country, paths, PUID/PGID, TZ, port")
-	fmt.Printf("  %s — all media files\n", libraryLabel)
-	fmt.Printf("  %s/downloads — torrents and seeding files\n", workDir)
-	fmt.Println()
-	fmt.Printf("%sType 'reset' to confirm, or anything else to abort:%s ", colorRed, colorReset)
-
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-	if strings.TrimSpace(line) != "reset" {
-		info("Aborted.")
-		return
-	}
-
-	ensureStackDown(ctx)
-
-	// Stash values to preserve
-	savedWGKey := env["WIREGUARD_PRIVATE_KEY"]
-	savedCountries := env["SERVER_COUNTRIES"]
-
-	// Stash Prowlarr indexer database
-	prowlarrDB := filepath.Join(configDir, "prowlarr", "prowlarr.db")
-	var prowlarrStash string
-	if _, err := os.Stat(prowlarrDB); err == nil {
-		tmpDir, err := os.MkdirTemp("", "pelicula-prowlarr-stash-")
-		if err == nil {
-			prowlarrStash = tmpDir
-			// Copy prowlarr.db and .db-wal, .db-shm etc.
-			entries, _ := filepath.Glob(prowlarrDB + "*")
-			for _, entry := range entries {
-				dest := filepath.Join(tmpDir, filepath.Base(entry))
-				_ = copyFile(entry, dest)
-			}
-			info("Prowlarr indexer database stashed")
-		}
-	}
-
-	info("Wiping " + configDir + "...")
-	if err := os.RemoveAll(configDir); err != nil {
-		fatal("Failed to wipe config dir: " + err.Error())
-	}
-
-	// Rebuild directory structure.
-	// After a hard reset configDir is wiped, so readOrCreateLibraries will
-	// recreate the default libraries.json and return the built-in slugs.
-	resetLibs, err := readOrCreateLibraries(filepath.Join(configDir, "pelicula"))
+	home, _ := os.UserHomeDir()
+	dirs, err := resetDirs(ctx.Env["CONFIG_DIR"], home, target)
 	if err != nil {
-		warn("Failed to seed libraries.json after reset: " + err.Error())
-		resetLibs = defaultLibraries().Libraries
-	}
-	if err := setupDirs(configDir, libraryDir, workDir, resetLibs); err != nil {
-		fatal("Failed to recreate directories: " + err.Error())
+		fmt.Fprintf(os.Stderr, "%v\n%s\n", err, resetUsage)
+		os.Exit(1)
 	}
 
-	// Restore Prowlarr indexer database
-	if prowlarrStash != "" {
-		_ = os.MkdirAll(filepath.Join(configDir, "prowlarr"), 0755)
-		entries, _ := filepath.Glob(filepath.Join(prowlarrStash, "prowlarr.db*"))
-		for _, entry := range entries {
-			dest := filepath.Join(configDir, "prowlarr", filepath.Base(entry))
-			_ = os.Rename(entry, dest)
+	fmt.Printf("%sReset configuration: %s%s\n\nThis stops the stack and deletes:\n", colorBold, target, colorReset)
+	for _, d := range dirs {
+		fmt.Printf("  %s — %s\n", d, resetNotes[filepath.Base(d)])
+	}
+	fmt.Println("\n.env and your media library are kept.")
+	if !yes && !confirm(os.Stdin, os.Stdout, "Continue?") {
+		fmt.Println("Aborted.")
+		return
+	}
+
+	progress("Stopping the stack...")
+	if err := ctx.compose(true).Run("down", "--remove-orphans"); err != nil {
+		warn("docker compose down failed: " + err.Error())
+	}
+	for _, d := range dirs {
+		if err := os.RemoveAll(d); err != nil {
+			fatal(fmt.Sprintf("Could not remove %s: %v (files written by containers may need sudo)", d, err))
 		}
-		_ = os.RemoveAll(prowlarrStash)
-		info("Prowlarr indexer database restored")
+		info("Removed " + d)
 	}
-
-	// Regenerate .env — preserved identity/VPN values, fresh internal API key.
-	// Admin password is left empty — the setup wizard handles that on next up.
-	newProculaKey := generateAPIKey()
-
-	// The NFS quartet counts as "paths" for the keep-promise above — without
-	// it a hard reset on an NFS install would write LIBRARY_DIR="" and no
-	// library source at all. env["LIBRARY_DIR"] (not the zeroed local var) is
-	// preserved too, in case the operator keeps one set for reference.
-	if err := writeEnvFile(
-		ctx.EnvFile,
-		configDir, env["LIBRARY_DIR"], workDir,
-		env["PUID"], env["PGID"], env["TZ"],
-		savedWGKey, savedCountries,
-		envDefault(env, "PELICULA_PORT", "7354"),
-		"", newProculaKey, "",
-		EnvMap{
-			"LIBRARY_NFS": env["LIBRARY_NFS"],
-			"NFS_HOST":    env["NFS_HOST"],
-			"NFS_EXPORT":  env["NFS_EXPORT"],
-			"NFS_OPTIONS": env["NFS_OPTIONS"],
-		},
-	); err != nil {
-		fatal("Failed to write .env: " + err.Error())
-	}
-	pass("Wrote fresh " + ctx.EnvFile)
-
-	fmt.Println()
-	pass("Full reset complete — run " + bold("pelicula up") + " to start fresh.")
-}
-
-// ensureStackDown stops the stack if any services are running.
-// It unconditionally activates all known profiles (vpn, apprise) so that
-// containers started with any profile are torn down, regardless of the
-// current env state (mirrors cmd_down.go's explicit profile list).
-func ensureStackDown(ctx *Context) {
-	c := composeInvocation(ctx)
-	c.profiles = []string{"vpn", "apprise"}
-	if isStackRunning(c) {
-		warn("Stack is running — stopping it first...")
-		_ = c.Run("down", "--remove-orphans")
-	}
-}
-
-// confirmYN reads a yes/no answer from stdin. Returns true for y/Y.
-func confirmYN() bool {
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-	line = strings.TrimSpace(line)
-	return line == "y" || line == "Y"
+	ok("Config reset — run " + bold("pelicula up") + " to recreate and re-wire the stack.")
 }

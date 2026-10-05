@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -22,26 +21,19 @@ type Platform struct {
 	UID        int
 	GID        int
 
-	// hasVolume1Hint records whether /volume1 exists, independent of the
-	// strong /proc/syno_platform signal. It is corroborating evidence for
-	// the human-readable PlatformLabel only (CIT-10) — a bare /volume1
-	// directory can exist on any Linux host (a manually created mount
-	// point, a NAS-in-a-VM setup, etc.), so it must never by itself select
-	// Synology default paths.
-	hasVolume1Hint bool
-
 	DefaultConfigDir  string
 	DefaultLibraryDir string
 	DefaultWorkDir    string
 }
 
+// synologyDockerPath is where DSM installs the docker CLI. It is not on
+// sudo's secure_path, so `sudo docker` fails unless the absolute path is used.
+const synologyDockerPath = "/usr/local/bin/docker"
+
 // Detect runs all platform detection and returns a filled Platform.
 func Detect(scriptDir string) Platform {
-	p := Platform{}
-	p.OS = runtime.GOOS
-	p.UID = os.Getuid()
-	p.GID = os.Getgid()
-	// os.Getuid/Getgid return -1 on Windows — default to 1000
+	p := Platform{OS: runtime.GOOS, UID: os.Getuid(), GID: os.Getgid()}
+	// os.Getuid/Getgid return -1 on Windows.
 	if p.UID < 0 {
 		p.UID = 1000
 	}
@@ -49,47 +41,35 @@ func Detect(scriptDir string) Platform {
 		p.GID = 1000
 	}
 
-	// Synology detection.
-	// /proc/syno_platform is a genuine Synology-only kernel marker — it is
-	// the only signal strong enough to switch default config/library/work
-	// paths. /volume1 is recorded separately as a secondary hint used only
-	// to enrich PlatformLabel (see hasVolume1Hint doc comment).
+	// /proc/syno_platform is a Synology-only kernel marker. A bare /volume1
+	// directory can exist on any Linux host, so it is never used.
 	if _, err := os.Stat("/proc/syno_platform"); err == nil {
 		p.IsSynology = true
 	}
-	if _, err := os.Stat("/volume1"); err == nil {
-		p.hasVolume1Hint = true
-	}
 
-	// WSL detection (Linux only)
 	if p.OS == "linux" {
 		if data, err := os.ReadFile("/proc/version"); err == nil {
 			lower := strings.ToLower(string(data))
-			if strings.Contains(lower, "microsoft") || strings.Contains(lower, "wsl") {
-				p.IsWSL = true
-			}
+			p.IsWSL = strings.Contains(lower, "microsoft") || strings.Contains(lower, "wsl")
 		}
 	}
 
-	// Timezone detection
 	p.TZ = detectTZ()
+	p.NeedsSudo = detectSudo(dockerBinary(p.IsSynology, fileExists))
 
-	// Docker sudo detection
-	p.NeedsSudo = detectSudo()
-
-	// Default paths
-	if p.IsSynology {
-		p.DefaultConfigDir = "/volume1/docker/pelicula/config"
-		p.DefaultLibraryDir = "/volume1/media"
-		p.DefaultWorkDir = "/volume1/media"
-	} else {
-		home, _ := os.UserHomeDir()
-		p.DefaultConfigDir = filepath.Join(scriptDir, "config")
-		p.DefaultLibraryDir = filepath.Join(home, "media")
-		p.DefaultWorkDir = filepath.Join(home, "media")
-	}
-
+	home, _ := os.UserHomeDir()
+	p.DefaultConfigDir, p.DefaultLibraryDir, p.DefaultWorkDir = platformDefaults(p.IsSynology, scriptDir, home)
 	return p
+}
+
+// platformDefaults returns the default CONFIG_DIR, LIBRARY_DIR and WORK_DIR
+// offered by the setup wizard. Config lives next to the repo (fast local
+// disk); the library and downloads share one tree so imports can hardlink.
+func platformDefaults(isSynology bool, scriptDir, home string) (config, library, work string) {
+	if isSynology {
+		return "/volume1/docker/pelicula/config", "/volume1/media", "/volume1/media"
+	}
+	return filepath.Join(scriptDir, "config"), filepath.Join(home, "media"), filepath.Join(home, "media")
 }
 
 // PlatformLabel returns a human-readable platform label.
@@ -109,49 +89,54 @@ func (p Platform) PlatformLabel() string {
 		}
 		return "WSL"
 	}
-	if p.hasVolume1Hint {
-		return "Linux (/volume1 present — not detected as Synology)"
-	}
 	return "Linux"
 }
 
-// HostPlatformID returns the platform string used in the setup container env vars.
-func (p Platform) HostPlatformID() string {
-	if p.IsSynology {
-		return "synology"
+// dockerBinary returns the docker executable to run. On Synology the absolute
+// DSM path is preferred when it exists (sudo does not search /usr/local/bin).
+func dockerBinary(isSynology bool, exists func(string) bool) string {
+	if isSynology && exists(synologyDockerPath) {
+		return synologyDockerPath
 	}
-	if p.OS == "darwin" {
-		return "macos"
-	}
-	if p.IsWSL {
-		return "wsl"
-	}
-	return "linux"
+	return "docker"
 }
 
 func detectTZ() string {
-	// Try reading /etc/localtime symlink
 	if link, err := os.Readlink("/etc/localtime"); err == nil {
 		if idx := strings.Index(link, "zoneinfo/"); idx >= 0 {
 			return link[idx+len("zoneinfo/"):]
 		}
 	}
-	// Try /etc/timezone file
 	if data, err := os.ReadFile("/etc/timezone"); err == nil {
-		tz := strings.TrimSpace(string(data))
-		if tz != "" {
+		if tz := strings.TrimSpace(string(data)); tz != "" {
 			return tz
 		}
 	}
 	return "UTC"
 }
 
-// detectLANIPs walks host interfaces and returns every non-loopback IPv4
-// address in an RFC1918 range. Order follows the OS interface enumeration.
-// Returns an empty slice if no suitable interface is found.
-//
-// detectLANIPsFn is overridable for tests.
-var detectLANIPsFn = func() []net.IP {
+// detectSudo reports whether docker needs sudo: false when `docker info`
+// works as the current user, true when only `sudo -n docker info` does.
+func detectSudo(docker string) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	const timeout = 5 * time.Second
+	run := func(name string, args ...string) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return exec.CommandContext(ctx, name, args...).Run() == nil
+	}
+	if run(docker, "info") {
+		return false
+	}
+	// -n: fail immediately rather than prompt for a password.
+	return run("sudo", "-n", docker, "info")
+}
+
+// detectLANIPs returns every non-loopback RFC1918 IPv4 address on the host's
+// interfaces. Overridable for tests.
+var detectLANIPs = func() []net.IP {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return nil
@@ -159,56 +144,26 @@ var detectLANIPsFn = func() []net.IP {
 	var ips []net.IP
 	for _, a := range addrs {
 		ipnet, ok := a.(*net.IPNet)
-		if !ok {
+		if !ok || ipnet.IP == nil || ipnet.IP.IsLoopback() {
 			continue
 		}
-		ip := ipnet.IP
-		if ip == nil || ip.IsLoopback() {
-			continue
-		}
-		ip4 := ip.To4()
-		if ip4 == nil {
-			continue
-		}
-		if isRFC1918(ip4) {
+		if ip4 := ipnet.IP.To4(); ip4 != nil && isRFC1918(ip4) {
 			ips = append(ips, ip4)
 		}
 	}
 	return ips
 }
 
-func detectLANIPs() []net.IP { return detectLANIPsFn() }
-
-// detectLANURL returns an http URL of the first RFC1918 IPv4 address discovered
-// on host interfaces, formatted for the nginx dashboard port. Returns empty
-// string when no suitable interface is found (CI sandboxes, all-loopback, etc.).
-//
-// Used to populate HOST_LAN_URL so the setup wizard can prefill a Jellyfin
-// PublishedServerUrl — what clients on the LAN should see when they discover
-// the server over UDP 7359 broadcast.
-//
-// Honors PELICULA_PORT from the environment so a host that pre-sets a custom
-// port (e.g. to avoid a 7354 collision) gets a correctly-suggested URL in
-// the wizard, instead of one that bakes the default in for the lifetime of
-// the install.
-func detectLANURL() string {
-	ips := detectLANIPs()
-	if len(ips) == 0 {
-		return ""
+// lanIP returns the first RFC1918 address of the host, or "localhost".
+func lanIP() string {
+	if ips := detectLANIPs(); len(ips) > 0 {
+		return ips[0].String()
 	}
-	port := os.Getenv("PELICULA_PORT")
-	if port == "" {
-		port = "7354"
-	}
-	return fmt.Sprintf("http://%s:%s/jellyfin", ips[0].String(), port)
+	return "localhost"
 }
 
-// isRFC1918 reports whether ip is in 10.0.0.0/8, 172.16.0.0/12, or
-// 192.168.0.0/16.
+// isRFC1918 reports whether ip is in 10/8, 172.16/12 or 192.168/16.
 func isRFC1918(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
 	ip4 := ip.To4()
 	if ip4 == nil {
 		return false
@@ -219,32 +174,6 @@ func isRFC1918(ip net.IP) bool {
 	case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
 		return true
 	case ip4[0] == 192 && ip4[1] == 168:
-		return true
-	}
-	return false
-}
-
-func detectSudo() bool {
-	if runtime.GOOS == "windows" {
-		return false
-	}
-	const timeout = 5 * time.Second
-	// Try docker info without sudo
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "info")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Run(); err == nil {
-		return false
-	}
-	// Try with sudo (-n = non-interactive: fail immediately if a password prompt would appear)
-	ctx2, cancel2 := context.WithTimeout(context.Background(), timeout)
-	defer cancel2()
-	cmd2 := exec.CommandContext(ctx2, "sudo", "-n", "docker", "info")
-	cmd2.Stdout = nil
-	cmd2.Stderr = nil
-	if err := cmd2.Run(); err == nil {
 		return true
 	}
 	return false

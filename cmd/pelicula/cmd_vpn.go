@@ -3,115 +3,81 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"sort"
-	"time"
+	"strings"
 )
 
+// gluetunEndpoints are the control-API paths check-vpn queries. The forwarded
+// port moved from /v1/openvpn/portforwarded to /v1/portforward; both are
+// tried, in that order.
+const (
+	gluetunIPPath      = "/v1/publicip/ip"
+	gluetunPortPath    = "/v1/openvpn/portforwarded"
+	gluetunPortPathNew = "/v1/portforward"
+)
+
+// gluetunGetArgs builds the `compose exec` arguments that GET a gluetun
+// control-API path from inside the gluetun container.
+func gluetunGetArgs(user, pass, path string) []string {
+	return []string{
+		"exec", "-T", "gluetun",
+		"wget", "-qO-", "--user=" + user, "--password=" + pass,
+		"http://localhost:8000" + path,
+	}
+}
+
+// jsonValue extracts key from a flat JSON object response such as
+// {"public_ip":"1.2.3.4"} or {"port":51234}. Anything that is not such an
+// object (or lacks the key) comes back as the trimmed raw text.
+func jsonValue(raw, key string) string {
+	raw = strings.TrimSpace(raw)
+	var obj map[string]any
+	if json.Unmarshal([]byte(raw), &obj) != nil {
+		return raw
+	}
+	if v, ok := obj[key]; ok {
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+	return raw
+}
+
+// cmdCheckVPN prints the tunnel's public IP and forwarded port as seen from
+// inside the gluetun container.
 func cmdCheckVPN(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-
-	fmt.Printf("%sVPN & Service Health Check%s\n", colorBold, colorReset)
-	fmt.Println()
-
-	url := peliculaBaseURL(ctx.Env) + "/api/pelicula/health"
-	client := newHTTPClient(10 * time.Second)
-	resp, err := client.Get(url)
-	if err != nil {
-		fail("Could not reach middleware at " + url + " — is the stack running?")
-		fmt.Println()
-		info("Run: pelicula up")
-		return
+	if !vpnEnabled(ctx.Env) {
+		fatal("No WIREGUARD_PRIVATE_KEY in .env — the VPN is not configured")
 	}
-	defer resp.Body.Close()
+	c := ctx.compose(false)
+	user := envDefault(ctx.Env, "GLUETUN_HTTP_USER", "pelicula")
+	pass := ctx.Env["GLUETUN_HTTP_PASS"]
 
-	body, _ := io.ReadAll(resp.Body)
+	fmt.Printf("%sVPN check%s\n\n", colorBold, colorReset)
 
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
-		fail("Could not parse health response: " + err.Error())
-		return
+	get := func(path string) (string, bool) {
+		out, err := c.Output(gluetunGetArgs(user, pass, path)...)
+		return strings.TrimSpace(string(out)), err == nil
 	}
 
-	// VPN checks
-	vpn, _ := data["vpn"].(map[string]interface{})
-	vpnIP, _ := vpn["ip"].(string)
-	vpnCountry, _ := vpn["country"].(string)
-	vpnStatus, _ := vpn["status"].(string)
-	vpnPort, _ := vpn["port"].(float64)
-
-	if vpnStatus == "healthy" && vpnIP != "" {
-		label := vpnIP
-		if vpnCountry != "" {
-			label = vpnIP + " (" + vpnCountry + ")"
-		}
-		pass("VPN tunnel: " + label)
+	failed := false
+	if out, good := get(gluetunIPPath); good && out != "" {
+		ok("Public IP: " + jsonValue(out, "public_ip"))
 	} else {
-		fail("VPN tunnel: not connected")
+		failed = true
+		fail("Public IP: not available — is gluetun running? (pelicula logs gluetun)")
 	}
 
-	if vpnIP != "" {
-		pass("VPN IP: " + vpnIP)
+	out, good := get(gluetunPortPath)
+	if !good || out == "" {
+		out, good = get(gluetunPortPathNew)
+	}
+	if port := jsonValue(out, "port"); good && port != "" && port != "0" {
+		ok("Forwarded port: " + port)
 	} else {
-		fail("VPN IP: not available")
+		failed = true
+		fail("Forwarded port: not available yet (port forwarding can take a minute after connect)")
 	}
 
-	if vpnPort > 0 {
-		pass(fmt.Sprintf("Port forwarding: port %.0f", vpnPort))
-	} else {
-		// Pull watchdog diagnostic details if available.
-		wd, _ := vpn["watchdog"].(map[string]interface{})
-		wdStatus, _ := wd["status"].(string)
-		wdTunnel, _ := wd["tunnel_status"].(string)
-		wdCooldown, _ := wd["cooldown_remaining"].(float64)
-		wdConsec, _ := wd["consecutive_zero"].(float64)
-		wdGrace, _ := wd["grace_remaining"].(float64)
-
-		switch wdStatus {
-		case "grace":
-			minsLeft := int(wdGrace) / 2 // 30s polls → rough minutes at 2 polls/min
-			fail(fmt.Sprintf("Port forwarding: not active (grace period, %.0f/10 polls, ~%d min to restart)", wdConsec, minsLeft))
-		case "restarting":
-			fail(fmt.Sprintf("Port forwarding: not active (restarting, cooldown %.0f ticks remaining)", wdCooldown))
-		case "degraded":
-			fail("Port forwarding: not active (degraded — manual restart required)")
-		default:
-			fail("Port forwarding: not active")
-		}
-		if wdTunnel != "" {
-			info(fmt.Sprintf("VPN tunnel status: %s", wdTunnel))
-		}
+	if failed {
+		fatal("VPN check failed")
 	}
-
-	// Service checks
-	fmt.Println()
-	services, _ := data["services"].(map[string]interface{})
-	if services != nil {
-		names := make([]string, 0, len(services))
-		for k := range services {
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			status, _ := services[name].(string)
-			label := capitalize(name)
-			if status == "up" {
-				pass(label + ": reachable")
-			} else {
-				fail(label + ": not reachable")
-			}
-		}
-	}
-
-	// Summary
-	fmt.Println()
-	passed, _ := data["checks_passed"].(float64)
-	total, _ := data["checks_total"].(float64)
-	color := colorRed
-	if passed == total {
-		color = colorGreen
-	} else if passed > 0 {
-		color = colorYellow
-	}
-	fmt.Printf("  %s%s%.0f/%.0f checks passed%s\n", color, colorBold, passed, total, colorReset)
 }

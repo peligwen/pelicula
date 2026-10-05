@@ -1,299 +1,132 @@
-# pelicula
+# Pelicula
 
-One command to set up, one command to run. Search for movies and TV shows by name, stream with Jellyfin.
+One command to set up, one command to run. Search for movies and TV shows by name, request or add them, and stream them with Jellyfin. Pelicula wires Sonarr, Radarr, Prowlarr, qBittorrent (behind a ProtonVPN/WireGuard tunnel) and Jellyfin together behind one nginx port and adds a small dashboard on top.
 
-The rest is Pelicula.
+Use it for legal content only. Pelicula does not ship, suggest or configure indexers; there are plenty that carry only legal material.
 
-## Statement from the Fleshie
-
-Pelicula is the media stack I always wanted. There are many ambitious features and improvements that will take time to flesh out properly, but the core functionality of search->download->verify->catalog->watch is there. 
-
-Use at your risk, and keep it LAN only - see the testing coverage table.
-
-Please, only use this for legal purposes. There are plenty of indexers that deal in LEGAL content only.
+**LAN only.** Pelicula listens on port 7354 and is meant for a trusted local network. Do not port-forward 7354. Jellyfin's own HTTPS listener on port 8920 is the only surface intended to be reachable from outside; forwarding it is up to you. The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#auth-model).
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/peligwen/pelicula.git
-cd pelicula
-./pelicula up       # builds CLI, runs setup wizard on first run, starts everything
+cd pelicula          # or cd pelicula/v1 while both trees share a checkout
+./pelicula up
 ```
 
-Open `http://localhost:7354` — that's it. On first run, a browser-based setup wizard walks you through configuration.
+On the first run `./pelicula up` builds the CLI and asks a few questions in the terminal (folders, an optional WireGuard key, VPN server country). It then generates the secrets, writes `.env`, prints the Jellyfin admin password once, and starts the stack.
+
+Open <http://localhost:7354> and sign in with the Jellyfin admin credentials the wizard printed. They are also stored in `.env` as `JELLYFIN_ADMIN_USER` and `JELLYFIN_PASSWORD`.
 
 ## Prerequisites
 
-- **Docker** with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine on Linux)
-- **Go 1.23+** _(optional)_ — if not installed, the wrapper script builds the CLI via Docker automatically
-- **ProtonVPN** paid plan (Plus or higher) with a Wireguard private key
-- **bash** (macOS, Linux, WSL, Synology NAS — the CLI auto-detects your platform and uses the right default paths; no manual folder creation needed on Synology)
+- **Docker** with the Compose v2 plugin (`docker compose`).
+- **Go 1.25** (optional). The `pelicula` wrapper builds the CLI with the local Go toolchain, or inside a `golang:1.25-alpine` container if Go is missing.
+- **ProtonVPN Plus or higher** with a WireGuard private key, if you want the VPN. The free tier has no P2P or port forwarding. Do **not** enable "Moderate NAT" when generating the key; it breaks port forwarding. Leave the key blank in the wizard to run without a VPN (see below).
+- **bash**. macOS, Linux, WSL and Synology are detected and get sensible default paths.
 
-## What Happens Automatically
+## What happens on `pelicula up`
 
-On `pelicula up`, the stack:
+1. Creates the config, library and download folders and seeds service configs (URL bases, external auth for the *arr apps, qBittorrent settings, Jellyfin proxy settings). The *arr auth settings are re-applied on every `up`.
+2. Starts 8 containers behind nginx (5 without the VPN: Sonarr, Radarr, Jellyfin, pelicula, nginx; the VPN adds gluetun, qBittorrent and Prowlarr).
+3. Waits for the VPN tunnel to come up.
+4. The `pelicula` server auto-wires everything in the background:
+   - qBittorrent as the download client in Sonarr and Radarr;
+   - Sonarr and Radarr as applications in Prowlarr;
+   - an import webhook in Sonarr and Radarr that calls the server with a shared secret;
+   - the Jellyfin startup wizard, an admin user, and the Movies and TV Shows libraries.
+5. Waits for `/api/health` to report `wired: true`, then prints the dashboard and Jellyfin URLs.
 
-1. Seeds service configs (URL bases, auth bypass, download paths)
-2. Starts 11 containers behind an nginx reverse proxy on port 7354
-3. Waits for VPN connection and port forwarding
-4. Auto-wires qBittorrent as the download client in Sonarr and Radarr
-5. Connects Prowlarr indexers to both Sonarr and Radarr
-6. Validates completed downloads automatically (FFprobe integrity, sample detection) — bad files are blocklisted and re-searched
-7. Watches for newly added content and triggers searches automatically
-8. Enforces auth bypass on every start (services can't lock you out)
+The only manual step is **adding indexers in Prowlarr** (open it from the dashboard link or at `/prowlarr/` after signing in). Without indexers nothing gets downloaded.
 
-The only manual step is **adding indexers in Prowlarr** — the dashboard warns if none are configured.
-
-### Media library on a NAS (NFS)
-
-Set `LIBRARY_NFS=true` with `NFS_HOST`/`NFS_EXPORT` in `.env` and the Docker engine mounts the export itself as the `/media` volume — no Finder/OS-level mount needed, and on macOS no VirtioFS in the media path. `WORK_DIR` (downloads + processing) stays on local disk because NFS breaks hardlinks; Sonarr/Radarr copy on import across that boundary. Details and mount options: [.env.example](.env.example) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compose-overlays).
+Without a WireGuard key the stack runs with no VPN: Prowlarr and qBittorrent are not started, so there are no downloads, but search, requests, Jellyfin and the import pipeline all work. This is also what the integration test runs.
 
 ## Dashboard
 
-The dashboard at `http://localhost:7354/` is the single interface for the whole stack:
+The dashboard at <http://localhost:7354/> has four tabs:
 
-- **Unified search** — searches Sonarr and Radarr in parallel, interleaved results, type filter tabs
-- **One-click add** — add movies or shows and search starts immediately
-- **Watch button** — links directly to Jellyfin when content is ready to stream
-- **Download management** — pause, resume, cancel, or blocklist with reason selection
-- **Processing pipeline** — live validation and transcoding status with progress bars
-- **Notifications** — bell icon with unread count for "content ready" and validation events
-- **Storage monitoring** — per-volume usage bars with growth rate and time-to-full estimates
-- **Service awareness** — search disables with a red/yellow warning when Radarr or Sonarr are down
-- **VPN telemetry** — IP, country, forwarded port, transfer speeds
-- **Service status** — red until confirmed up, green when healthy
+- **Search** searches Radarr and Sonarr in parallel and shows interleaved results. Viewers get a *Request* button; managers and admins get *Add*. Titles already in the library show *In library*, and *Watch* once a file exists.
+- **Requests** lists requests with a status of pending, approved, declined or available. Viewers see their own; managers and admins see everyone's and can approve or decline.
+- **Jobs** shows active downloads (progress, speed, ETA; pause and resume for managers, remove and blocklist for admins) and recent import validations with a Retry button for failed ones.
+- **Settings** (admin only) holds three toggles (validation, auto-blocklist, auto-approve requests), a read-only info block, user roles, and invites.
 
-When you click away from search results, they collapse to the top result with a "Show N more" bar. Click back to expand.
+Roles:
 
-## Services
+| Role | Can do |
+|---|---|
+| viewer | search, request, see own requests, see jobs and downloads |
+| manager | plus add titles directly, approve and decline requests, pause and resume downloads, retry jobs |
+| admin | plus settings, invites, user roles and deletion, remove downloads |
 
-Everything runs behind nginx on one port:
-
-| Path | Service | Purpose |
-|------|---------|---------|
-| `/` | Dashboard | Search, downloads, processing, status |
-| `/setup` | Setup wizard | Browser-based first-time configuration |
-| `/settings` | Settings | Runtime configuration |
-| `/import` | Import wizard | Browse and import local media files |
-| `/register` | Register | Invite redemption / open registration (public) |
-| `/api/pelicula/` | Go middleware | Auto-wiring, search API, download actions |
-| `/api/procula/` | Procula | Media processing pipeline |
-| `/api/vpn/` | Gluetun | VPN telemetry |
-| `/sonarr/` | Sonarr | TV show automation |
-| `/radarr/` | Radarr | Movie automation |
-| `/prowlarr/` | Prowlarr | Indexer management |
-| `/qbt/` | qBittorrent | Torrent client (VPN-only traffic) |
-| `/bazarr/` | Bazarr | Automatic subtitle acquisition |
-| `/jellyfin/` | Jellyfin | Media server and streaming |
-
-All torrent traffic goes through Gluetun's Wireguard tunnel. If the VPN drops, qBittorrent loses internet (kill-switch).
+Jellyfin is the identity provider. A Jellyfin administrator is an admin in Pelicula; everyone else starts as a viewer. Admins invite people from Settings: create an invite, send the link (`/register?code=...`), and the recipient picks a username and password, which creates a Jellyfin account and signs them in. Invites are single-use and expire (default 72 hours).
 
 ## CLI
 
-```
-pelicula up                  # Start all services (runs setup wizard on first run)
-pelicula down                # Stop all services
-pelicula status              # Show container status
-pelicula logs [svc]          # Tail logs (optionally for one service)
-pelicula check-vpn           # Verify VPN tunnel and service health
-pelicula update              # Pull latest images and recreate
-pelicula restart [svc]       # Restart service(s) without stopping the whole stack
-pelicula restart-acquire     # Restart and re-run VPN port-forward acquisition
-pelicula rebuild             # Rebuild and restart middleware/procula containers
-pelicula redeploy [svc]      # Rebuild Docker images then full stack down/up
-pelicula reset-config [svc]  # Delete seeded configs so they regenerate on next up
-pelicula import              # Open the browser-based local media import wizard
-pelicula export              # Export watchlist/library backup
-pelicula import-backup       # Restore from a backup exported by pelicula export
-pelicula test                # End-to-end integration test (isolated stack, no VPN needed)
-pelicula doctor              # Dump container status and error logs for troubleshooting
-```
+Run `./pelicula help` for the full list.
 
-## Architecture
+| Command | What it does |
+|---|---|
+| `pelicula up` | First run: terminal setup wizard. Then seed configs, start the stack, wait for VPN and health |
+| `pelicula down` | Stop the stack |
+| `pelicula status` | `docker compose ps` for the stack |
+| `pelicula logs [svc]` | Follow logs, optionally for one service |
+| `pelicula restart [svc]` | Restart one service or all of them |
+| `pelicula update` | Pull images and rebuild, then recreate |
+| `pelicula check-vpn` | Print the VPN public IP and forwarded port from gluetun |
+| `pelicula reset-config [svc\|all]` | Delete seeded service configs (`all` = every service dir; `.env` is kept). Asks first; `--yes` skips |
+| `pelicula doctor` | Container status, docker version, and recent logs of unhealthy containers, with secrets redacted |
+| `pelicula seed <config_dir>` | Write and re-enforce the seeded service configs only, no Docker involved (`up` does this on every start) |
+| `pelicula version` | Print the CLI version |
 
-```
-  http://localhost:7354
-        |
-  nginx reverse proxy
-        |
-        +-- /                -> Dashboard (static HTML)
-        +-- /setup           -> Browser setup wizard
-        +-- /settings        -> Runtime configuration
-        +-- /import          -> Local media import wizard
-        +-- /api/pelicula/   -> Go middleware (search, downloads, auto-wire)
-        +-- /api/procula/    -> Procula (validation, transcoding, storage)
-        +-- /api/vpn/        -> Gluetun control API
-        +-- /sonarr/         -> Sonarr --+
-        +-- /radarr/         -> Radarr --+--> Prowlarr (indexers)
-        +-- /qbt/            -> qBittorrent
-        |                         |
-        |                    Gluetun (VPN tunnel)
-        |                         |
-        |                    /downloads -> /movies, /tv
-        |
-        +-- /jellyfin/       -> Jellyfin (streams your library)
-```
+Global flag: `--debug` enables verbose output.
 
-## Download Management
+## Folder layout
 
-The dashboard download panel supports:
-
-| Action | What it does |
-|--------|-------------|
-| **Pause** | Stops the torrent in qBittorrent. Reversible. |
-| **Resume** | Resumes a paused torrent. |
-| **Cancel** | Removes torrent + files, unmonitors in Radarr/Sonarr so the watcher won't re-grab it. |
-| **Blocklist** | Removes and blocklists the release with a reason (wrong quality, wrong language, corrupt, slow, wrong content, other). |
-
-Progress bars are green (active), amber (paused), or blue (seeding).
-
-## Missing Content Watcher
-
-A background process checks every 10 minutes for monitored movies/episodes that have no files and aren't already downloading. If found, it triggers a search automatically. This means content added through any path (dashboard, Radarr UI, Sonarr UI, API) gets searched without manual intervention.
-
-## Content Requests
-
-Viewers can request movies and TV shows directly from the dashboard search results. Admins approve or deny requests from the Requests section; approval automatically adds the item to Radarr or Sonarr using the quality profile and root folder configured in the Requests settings panel. When the download completes and is imported, the request flips to "available" and Apprise notifies the requester.
-
-**How it works:**
-1. Generate an invite link from the **Users** section and share it with your viewers.
-2. Recipients redeem the link, set a username and password, and log in.
-3. Viewers search for a title and click **Request** — the request appears in the admin's Requests section.
-4. Admin approves (or denies with a reason) from the dashboard. No external tools needed.
-
-## Optional Services
-
-**Apprise** — push notifications to phone, email, Telegram, ntfy, Gotify, and 85+ other services. Configure notification URLs in the Settings page.
-
-**Bazarr** — automatic subtitle acquisition from OpenSubtitles, Addic7ed, Podnapisi, and others. Wired to Sonarr and Radarr automatically on startup. Set which languages to acquire in the Settings page (`PELICULA_SUB_LANGS`).
-
-**Dual subtitles** — optional post-Bazarr pipeline stage that stacks two subtitle tracks into a single ASS sidecar file (e.g. `Movie.en-es.ass`) for language learners. Base language appears bottom-center; learning language appears top-center. Configure via `DUALSUB_ENABLED` / `DUALSUB_PAIRS` or the Procula settings UI. See [PROCULA.md](docs/PROCULA.md) for details.
-
-## Authentication
-
-Pelicula requires a login after first use. The first POST to `/api/pelicula/register` on an empty install claims the admin account. Credentials are verified against Jellyfin; roles are stored in `pelicula.db` (SQLite); Jellyfin admins automatically get admin in Pelicula.
-
-For convenience, requests originating on the host machine are granted an admin session automatically — no login required from the box running the stack. This is a per-request transient grant (no cookie is set); LAN clients must authenticate normally. See [docs/PELIGROSA.md](docs/PELIGROSA.md) for the full security model.
-
-Role capabilities: **viewer** sees the dashboard and can submit content requests; **manager** can search, add content, and pause/resume downloads; **admin** has full access including settings, *arr UIs, and destructive actions (cancel, blocklist, user management).
-
-**Invites:** Admins can generate shareable invite links from the Users section of the dashboard. Recipients open the link, choose a username and password, and get a Jellyfin viewer account automatically. No admin involvement after the link is shared.
-
-## Security
-
-Pelicula is designed for a trusted LAN. Port 7354 is never intended for internet exposure. See [SECURITY.md](SECURITY.md) for the threat model, known limitations, and how to report a vulnerability privately.
-
-For external Jellyfin access, enable Jellyfin's built-in HTTPS on port 8920 and port-forward it on your router. See [docs/PELIGROSA.md](docs/PELIGROSA.md#exposing-jellyfin-externally) for details.
-
-## Feature Coverage
-
-The table below lists every feature claimed in this README. **E2E** shows automated coverage from `tests/e2e.sh` and the Playwright specs in `tests/playwright/specs/`. **Manual** is a verification column for you to tick off yourself.
-
-> **Note on CLI coverage:** `tests/e2e.sh` runs `docker compose` directly — it does not invoke the `pelicula` wrapper. CLI *effects* are often covered; the wrapper commands themselves are not.
-
-| Feature | E2E | Manual |
-|---------|-----|--------|
-| **What Happens Automatically** | | |
-| Seeds service configs (URL bases, auth bypass, download paths) | ✓ e2e.sh | ☐ |
-| Starts 11 containers behind nginx reverse proxy | ~ partial (health check passes; container count not asserted) | ☐ |
-| Waits for VPN connection and port forwarding | — | ☐ |
-| Auto-wires qBittorrent as download client in Sonarr and Radarr | ✓ e2e.sh | ☐ |
-| Connects Prowlarr indexers to Sonarr and Radarr | ✓ e2e.sh | ☐ |
-| Validates downloads (FFprobe integrity, sample detection, blocklist + re-search) | ~ partial (pipeline via import webhook; blocklist/re-search path not exercised) | ☐ |
-| Missing content watcher (10-min interval auto-search) | — | ☐ |
-| Enforces auth bypass on every start | — | ☐ |
-| **Dashboard** | | |
-| Unified search (Sonarr + Radarr in parallel, interleaved, type filter tabs) | — | ☐ |
-| One-click add (search starts immediately) | — | ☐ |
-| Watch button links directly to Jellyfin | ~ partial (Jellyfin library populated + searchable; button click not asserted) | ☐ |
-| Download management (pause / resume / cancel / blocklist) | — | ☐ |
-| Processing pipeline live status with progress bars | ✓ playwright (import-play: pipeline lane card → completed) | ☐ |
-| Notifications bell icon with unread count | — | ☐ |
-| Storage monitoring (per-volume usage bars, growth rate, time-to-full) | — | ☐ |
-| Service awareness (search disables with red/yellow when *arr down) | — | ☐ |
-| VPN telemetry (IP, country, forwarded port, transfer speeds) | — | ☐ |
-| Service status indicators (red until up, green when healthy) | — | ☐ |
-| Collapse search results to top result / "Show N more" expand | — | ☐ |
-| **Services** | | |
-| `/` — Dashboard | ✓ e2e.sh (public route + Cache-Control: no-store) | ☐ |
-| `/setup` — Browser setup wizard | — | ☐ |
-| `/settings` — Runtime configuration | ✓ e2e.sh (protected route redirect + cookie access) | ☐ |
-| `/import` — Local media import wizard | ✓ playwright (import-play exercises full wizard) | ☐ |
-| `/register` — Invite redemption / open registration | — | ☐ |
-| `/api/pelicula/` — Go middleware | ✓ e2e.sh (health, status, auth, hooks/import) | ☐ |
-| `/api/procula/` — Procula pipeline | ✓ e2e.sh (settings + jobs polling) | ☐ |
-| `/api/vpn/` — Gluetun VPN telemetry | — | ☐ |
-| `/sonarr/` | ~ partial (auto-wire confirms reachable; UI not exercised) | ☐ |
-| `/radarr/` | ~ partial (same) | ☐ |
-| `/prowlarr/` | ~ partial (protected route redirect only) | ☐ |
-| `/qbt/` | ~ partial (protected route redirect only) | ☐ |
-| `/jellyfin/` | ✓ e2e.sh + ✓ playwright (library search + catalog sync) | ☐ |
-| **Download Management** | | |
-| Pause torrent | — | ☐ |
-| Resume paused torrent | — | ☐ |
-| Cancel (removes torrent + files, unmonitors in *arr) | — | ☐ |
-| Blocklist release with reason selection | — | ☐ |
-| Progress bar colours (green active / amber paused / blue seeding) | — | ☐ |
-| **Content Requests** | | |
-| Viewer submits request from search results | — | ☐ |
-| Admin approves / denies with reason | — | ☐ |
-| Approval auto-adds to Radarr or Sonarr with configured quality profile | — | ☐ |
-| Request flips to "available" on import + Apprise notifies requester | — | ☐ |
-| Admin generates shareable invite link | — | ☐ |
-| Invite redeem (username + password → Jellyfin viewer account) | — | ☐ |
-| **Optional Services** | | |
-| Apprise push notifications (phone, email, Telegram, ntfy, Gotify, 85+ services) | — | ☐ |
-| Bazarr auto subtitle acquisition (wired to Sonarr + Radarr on startup) | ✓ playwright (subtitle-acquisition spec: await_subs stage → completed → jellyfin_synced) | ☐ |
-| Dual subtitles (stacked ASS sidecar, base + learning language) | ✓ playwright (dualsub-happy asserts the written .ass content — sections, styles, exact stacked Dialogue lines; dualsub-failed asserts the recorded error names the missing language) | ☐ |
-| **Auth** | | |
-| Login required (Jellyfin-backed, always on) | ✓ e2e.sh (login 401/200, session cookie, protected routes, logout) | ☐ |
-| Loopback auto-session (host-machine requests, transient) | — | ☐ |
-| Jellyfin admins automatically get admin role in Pelicula | — | ☐ |
-| Role capabilities: viewer / manager / admin | — | ☐ |
-| **CLI** | | |
-| `pelicula up` | — (effects tested; wrapper not invoked by e2e) | ☐ |
-| `pelicula down` | — | ☐ |
-| `pelicula status` | — | ☐ |
-| `pelicula logs [svc]` | — | ☐ |
-| `pelicula check-vpn` | — | ☐ |
-| `pelicula update` | — | ☐ |
-| `pelicula restart [svc]` / `restart-acquire` | — | ☐ |
-| `pelicula rebuild` | — | ☐ |
-| `pelicula reset-config [svc]` | — | ☐ |
-| `pelicula import` | — | ☐ |
-| `pelicula export` / `import-backup` | — | ☐ |
-| `pelicula test` | ✓ e2e.sh (this command runs the suite) | ☐ |
-| `pelicula doctor` | — | ☐ |
-| **Security** | | |
-| Auth + CSRF guards (LAN-only, session-cookie) | ✓ e2e.sh (login flow, session, CSRF origin check) | ☐ |
-
-> **Claimed in other docs — candidates to promote or drop from README:**
-> - Open registration toggle (`PELICULA_OPEN_REGISTRATION`, LAN-only) — [PELIGROSA.md](docs/PELIGROSA.md)
-> - Backup export/import v1→v2 auto-migration — [API.md](docs/API.md)
-> - Now-playing Jellyfin sessions card — [API.md](docs/API.md)
-> - Notifications feed merges Procula + *arr history — [API.md](docs/API.md)
-> - Server-side folder browser + library scan/apply — [API.md](docs/API.md) / [ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> - Storage warning/critical thresholds — [PROCULA.md](docs/PROCULA.md)
-> - Jellyfin alternate-version sidecars from transcoding profiles — [PROCULA.md](docs/PROCULA.md)
-
-## Development
+All three roots are set in `.env` and nothing is hardcoded.
 
 ```
-make install-hooks   # one-time: sets up pre-commit, pre-push, and pre-merge-commit hooks
-make test            # unit tests (all 3 modules)
-make verify          # unit tests + e2e integration suite (~10 min)
+CONFIG_DIR/                  service configs and runtime state
+  sonarr/ radarr/ prowlarr/ qbittorrent/ jellyfin/ gluetun/
+  pelicula/pelicula.db       the server's SQLite database
+LIBRARY_DIR/                 your media (mounted at /media)
+  movies/
+  tv/
+WORK_DIR/
+  downloads/                 qBittorrent downloads (radarr/, tv-sonarr/)
 ```
 
-## License
+The `pelicula` server mounts `LIBRARY_DIR` read-only. It never writes or deletes media; file removals go through the Sonarr and Radarr APIs.
 
-AGPL-3.0 — see [LICENSE](LICENSE). If you run a modified version of Pelicula
-as a network service, you must make your source available to its users.
+## Testing
 
-## Post-Setup: Add Indexers
+```bash
+make test        # go test -race ./...
+make vet         # go vet + gofmt check
+make lint        # staticcheck
+make e2e         # integration test: starts a real stack on port 7399 (needs Docker)
+make playwright  # browser specs against PELICULA_URL (default http://localhost:7399)
+```
 
-1. Open Prowlarr at `http://localhost:7354/prowlarr/`
-2. Go to **Indexers** > **Add Indexer**
-3. Add your preferred torrent indexers
-4. Indexers automatically sync to Sonarr and Radarr
+`make e2e` runs `docker compose` with project `pelicula-test`, no VPN, and temporary folders, then tears everything down. It needs Docker and about 5 minutes for a cold build. The Playwright specs expect a running stack and the admin credentials in `PELICULA_ADMIN_USER` and `PELICULA_ADMIN_PASSWORD`; see [tests/playwright/README.md](tests/playwright/README.md).
 
-Once indexers are configured, search and download from the dashboard.
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): processes, startup, data model, auth, pipeline, compose, nginx
+- [docs/API.md](docs/API.md): HTTP routes, webhook contract, environment variables
+- [docs/ROADMAP.md](docs/ROADMAP.md): what shipped and what was deferred
+- [CHANGELOG.md](CHANGELOG.md)
+
+## What this version deliberately leaves out
+
+Each of these existed in the previous implementation or was planned. They were cut to keep one source of truth per fact and a codebase one person can read. [docs/ROADMAP.md](docs/ROADMAP.md) says why and what it would take to bring each back.
+
+- Bazarr and subtitle acquisition, dual subtitles
+- Transcoding and any other post-import action besides validation
+- Backups and export/import of the watchlist
+- Apprise notifications
+- Hardware acceleration
+- NFS-mounted library
+- Local media import wizard
+- Live updates over SSE (the dashboard polls)
+- Open registration (invites only)
+- Catalog browser, storage monitoring, notification bell

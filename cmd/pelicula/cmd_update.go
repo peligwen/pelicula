@@ -1,18 +1,19 @@
 package main
 
+// cmdUpdate pulls newer images, rebuilds the Pelicula image and recreates
+// whatever changed.
 func cmdUpdate(ctx *Context, _ []string) {
 	ctx.LoadEnv()
-	c := composeInvocation(ctx)
+	c := ctx.compose(false)
 
-	info("Pulling latest images...")
+	progress("Pulling images...")
 	if err := c.Run("pull"); err != nil {
 		fatal("docker compose pull failed: " + err.Error())
 	}
 
-	info("Recreating containers...")
-	if err := c.Run("up", "-d"); err != nil {
+	progress("Rebuilding and recreating containers...")
+	if err := c.Run("up", "-d", "--build"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
-
-	pass("Update complete")
+	ok("Update complete")
 }
