@@ -1,15 +1,13 @@
 package main
 
+// cmdLogs follows logs of all services, or of the named ones.
 func cmdLogs(ctx *Context, args []string) {
-	requireEnv(ctx.EnvFile)
 	ctx.LoadEnv()
-	c := composeInvocation(ctx)
+	// Ctrl+C ends `logs -f`; that is the normal way out, not an error.
+	_ = ctx.compose(true).Run(logsArgs(args)...)
+}
 
-	composeArgs := []string{"logs", "-f"}
-	if len(args) > 0 {
-		composeArgs = append(composeArgs, args...)
-	}
-
-	// logs -f exits on Ctrl+C — that's expected, not an error
-	_ = c.Run(composeArgs...)
+// logsArgs builds the compose arguments for `pelicula logs [svc...]`.
+func logsArgs(services []string) []string {
+	return append([]string{"logs", "-f", "--tail", "100"}, services...)
 }

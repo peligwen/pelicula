@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
+# Pelicula CLI launcher: builds ./cmd/pelicula into bin/pelicula when missing or
+# stale, then runs it. Uses the local Go toolchain, or a golang container when
+# Go is not installed.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Pass --debug through to the Go binary as -v, and enable bash tracing
+# --debug is passed through to the CLI and also turns on bash tracing.
 DEBUG=0
 ARGS=()
 for arg in "$@"; do
@@ -30,7 +33,7 @@ if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
     echo "Building pelicula CLI..." >&2
     mkdir -p bin
     if command -v go &>/dev/null; then
-        ( cd cmd/pelicula && go build -ldflags "-X main.version=$GIT_VERSION" -o ../../bin/pelicula . ) || {
+        go build -ldflags "-X main.version=$GIT_VERSION" -o bin/pelicula ./cmd/pelicula || {
             echo "error: Go build failed" >&2
             exit 1
         }
@@ -42,11 +45,15 @@ if [[ ! -x "$BIN" ]] || [[ -n "$NEWEST" ]]; then
         if [[ -L "$(dirname "$HOME")" ]]; then
             DOCKER_HOME="$(pwd)"
         fi
+        # -buildvcs=false: the golang image has no git. Run as the current user
+        # so bin/pelicula is not root-owned; /tmp holds the Go caches.
         HOME="$DOCKER_HOME" docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e GOCACHE=/tmp/go-cache -e GOPATH=/tmp/go \
             -v "$(pwd):/src" \
-            -w /src/cmd/pelicula \
-            golang:1.23-alpine \
-            go build -ldflags "-X main.version=$GIT_VERSION" -o /src/bin/pelicula . || {
+            -w /src \
+            golang:1.25-alpine \
+            go build -buildvcs=false -ldflags "-X main.version=$GIT_VERSION" -o bin/pelicula ./cmd/pelicula || {
             echo "error: Docker-based Go build failed" >&2
             exit 1
         }

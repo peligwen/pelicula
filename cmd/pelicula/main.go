@@ -1,3 +1,6 @@
+// Command pelicula is the Pelicula CLI: setup, lifecycle and health checks for
+// the Docker Compose stack. It is deliberately stdlib-only and independent of
+// the server's packages.
 package main
 
 import (
@@ -8,10 +11,9 @@ import (
 	"runtime"
 )
 
-var version = "dev" // set via -ldflags at build time
+var version = "dev" // set via -ldflags "-X main.version=..."
 
 func main() {
-	// Strip -v/--verbose/--debug flags from args
 	var args []string
 	for _, a := range os.Args[1:] {
 		switch a {
@@ -25,23 +27,24 @@ func main() {
 		}
 	}
 
-	// Fast-path commands that need no bootstrap context.
+	// Commands that need no bootstrap (platform detection runs `docker info`).
 	if len(args) == 0 {
 		usage()
 		return
 	}
 	switch args[0] {
-	case "--version", "-V":
+	case "version", "--version", "-V":
 		fmt.Println("pelicula", version)
 		return
-	case "-h", "--help", "help":
+	case "help", "-h", "--help":
 		usage()
+		return
+	case "seed":
+		cmdSeed(args[1:])
 		return
 	}
 
-	// Build the context once — runs platform detection (docker info) one time.
 	ctx := newContext()
-
 	if debugMode {
 		printDiagnostics(ctx)
 	}
@@ -51,38 +54,22 @@ func main() {
 		cmdUp(ctx, args[1:])
 	case "down":
 		cmdDown(ctx, args[1:])
-	case "restart":
-		cmdRestart(ctx, args[1:])
-	case "restart-acquire":
-		cmdRestartAcquire(ctx, args[1:])
-	case "rebuild":
-		cmdRebuild(ctx, args[1:])
-	case "redeploy":
-		cmdRedeploy(ctx, args[1:])
-	case "reset-config":
-		cmdResetConfig(ctx, args[1:])
 	case "status":
 		cmdStatus(ctx, args[1:])
 	case "logs":
 		cmdLogs(ctx, args[1:])
-	case "check-vpn":
-		cmdCheckVPN(ctx, args[1:])
+	case "restart":
+		cmdRestart(ctx, args[1:])
 	case "update":
 		cmdUpdate(ctx, args[1:])
-	case "export":
-		cmdExport(ctx, args[1:])
-	case "import-backup":
-		cmdImportBackup(ctx, args[1:])
-	case "import":
-		cmdImport(ctx, args[1:])
-	case "test":
-		cmdTest(ctx, args[1:])
-	case "verify":
-		cmdVerify(ctx, args[1:])
+	case "check-vpn":
+		cmdCheckVPN(ctx, args[1:])
+	case "reset-config":
+		cmdResetConfig(ctx, args[1:])
 	case "doctor":
 		cmdDoctor(ctx, args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
 		usage()
 		os.Exit(1)
 	}
@@ -94,33 +81,20 @@ func printDiagnostics(ctx *Context) {
 	if err != nil {
 		resolved = exe + " (symlink resolve failed: " + err.Error() + ")"
 	}
-	_, envErr := os.Stat(ctx.EnvFile)
-
 	debug("pelicula version: " + version)
 	debug("GOOS: " + runtime.GOOS + " GOARCH: " + runtime.GOARCH)
 	debug("binary: " + resolved)
-	debug("script dir: " + ctx.ScriptDir)
-	if envErr == nil {
-		debug(".env: " + ctx.EnvFile + " (found)")
-	} else {
-		debug(".env: " + ctx.EnvFile + " (not found)")
-	}
-
+	debug("repo dir: " + ctx.ScriptDir)
+	debug(".env: " + ctx.EnvFile + fmt.Sprintf(" (exists=%v)", fileExists(ctx.EnvFile)))
 	plat := ctx.Plat
 	debug(fmt.Sprintf("platform: %s (synology=%v, wsl=%v, needsSudo=%v, uid=%d, gid=%d)",
 		plat.PlatformLabel(), plat.IsSynology, plat.IsWSL, plat.NeedsSudo, plat.UID, plat.GID))
 	debug("TZ: " + plat.TZ)
-	debug("default config dir: " + plat.DefaultConfigDir)
-	debug("default library dir: " + plat.DefaultLibraryDir)
-
-	composeFile := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.yml")
-	if _, err := os.Stat(composeFile); err == nil {
-		debug("compose file: " + composeFile + " (found)")
-	} else {
-		debug("compose file: " + composeFile + " (NOT FOUND)")
-	}
-
-	if out, err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Output(); err == nil {
+	debug("default dirs: config=" + plat.DefaultConfigDir + " library=" + plat.DefaultLibraryDir + " work=" + plat.DefaultWorkDir)
+	composeFile := filepath.Join(ctx.ScriptDir, composeMarker)
+	debug(fmt.Sprintf("compose file: %s (exists=%v)", composeFile, fileExists(composeFile)))
+	docker := dockerBinary(plat.IsSynology, fileExists)
+	if out, err := exec.Command(docker, "version", "--format", "{{.Server.Version}}").Output(); err == nil {
 		debug("docker server: " + string(out))
 	} else {
 		debug("docker: " + err.Error())
@@ -132,36 +106,24 @@ func usage() {
 
 Usage: pelicula <command> [options]
 
-Lifecycle:
-  up                  Start the stack (runs setup wizard on first run)
-  down                Stop the stack
-  restart [service]   Restart service(s)
-  restart-acquire     Restart VPN + acquisition services (jellyfin/nginx stay up)
-  rebuild [service]   Rebuild and restart middleware/procula/nginx
-  redeploy [service]  Rebuild images then do a full stack down/up
-  update              Pull latest images and restart
-  status              Show service health
-  logs [service]      Tail service logs
-
-Configuration:
-  reset-config [svc]  Reset service configs (soft/per-service/all)
-
-Data:
-  export [file]       Export library backup
-  import-backup file  Restore from backup
-  import [dir]        Open media import wizard
-
-Network:
-  check-vpn           Verify VPN connectivity
-
-Diagnostics:
-  doctor              Dump container status and error logs for troubleshooting
-  test                Run e2e integration test (isolated stack on port 7399)
-  verify [--target H] Run regression checks against a running stack
+Commands:
+  up                     Start the stack (first run: terminal setup wizard)
+  down                   Stop and remove the containers
+  status                 Show container status
+  logs [service]         Follow service logs
+  restart [service]      Restart one service, or all
+  update                 Pull images, rebuild Pelicula, recreate what changed
+  check-vpn              Show the VPN's public IP and forwarded port
+  reset-config <svc|all> [--yes]
+                         Delete a service's config dir (all = every service;
+                         .env and media are kept), then run 'pelicula up'
+  doctor                 Print a support report (secrets redacted)
+  seed <config_dir>      Write and re-enforce service configs only (no Docker)
+  version                Print the CLI version
+  help                   Show this help
 
 Options:
-  -v, --verbose       Verbose output
-  -h, --help          Show this help
-  --version           Show version
+  -v, --verbose          Verbose output
+  --debug                Diagnostics (implies -v)
 `)
 }

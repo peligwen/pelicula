@@ -1,0 +1,9 @@
+config/
+bin/
+nginx/
+docs/
+tests/
+compose/*.yml
+.env*
+*.md
+.git

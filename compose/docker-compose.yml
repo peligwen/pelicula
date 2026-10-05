@@ -1,21 +1,26 @@
-# Image pinning policy:
-# All images are pinned to specific tags. The :latest tag tracks unstable
-# upstream changes (gluetun's :latest broke port-forwarding multiple times
-# in 2024). To bump, verify via `docker manifest inspect <tag>` and run
-# the e2e test stack first.
+# The one compose file for Pelicula. Drive it with `./pelicula up` (the CLI
+# passes the env file, project name and profiles); by hand:
+#
+#   docker compose --env-file .env -f compose/docker-compose.yml [--profile vpn] up -d --build
+#
+# Relative paths below resolve against this file's directory (compose/), so the
+# repository root is "..".
+#
+# Image pinning policy: every image is pinned to a specific tag. `latest` tracks
+# unstable upstream changes (gluetun's broke port forwarding more than once).
+# To bump one, verify with `docker manifest inspect <tag>` and run the
+# integration test first.
+#
+# The vpn profile (gluetun, qbittorrent, prowlarr) is enabled by the CLI only
+# when WIREGUARD_PRIVATE_KEY is set. Without it Sonarr, Radarr, Jellyfin, the
+# Pelicula server and nginx still run.
 
-# Library source: this file deliberately mounts NO /media volume. The
-# library comes from exactly one companion overlay, chosen by the CLI from
-# LIBRARY_NFS in .env (see cmd/pelicula/compose.go buildArgs):
-#   docker-compose.local-library.yml — ${LIBRARY_DIR} bind mount (default)
-#   docker-compose.nfs.yml           — NFS named volume (LIBRARY_NFS=true)
-# Never `docker compose -f docker-compose.yml ...` by hand without adding
-# one of the pair, or every media service starts without its library.
+# Default project name for hand-run `docker compose`; the CLI passes
+# --project-name explicitly (PELICULA_PROJECT_NAME), which takes precedence.
+name: pelicula
 
-# Default logging driver: json-file with rotation. Apply to every service
-# via `<<: *default-logging`. 10 MB × 3 files × ~14 services ≈ 420 MB
-# stack-wide ceiling — fits Synology comfortably while preserving
-# meaningful incident debug.
+# Default logging: json-file with rotation (10 MB x 3 files per service) so a
+# chatty container cannot fill a NAS volume. Applied with `logging: *default-logging`.
 x-logging: &default-logging
   driver: "json-file"
   options:
@@ -25,7 +30,7 @@ x-logging: &default-logging
 services:
 
   # ═══════════════════════════════════════════════════
-  # VPN — ProtonVPN via Wireguard with port forwarding
+  # VPN — ProtonVPN via WireGuard with port forwarding
   # ═══════════════════════════════════════════════════
   gluetun:
     image: qmcgaw/gluetun:v3.41.0
@@ -43,16 +48,11 @@ services:
       - VPN_PORT_FORWARDING_PROVIDER=protonvpn
       - PORT_FORWARD_ONLY=on
       - TZ=${TZ}
-      # Allow containers in gluetun's namespace (Prowlarr, qBittorrent) to reach
-      # the Docker bridge network directly without routing through the VPN.
-      # Without this, Prowlarr's indexer sync requests to Sonarr/Radarr arrive
-      # from the VPN's public IP and get 401 (DisabledForLocalAddresses requires
-      # local source IP to bypass API key auth).
+      # Let containers in gluetun's namespace (Prowlarr, qBittorrent) reach the
+      # Docker network directly instead of through the tunnel. Without this,
+      # Prowlarr's sync calls to Sonarr/Radarr arrive from the VPN's public IP
+      # and get 401 (DisabledForLocalAddresses needs a local source address).
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
-      # HTTP proxy — lets other containers (pelicula-api) route test traffic
-      # through the VPN tunnel for speed diagnostics.
-      - HTTPPROXY=on
-      - HTTPPROXY_LISTENING_ADDRESS=:8888
       - HTTP_CONTROL_SERVER_USERNAME=${GLUETUN_HTTP_USER:-pelicula}
       - HTTP_CONTROL_SERVER_PASSWORD=${GLUETUN_HTTP_PASS}
     ports:
@@ -60,12 +60,12 @@ services:
       - "6881:6881"
       - "6881:6881/udp"
     volumes:
-      - ${CONFIG_DIR}/gluetun:/gluetun
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/gluetun:/gluetun
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
     healthcheck:
-      # NOTE: gluetun's control-server auth middleware rejects HEAD requests with 401
-      # even with valid credentials (GET succeeds identically) — must not use `wget --spider`.
+      # gluetun's control-server auth middleware rejects HEAD requests with 401
+      # even with valid credentials (GET succeeds), so `wget --spider` must not be used.
       test: ["CMD-SHELL", "wget -q -O /dev/null --user=${GLUETUN_HTTP_USER:-pelicula} --password=${GLUETUN_HTTP_PASS} http://localhost:8000/v1/publicip/ip || exit 1"]
       interval: 30s
       timeout: 10s
@@ -74,7 +74,7 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # Torrent Client — all traffic through VPN
+  # Torrent client — all traffic through the VPN
   # ═══════════════════════════════════════════════════
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.1.4
@@ -87,7 +87,7 @@ services:
       - TZ=${TZ}
       - WEBUI_PORT=8080
     volumes:
-      - ${CONFIG_DIR}/qbittorrent:/config
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/qbittorrent:/config
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     depends_on:
       gluetun:
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # Indexer Manager
+  # Indexer manager — in gluetun's network namespace
   # ═══════════════════════════════════════════════════
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:2.3.0
@@ -116,7 +116,7 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${CONFIG_DIR}/prowlarr:/config
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/prowlarr:/config
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:9696/ping || exit 1"]
       interval: 30s
@@ -126,7 +126,7 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # TV Show Manager
+  # TV show manager
   # ═══════════════════════════════════════════════════
   sonarr:
     image: lscr.io/linuxserver/sonarr:4.0.17
@@ -136,7 +136,8 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${CONFIG_DIR}/sonarr:/config
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/sonarr:/config
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8989/ping || exit 1"]
@@ -147,7 +148,7 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # Movie Manager
+  # Movie manager
   # ═══════════════════════════════════════════════════
   radarr:
     image: lscr.io/linuxserver/radarr:6.0.4
@@ -157,7 +158,8 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${CONFIG_DIR}/radarr:/config
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/radarr:/config
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
       - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ping || exit 1"]
@@ -168,13 +170,13 @@ services:
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # Media Server
+  # Media server
   # ═══════════════════════════════════════════════════
   jellyfin:
     # Pinned: bump deliberately, not on every `pelicula update` (mirrors gluetun policy).
     image: lscr.io/linuxserver/jellyfin:10.11.8
     logging: *default-logging
-    # Transcode memory cap — protects the rest of the stack from OOM.
+    # Memory cap protects the rest of the stack from a runaway transcode.
     mem_limit: ${JELLYFIN_MEM_LIMIT:-4g}
     environment:
       - PUID=${PUID}
@@ -182,262 +184,82 @@ services:
       - TZ=${TZ}
     ports:
       - "7359:7359/udp"   # LAN discovery — lets Jellyfin apps find the server
-      - "8920:8920"       # Jellyfin built-in HTTPS — operator port-forwards this for external access
+      - "8920:8920"       # Jellyfin built-in HTTPS — the operator port-forwards this for external access
     volumes:
-      - ${CONFIG_DIR}/jellyfin:/config
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/jellyfin:/config
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media
     healthcheck:
       # linuxserver/jellyfin is Ubuntu-based (no wget) — use curl.
       test: ["CMD-SHELL", "curl -sf http://localhost:8096/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      # First-boot DB migrations + plugin scan can run 40-90s on slow hardware (Synology).
+      # First-boot DB migrations and plugin scan can take 40-90s on slow hardware (Synology).
       start_period: 120s
     restart: unless-stopped
 
   # ═══════════════════════════════════════════════════
-  # Procula — media processing pipeline
+  # Pelicula server — API, auto-wiring, import pipeline
   # ═══════════════════════════════════════════════════
-  procula:
-    # VERSION stamps the binary (ldflags) and the org.pelicula.version image
-    # label used by the CLI's image-staleness check. The CLI exports
-    # PELICULA_VERSION on every compose invocation, so even an implicit
-    # first-run build by `pelicula up` gets a real version, not "dev".
+  pelicula:
     build:
-      context: ./procula
+      context: ..
+      dockerfile: compose/Dockerfile
       args:
+        # Stamps the binary. The CLI exports PELICULA_VERSION (git describe).
         VERSION: ${PELICULA_VERSION:-dev}
     logging: *default-logging
-    restart: unless-stopped
-    # Worst-case graceful shutdown in procula/main.go: 10s HTTP drain
-    # (serveWithShutdown) + 10s background-goroutine drain + up to 10s for
-    # FlushJellyfinRefresh's own HTTP client timeout (only if a debounced
-    # refresh is pending) = 30s. 15s let SIGKILL land before that finished —
-    # the same mismatch as pelicula-api's (MWA-14); 32s gives ~2s of margin.
-    stop_grace_period: 32s
-    # Run as the operator's user so files written to the library/processing
-    # volumes match host ownership (image has no privilege-drop entrypoint).
-    user: "${PUID}:${PGID}"
-    # Cap memory so a runaway FFmpeg can't OOM the host and take down the
-    # whole stack. CPU is left unlimited — starving transcodes only slows
-    # them; memory exhaustion kills neighbours.
-    mem_limit: ${PROCULA_MEM_LIMIT:-4g}
-    depends_on:
-      - pelicula-api
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-      - CONFIG_DIR=/config
-      - PELICULA_API_URL=http://pelicula-api:8181
-      - PROCULA_API_KEY=${PROCULA_API_KEY:-}
-      - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
-      - PELICULA_AUDIO_LANG=${PELICULA_AUDIO_LANG:-eng}
-      - BAZARR_URL=${BAZARR_URL:-http://bazarr:6767/bazarr}
-    volumes:
-      - ${CONFIG_DIR}/procula:/config
-      - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
-      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
-      - ${WORK_DIR:?WORK_DIR not set in .env}/processing:/processing
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8282/ping || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # ═══════════════════════════════════════════════════
-  # Subtitles — downloads subtitles for movies & TV
-  # ═══════════════════════════════════════════════════
-  bazarr:
-    image: lscr.io/linuxserver/bazarr:1.5.5
-    logging: *default-logging
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ${CONFIG_DIR}/bazarr:/config
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6767/bazarr/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-
-  # ═══════════════════════════════════════════════════
-  # Docker socket proxy — exposes only containers/restart+logs
-  # to pelicula-api. Verb allowlist enforced by tecnativa proxy;
-  # defense-in-depth on top of the in-process container allowlist.
-  # The real socket is never mounted into pelicula-api.
-  # ═══════════════════════════════════════════════════
-  docker-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
-    logging: *default-logging
-    restart: unless-stopped
-    environment:
-      - CONTAINERS=1       # GET /containers/* (inspect, logs)
-      - POST=1             # allow POST verbs (restart)
-      - ALLOW_START=0
-      - ALLOW_STOP=0
-      - ALLOW_RESTARTS=1   # POST /containers/{id}/restart only
-      # Everything else (IMAGES, VOLUMES, NETWORKS, EXEC, BUILD, AUTH, INFO)
-      # defaults to 0 — not exposed.
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      # Intentionally only on the `pelicula` named network — not on `default`.
-      # pelicula-api reaches the proxy via Docker service discovery on this
-      # network; nginx never talks to it directly. Keeping it off `default`
-      # limits the blast radius if the proxy were ever compromised.
-      pelicula:
-        aliases:
-          - docker-proxy
-
-  # ═══════════════════════════════════════════════════
-  # Middleware — auto-wiring, search, downloads API
-  # ═══════════════════════════════════════════════════
-  pelicula-api:
-    # See procula's build block for what VERSION does here.
-    build:
-      context: ./middleware
-      args:
-        VERSION: ${PELICULA_VERSION:-dev}
-    logging: *default-logging
-    # Run as the operator's user — config/jellyfin and .env mounts stay
-    # host-owned, and the API needs no root privileges (Docker access goes
-    # through docker-proxy over TCP).
-    user: "${PUID}:${PGID}"
-    mem_limit: ${PELICULA_API_MEM_LIMIT:-512m}
+    # Run as the operator so files in the mounted config dir stay host-owned.
+    user: "${PUID:?PUID not set in .env}:${PGID:?PGID not set in .env}"
     environment:
       - TZ=${TZ}
-      - DOCKER_HOST=http://docker-proxy:2375
-      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
-      - PROCULA_API_KEY=${PROCULA_API_KEY:-}
-      - PELICULA_SUB_LANGS=${PELICULA_SUB_LANGS:-en}
-      - PELICULA_AUDIO_LANG=${PELICULA_AUDIO_LANG:-eng}
-      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      # The CLI sets PELICULA_VPN=true when WIREGUARD_PRIVATE_KEY is set.
+      - PELICULA_VPN=${PELICULA_VPN:-false}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:?WEBHOOK_SECRET not set in .env}
+      - JELLYFIN_ADMIN_USER=${JELLYFIN_ADMIN_USER:-admin}
+      - JELLYFIN_PASSWORD=${JELLYFIN_PASSWORD:?JELLYFIN_PASSWORD not set in .env}
       - GLUETUN_HTTP_USER=${GLUETUN_HTTP_USER:-pelicula}
-      - GLUETUN_HTTP_PASS=${GLUETUN_HTTP_PASS}
-      - GLUETUN_PROXY_URL=${GLUETUN_PROXY_URL:-http://gluetun:8888}
-      - PELICULA_PROJECT_NAME=${PELICULA_PROJECT_NAME:-pelicula}
+      - GLUETUN_HTTP_PASS=${GLUETUN_HTTP_PASS:-}
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES:-}
+      # Host paths, shown on the Settings page only.
+      - HOST_CONFIG_DIR=${CONFIG_DIR}
+      - HOST_LIBRARY_DIR=${LIBRARY_DIR}
+      - HOST_WORK_DIR=${WORK_DIR}
     volumes:
-      # The middleware reads AND writes this file at runtime (setup wizard,
-      # auto-wiring's API-key persistence — see bootstrap.go's envPath).
-      # PELICULA_ENV_FILE is the CLI's test/orchestration seam: when exported
-      # (tests/e2e.sh's isolated stack), the same env file the CLI operates on
-      # is what the container mounts; unset, production mounts repo-root .env
-      # exactly as before. OS environment wins over --env-file in compose
-      # substitution, so the export flows through `pelicula up` unchanged.
-      - ${PELICULA_ENV_FILE:-./.env}:/project/.env
-      - ${CONFIG_DIR}/sonarr:/config/sonarr:ro
-      - ${CONFIG_DIR}/radarr:/config/radarr:ro
-      - ${CONFIG_DIR}/prowlarr:/config/prowlarr:ro
-      - ${CONFIG_DIR}/qbittorrent:/config/qbittorrent:ro
-      - ${CONFIG_DIR}/bazarr:/config/bazarr:ro
-      - ${CONFIG_DIR}/pelicula:/config/pelicula
-      # Writable mount so settings auto-apply can re-seed network.xml when the
-      # Jellyfin published URL changes (then restart Jellyfin via docker-proxy).
-      - ${CONFIG_DIR}/jellyfin:/config/jellyfin
-      - ${WORK_DIR:?WORK_DIR not set in .env}/downloads:/downloads:ro
-    networks:
-      default: {}
-      pelicula:
-        aliases:
-          - pelicula-api
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/pelicula:/config/pelicula
+      # The server reads the *arr API keys from their config.xml files.
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/sonarr:/config/sonarr:ro
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/radarr:/config/radarr:ro
+      - ${CONFIG_DIR:?CONFIG_DIR not set in .env}/prowlarr:/config/prowlarr:ro
+      # Read-only: the server probes files; deletions go through the *arr API.
+      - ${LIBRARY_DIR:?LIBRARY_DIR not set in .env}:/media:ro
     depends_on:
       - sonarr
       - radarr
-      - docker-proxy
+      - jellyfin
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8181/api/pelicula/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8181/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 30s
     restart: unless-stopped
-    # Worst-case graceful shutdown in cmd/pelicula-api/main.go: 10s HTTP
-    # drain (serveWithShutdown's Shutdown context) + 5s background-goroutine
-    # drain = 15s. 8s let SIGKILL land before that finished (MWA-14); 16s
-    # gives 1s of margin.
-    stop_grace_period: 16s
+    # Graceful shutdown drains in-flight HTTP requests and the running import job.
+    stop_grace_period: 20s
 
   # ═══════════════════════════════════════════════════
-  # Push Notifications — opt-in (profile: apprise)
-  # Enable: set NOTIFICATIONS_MODE=apprise in .env
-  # Supports ntfy, Gotify, email, Pushover, Telegram, etc.
-  # ═══════════════════════════════════════════════════
-  apprise:
-    image: caronc/apprise:v1.3.3
-    logging: *default-logging
-    profiles: [apprise]
-    volumes:
-      - ${CONFIG_DIR}/apprise:/config
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8000 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-
-  # ═══════════════════════════════════════════════════
-  # Reverse Proxy — single entry point (HTTP, LAN-only)
+  # Reverse proxy — single entry point (HTTP, LAN-only)
   # ═══════════════════════════════════════════════════
   nginx:
     image: nginx:1.28.3-alpine
     logging: *default-logging
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/snippets:/etc/nginx/snippets:ro
-      - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
-      - ./nginx/styles.css:/usr/share/nginx/html/styles.css:ro
-      - ./nginx/theme.css:/usr/share/nginx/html/theme.css:ro
-      - ./nginx/service-overrides.css:/usr/share/nginx/html/service-overrides.css:ro
-      - ./nginx/dashboard.js:/usr/share/nginx/html/dashboard.js:ro
-      - ./nginx/framework.js:/usr/share/nginx/html/framework.js:ro
-      - ./nginx/api.js:/usr/share/nginx/html/api.js:ro
-      - ./nginx/format.js:/usr/share/nginx/html/format.js:ro
-      - ./nginx/notif-helpers.js:/usr/share/nginx/html/notif-helpers.js:ro
-      - ./nginx/setup.html:/usr/share/nginx/html/setup.html:ro
-      - ./nginx/setup.css:/usr/share/nginx/html/setup.css:ro
-      - ./nginx/components.css:/usr/share/nginx/html/components.css:ro
-      - ./nginx/import.html:/usr/share/nginx/html/import.html:ro
-      - ./nginx/import.js:/usr/share/nginx/html/import.js:ro
-      - ./nginx/import.css:/usr/share/nginx/html/import.css:ro
-      - ./nginx/journey.js:/usr/share/nginx/html/journey.js:ro
-      - ./nginx/catalog.js:/usr/share/nginx/html/catalog.js:ro
-      - ./nginx/catalog.css:/usr/share/nginx/html/catalog.css:ro
-      - ./nginx/jobs.js:/usr/share/nginx/html/jobs.js:ro
-      - ./nginx/logs.js:/usr/share/nginx/html/logs.js:ro
-      - ./nginx/search.js:/usr/share/nginx/html/search.js:ro
-      - ./nginx/downloads.js:/usr/share/nginx/html/downloads.js:ro
-      - ./nginx/notifications.js:/usr/share/nginx/html/notifications.js:ro
-      - ./nginx/activity.js:/usr/share/nginx/html/activity.js:ro
-      - ./nginx/settings.js:/usr/share/nginx/html/settings.js:ro
-      - ./nginx/users.js:/usr/share/nginx/html/users.js:ro
-      - ./nginx/services.js:/usr/share/nginx/html/services.js:ro
-      - ./nginx/native_apps.js:/usr/share/nginx/html/native_apps.js:ro
-      - ./nginx/register.html:/usr/share/nginx/html/register.html:ro
-      - ./nginx/register.js:/usr/share/nginx/html/register.js:ro
-      - ./nginx/register.css:/usr/share/nginx/html/register.css:ro
-      - ./nginx/qr.js:/usr/share/nginx/html/qr.js:ro
-      - ./nginx/sse.js:/usr/share/nginx/html/sse.js:ro
-      - ./nginx/network.js:/usr/share/nginx/html/network.js:ro
-      - ./nginx/network.css:/usr/share/nginx/html/network.css:ro
-      - ./nginx/fonts:/usr/share/nginx/html/fonts:ro
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/html:/usr/share/nginx/html:ro
     ports:
       - "${PELICULA_PORT:-7354}:80"
     depends_on:
-      - sonarr
-      - radarr
-      - jellyfin
-      - pelicula-api
-      - procula
-      - bazarr
+      - pelicula
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80 || exit 1"]
       interval: 30s
@@ -445,8 +267,3 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
-
-networks:
-  pelicula:
-    name: pelicula
-    driver: bridge

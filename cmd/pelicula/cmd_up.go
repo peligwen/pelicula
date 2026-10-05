@@ -1,401 +1,204 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
-	"syscall"
+	"slices"
+	"strings"
 	"time"
 )
 
-// cmdUp implements the "up" subcommand.
+const (
+	gluetunWaitAttempts = 60 // × 2s = 2 minutes
+	healthWaitAttempts  = 60 // × 2s = 2 minutes
+	waitInterval        = 2 * time.Second
+)
+
+// cmdUp implements `pelicula up`: first-run setup, directories, TUN override,
+// config seeding, `docker compose up`, then waits for the stack to answer.
 func cmdUp(ctx *Context, _ []string) {
-	// If no .env, run setup wizard, then continue with up
-	if _, err := os.Stat(ctx.EnvFile); err != nil {
-		fmt.Println()
-		fmt.Printf("%sNo configuration found — starting setup wizard.%s\n", colorBold, colorReset)
-		fmt.Println()
-
-		// intentional: pre-env setup wizard path; .env does not exist yet so profiles unavailable
-		c := ctx.newCompose()
-
-		setupCompose := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.setup.yml")
-		if _, err := os.Stat(setupCompose); err != nil {
-			fatal("compose/docker-compose.setup.yml not found — make sure you're running from the pelicula directory")
-		}
-
-		home, _ := os.UserHomeDir()
-		setupEnv := os.Environ()
-		setupEnv = append(setupEnv,
-			"HOST_PLATFORM="+ctx.Plat.HostPlatformID(),
-			"HOST_TZ="+ctx.Plat.TZ,
-			fmt.Sprintf("HOST_PUID=%d", ctx.Plat.UID),
-			fmt.Sprintf("HOST_PGID=%d", ctx.Plat.GID),
-			"HOST_HOME="+home,
-			"HOST_CONFIG_DIR="+ctx.Plat.DefaultConfigDir,
-			"HOST_LIBRARY_DIR="+ctx.Plat.DefaultLibraryDir,
-			"HOST_WORK_DIR="+ctx.Plat.DefaultWorkDir,
-			"HOST_LAN_URL="+detectLANURL(),
-		)
-
-		if err := c.runSetupBuild(setupCompose, setupEnv); err != nil {
-			fatal("Failed to start setup containers: " + err.Error())
-		}
-
-		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer stop()
-		fmt.Printf("  Open %s in your browser to continue setup\n", bold("http://localhost:7354/"))
-		fmt.Println()
-		openBrowser("http://localhost:7354/")
-
-		info("Waiting for setup to complete (Ctrl+C to abort)...")
-		maxWait := 150
-		if v := os.Getenv("PELICULA_SETUP_TIMEOUT"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				maxWait = n
-			}
-		}
-		completed := false
-		for i := 0; i < maxWait; i++ {
-			select {
-			case <-sigCtx.Done():
-				fmt.Println()
-				warn("Setup cancelled.")
-				_ = c.runSetupDown(setupCompose)
-				return
-			default:
-			}
-			time.Sleep(2 * time.Second)
-			if _, err := os.Stat(ctx.EnvFile); err == nil {
-				pass("Configuration saved")
-				completed = true
-				break
-			}
-			if i == maxWait-1 {
-				warn("Setup timed out after 5 minutes")
-				_ = c.runSetupDown(setupCompose)
-				return
-			}
-		}
-		if !completed {
-			_ = c.runSetupDown(setupCompose)
-			return
-		}
-
-		// Tear down setup containers before starting main stack —
-		// they share container names (pelicula-api, nginx) and port 7354.
-		info("Cleaning up setup containers...")
-		if err := c.runSetupDown(setupCompose); err != nil {
-			warn("Failed to stop setup containers: " + err.Error())
-		}
-
-		fmt.Println()
+	if composeFile := filepath.Join(ctx.ScriptDir, composeMarker); !fileExists(composeFile) {
+		fatal(composeFile + " not found — run pelicula from a Pelicula checkout")
+	}
+	if !fileExists(ctx.EnvFile) {
+		firstRunSetup(ctx)
 	}
 
-	// Load and migrate .env
 	progress("Loading configuration...")
-	if _, err := ParseEnv(ctx.EnvFile); err != nil {
-		fatal("Failed to read .env: " + err.Error())
+	env := loadEnvOrFatal(ctx.EnvFile)
+	if set := completeEnv(env, ctx.Plat); len(set) > 0 {
+		if err := WriteEnv(ctx.EnvFile, env); err != nil {
+			fatal("Failed to update .env: " + err.Error())
+		}
+		warn("Filled in blank .env values: " + strings.Join(set, ", "))
+		if slices.Contains(set, "JELLYFIN_PASSWORD") {
+			printAdminCredentials(env)
+		}
 	}
-	if _, err := MigrateEnv(ctx.EnvFile); err != nil {
-		warn("Failed to migrate .env: " + err.Error())
-	}
-	// Re-read after migration
-	env, err := ParseEnv(ctx.EnvFile)
-	if err != nil {
-		fatal("Failed to read .env after migration: " + err.Error())
+	if err := validateEnv(env); err != nil {
+		fatal(err.Error())
 	}
 	ctx.Env = env
 
-	configDir := env["CONFIG_DIR"]
-	libraryDir := env["LIBRARY_DIR"]
-	workDir := env["WORK_DIR"]
-	port := envDefault(env, "PELICULA_PORT", "7354")
-	nfsLibrary := isNFSLibrary(env)
-
-	// Validate critical path vars — empty values produce cryptic Docker Compose errors.
-	// LIBRARY_DIR is only required for the default bind-mount library: in NFS
-	// mode (LIBRARY_NFS=true) the Docker engine mounts the export itself and
-	// no host library path exists — NFS_HOST/NFS_EXPORT take its place.
-	pathChecks := []struct{ key, val string }{
-		{"CONFIG_DIR", configDir},
-		{"WORK_DIR", workDir},
-	}
-	if nfsLibrary {
-		pathChecks = append(pathChecks,
-			struct{ key, val string }{"NFS_HOST", env["NFS_HOST"]},
-			struct{ key, val string }{"NFS_EXPORT", env["NFS_EXPORT"]},
-		)
-	} else {
-		pathChecks = append(pathChecks, struct{ key, val string }{"LIBRARY_DIR", libraryDir})
-	}
-	for _, check := range pathChecks {
-		if check.val == "" {
-			if nfsLibrary && (check.key == "NFS_HOST" || check.key == "NFS_EXPORT") {
-				fatal(check.key + ` is empty in .env — required when LIBRARY_NFS=true (NAS host and export path, e.g. NFS_HOST=nas.local NFS_EXPORT=/volume1/media)`)
-			}
-			fatal(check.key + ` is empty in .env — set it manually or run: pelicula reset-config`)
-		}
-	}
+	configDir, libraryDir, workDir := env["CONFIG_DIR"], env["LIBRARY_DIR"], env["WORK_DIR"]
+	vpn := vpnEnabled(env)
 
 	progress("Detected: " + ctx.Plat.PlatformLabel())
 
-	info("Starting stack...")
-
-	// Ensure libraries.json exists (migrates old installs to the library registry).
-	configPeliculaDir := filepath.Join(configDir, "pelicula")
-	libs, err := readOrCreateLibraries(configPeliculaDir)
-	if err != nil {
-		warn("Failed to read libraries.json: " + err.Error())
-		libs = defaultLibraries().Libraries
-	}
-
-	// Create directory structure. In NFS mode there is no host library path —
-	// setupDirs skips slug dirs (libraryDir "") and ensureNFSLibraryDirs
-	// creates them inside the mounted volume once the stack is up.
 	progress("Setting up directories...")
-	setupLibraryDir := libraryDir
-	if nfsLibrary {
-		setupLibraryDir = ""
-	}
-	if err := setupDirs(configDir, setupLibraryDir, workDir, libs); err != nil {
-		var dce *dirCreateError
-		if errors.As(err, &dce) && os.IsPermission(dce.err) {
-			ancestor := firstExistingAncestor(dce.path)
-			if ancestor == "" {
-				ancestor = filepath.Dir(dce.path)
-			}
-			fmt.Fprintf(os.Stderr, "%s✗ Permission denied creating %s%s\n", colorRed, dce.path, colorReset)
-			fmt.Fprintf(os.Stderr, "  The directory %s%s%s exists but is not writable.\n", colorBold, ancestor, colorReset)
-			fmt.Fprintf(os.Stderr, "  Create the required folder first, then re-run %s:\n\n", bold("pelicula up"))
-			fmt.Fprintf(os.Stderr, "    sudo mkdir -p %s\n", filepath.Dir(dce.path))
-			fmt.Fprintf(os.Stderr, "    sudo chown %d:%d %s\n\n", ctx.Plat.UID, ctx.Plat.GID, filepath.Dir(dce.path))
-			fmt.Fprintf(os.Stderr, "  On Synology: create the shared folder in DSM File Station instead.\n\n")
-			os.Exit(1)
-		}
-		fatal("Failed to create directories: " + err.Error())
+	if err := setupDirs(configDir, libraryDir, workDir); err != nil {
+		reportDirError(err, ctx.Plat)
 	}
 
-	// Check /dev/net/tun on Linux
-	if err := CheckTUN(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s%s%s Run %s to create it.\n",
-			colorRed, err.Error(), colorReset, bold("pelicula up"))
-		os.Exit(1)
+	if err := ensureTUN(runtime.GOOS, filepath.Join(ctx.ScriptDir, "compose"), tunDevice, vpn); err != nil {
+		fatal(err.Error())
 	}
 
-	// Seed all service configs
+	progress("Seeding service configs...")
 	if err := SeedAllConfigs(configDir); err != nil {
 		fatal("Config seeding failed: " + err.Error())
 	}
 
-	// Regenerate the external-libraries compose override before starting.
-	librariesOverridePath := filepath.Join(ctx.ScriptDir, "compose", "docker-compose.libraries.yml")
-	if err := generateLibrariesOverride(configPeliculaDir, librariesOverridePath); err != nil {
-		warn("Failed to generate libraries override: " + err.Error())
-	}
-
-	// Build compose with profiles from env (vpn, apprise).
-	c := composeInvocation(ctx)
-
-	progress("Starting containers...")
-	if err := c.Run("up", "-d", "--remove-orphans"); err != nil {
+	c := ctx.compose(false)
+	progress("Starting containers (the first run builds the Pelicula image)...")
+	if err := c.Run("up", "-d", "--build", "--remove-orphans"); err != nil {
 		fatal("docker compose up failed: " + err.Error())
 	}
 
-	if nfsLibrary {
-		ensureNFSLibraryDirs(c, libs)
-	}
-
-	wgKey := env["WIREGUARD_PRIVATE_KEY"]
-	if wgKey != "" {
-		// Wait for gluetun health
-		info("Connecting to VPN...")
-		const maxAttempts = 30
-		vpnConnected := false
-		for i := 0; i < maxAttempts; i++ {
-			health, err := c.DockerInspect("{{.State.Health.Status}}", "gluetun")
-			if err == nil && health == "healthy" {
-				vpnConnected = true
-				break
-			}
-			time.Sleep(2 * time.Second)
-		}
-		if vpnConnected {
-			pass("VPN connected")
+	if vpn {
+		progress("Waiting for the VPN tunnel...")
+		if waitForGluetun(c, gluetunWaitAttempts, waitInterval) {
+			ok("VPN connected")
 		} else {
-			warn("VPN not ready — check: pelicula logs gluetun")
+			warn("VPN not healthy yet — check: pelicula logs gluetun")
 		}
 	} else {
-		info("VPN not configured — download services skipped")
+		info("No WireGuard key configured — VPN, download client and indexer manager are not started")
 	}
 
-	fmt.Println()
-	fmt.Printf("%s%sStack is running!%s\n", colorGreen, colorBold, colorReset)
-
-	host := lanIP()
-
-	fmt.Println()
-	fmt.Printf("  %sDashboard%s\n", colorBold, colorReset)
-	fmt.Printf("  http://%s:%s/\n", host, port)
-	fmt.Println()
-	fmt.Printf("  %sJellyfin%s\n", colorBold, colorReset)
-	fmt.Printf("  http://%s:%s/jellyfin/\n", host, port)
-
-	// Check if any admin has registered yet. The middleware may still be
-	// starting, so poll for up to 15 seconds before giving up quietly.
-	regURL := peliculaBaseURL(env) + "/api/pelicula/register/check"
-	if needsAdmin := checkNeedsAdmin(regURL); needsAdmin {
-		fmt.Printf("  %s%s No admin account yet — register now:%s\n", colorYellow, colorBold, colorReset)
-		dashURL := fmt.Sprintf("http://%s:%s/register", host, port)
-		fmt.Printf("  %s\n", dashURL)
-		fmt.Println()
-		openBrowser(dashURL)
+	progress("Waiting for the Pelicula API...")
+	healthURL := peliculaBaseURL(env) + "/api/health"
+	h, healthy := waitForHealth(&http.Client{Timeout: 5 * time.Second}, healthURL, healthWaitAttempts, waitInterval)
+	if !healthy {
+		warn("The API did not answer at " + healthURL + " within 2 minutes — check: pelicula doctor")
+	} else if h.Wired {
+		ok("API healthy (" + h.Version + "); services are wired")
+	} else {
+		ok("API healthy (" + h.Version + "); auto-wiring is still running — see: pelicula logs pelicula")
 	}
 
-	// Run an auth-free verify smoke after the stack is healthy.
-	// Non-blocking: failures print a hint but never prevent 'up' from succeeding.
-	// Set PELICULA_SKIP_VERIFY=1 to suppress (e.g. pelicula test isolated stack startup).
-	runUpSmoke(ctx.ScriptDir, port)
-
-	// Image staleness: a git pull updates nginx's bind-mounted dashboard
-	// files in place, but pelicula-api/procula run from images built at
-	// rebuild/redeploy time. Warn — last, so it is the most visible line —
-	// when those images lag the repo, so a half-deployed stack (new
-	// frontend, old API) never goes unnoticed.
-	for _, r := range checkImageSkews(c, ctx.ScriptDir) {
-		if r.needsRedeploy() {
-			warn(r.verdict())
-		}
+	printUpSummary(env, lanIP())
+	if !healthy {
+		os.Exit(1)
 	}
-
-	fmt.Println()
-
 }
 
-// checkNeedsAdmin polls the register/check endpoint (up to 15s) and returns
-// true if initial_setup is true (no admin has registered yet).
-func checkNeedsAdmin(url string) bool {
-	client := newHTTPClient(3 * time.Second)
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err != nil {
-			time.Sleep(2 * time.Second)
-			continue
+// firstRunSetup runs the terminal wizard and writes the first .env.
+func firstRunSetup(ctx *Context) {
+	fmt.Println()
+	if !isTerminal(os.Stdin) {
+		warn("stdin is not a terminal — setup will use the defaults")
+	}
+	home, _ := os.UserHomeDir()
+	env := runWizard(os.Stdin, os.Stdout, ctx.Plat, ctx.ScriptDir, home)
+	if err := WriteEnv(ctx.EnvFile, env); err != nil {
+		fatal("Failed to write .env: " + err.Error())
+	}
+	fmt.Println()
+	ok("Wrote " + ctx.EnvFile)
+	printAdminCredentials(env)
+	fmt.Println()
+}
+
+// printAdminCredentials shows the generated Jellyfin admin login once.
+func printAdminCredentials(env EnvMap) {
+	fmt.Printf("\n  %sJellyfin / dashboard admin login%s (shown only now; also kept in .env)\n", colorBold, colorReset)
+	fmt.Printf("    user:     %s\n    password: %s\n", env["JELLYFIN_ADMIN_USER"], env["JELLYFIN_PASSWORD"])
+}
+
+// printUpSummary prints the URLs and where the admin credentials live.
+func printUpSummary(env EnvMap, host string) {
+	port := envDefault(env, "PELICULA_PORT", "7354")
+	fmt.Println()
+	fmt.Printf("%s%sStack is running!%s\n\n", colorGreen, colorBold, colorReset)
+	fmt.Printf("  %sDashboard%s  http://%s:%s/\n", colorBold, colorReset, host, port)
+	fmt.Printf("  %sJellyfin%s   http://%s:%s/jellyfin/\n", colorBold, colorReset, host, port)
+	fmt.Println()
+	fmt.Printf("  Sign in with the Jellyfin admin account: user %q, password in JELLYFIN_PASSWORD (.env).\n", envDefault(env, "JELLYFIN_ADMIN_USER", "admin"))
+	fmt.Println()
+}
+
+// reportDirError explains a failed mkdir (with fix-it commands for permission
+// errors) and exits.
+func reportDirError(err error, plat Platform) {
+	var dce *dirCreateError
+	if errors.As(err, &dce) && os.IsPermission(dce.err) {
+		ancestor := firstExistingAncestor(dce.path)
+		if ancestor == "" {
+			ancestor = filepath.Dir(dce.path)
 		}
-		var data struct {
-			InitialSetup bool `json:"initial_setup"`
+		fmt.Fprintf(os.Stderr, "%s✗ Permission denied creating %s%s\n", colorRed, dce.path, colorReset)
+		fmt.Fprintf(os.Stderr, "  The directory %s exists but is not writable.\n", bold(ancestor))
+		fmt.Fprintf(os.Stderr, "  Create the folder first, then re-run %s:\n\n", bold("pelicula up"))
+		fmt.Fprintf(os.Stderr, "    sudo mkdir -p %s\n", filepath.Dir(dce.path))
+		fmt.Fprintf(os.Stderr, "    sudo chown %d:%d %s\n\n", plat.UID, plat.GID, filepath.Dir(dce.path))
+		fmt.Fprintf(os.Stderr, "  On Synology, create the shared folder in DSM File Station instead.\n")
+		os.Exit(1)
+	}
+	fatal("Failed to create directories: " + err.Error())
+}
+
+// waitForGluetun polls gluetun's docker health until it is "healthy".
+func waitForGluetun(c *Compose, attempts int, interval time.Duration) bool {
+	for i := 0; i < attempts; i++ {
+		if status, err := c.ServiceHealth("gluetun"); err == nil && status == "healthy" {
+			return true
 		}
-		err = json.NewDecoder(resp.Body).Decode(&data)
-		resp.Body.Close()
-		if err != nil {
-			return false
-		}
-		return data.InitialSetup
+		time.Sleep(interval)
 	}
 	return false
 }
 
-// lanIP returns the first RFC1918 IPv4 address found on host interfaces,
-// or "localhost" if none found. Delegates to detectLANIPs so the RFC1918
-// filter is applied (avoids returning a public IP on multi-homed hosts).
-func lanIP() string {
-	ips := detectLANIPs()
-	if len(ips) == 0 {
-		return "localhost"
-	}
-	return ips[0].String()
+// apiHealth is the body of GET /api/health.
+type apiHealth struct {
+	OK      bool   `json:"ok"`
+	Wired   bool   `json:"wired"`
+	Version string `json:"version"`
 }
 
-// runUpSmoke runs tests/verify.sh --skip-auth against the local stack after
-// it becomes healthy. It is non-blocking: a smoke failure prints a clear hint
-// but never causes 'pelicula up' to exit non-zero.
-//
-// Skipped entirely when:
-//   - PELICULA_SKIP_VERIFY=1 is set in the environment
-//   - running on Windows (bash not available)
-func runUpSmoke(scriptDir, port string) {
-	if os.Getenv("PELICULA_SKIP_VERIFY") != "" {
-		return
+// fetchHealth GETs url and decodes a healthy /api/health response.
+func fetchHealth(client *http.Client, url string) (apiHealth, error) {
+	var h apiHealth
+	resp, err := client.Get(url)
+	if err != nil {
+		return h, err
 	}
-	if runtime.GOOS == "windows" {
-		return
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return h, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-
-	verifyScript := filepath.Join(scriptDir, "tests", "verify.sh")
-	if _, err := os.Stat(verifyScript); err != nil {
-		// verify.sh missing — skip silently (older checkouts, partial installs)
-		return
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return h, err
 	}
-
-	fmt.Println()
-	info("Running post-deploy verify smoke (auth-free)...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", verifyScript, "--skip-auth", "--target", "localhost:"+port)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Run()
-
-	// Parse "Results: N passed, M failed" from verify.sh output.
-	reResults := regexp.MustCompile(`(\d+) passed, (\d+) failed`)
-	match := reResults.FindStringSubmatch(out.String())
-
-	if err == nil {
-		if match != nil {
-			pass("verify smoke: " + match[1] + " passed, 0 failed")
-		} else {
-			pass("verify smoke passed")
-		}
-		return
+	if !h.OK {
+		return h, errors.New("health reports not ok")
 	}
-
-	// Smoke failed (or timed out) — surface a hint, never block 'up'.
-	if match != nil {
-		warn("verify smoke: " + match[1] + " passed, " + match[2] + " failed")
-	} else {
-		warn("verify smoke reported failures")
-	}
-	fmt.Printf("  Run %s for details (this does not block 'up')\n", bold("pelicula verify"))
+	return h, nil
 }
 
-// ensureNFSLibraryDirs creates each managed library's slug directory inside
-// the NFS-backed /media volume (best-effort). In NFS mode the host never
-// sees the library filesystem, so setupDirs cannot pre-create movies/ and
-// tv/ the way it does for a bind mount — instead mkdir runs inside procula,
-// which mounts the volume read-write and runs as ${PUID}:${PGID}, the uid
-// the export is expected to grant. Failure is a warning, not fatal: the
-// export may be root-squashed or read-only for this uid, in which case the
-// operator creates the directories on the NAS themselves.
-func ensureNFSLibraryDirs(c *Compose, libs []cliLibrary) {
-	args := []string{"exec", "-T", "procula", "mkdir", "-p"}
-	n := 0
-	for _, lib := range libs {
-		if lib.Slug == "" || lib.Path != "" || !safeSlugRe.MatchString(lib.Slug) {
-			continue
+// waitForHealth polls url until it reports ok, returning the last response
+// (so the caller can report `wired`) and whether it became healthy.
+func waitForHealth(client *http.Client, url string, attempts int, interval time.Duration) (apiHealth, bool) {
+	for i := 0; i < attempts; i++ {
+		if h, err := fetchHealth(client, url); err == nil {
+			return h, true
 		}
-		args = append(args, "/media/"+lib.Slug)
-		n++
+		time.Sleep(interval)
 	}
-	if n == 0 {
-		return
-	}
-	if out, err := c.RunSilent(args...); err != nil {
-		warn("could not create library folders on the NFS export: " + err.Error())
-		fmt.Fprintf(os.Stderr, "%s", out)
-		fmt.Println("  Create them on the NAS export manually (e.g. movies/ and tv/), then re-run: pelicula up")
-	}
+	return apiHealth{}, false
 }

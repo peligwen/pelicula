@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Join Pelicula</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="register-wrap">
+    <div class="card register-card">
+      <a class="wordmark wordmark-lg" href="/">pelicula</a>
+      <h1>Create your account</h1>
+
+      <p class="muted" id="register-loading">Checking your invite&hellip;</p>
+
+      <div id="register-invalid" data-testid="register-invalid" hidden>
+        <p class="form-error" id="register-invalid-msg"></p>
+        <p class="muted small">Ask whoever runs this server for a new invite link.</p>
+      </div>
+
+      <form id="register-form" data-testid="register-form" autocomplete="on" hidden>
+        <p class="muted">You are joining as <strong id="register-role" data-testid="register-role"></strong>.</p>
+        <label class="field">
+          <span>Username</span>
+          <input type="text" id="register-username" data-testid="register-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" pattern="[A-Za-z0-9._\-]{3,32}" required>
+          <span class="small">3 to 32 letters, numbers, dots, dashes or underscores.</span>
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" id="register-password" data-testid="register-password" name="password" autocomplete="new-password" minlength="8" required>
+          <span class="small">At least 8 characters.</span>
+        </label>
+        <label class="field">
+          <span>Confirm password</span>
+          <input type="password" id="register-confirm" data-testid="register-confirm" name="confirm" autocomplete="new-password" minlength="8" required>
+        </label>
+        <p class="form-error" id="register-error" data-testid="register-error" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="register-submit" data-testid="register-submit">Create account</button>
+      </form>
+    </div>
+  </main>
+
+  <script src="/api.js"></script>
+  <script src="/register.js"></script>
+</body>
+</html>

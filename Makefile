@@ -1,43 +1,32 @@
-.PHONY: build test test-procula test-middleware test-cli test-race test-cover e2e install-hooks check-hooks verify
+.PHONY: build test vet lint e2e playwright clean
+
+GO      ?= go
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 
 build:
-	cd cmd/pelicula && go build -ldflags "-X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o ../../bin/pelicula .
+	mkdir -p bin
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/pelicula ./cmd/pelicula
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/pelicula-server ./cmd/pelicula-server
 
-check-hooks:
-	@if [ "$$(git config core.hooksPath)" != ".githooks" ]; then \
-		echo "hooks not installed; running make install-hooks..."; \
-		$(MAKE) install-hooks; \
+test:
+	$(GO) test -race ./...
+
+vet:
+	$(GO) vet ./...
+	@out="$$(gofmt -l .)"; \
+	if [ -n "$$out" ]; then \
+		echo "gofmt needed on:"; echo "$$out"; exit 1; \
 	fi
 
-test: check-hooks test-procula test-middleware test-cli
-
-test-procula:
-	cd procula && go test -race -v ./...
-
-test-middleware:
-	cd middleware && go test -race -v ./...
-
-test-cli:
-	cd cmd/pelicula && go test -race -v ./...
-
-test-race:
-	cd procula && go test -race -v ./...
-	cd middleware && go test -race -v ./...
-	cd cmd/pelicula && go test -race -v ./...
-
-test-cover:
-	cd procula && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
-	cd middleware && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
-	cd cmd/pelicula && go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+lint:
+	$(GO) run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
 e2e:
-	bash tests/e2e.sh
+	$(GO) test -tags integration -count=1 -timeout 20m ./tests/integration/...
 
-install-hooks:
-	git config core.hooksPath .githooks
-	git config merge.ff false
-	@echo "hooks installed — pre-commit, pre-push, pre-merge-commit active"
-	@echo "merges into main will run the full suite (unit + e2e, ~10 min)"
-	@echo "bypass any hook with --no-verify"
+playwright:
+	cd tests/playwright && npm test
 
-verify: test e2e
+clean:
+	rm -rf bin tests/playwright/report tests/playwright/test-results

@@ -5,16 +5,16 @@ import (
 	"os"
 )
 
-// verboseMode gates debug-level output. Set from main.go when -v is passed.
+// verboseMode gates info/pass output. Set from main when -v is passed.
 var verboseMode bool
 
-// debugMode enables detailed diagnostic output. Set from main.go when --debug is passed.
+// debugMode enables diagnostic output. Set from main when --debug is passed.
 var debugMode bool
 
-// isTTY is true when stdout is a terminal. Detected once at startup via isTerminal (tty.go).
+// isTTY is true when stdout is a terminal (see tty_*.go).
 var isTTY = isTerminal(os.Stdout)
 
-// ANSI color codes — empty strings when stdout is not a terminal.
+// ANSI color codes; empty strings when stdout is not a terminal.
 var (
 	colorRed    = ansiCode("\033[0;31m")
 	colorGreen  = ansiCode("\033[0;32m")
@@ -24,7 +24,6 @@ var (
 	colorReset  = ansiCode("\033[0m")
 )
 
-// ansiCode returns the escape sequence only when stdout is a terminal.
 func ansiCode(seq string) string {
 	if isTTY {
 		return seq
@@ -32,10 +31,8 @@ func ansiCode(seq string) string {
 	return ""
 }
 
-func pass(msg string) {
-	if !verboseMode {
-		return
-	}
+// ok prints a success line.
+func ok(msg string) {
 	fmt.Printf("  %s✓%s %s\n", colorGreen, colorReset, msg)
 }
 
@@ -43,6 +40,7 @@ func fail(msg string) {
 	fmt.Printf("  %s✗%s %s\n", colorRed, colorReset, msg)
 }
 
+// info prints a hint line (verbose only).
 func info(msg string) {
 	if !verboseMode {
 		return
@@ -63,8 +61,7 @@ func bold(s string) string {
 	return colorBold + s + colorReset
 }
 
-// progress always prints a short milestone line, regardless of verboseMode.
-// Used to give a visible breadcrumb trail during startup so failed steps are locatable.
+// progress always prints a short milestone line so a failed step is locatable.
 func progress(msg string) {
 	fmt.Printf("%s▸%s %s\n", colorCyan, colorReset, msg)
 }

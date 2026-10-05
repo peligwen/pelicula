@@ -1,12 +1,13 @@
 {
-  "name": "pelicula-tests",
+  "name": "pelicula-v1-playwright",
+  "version": "1.0.0",
   "private": true,
+  "description": "Browser specs for the Pelicula dashboard",
   "scripts": {
-    "test:ui": "playwright test --config playwright.config.js",
-    "test:ui:headed": "playwright test --config playwright.config.js --headed",
-    "test:ui:debug": "playwright test --config playwright.config.js --debug"
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.49.0"
   }
 }
