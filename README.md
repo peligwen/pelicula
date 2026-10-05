@@ -10,7 +10,7 @@ Use it for legal content only. Pelicula does not ship, suggest or configure inde
 
 ```bash
 git clone https://github.com/peligwen/pelicula.git
-cd pelicula          # or cd pelicula/v1 while both trees share a checkout
+cd pelicula
 ./pelicula up
 ```
 

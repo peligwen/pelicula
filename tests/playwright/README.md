@@ -18,7 +18,7 @@ npx playwright install chromium
 export PELICULA_URL=http://localhost:7399        # default; use http://localhost:7354 for a real install
 export PELICULA_ADMIN_USER=admin                 # default
 export PELICULA_ADMIN_PASSWORD='<JELLYFIN_PASSWORD from .env>'
-npm test                                         # or: make playwright (from v1/)
+npm test                                         # or: make playwright (from the repo root)
 ```
 
 `PELICULA_CHROMIUM_PATH` points Playwright at a specific Chromium binary; it is only used when `PLAYWRIGHT_BROWSERS_PATH` is unset.

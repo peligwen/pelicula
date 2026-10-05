@@ -82,7 +82,7 @@ type userRole struct {
 // ── stack: the docker compose project under test ────────────────────────────
 
 type stack struct {
-	root        string // the v1 directory
+	root        string // the repository root
 	composeFile string
 	envFile     string // empty file: keeps a developer's own .env out of the run
 	env         []string
@@ -153,7 +153,7 @@ func newStack(t *testing.T) *stack {
 
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
-		t.Fatalf("resolve v1 dir: %v", err)
+		t.Fatalf("resolve repo root: %v", err)
 	}
 	composeFile := filepath.Join(root, "compose", "docker-compose.yml")
 	if _, err := os.Stat(composeFile); err != nil {

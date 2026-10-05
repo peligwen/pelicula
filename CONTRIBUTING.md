@@ -11,50 +11,43 @@ Pelicula is a LAN-first, clone-and-run media stack for personal use. It is a hob
 ## Scope
 
 The project accepts contributions that:
-- Fix bugs in the Go CLI, Go middleware, Go processing pipeline, or container configuration
-- Add features described in [ROADMAP.md](docs/ROADMAP.md) (Active section)
+- Fix bugs in the Go CLI, the Go server, the dashboard, or the container configuration
+- Bring back an item from the deferred list in [ROADMAP.md](docs/ROADMAP.md), in the shape it describes: behind a compose profile or a flag that is off by default
 - Improve documentation accuracy
 - Add or improve test coverage
 
-**Out of scope:** third-party service integrations not already in the stack, changes to the threat model, breaking changes to existing CLI flags or `.env` keys.
+**Out of scope:** third-party service integrations not already in the stack, changes to the threat model, breaking changes to existing CLI flags or `.env` keys, and anything on the deferred list in ROADMAP.md outside the shape described there. The guiding rule is one source of truth per fact: if Sonarr, Radarr, qBittorrent, Jellyfin or `.env` already owns something, read it from there rather than mirroring it.
 
 ## Dev Setup
 
-You need: Docker, Go 1.23+, bash, and a working ProtonVPN Plus account (for full e2e) or a stub `.env` (for unit tests only).
+You need: Docker with the Compose v2 plugin, Go 1.25, and bash. A ProtonVPN Plus account is only needed to run the stack with the VPN; the unit tests and the integration test run without one.
 
 ```bash
-# Run Go unit tests for both services
-make test
-
-# Run with race detector
-make test-race
-
-# Run code coverage report
-make test-cover
-
-# Full end-to-end test — spins an isolated stack on port 7399, no VPN needed
-make e2e
+make test        # go test -race ./...            (no Docker needed)
+make vet         # go vet ./... and a gofmt check
+make lint        # staticcheck
+make e2e         # integration test: starts a real stack on port 7399 (needs Docker)
+make playwright  # browser specs against a running stack (see tests/playwright/README.md)
 ```
-
-The one permitted external dependency is `modernc.org/sqlite` (pure-Go SQLite driver, no CGO). No other external dependencies are accepted.
 
 ## Code Conventions
 
-- **Go**: `modernc.org/sqlite` is the only permitted external dependency. `go vet ./...` must pass clean.
-- **Bash**: `tests/e2e.sh` is the end-to-end test runner. Shellcheck (`-S warning`) must pass.
-- **Tests**: every new Go function that makes a decision should have a unit test. Table-driven tests are preferred. Do not mock the database (there isn't one — use temp dirs).
-- **Commit messages**: `type(scope): short description` in imperative form. Types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`. Examples from history: `feat(procula): dual-subtitle stacking pipeline stage`, `refactor(cli): reset-config all regenerates .env`.
+- **Go**: one module, two binaries. `modernc.org/sqlite` is the only permitted external dependency; the CLI in `cmd/pelicula` is stdlib-only and must not import `internal/`. `gofmt -l .`, `go vet ./...` and `go test ./...` must pass clean.
+- **Bash**: the `pelicula` wrapper must pass shellcheck (`-S warning`).
+- **Tests**: every package has unit tests using `httptest` fakes and `store.OpenMemory()`. Nothing in `go test ./...` may require a running stack. Table-driven tests are preferred.
+- **Frontend**: vanilla JS, no build step, no inline scripts, no CDNs.
+- **Commit messages**: `type(scope): short description` in imperative form. Types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`.
 
 ## Pull Requests
 
 - One logical change per PR. A PR that adds a feature and refactors unrelated code will be asked to split.
 - Include tests for new behaviour.
-- Run `make test` before opening a PR. CI will also run `go vet`, `go test -race`, and shellcheck.
-- Reference the ROADMAP item if your PR implements one.
+- Run `make test` and `make vet` before opening a PR. CI also runs staticcheck, shellcheck and the integration test.
+- When a change adds code, look for code, a setting, a test or a doc paragraph it makes unnecessary and remove it in the same PR.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy. Pelicula is LAN-first — do not open issues or PRs that assume an internet-facing threat model unless that is explicitly described in docs/PELIGROSA.md.
+See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy and the [auth model](docs/ARCHITECTURE.md#auth-model) section of docs/ARCHITECTURE.md for the threat model. Pelicula is LAN-first — do not open issues or PRs that assume an internet-facing threat model.
 
 ## License
 

@@ -4,7 +4,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## v1 rescope (unreleased)
 
-A from-scratch rebuild whose goal is to delete complexity while keeping the core loop: search, request, download, verify, watch. It lives in `v1/` while the previous implementation remains at the repository root.
+A from-scratch rebuild whose goal is to delete complexity while keeping the core loop: search, request, download, verify, watch. It replaces the previous implementation, which remains in git history under the `pre-rescope` tag.
 
 ### Changed
 

@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working in `v1/` of this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## About Pelicula v1
 
 **Pelicula** is a clone-and-run media stack. The `pelicula` Go CLI handles setup (a terminal wizard), lifecycle and diagnostics for a Docker Compose stack of 8 containers (5 without the VPN) behind an nginx reverse proxy on port **7354** (PELI on a phone keypad). One Go server, `pelicula-server`, auto-wires the stack, serves the dashboard API and validates imports.
 
-`v1/` is a from-scratch rescope of the older implementation at the repository root (`middleware/`, `procula/`, `cmd/pelicula/`). Work only inside `v1/` unless told otherwise. The point of v1 is to have less: do not port features back from the old tree without being asked.
+This tree is a from-scratch rescope of the previous implementation (`middleware/`, `procula/` and the old `cmd/pelicula/`), which is preserved in git history under the `pre-rescope` tag. The point of v1 is to have less: do not port features back from the old tree without being asked.
 
 ## Layout
 
@@ -90,7 +90,7 @@ make playwright  # cd tests/playwright && npm test   (needs a running stack; PEL
 make build       # bin/pelicula and bin/pelicula-server
 ```
 
-Every package has unit tests using `httptest` fakes and `store.OpenMemory()`. Nothing in `go test ./...` may require a running stack. Run `gofmt -l .`, `go vet ./...` and `go test ./...` from `v1/` before committing.
+Every package has unit tests using `httptest` fakes and `store.OpenMemory()`. Nothing in `go test ./...` may require a running stack. Run `gofmt -l .`, `go vet ./...` and `go test ./...` from the repository root before committing.
 
 ## Scope discipline
 
