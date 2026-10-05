@@ -1,0 +1,13 @@
+{
+  "name": "pelicula-v1-playwright",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser specs for the Pelicula dashboard",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
