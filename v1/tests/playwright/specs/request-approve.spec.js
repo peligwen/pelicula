@@ -36,13 +36,13 @@ test.describe('request and approve', () => {
 
     let haveResults = true;
     try {
-      await expect(vp.getByTestId('search-result').first()).toBeVisible({ timeout: 45_000 });
+      await expect(vp.getByTestId('result-card').first()).toBeVisible({ timeout: 45_000 });
     } catch (_) {
       haveResults = false;
     }
     test.skip(!haveResults, 'search returned nothing; metadata lookup is probably offline');
 
-    await vp.getByTestId('request-button').first().click();
+    await vp.getByTestId('result-request').first().click();
 
     // Find out which title was requested from the API, not from card text.
     let requested;
@@ -63,7 +63,7 @@ test.describe('request and approve', () => {
     await expect(viewerRow).toBeVisible();
     await expect(viewerRow.getByTestId('request-status')).toHaveText(/pending/i);
     // A viewer cannot approve.
-    await expect(viewerRow.getByTestId('approve-button')).toHaveCount(0);
+    await expect(viewerRow.getByTestId('request-approve')).toHaveCount(0);
 
     // Admin: approve it.
     const adminCtx = await browserContextFor(browser, admin);
@@ -72,7 +72,7 @@ test.describe('request and approve', () => {
     await ap.getByTestId('tab-requests').click();
     const adminRow = ap.getByTestId('request-row').filter({ hasText: requested.title });
     await expect(adminRow).toBeVisible();
-    await adminRow.getByTestId('approve-button').click();
+    await adminRow.getByTestId('request-approve').click();
     await expect(adminRow.getByTestId('request-status')).toHaveText(/approved/i);
 
     // The API agrees, and the title was added to Radarr/Sonarr (arr_id set).

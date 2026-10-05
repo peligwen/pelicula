@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Pelicula</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="masthead">
+      <div class="wrap masthead-inner">
+        <a class="wordmark" href="/">pelicula</a>
+        <div class="who" id="who" hidden>
+          <span class="who-name" id="who-name" data-testid="who-name"></span>
+          <span class="chip" id="who-role" data-testid="who-role"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="logout-btn" data-testid="logout">Log out</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <div class="status-strip" id="status-strip" data-testid="status-strip" aria-live="polite">
+        <span class="muted"><span class="dot"></span>Checking services&hellip;</span>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Sections" id="tablist">
+        <button type="button" role="tab" class="tab" id="tab-btn-search" data-testid="tab-search" data-tab="search" aria-controls="panel-search" aria-selected="true">Search</button>
+        <button type="button" role="tab" class="tab" id="tab-btn-requests" data-testid="tab-requests" data-tab="requests" aria-controls="panel-requests" aria-selected="false" tabindex="-1">Requests <span class="count" id="badge-requests" data-testid="requests-badge" hidden></span></button>
+        <button type="button" role="tab" class="tab" id="tab-btn-jobs" data-testid="tab-jobs" data-tab="jobs" aria-controls="panel-jobs" aria-selected="false" tabindex="-1">Jobs</button>
+        <button type="button" role="tab" class="tab" id="tab-btn-settings" data-testid="tab-settings" data-tab="settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1" hidden>Settings</button>
+      </nav>
+
+      <main>
+        <section class="panel" id="panel-search" data-testid="panel-search" role="tabpanel" aria-labelledby="tab-btn-search">
+          <form class="search-form" id="search-form" data-testid="search-form" role="search">
+            <input type="search" id="search-q" data-testid="search-input" name="q" placeholder="Search movies and shows" aria-label="Search movies and shows" autocomplete="off" maxlength="200">
+            <button type="submit" class="btn btn-primary" data-testid="search-submit">Search</button>
+          </form>
+          <div id="search-results" data-testid="search-results" class="region"></div>
+        </section>
+
+        <section class="panel" id="panel-requests" data-testid="panel-requests" role="tabpanel" aria-labelledby="tab-btn-requests" hidden>
+          <div id="requests-list" data-testid="requests-list" class="region"></div>
+        </section>
+
+        <section class="panel" id="panel-jobs" data-testid="panel-jobs" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden>
+          <div class="section-head">
+            <h2>Downloads</h2>
+            <span class="muted" id="transfer" data-testid="transfer"></span>
+          </div>
+          <div id="downloads-list" data-testid="downloads-list" class="region"></div>
+
+          <div class="section-head">
+            <h2>Recent imports</h2>
+          </div>
+          <div id="jobs-list" data-testid="jobs-list" class="region"></div>
+        </section>
+
+        <section class="panel" id="panel-settings" data-testid="panel-settings" role="tabpanel" aria-labelledby="tab-btn-settings" hidden>
+          <div class="section-head"><h2>Behaviour</h2></div>
+          <div id="settings-toggles" data-testid="settings-toggles" class="region"></div>
+
+          <div class="section-head"><h2>Info</h2></div>
+          <div id="settings-info" data-testid="settings-info" class="region"></div>
+
+          <div class="section-head"><h2>Users</h2></div>
+          <div id="users-list" data-testid="users-list" class="region"></div>
+
+          <div class="section-head"><h2>Invites</h2></div>
+          <form class="invite-form card" id="invite-form" data-testid="invite-form">
+            <label class="field">
+              <span>Role</span>
+              <select id="invite-role" data-testid="invite-role" name="role">
+                <option value="viewer" selected>viewer</option>
+                <option value="manager">manager</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Expires in (hours)</span>
+              <input type="number" id="invite-hours" data-testid="invite-hours" name="hours" min="1" max="720" value="72" inputmode="numeric">
+            </label>
+            <button type="submit" class="btn btn-primary" data-testid="invite-create">Create invite</button>
+          </form>
+          <div class="invite-result card" id="invite-result" data-testid="invite-result" hidden>
+            <label class="field grow">
+              <span>Invite link</span>
+              <input type="text" id="invite-url" data-testid="invite-url" readonly>
+            </label>
+            <button type="button" class="btn" id="invite-copy" data-testid="invite-copy" data-action="copy-url">Copy</button>
+          </div>
+          <div id="invites-list" data-testid="invites-list" class="region"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="overlay" id="login-overlay" data-testid="login-overlay" role="dialog" aria-modal="true" aria-labelledby="login-title" hidden>
+    <form class="card login-card" id="login-form" data-testid="login-form" autocomplete="on">
+      <div class="wordmark wordmark-lg">pelicula</div>
+      <h1 id="login-title">Log in</h1>
+      <p class="muted">Use your Jellyfin username and password.</p>
+      <label class="field">
+        <span>Username</span>
+        <input type="text" id="login-username" data-testid="login-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" id="login-password" data-testid="login-password" name="password" autocomplete="current-password" required>
+      </label>
+      <p class="form-error" id="login-error" data-testid="login-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-block" id="login-submit" data-testid="login-submit">Log in</button>
+    </form>
+  </div>
+
+  <dialog id="dialog" data-testid="dialog" class="dialog">
+    <form method="dialog" id="dialog-form">
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-msg"></p>
+      <label class="field" id="dialog-note-row" hidden>
+        <span id="dialog-note-label">Note</span>
+        <input type="text" id="dialog-note" data-testid="dialog-note" maxlength="300" autocomplete="off">
+      </label>
+      <label class="check" id="dialog-check-row" hidden>
+        <input type="checkbox" id="dialog-check" data-testid="dialog-check">
+        <span id="dialog-check-label"></span>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="dialog-cancel" data-testid="dialog-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" value="ok" id="dialog-ok" data-testid="dialog-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" data-testid="toasts" role="status" aria-live="polite"></div>
+
+  <script src="/api.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -40,11 +40,11 @@ The frontend must expose these exact ids. The specs select with `getByTestId`, w
 | `tab-jobs` | Jobs tab button | login |
 | `tab-settings` | Settings tab button; must be absent or hidden for non-admins | login, invite-register |
 | `search-input` | the search text input (Enter submits) | request-approve |
-| `search-result` | one result card; repeated per result | request-approve |
-| `request-button` | the "Request" button inside a result card (viewers); repeated per card, absent on in-library cards | request-approve |
-| `approve-button` | the "Approve" button in a pending request row, shown to managers and admins only; repeated per row | request-approve |
+| `result-card` | one result card; repeated per result | request-approve |
+| `result-request` | the "Request" button inside a result card (viewers); repeated per card, absent on in-library cards | request-approve |
+| `request-approve` | the "Approve" button in a pending request row, shown to managers and admins only; repeated per row | request-approve |
 | `invite-create` | the "Create" button in the Settings invites section | invite-register |
-| `invite-link` | element showing the full invite URL (`location.origin + path`) after creating; an `<input>` (its value is read) or any element (its text is read). If several exist the first is used, so the newest should come first | invite-register |
+| `invite-url` | element showing the full invite URL (`location.origin + path`) after creating; an `<input>` (its value is read) or any element (its text is read). If several exist the first is used, so the newest should come first | invite-register |
 | `register-username` | username input on `/register` | invite-register |
 | `register-password` | password input on `/register` | invite-register |
 | `register-confirm` | confirm-password input on `/register` | invite-register |
@@ -54,7 +54,7 @@ Two additions beyond the agreed list, needed to tell requests apart and read the
 
 | Id | Element | Used by |
 |---|---|---|
-| `request-row` | one request in the Requests tab; contains the title text, a `request-status` and, for managers on pending rows, an `approve-button`. Repeated per request | request-approve |
+| `request-row` | one request in the Requests tab; contains the title text, a `request-status` and, for managers on pending rows, an `request-approve`. Repeated per request | request-approve |
 | `request-status` | the status pill inside a `request-row`; its text is the status word: `pending`, `approved`, `declined` or `available` | request-approve |
 
 If the frontend prefers other markup, change the two ids in `specs/request-approve.spec.js` rather than the spec flow.

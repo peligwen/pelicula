@@ -34,7 +34,7 @@ test.describe('invite and register', () => {
     await adminPage.getByTestId('tab-settings').click();
     await adminPage.getByTestId('invite-create').click();
 
-    const link = adminPage.getByTestId('invite-link').first();
+    const link = adminPage.getByTestId('invite-url').first();
     await expect(link).toBeVisible();
     const inviteURL = new URL(await valueOrText(link), BASE_URL).toString();
     expect(inviteURL).toContain('/register');
