@@ -6,7 +6,9 @@ package arr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -169,10 +171,23 @@ func (c *Client) LookupMovie(ctx context.Context, term string) ([]map[string]any
 	return c.list(ctx, "/movie/lookup?term="+url.QueryEscape(term))
 }
 
-// LookupMovieByTmdbID returns zero or one candidate. A non-zero "id" in the
+// LookupMovieByTmdbID returns zero or one candidate. Unlike the other lookups
+// Radarr answers this one with a single object, and with 404 for an unknown
+// id; both are mapped onto the slice callers expect. A non-zero "id" in the
 // result means the movie is already in the library.
 func (c *Client) LookupMovieByTmdbID(ctx context.Context, tmdbID int) ([]map[string]any, error) {
-	return c.list(ctx, fmt.Sprintf("/movie/lookup/tmdb?tmdbId=%d", tmdbID))
+	m, err := c.object(ctx, fmt.Sprintf("/movie/lookup/tmdb?tmdbId=%d", tmdbID))
+	if err != nil {
+		var he *httpx.HTTPError
+		if errors.As(err, &he) && he.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(m) == 0 {
+		return nil, nil
+	}
+	return []map[string]any{m}, nil
 }
 
 // Library: Sonarr series.

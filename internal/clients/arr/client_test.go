@@ -109,12 +109,25 @@ func TestSetAPIKey(t *testing.T) {
 	}
 }
 
+// Radarr answers an unknown TMDB id with 404; that is "no candidate", not an error.
+func TestLookupMovieByTmdbID_NotFound(t *testing.T) {
+	c, _ := newFake(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /sonarr/api/v3/movie/lookup/tmdb": func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "movie not found", http.StatusNotFound)
+		},
+	})
+	r, err := c.LookupMovieByTmdbID(context.Background(), 1)
+	if err != nil || len(r) != 0 {
+		t.Fatalf("LookupMovieByTmdbID on 404: %v %v", r, err)
+	}
+}
+
 func TestLibraryReadsAndLookups(t *testing.T) {
 	c, f := newFake(t, map[string]func(http.ResponseWriter, *http.Request){
 		"GET /sonarr/api/v3/movie/5":           reply(`{"id":5,"runtime":120,"movieFile":{"id":9,"path":"/media/movies/a.mkv"}}`),
 		"GET /sonarr/api/v3/movie":             reply(`[{"id":1},{"id":2}]`),
 		"GET /sonarr/api/v3/movie/lookup":      reply(`[{"title":"Heat","tmdbId":949}]`),
-		"GET /sonarr/api/v3/movie/lookup/tmdb": reply(`[{"tmdbId":949,"id":0}]`),
+		"GET /sonarr/api/v3/movie/lookup/tmdb": reply(`{"tmdbId":949,"id":0}`), // Radarr: one object, not an array
 		"GET /sonarr/api/v3/series":            reply(`[{"id":3}]`),
 		"GET /sonarr/api/v3/series/3":          reply(`{"id":3,"runtime":45}`),
 		"GET /sonarr/api/v3/series/lookup":     reply(`[{"title":"Show","tvdbId":12345}]`),
@@ -141,7 +154,7 @@ func TestLibraryReadsAndLookups(t *testing.T) {
 	if got := f.last().Query; got != "term=heat+%26+co" {
 		t.Fatalf("lookup query = %q", got)
 	}
-	if r, err := c.LookupMovieByTmdbID(ctx, 949); err != nil || len(r) != 1 {
+	if r, err := c.LookupMovieByTmdbID(ctx, 949); err != nil || len(r) != 1 || r[0]["tmdbId"].(float64) != 949 {
 		t.Fatalf("LookupMovieByTmdbID: %v %v", r, err)
 	}
 	if got := f.last().Query; got != "tmdbId=949" {
