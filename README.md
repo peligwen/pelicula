@@ -1,6 +1,8 @@
 # Pelicula
 
-One command to set up, one command to run. Search for movies and TV shows by name, request or add them, and stream them with Jellyfin. Pelicula wires Sonarr, Radarr, Prowlarr, qBittorrent (behind a ProtonVPN/WireGuard tunnel) and Jellyfin together behind one nginx port and adds a small dashboard on top.
+One command to set up, one command to run. Search for movies and TV shows by name, add them, and stream them with Jellyfin. Pelicula wires Sonarr, Radarr, Prowlarr, qBittorrent (behind a ProtonVPN/WireGuard tunnel) and Jellyfin together behind one nginx port and adds a small dashboard on top.
+
+Pelicula is built for one person. The administrator acquires media from the dashboard on the local network; everyone else watches through Jellyfin, which owns their accounts and is the only part of the stack meant to be reachable from outside.
 
 Use it for legal content only. Pelicula does not ship, suggest or configure indexers; there are plenty that carry only legal material.
 
@@ -39,26 +41,17 @@ Open <http://localhost:7354> and sign in with the Jellyfin admin credentials the
 
 The only manual step is **adding indexers in Prowlarr** (open it from the dashboard link or at `/prowlarr/` after signing in). Without indexers nothing gets downloaded.
 
-Without a WireGuard key the stack runs with no VPN: Prowlarr and qBittorrent are not started, so there are no downloads, but search, requests, Jellyfin and the import pipeline all work. This is also what the integration test runs.
+Without a WireGuard key the stack runs with no VPN: Prowlarr and qBittorrent are not started, so there are no downloads, but search, Jellyfin and the import pipeline all work. This is also what the integration test runs.
 
 ## Dashboard
 
-The dashboard at <http://localhost:7354/> has four tabs:
+The dashboard at <http://localhost:7354/> has three tabs:
 
-- **Search** searches Radarr and Sonarr in parallel and shows interleaved results. Viewers get a *Request* button; managers and admins get *Add*. Titles already in the library show *In library*, and *Watch* once a file exists.
-- **Requests** lists requests with a status of pending, approved, declined or available. Viewers see their own; managers and admins see everyone's and can approve or decline.
-- **Jobs** shows active downloads (progress, speed, ETA; pause and resume for managers, remove and blocklist for admins) and recent import validations with a Retry button for failed ones.
-- **Settings** (admin only) holds three toggles (validation, auto-blocklist, auto-approve requests), a read-only info block, user roles, and invites.
+- **Search** searches Radarr and Sonarr in parallel and shows interleaved results with an *Add* button. Titles already in the library show *In library*, and *Watch* once a file exists.
+- **Jobs** shows active downloads (progress, speed, ETA, pause, resume, remove and blocklist) and recent import validations with a Retry button for failed ones.
+- **Settings** holds two toggles (validate imports, blocklist and re-search failures) and a read-only info block.
 
-Roles:
-
-| Role | Can do |
-|---|---|
-| viewer | search, request, see own requests, see jobs and downloads |
-| manager | plus add titles directly, approve and decline requests, pause and resume downloads, retry jobs |
-| admin | plus settings, invites, user roles and deletion, remove downloads |
-
-Jellyfin is the identity provider. A Jellyfin administrator is an admin in Pelicula; everyone else starts as a viewer. Admins invite people from Settings: create an invite, send the link (`/register?code=...`), and the recipient picks a username and password, which creates a Jellyfin account and signs them in. Invites are single-use and expire (default 72 hours).
+Only the Jellyfin administrator can sign in. Jellyfin is the identity provider: the dashboard checks the username and password against Jellyfin and refuses anyone Jellyfin does not report as an administrator. Other people get Jellyfin accounts from Jellyfin's own dashboard (*Dashboard → Users*); they watch through Jellyfin and never need port 7354.
 
 ## CLI
 
@@ -113,20 +106,21 @@ make playwright  # browser specs against PELICULA_URL (default http://localhost:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): processes, startup, data model, auth, pipeline, compose, nginx
 - [docs/API.md](docs/API.md): HTTP routes, webhook contract, environment variables
-- [docs/ROADMAP.md](docs/ROADMAP.md): what shipped and what was deferred
+- [docs/ROADMAP.md](docs/ROADMAP.md): what shipped, what comes next and what was deferred
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## What this version deliberately leaves out
 
-Each of these existed in the previous implementation or was planned. They were cut to keep one source of truth per fact and a codebase one person can read. [docs/ROADMAP.md](docs/ROADMAP.md) says why and what it would take to bring each back.
+Each of these existed in a previous implementation or was planned. They were cut to keep one source of truth per fact and a codebase one person can read. [docs/ROADMAP.md](docs/ROADMAP.md) says why and what it would take to bring each back.
 
+- Requests, roles and invites: one administrator adds titles directly, and Jellyfin manages viewers
+- Open or remote registration (give people Jellyfin accounts from Jellyfin)
 - Bazarr and subtitle acquisition, dual subtitles
 - Transcoding and any other post-import action besides validation
-- Backups and export/import of the watchlist
+- Backups and export/import
 - Apprise notifications
 - Hardware acceleration
 - NFS-mounted library
 - Local media import wizard
 - Live updates over SSE (the dashboard polls)
-- Open registration (invites only)
 - Catalog browser, storage monitoring, notification bell

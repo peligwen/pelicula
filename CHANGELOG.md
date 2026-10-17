@@ -2,9 +2,27 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Single administrator (unreleased)
+
+Narrows the v1 rescope below to one person: the Jellyfin administrator acquires media from the dashboard on the LAN, and everyone else watches through Jellyfin. Only the acquisition stack, the import checks and the retry stay.
+
+### Changed
+
+- **Login is for the Jellyfin administrator only.** Any other Jellyfin account gets a 403 and no session. Sessions carry no role, and every `/api` route except `/api/health` and the import webhook needs a session rather than a minimum role.
+- **Dashboard** is three tabs (Search, Jobs, Settings). Search results carry one *Add* button. The *arr UI links are shown to the one signed-in user; the `auth_request` gate checks for a session only.
+- **SQLite schema version 2**: three tables (`sessions`, `jobs`, `settings`). The migration drops the version 1 `roles`, `invites` and `requests` tables, rebuilds `sessions` without the role column and removes the `auto_approve_requests` setting; an existing database logs everyone out once and keeps its job history.
+- **Integration test** walks login, search, add, webhook, retry, logout. **Playwright** has two specs: `login` and `search-add`.
+
+### Removed
+
+- Requests: the table, `/api/requests*`, the Requests tab, the pending badge, `pending_requests` in `/api/status`, the `auto_approve_requests` setting and the pipeline step that marked requests available.
+- Roles: viewer, manager and admin, the `roles` table, `?min=` on `/api/auth/check`.
+- Invites and registration: the `invites` table, `/api/invites*`, `/api/register*`, the `/register` page and its nginx locations and rate-limit budget.
+- User management: `/api/users*`, the Settings sections for users and invites, and the Jellyfin client's user create, list and delete calls.
+
 ## v1 rescope (unreleased)
 
-A from-scratch rebuild whose goal is to delete complexity while keeping the core loop: search, request, download, verify, watch. It replaces the previous implementation, which remains in git history under the `pre-rescope` tag.
+A from-scratch rebuild whose goal is to delete complexity while keeping the core loop: search, download, verify, watch. It replaces the previous implementation, which remains in git history.
 
 ### Changed
 

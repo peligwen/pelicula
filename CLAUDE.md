@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## About Pelicula v1
 
-**Pelicula** is a clone-and-run media stack. The `pelicula` Go CLI handles setup (a terminal wizard), lifecycle and diagnostics for a Docker Compose stack of 8 containers (5 without the VPN) behind an nginx reverse proxy on port **7354** (PELI on a phone keypad). One Go server, `pelicula-server`, auto-wires the stack, serves the dashboard API and validates imports.
+**Pelicula** is a clone-and-run media stack for one person. The `pelicula` Go CLI handles setup (a terminal wizard), lifecycle and diagnostics for a Docker Compose stack of 8 containers (5 without the VPN) behind an nginx reverse proxy on port **7354** (PELI on a phone keypad). One Go server, `pelicula-server`, auto-wires the stack, serves the dashboard API and validates imports.
 
-This tree is a from-scratch rescope of the previous implementation (`middleware/`, `procula/` and the old `cmd/pelicula/`), which is preserved in git history under the `pre-rescope` tag. The point of v1 is to have less: do not port features back from the old tree without being asked.
+**Scope:** the Jellyfin administrator acquires media from the dashboard on the local network. Everyone else watches through Jellyfin, which owns their accounts and is the only surface meant to be reachable from outside. There are no viewer roles, requests, invites or registration pages, and none should come back without a decision to widen the scope.
+
+This tree is a from-scratch rescope of the previous implementation, preserved in git history. The point of v1 is to have less: do not port features back from the old tree without being asked.
 
 ## Layout
 
@@ -15,18 +17,18 @@ pelicula                 bash wrapper: builds ./cmd/pelicula into bin/pelicula (
 cmd/pelicula/            CLI, stdlib only; must not import pelicula/internal/...
 cmd/pelicula-server/     server binary: wires store, clients, autowire, pipeline, portsync, HTTP
 internal/config/         env to Config; reads *arr API keys from mounted config.xml
-internal/store/          SQLite: roles, sessions, invites, requests, jobs, settings
+internal/store/          SQLite: sessions, jobs, settings
 internal/httpx/          retrying HTTP client with API-key redaction
 internal/clients/        arr, qbt, jellyfin, gluetun clients
-internal/auth/           sessions, roles, invites, login/register, Guard, CSRF
+internal/auth/           admin-only login, cookie sessions, Guard, CSRF
 internal/api/            dashboard routes and the import webhook
 internal/pipeline/       job worker: ffprobe validate, pass/fail handling, Jellyfin refresh
 internal/autowire/       startup wiring of *arr and Jellyfin (idempotent)
 internal/portsync/       gluetun forwarded port to qBittorrent listen port
 compose/                 docker-compose.yml (the one file), Dockerfile, generated TUN override
-nginx/                   nginx.conf and html/ (dashboard: index.html, app.js, styles.css, register.*)
+nginx/                   nginx.conf and html/ (dashboard: index.html, api.js, app.js, styles.css)
 tests/integration/       go test -tags integration; starts a real stack (CI, needs Docker)
-tests/playwright/        3 browser specs selecting by data-testid
+tests/playwright/        2 browser specs selecting by data-testid
 docs/                    ARCHITECTURE.md, API.md, ROADMAP.md
 .env                     generated on first `pelicula up`; gitignored; only the CLI writes it
 ```
@@ -49,7 +51,6 @@ Not in v1 on purpose: export, import-backup, import, rebuild, redeploy, restart-
 
 ```
 nginx (:7354) ─── /                 → static dashboard
-               ── /register         → register.html (public)
                ── /api/*            → pelicula server (:8181)
                ── /sonarr /radarr   → Sonarr / Radarr   (auth_request gate)
                ── /prowlarr /qbt/   → gluetun:9696 / :8080 (auth_request gate, vpn profile)
@@ -57,9 +58,9 @@ nginx (:7354) ─── /                 → static dashboard
 ```
 
 - **Server startup order:** store open + `ResetRunningJobs`, clients, `WaitForAPIKeys` (background), `autowire.Run` (background, sets `wired`), pipeline worker, portsync (VPN only), HTTP wrapped in `auth.CSRF`.
-- **Source of truth:** Sonarr/Radarr own the catalog, qBittorrent owns downloads, Jellyfin owns users and passwords, the CLI owns `.env` and seeded XML/INI. SQLite holds only roles, sessions, invites, requests, jobs and three runtime settings.
-- **Auth:** Jellyfin `AuthenticateByName`; role from the `roles` table (default admin for Jellyfin admins, else viewer); `pelicula_session` cookie; single-use invites; `auth_request` gate for the *arr UIs; nginx rate-limits login and register.
-- **Pipeline:** *arr webhook (`X-Webhook-Secret`) enqueues a job, ffprobe validates; pass marks requests available and refreshes Jellyfin; fail marks history failed in *arr, deletes only the matching file via the *arr API, and re-searches.
+- **Source of truth:** Sonarr/Radarr own the catalog, qBittorrent owns downloads, Jellyfin owns users and passwords, the CLI owns `.env` and seeded XML/INI. SQLite holds only sessions, jobs and two runtime settings.
+- **Auth:** Jellyfin `AuthenticateByName`; only a Jellyfin administrator gets a session (403 otherwise); `pelicula_session` cookie; every `/api` route except health and the webhook needs it; `auth_request` gate for the *arr UIs; nginx rate-limits login.
+- **Pipeline:** *arr webhook (`X-Webhook-Secret`) enqueues a job, ffprobe validates; pass refreshes Jellyfin; fail marks history failed in *arr, deletes only the matching file via the *arr API, and re-searches.
 - **qBittorrent and Prowlarr share gluetun's network namespace** and are reached at `gluetun:8080` and `gluetun:9696`, never by their own container names.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -95,9 +96,10 @@ Every package has unit tests using `httptest` fakes and `store.OpenMemory()`. No
 ## Scope discipline
 
 - **No second source of truth.** If Sonarr, Radarr, qBittorrent, Jellyfin or `.env` already owns a fact, read it from there. Do not cache it in SQLite or write a mirror.
-- **New features go behind a compose profile or a flag**, off by default. Anything on the deferred list in docs/ROADMAP.md (Bazarr, transcoding, backups, Apprise, hardware acceleration, NFS, import wizard, SSE, open registration, dual subtitles) must not return outside that shape.
+- **One user.** The dashboard is for the Jellyfin administrator. Do not add roles, per-user state, requests, invites or registration; viewers are Jellyfin's business.
+- **New features go behind a compose profile or a flag**, off by default. The two planned additions (subtitles via a Bazarr profile, a library scan that reuses the job worker) and anything on the deferred list in docs/ROADMAP.md (transcoding, backups, Apprise, hardware acceleration, NFS, import wizard, SSE, remote registration, dual subtitles) must not return outside that shape.
 - **Delete something each round.** When a change adds code, look for code, a setting, a test or a doc paragraph that the change makes unnecessary and remove it in the same round.
-- Keep the dashboard small: `app.js` stays around 900 lines; split a helper rather than grow it.
+- Keep the dashboard small: `app.js` stays around 650 lines; split a helper rather than grow it.
 
 ## Bug Fixing
 

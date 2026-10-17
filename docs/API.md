@@ -4,49 +4,37 @@ All routes are served by the `pelicula` server on `:8181` and reached through ng
 
 Conventions:
 
-- **Auth.** A session cookie, `pelicula_session` (HttpOnly, SameSite=Lax), set by login or register. "Min role" is the lowest role allowed: viewer < manager < admin. No session is a 401; a role that is too low is a 403.
+- **Auth.** A session cookie, `pelicula_session` (HttpOnly, SameSite=Lax), set by login. Only the Jellyfin administrator can log in. Every route except `/api/health` and the webhook needs the cookie; no session is a 401.
 - **CSRF.** For POST, PUT, PATCH and DELETE, a present `Origin` (else `Referer`) header must match the request host, otherwise 403. Requests with neither header pass.
-- **Errors.** Every error is `{"error":"message"}` with a status that matches the cause: 400 bad input, 401 no session or bad credentials, 403 role too low or CSRF, 404 missing, 409 conflict, 410 gone, 413 body too large, 500 server error, 502 an upstream (Radarr, Sonarr) did not answer, 503 dependency unavailable. One error carries extra data: a duplicate request is `409 {"error":"already requested","request":{...}}`.
+- **Errors.** Every error is `{"error":"message"}` with a status that matches the cause: 400 bad input, 401 no session or bad credentials, 403 not an administrator or CSRF, 404 missing, 409 conflict, 413 body too large, 500 server error, 502 an upstream (Radarr, Sonarr) did not answer, 503 dependency unavailable.
 - **Timestamps** are RFC 3339 (UTC).
-- **Rate limits** on login, register and the invite lookup are applied by nginx, not the server: 10 requests per minute per IP across the three, excess answered with `429` (not the JSON error format). See [ARCHITECTURE.md](ARCHITECTURE.md#nginx-route-map).
+- **Rate limit** on login is applied by nginx, not the server: 10 requests per minute per IP, excess answered with `429` (not the JSON error format). See [ARCHITECTURE.md](ARCHITECTURE.md#nginx-route-map).
 
 ## Auth routes
 
-| Method and path | Min role | Request | Response |
+| Method and path | Auth | Request | Response |
 |---|---|---|---|
-| `POST /api/auth/login` | public | `{"username","password"}` | `200 {"username","role"}` and a session cookie. 401 bad credentials; 503 Jellyfin unreachable. Role is the stored role, else `admin` for a Jellyfin administrator, else `viewer` (and the default is saved). |
+| `POST /api/auth/login` | public | `{"username","password"}` | `200 {"username"}` and a session cookie. 401 bad credentials; 403 the account is not a Jellyfin administrator; 503 Jellyfin unreachable. |
 | `POST /api/auth/logout` | any | none | `204`; clears the session |
-| `GET /api/auth/me` | any | none | `200 {"username","role"}` or 401 |
-| `GET /api/auth/check` | any | none | `204` with a valid session cookie, else 401. Used by nginx `auth_request`. |
-| `GET /api/register/{code}` | public | none | `200 {"valid":bool,"role":"viewer"}`. `valid` means the invite exists, is unused and is unexpired. |
-| `POST /api/register` | public | `{"code","username","password"}` | `201 {"username","role"}` and a session cookie. Username must match `^[A-Za-z0-9._-]{3,32}$`, password at least 8 characters (400 otherwise). 409 if the Jellyfin user exists; 410 if the invite is unavailable. |
-| `GET /api/invites` | admin | none | `200 {"invites":[{"code","role","created_by","created_at","expires_at","used_by","used_at"}]}` |
-| `POST /api/invites` | admin | `{"role","expires_hours"}`; role defaults to `viewer`, hours to 72, maximum 720 | `201 {"code","role","expires_at","path":"/register?code=<code>"}`. The code is 16 random bytes, base64url. |
-| `DELETE /api/invites/{code}` | admin | none | `204`, or 404 |
+| `GET /api/auth/me` | session | none | `200 {"username"}` or 401 |
+| `GET /api/auth/check` | session | none | `204` with a valid session cookie, else 401. Used by nginx `auth_request`. |
 
 ## API routes
 
-| Method and path | Min role | Request | Response |
+| Method and path | Auth | Request | Response |
 |---|---|---|---|
 | `GET /api/health` | public | none | `{"ok":true,"wired":bool,"version":"..."}`. `wired` turns true when autowire has finished. |
-| `GET /api/status` | viewer | none | `{"services":[{"name","ok","path"}],"vpn":{"enabled","tunnel","public_ip","country","forwarded_port"},"wired","version","pending_requests","queued_jobs"}`. Services are sonarr (`/sonarr/`), radarr, jellyfin, plus prowlarr (`/prowlarr/`) and qbittorrent (`/qbt/`) when the VPN is on. Each is pinged with a 2 s timeout, in parallel, cached for 5 s. `pending_requests` is 0 unless the caller is a manager or above. |
-| `GET /api/search?q=` | viewer | query `q` (empty is 400); 502 when both Radarr and Sonarr lookups fail | `{"results":[{"type":"movie"\|"series","title","year","overview","poster","tmdb_id","tvdb_id","in_library","arr_id","has_file"}]}`. Radarr and Sonarr lookups run in parallel and are interleaved movie, series, movie, ... with a maximum of 40. `in_library` is true when the lookup result has a non-zero `id`; `has_file` comes from `hasFile` (movie) or `statistics.episodeFileCount > 0` (series). |
-| `POST /api/search/add` | manager | `{"type","tmdb_id","tvdb_id"}` | `{"arr_id":N}`. Adds the title to Radarr or Sonarr and starts a search. |
-| `GET /api/requests` | viewer | none | `{"requests":[Request]}`. Viewers get their own; managers and admins get all. |
-| `POST /api/requests` | viewer | `{"type","tmdb_id","tvdb_id","title","year","poster"}` | `201 Request`. 409 duplicate (see Errors). If the `auto_approve_requests` setting is true the title is added immediately and the request is stored `approved` with `decided_by` `"auto"`. |
-| `POST /api/requests/{id}/approve` | manager | none | `200 Request` with `status` `approved`, `decided_by` the approver and `arr_id` set. Adds the title to Radarr or Sonarr. |
-| `POST /api/requests/{id}/decline` | manager | `{"note"}` | `200 Request` with `status` `declined` |
-| `GET /api/downloads` | viewer | none | `{"vpn":bool,"downloads":[{"hash","name","state","progress","dlspeed","upspeed","eta","size","category"}],"transfer":{"dl_speed","up_speed"}}`. Without the VPN: `{"vpn":false,"downloads":[],"transfer":{zeros}}`. |
-| `POST /api/downloads/{hash}/pause` | manager | none | `204` (qBittorrent v5 `stop`) |
-| `POST /api/downloads/{hash}/resume` | manager | none | `204` (qBittorrent v5 `start`) |
-| `DELETE /api/downloads/{hash}?blocklist=true` | admin | optional `blocklist` query | `204`. Finds the Radarr then Sonarr queue record whose `downloadId` equals the hash (case-insensitive) and deletes it with `removeFromClient=true` and the given blocklist flag; if none matches, deletes the torrent and its files from qBittorrent. |
-| `GET /api/jobs?limit=50` | viewer | `limit` optional | `{"jobs":[Job]}`, newest first |
-| `POST /api/jobs/{id}/retry` | manager | none | `204`; requeues a finished job and wakes the worker. 404 unknown job; 409 if the job is still `queued` or `running`. |
-| `GET /api/settings` | admin | none | `{"settings":{"validation_enabled":"true",...},"info":{"config_dir","library_dir","work_dir","server_countries","vpn_enabled","version","tz"}}` |
-| `PUT /api/settings` | admin | `{"<key>":"true"\|"false",...}`; keys must be in `store.SettingDefaults` and values must parse as booleans (400 otherwise) | `200` the full settings map as a bare object, e.g. `{"validation_enabled":"true",...}` (not wrapped in `settings`) |
-| `GET /api/users` | admin | none | `{"users":[{"id","name","is_admin","is_disabled","role","last_login"}]}`: Jellyfin's users joined with the `roles` table (default role `admin` if `is_admin`, else `viewer`) |
-| `PUT /api/users/{username}/role` | admin | `{"role"}` | `204`. 400 when changing your own role or an invalid role. |
-| `DELETE /api/users/{username}` | admin | none | `204`. 400 when deleting yourself. Deletes the Jellyfin user, the role row and the user's sessions. |
+| `GET /api/status` | session | none | `{"services":[{"name","ok","path"}],"vpn":{"enabled","tunnel","public_ip","country","forwarded_port"},"wired","version","queued_jobs"}`. Services are sonarr (`/sonarr/`), radarr, jellyfin, plus prowlarr (`/prowlarr/`) and qbittorrent (`/qbt/`) when the VPN is on. Each is pinged with a 2 s timeout, in parallel, cached for 5 s. |
+| `GET /api/search?q=` | session | query `q` (empty is 400); 502 when both Radarr and Sonarr lookups fail | `{"results":[{"type":"movie"\|"series","title","year","overview","poster","tmdb_id","tvdb_id","in_library","arr_id","has_file"}]}`. Radarr and Sonarr lookups run in parallel and are interleaved movie, series, movie, ... with a maximum of 40. `in_library` is true when the lookup result has a non-zero `id`; `has_file` comes from `hasFile` (movie) or `statistics.episodeFileCount > 0` (series). |
+| `POST /api/search/add` | session | `{"type","tmdb_id","tvdb_id"}` | `{"arr_id":N}`. Adds the title to Radarr or Sonarr and starts a search. A title that is already in the library is searched again and its existing id returned. |
+| `GET /api/downloads` | session | none | `{"vpn":bool,"downloads":[{"hash","name","state","progress","dlspeed","upspeed","eta","size","category"}],"transfer":{"dl_speed","up_speed"}}`. Without the VPN: `{"vpn":false,"downloads":[],"transfer":{zeros}}`. |
+| `POST /api/downloads/{hash}/pause` | session | none | `204` (qBittorrent v5 `stop`) |
+| `POST /api/downloads/{hash}/resume` | session | none | `204` (qBittorrent v5 `start`) |
+| `DELETE /api/downloads/{hash}?blocklist=true` | session | optional `blocklist` query | `204`. Finds the Radarr then Sonarr queue record whose `downloadId` equals the hash (case-insensitive) and deletes it with `removeFromClient=true` and the given blocklist flag; if none matches, deletes the torrent and its files from qBittorrent. |
+| `GET /api/jobs?limit=50` | session | `limit` optional | `{"jobs":[Job]}`, newest first |
+| `POST /api/jobs/{id}/retry` | session | none | `204`; requeues a finished job and wakes the worker. 404 unknown job; 409 if the job is still `queued` or `running`. |
+| `GET /api/settings` | session | none | `{"settings":{"validation_enabled":"true","auto_blocklist":"true"},"info":{"config_dir","library_dir","work_dir","server_countries","vpn_enabled","version","tz"}}` |
+| `PUT /api/settings` | session | `{"<key>":"true"\|"false",...}`; keys must be in `store.SettingDefaults` and values must parse as booleans (400 otherwise) | `200` the full settings map as a bare object, e.g. `{"validation_enabled":"true",...}` (not wrapped in `settings`) |
 | `POST /api/hooks/import` | none, secret | Sonarr or Radarr webhook; see below | see below |
 
 Settings keys:
@@ -55,32 +43,6 @@ Settings keys:
 |---|---|---|
 | `validation_enabled` | `true` | run the ffprobe check on import |
 | `auto_blocklist` | `true` | on a failed check, mark the release failed in *arr (blocklist), delete the bad file via the *arr API and search again |
-| `auto_approve_requests` | `false` | viewer requests are added without a manager's approval |
-
-### Request
-
-`store.Request`, as returned by `/api/requests`:
-
-```json
-{
-  "id": 7,
-  "media_type": "movie",
-  "tmdb_id": 603,
-  "tvdb_id": 0,
-  "title": "The Matrix",
-  "year": 1999,
-  "poster": "https://...",
-  "requested_by": "alice",
-  "status": "approved",
-  "arr_id": 12,
-  "decided_by": "admin",
-  "note": "",
-  "created_at": "2026-01-01T12:00:00Z",
-  "updated_at": "2026-01-01T12:05:00Z"
-}
-```
-
-`media_type` is `movie` or `series`. Status is `pending`, `approved`, `declined` or `available`. `tmdb_id`, `tvdb_id`, `year`, `poster`, `arr_id`, `decided_by` and `note` are omitted when empty or zero. Note that the request body of `POST /api/requests` and `POST /api/search/add` names the media type `type`, while the stored request and the response use `media_type`. A pass in the pipeline flips `approved` requests for that *arr item to `available`.
 
 ### Job
 
