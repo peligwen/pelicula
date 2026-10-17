@@ -23,23 +23,8 @@ func identity(jf *jellyfin.Client) auth.Identity {
 		if err != nil {
 			return nil, err
 		}
-		return &auth.LoginResult{Token: r.Token, UserID: r.UserID, Username: r.Username, IsAdmin: r.IsAdmin}, nil
+		return &auth.LoginResult{Username: r.Username, IsAdmin: r.IsAdmin}, nil
 	})
-}
-
-// jfUsers satisfies api.JellyfinClient.
-type jfUsers struct{ *jellyfin.Client }
-
-func (j jfUsers) ListUsers(ctx context.Context, token string) ([]api.JellyfinUser, error) {
-	users, err := j.Client.ListUsers(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]api.JellyfinUser, 0, len(users))
-	for _, u := range users {
-		out = append(out, api.JellyfinUser{ID: u.ID, Name: u.Name, IsAdmin: u.IsAdmin, IsDisabled: u.IsDisabled, LastLogin: u.LastLogin})
-	}
-	return out, nil
 }
 
 // jfLibraries satisfies autowire.JellyfinClient.

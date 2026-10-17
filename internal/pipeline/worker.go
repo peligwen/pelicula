@@ -1,9 +1,9 @@
 // Package pipeline validates imported media files and reacts to the outcome.
 //
 // The *arr webhook enqueues a job per imported file. The worker claims jobs
-// one at a time, runs ffprobe checks, and then either marks the matching
-// requests available and refreshes Jellyfin (pass) or marks the release failed
-// in *arr, deletes the bad file through the *arr API and searches again (fail).
+// one at a time, runs ffprobe checks, and then either refreshes Jellyfin
+// (pass) or marks the release failed in *arr, deletes the bad file through
+// the *arr API and searches again (fail).
 package pipeline
 
 import (
@@ -189,13 +189,6 @@ func (w *Worker) process(ctx context.Context, job *store.Job) {
 			log.Error("finish job failed", "error", err)
 		}
 		finished = true
-		w.step("mark requests available", job, func() error {
-			n, err := w.d.Store.MarkRequestsAvailable(ctx, job.ArrType, job.ArrID)
-			if n > 0 {
-				log.Info("requests marked available", "count", n)
-			}
-			return err
-		})
 		w.scheduleRefresh(ctx)
 		log.Info("job passed", "skipped", res.Skipped, "duration", res.Duration, "sample", res.Sample)
 		return

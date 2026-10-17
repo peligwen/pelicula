@@ -17,7 +17,7 @@ var resetNotes = map[string]string{
 	"prowlarr":    "indexers and API key",
 	"qbittorrent": "client settings and torrent state",
 	"jellyfin":    "users, libraries, watch history (media files are untouched)",
-	"pelicula":    "Pelicula's database: roles, sessions, invites, requests, job history",
+	"pelicula":    "Pelicula's database: dashboard sessions, job history, settings",
 	"gluetun":     "cached VPN server list",
 }
 

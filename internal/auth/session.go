@@ -9,9 +9,8 @@ import (
 	"pelicula/internal/store"
 )
 
-type userRole struct {
-	Username string     `json:"username"`
-	Role     store.Role `json:"role"`
+type userJSON struct {
+	Username string `json:"username"`
 }
 
 func (a *Auth) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -37,53 +36,34 @@ func (a *Auth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "login service unavailable")
 		return
 	}
-	sess, err := a.startSession(w, r, res, req.Username)
+	name := res.Username
+	if name == "" {
+		name = req.Username
+	}
+	if !res.IsAdmin {
+		a.log.Warn("auth: login refused for a non-administrator", "username", name, "remote", r.RemoteAddr)
+		writeError(w, http.StatusForbidden, "the dashboard is for the Jellyfin administrator")
+		return
+	}
+	sess, err := a.startSession(w, r, name)
 	if err != nil {
-		a.log.Error("auth: start session failed", "username", req.Username, "error", err)
+		a.log.Error("auth: start session failed", "username", name, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	a.log.Info("auth: login", "username", sess.Username, "role", sess.Role)
-	writeJSON(w, http.StatusOK, userRole{sess.Username, sess.Role})
+	a.log.Info("auth: login", "username", sess.Username)
+	writeJSON(w, http.StatusOK, userJSON{sess.Username})
 }
 
-// startSession resolves the user's role (stored role, else admin when Jellyfin
-// says so, else viewer, persisted on first login), creates a session and sets
-// the cookie. submitted is the username typed by the user, used only when
-// Jellyfin does not report a canonical name.
-func (a *Auth) startSession(w http.ResponseWriter, r *http.Request, res *LoginResult, submitted string) (*store.Session, error) {
+// startSession creates a session for name and sets the cookie.
+func (a *Auth) startSession(w http.ResponseWriter, r *http.Request, name string) (*store.Session, error) {
 	ctx := r.Context()
-	name := res.Username
-	if name == "" {
-		name = submitted
-	}
-	role, ok, err := a.store.GetRole(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		role = store.RoleViewer
-		if res.IsAdmin {
-			role = store.RoleAdmin
-		}
-		if err := a.store.SetRole(ctx, name, role); err != nil {
-			return nil, err
-		}
-	}
 	token, err := newToken()
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now()
-	sess := store.Session{
-		Token:          token,
-		Username:       name,
-		Role:           role,
-		JellyfinUserID: res.UserID,
-		JellyfinToken:  res.Token,
-		ExpiresAt:      now.Add(a.ttl),
-		CreatedAt:      now,
-	}
+	sess := store.Session{Token: token, Username: name, ExpiresAt: now.Add(a.ttl), CreatedAt: now}
 	if err := a.store.CreateSession(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -131,26 +111,13 @@ func (a *Auth) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	writeJSON(w, http.StatusOK, userRole{sess.Username, sess.Role})
+	writeJSON(w, http.StatusOK, userJSON{sess.Username})
 }
 
-// handleCheck is nginx's auth_request target: status only, no body, one store
-// lookup.
-// handleCheck backs nginx's auth_request. An optional ?min=<role> raises
-// the bar above "any session": nginx uses min=admin in front of the Sonarr,
-// Radarr, Prowlarr and qBittorrent UIs, which run with their own auth off.
-// 403 is returned for a live session below the minimum so nginx can tell a
-// signed-in viewer apart from no session at all.
+// handleCheck backs nginx's auth_request in front of the Sonarr, Radarr,
+// Prowlarr and qBittorrent UIs, which run with their own auth off: status
+// only, no body, one store lookup. 204 is a live session, 401 is none.
 func (a *Auth) handleCheck(w http.ResponseWriter, r *http.Request) {
-	min := store.RoleViewer
-	if q := r.URL.Query().Get("min"); q != "" {
-		role, ok := store.ParseRole(q)
-		if !ok {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		min = role
-	}
 	sess, err := a.sessionFor(r)
 	switch {
 	case err != nil:
@@ -158,8 +125,6 @@ func (a *Auth) handleCheck(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	case sess == nil:
 		w.WriteHeader(http.StatusUnauthorized)
-	case !sess.Role.AtLeast(min):
-		w.WriteHeader(http.StatusForbidden)
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

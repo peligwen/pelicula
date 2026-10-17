@@ -30,7 +30,7 @@ func seedJob(t *testing.T, e *env, path string, status store.JobStatus) int64 {
 
 func TestListJobs(t *testing.T) {
 	e := newEnv(t)
-	rec := e.do(viewer, "GET", "/api/jobs", nil)
+	rec := e.do(admin, "GET", "/api/jobs", nil)
 	wantStatus(t, rec, 200)
 	if rec.Body.String() != "{\"jobs\":[]}\n" {
 		t.Fatalf("empty body = %q", rec.Body)
@@ -39,7 +39,7 @@ func TestListJobs(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		seedJob(t, e, fmt.Sprintf("/media/movies/%d.mkv", i), store.JobFailed)
 	}
-	got := decode(t, e.do(viewer, "GET", "/api/jobs", nil))["jobs"].([]any)
+	got := decode(t, e.do(admin, "GET", "/api/jobs", nil))["jobs"].([]any)
 	if len(got) != 5 {
 		t.Fatalf("jobs = %d, want 5", len(got))
 	}
@@ -48,12 +48,12 @@ func TestListJobs(t *testing.T) {
 		t.Errorf("newest job = %v", first)
 	}
 
-	got = decode(t, e.do(viewer, "GET", "/api/jobs?limit=2", nil))["jobs"].([]any)
+	got = decode(t, e.do(admin, "GET", "/api/jobs?limit=2", nil))["jobs"].([]any)
 	if len(got) != 2 {
 		t.Fatalf("limit=2 returned %d", len(got))
 	}
 	for _, bad := range []string{"limit=0", "limit=-3", "limit=abc"} {
-		wantStatus(t, e.do(viewer, "GET", "/api/jobs?"+bad, nil), 400)
+		wantStatus(t, e.do(admin, "GET", "/api/jobs?"+bad, nil), 400)
 	}
 }
 
@@ -62,12 +62,12 @@ func TestRetryJob(t *testing.T) {
 	id := seedJob(t, e, "/media/movies/a.mkv", store.JobFailed)
 	path := fmt.Sprintf("/api/jobs/%d/retry", id)
 
-	wantStatus(t, e.do(viewer, "POST", path, nil), 403)
+	wantStatus(t, e.do(anon, "POST", path, nil), 401)
 	if e.kicks != 0 {
-		t.Fatal("forbidden retry kicked the worker")
+		t.Fatal("unauthenticated retry kicked the worker")
 	}
 
-	wantStatus(t, e.do(manager, "POST", path, nil), 204)
+	wantStatus(t, e.do(admin, "POST", path, nil), 204)
 	job, err := e.store.GetJob(t.Context(), id)
 	if err != nil || job.Status != store.JobQueued {
 		t.Fatalf("job = %+v, err %v; want queued", job, err)
@@ -77,9 +77,9 @@ func TestRetryJob(t *testing.T) {
 	}
 
 	// Already queued: nothing to retry.
-	wantStatus(t, e.do(manager, "POST", path, nil), 409)
-	wantStatus(t, e.do(manager, "POST", "/api/jobs/999/retry", nil), 404)
-	wantStatus(t, e.do(manager, "POST", "/api/jobs/x/retry", nil), 400)
+	wantStatus(t, e.do(admin, "POST", path, nil), 409)
+	wantStatus(t, e.do(admin, "POST", "/api/jobs/999/retry", nil), 404)
+	wantStatus(t, e.do(admin, "POST", "/api/jobs/x/retry", nil), 400)
 	if e.kicks != 1 {
 		t.Fatalf("kicks = %d after failed retries, want still 1", e.kicks)
 	}
@@ -91,7 +91,7 @@ func TestRetryJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	id2 := seedJob(t, e, "/media/movies/b.mkv", store.JobFailed)
-	wantStatus(t, e.do(manager, "POST", fmt.Sprintf("/api/jobs/%d/retry", id2), nil), 204)
+	wantStatus(t, e.do(admin, "POST", fmt.Sprintf("/api/jobs/%d/retry", id2), nil), 204)
 }
 
 func mustClaim(t *testing.T, e *env) int64 {

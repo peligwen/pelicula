@@ -218,7 +218,6 @@ func TestHookIsNotSessionGuarded(t *testing.T) {
 	// And a signed-in admin without the secret is still refused.
 	req := httptest.NewRequest("POST", "/api/hooks/import", strings.NewReader(`{"eventType":"Test"}`))
 	req.Header.Set("X-Test-User", "adam")
-	req.Header.Set("X-Test-Role", "admin")
 	rec := httptest.NewRecorder()
 	e.mux.ServeHTTP(rec, req)
 	if rec.Code != 401 {

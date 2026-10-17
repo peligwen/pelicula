@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const maxBody = 8 << 10 // matches the nginx limit on the public auth routes
+const maxBody = 8 << 10 // matches the nginx limit on the login route
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

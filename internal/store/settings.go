@@ -16,9 +16,6 @@ const (
 	// release failed in *arr (blocklist plus re-search) and deletes the file.
 	// Default true.
 	SettingAutoBlocklist = "auto_blocklist"
-	// SettingAutoApprove makes viewer requests go straight to *arr without a
-	// manager's approval. Default false.
-	SettingAutoApprove = "auto_approve_requests"
 )
 
 // SettingDefaults is the canonical list of editable keys and their defaults.
@@ -26,7 +23,6 @@ const (
 var SettingDefaults = map[string]string{
 	SettingValidationEnabled: "true",
 	SettingAutoBlocklist:     "true",
-	SettingAutoApprove:       "false",
 }
 
 // GetSetting returns the stored value or def when unset.

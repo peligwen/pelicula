@@ -62,10 +62,11 @@ func run(log *slog.Logger) error {
 	// once the apps have written their config.xml.
 	sonarr := arr.New(cfg.SonarrURL, "", "v3")
 	radarr := arr.New(cfg.RadarrURL, "", "v3")
-	// jf logs dashboard users in. jfAdmin holds the server's own admin token on
-	// a separate Jellyfin device, and jfSrv is the client every call made with
-	// that token goes through; mixing the two lets a dashboard login revoke
-	// the server's token (see jellyfin.DeviceServer).
+	// jf logs the administrator in to the dashboard. jfAdmin holds the
+	// server's own admin token on a separate Jellyfin device, and jfSrv is the
+	// client every call made with that token goes through; mixing the two
+	// lets a dashboard login revoke the server's token (see
+	// jellyfin.DeviceServer).
 	jf := jellyfin.New(cfg.JellyfinURL)
 	jfAdmin := jellyfin.NewAdmin(jf, cfg.JellyfinAdminUser, cfg.JellyfinAdminPassword)
 	jfSrv := jfAdmin.Client()
@@ -92,8 +93,6 @@ func run(log *slog.Logger) error {
 	authn := auth.New(auth.Deps{
 		Store:    st,
 		Jellyfin: identity(jf),
-		Admin:    jfAdmin,
-		Users:    jfSrv,
 		Log:      log,
 	})
 
@@ -112,11 +111,9 @@ func run(log *slog.Logger) error {
 		Cfg:      cfg,
 		Store:    st,
 		Auth:     authn,
-		Session:  auth.SessionFrom,
 		Sonarr:   sonarr,
 		Radarr:   radarr,
-		Jellyfin: jfUsers{jfSrv},
-		JFAdmin:  jfAdmin,
+		Jellyfin: jfSrv,
 		Wired:    wired.Load,
 		Kick:     worker.Kick,
 		Log:      log,

@@ -1,11 +1,11 @@
 // Package api holds the HTTP handlers behind /api/*: status, search,
-// requests, downloads, jobs, settings, users and the *arr import webhook.
+// downloads, jobs, settings and the *arr import webhook.
 //
-// Authentication (login, sessions, invites) lives in internal/auth. This
-// package only asks it to guard routes (Guard) and reads the current user
-// back out of the request context (Session). Everything else the handlers
-// talk to is a narrow interface defined here, so the concrete clients are
-// wired in by cmd/pelicula-server and unit tests can use plain fakes.
+// Authentication (login, sessions) lives in internal/auth. This package only
+// asks it to guard routes (Guard); every route is for the one signed-in
+// administrator. Everything else the handlers talk to is a narrow interface
+// defined here, so the concrete clients are wired in by cmd/pelicula-server
+// and unit tests can use plain fakes.
 package api
 
 import (
@@ -70,25 +70,10 @@ type QBTClient interface {
 	DeleteTorrent(ctx context.Context, hash string, deleteFiles bool) error
 }
 
-// JellyfinUser is one Jellyfin account.
-type JellyfinUser struct {
-	ID         string
-	Name       string
-	IsAdmin    bool
-	IsDisabled bool
-	LastLogin  string
-}
-
-// JellyfinClient is the slice of the Jellyfin client the handlers use.
-type JellyfinClient interface {
+// Pinger is the slice of the Jellyfin client the handlers use (the status
+// probe). *jellyfin.Client satisfies it.
+type Pinger interface {
 	Ping(ctx context.Context) error
-	ListUsers(ctx context.Context, token string) ([]JellyfinUser, error)
-	DeleteUser(ctx context.Context, token, userID string) error
-}
-
-// TokenSource yields a Jellyfin admin token (jellyfin.Admin satisfies it).
-type TokenSource interface {
-	Token(ctx context.Context) (string, error)
 }
 
 // VPNStatus is gluetun's view of the tunnel's public identity.
@@ -106,15 +91,11 @@ type GluetunClient interface {
 	GetTunnelStatus(ctx context.Context) (string, error)
 }
 
-// Guard wraps a handler so that only sessions of at least min reach it
+// Guard wraps a handler so that only a signed-in session reaches it
 // (auth.Auth satisfies this).
 type Guard interface {
-	Guard(min store.Role, h http.Handler) http.Handler
+	Guard(h http.Handler) http.Handler
 }
-
-// SessionFunc returns the session the Guard stored in ctx, or nil
-// (auth.SessionFrom satisfies this).
-type SessionFunc func(ctx context.Context) *store.Session
 
 // Server carries everything the handlers need. Build one, set the fields
 // (nil is fine for anything VPN-only), then call Routes. A Server must not be
@@ -123,14 +104,12 @@ type Server struct {
 	Cfg      config.Config
 	Store    *store.Store
 	Auth     Guard
-	Session  SessionFunc
 	Sonarr   ArrClient
 	Radarr   ArrClient
 	Prowlarr ArrClient     // nil without VPN
 	QBT      QBTClient     // nil without VPN
 	Gluetun  GluetunClient // nil without VPN
-	Jellyfin JellyfinClient
-	JFAdmin  TokenSource
+	Jellyfin Pinger
 	Wired    func() bool // autowire finished
 	Kick     func()      // wake the pipeline worker after enqueue (may be nil)
 	Log      *slog.Logger
@@ -141,33 +120,24 @@ type Server struct {
 }
 
 // Routes registers every route this package owns. Auth-owned routes
-// (/api/auth/*, /api/register*, /api/invites*) are registered by auth.
+// (/api/auth/*) are registered by auth.
 func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.Handle("GET /api/status", s.guard(store.RoleViewer, s.handleStatus))
+	mux.Handle("GET /api/status", s.guard(s.handleStatus))
 
-	mux.Handle("GET /api/search", s.guard(store.RoleViewer, s.handleSearch))
-	mux.Handle("POST /api/search/add", s.guard(store.RoleManager, s.handleSearchAdd))
+	mux.Handle("GET /api/search", s.guard(s.handleSearch))
+	mux.Handle("POST /api/search/add", s.guard(s.handleSearchAdd))
 
-	mux.Handle("GET /api/requests", s.guard(store.RoleViewer, s.handleListRequests))
-	mux.Handle("POST /api/requests", s.guard(store.RoleViewer, s.handleCreateRequest))
-	mux.Handle("POST /api/requests/{id}/approve", s.guard(store.RoleManager, s.handleApproveRequest))
-	mux.Handle("POST /api/requests/{id}/decline", s.guard(store.RoleManager, s.handleDeclineRequest))
+	mux.Handle("GET /api/downloads", s.guard(s.handleListDownloads))
+	mux.Handle("POST /api/downloads/{hash}/pause", s.guard(s.handlePauseDownload))
+	mux.Handle("POST /api/downloads/{hash}/resume", s.guard(s.handleResumeDownload))
+	mux.Handle("DELETE /api/downloads/{hash}", s.guard(s.handleDeleteDownload))
 
-	mux.Handle("GET /api/downloads", s.guard(store.RoleViewer, s.handleListDownloads))
-	mux.Handle("POST /api/downloads/{hash}/pause", s.guard(store.RoleManager, s.handlePauseDownload))
-	mux.Handle("POST /api/downloads/{hash}/resume", s.guard(store.RoleManager, s.handleResumeDownload))
-	mux.Handle("DELETE /api/downloads/{hash}", s.guard(store.RoleAdmin, s.handleDeleteDownload))
+	mux.Handle("GET /api/jobs", s.guard(s.handleListJobs))
+	mux.Handle("POST /api/jobs/{id}/retry", s.guard(s.handleRetryJob))
 
-	mux.Handle("GET /api/jobs", s.guard(store.RoleViewer, s.handleListJobs))
-	mux.Handle("POST /api/jobs/{id}/retry", s.guard(store.RoleManager, s.handleRetryJob))
-
-	mux.Handle("GET /api/settings", s.guard(store.RoleAdmin, s.handleGetSettings))
-	mux.Handle("PUT /api/settings", s.guard(store.RoleAdmin, s.handlePutSettings))
-
-	mux.Handle("GET /api/users", s.guard(store.RoleAdmin, s.handleListUsers))
-	mux.Handle("PUT /api/users/{username}/role", s.guard(store.RoleAdmin, s.handleSetUserRole))
-	mux.Handle("DELETE /api/users/{username}", s.guard(store.RoleAdmin, s.handleDeleteUser))
+	mux.Handle("GET /api/settings", s.guard(s.handleGetSettings))
+	mux.Handle("PUT /api/settings", s.guard(s.handlePutSettings))
 
 	// Authenticated by the shared secret header, not a session.
 	mux.HandleFunc("POST /api/hooks/import", s.handleImportHook)
@@ -185,31 +155,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // guard wraps h with the auth Guard. With no Guard configured it fails closed
 // rather than serving the route unauthenticated.
-func (s *Server) guard(min store.Role, h http.HandlerFunc) http.Handler {
+func (s *Server) guard(h http.HandlerFunc) http.Handler {
 	if s.Auth == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "auth is not configured")
 		})
 	}
-	return s.Auth.Guard(min, h)
-}
-
-// user returns the session behind r, or nil.
-func (s *Server) user(r *http.Request) *store.Session {
-	if s.Session == nil {
-		return nil
-	}
-	return s.Session(r.Context())
-}
-
-// requireUser returns the session behind r, writing 401 and returning nil
-// when there is none (which a Guard-wrapped route should never see).
-func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) *store.Session {
-	sess := s.user(r)
-	if sess == nil {
-		writeError(w, http.StatusUnauthorized, "not signed in")
-	}
-	return sess
+	return s.Auth.Guard(h)
 }
 
 func (s *Server) wired() bool { return s.Wired != nil && s.Wired() }

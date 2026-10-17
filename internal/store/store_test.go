@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 )
@@ -17,136 +16,37 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
-func TestRole(t *testing.T) {
-	if !RoleAdmin.AtLeast(RoleManager) || RoleViewer.AtLeast(RoleManager) {
-		t.Fatal("AtLeast ordering wrong")
-	}
-	if _, ok := ParseRole("root"); ok {
-		t.Fatal("ParseRole accepted bogus role")
-	}
-}
-
-func TestRolesAndSessions(t *testing.T) {
+func TestSessions(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, ok, err := s.GetRole(ctx, "gwen"); err != nil || ok {
-		t.Fatalf("expected no role, got ok=%v err=%v", ok, err)
-	}
-	if err := s.SetRole(ctx, "gwen", RoleViewer); err != nil {
-		t.Fatal(err)
-	}
-	sess := Session{Token: "tok", Username: "gwen", Role: RoleViewer, ExpiresAt: time.Now().Add(time.Hour)}
+	sess := Session{Token: "tok", Username: "gwen", ExpiresAt: time.Now().Add(time.Hour)}
 	if err := s.CreateSession(ctx, sess); err != nil {
 		t.Fatal(err)
 	}
-	// Changing the role updates the live session.
-	if err := s.SetRole(ctx, "gwen", RoleAdmin); err != nil {
-		t.Fatal(err)
-	}
 	got, err := s.GetSession(ctx, "tok")
-	if err != nil || got == nil {
-		t.Fatalf("GetSession: %v %v", got, err)
-	}
-	if got.Role != RoleAdmin {
-		t.Fatalf("session role not updated: %s", got.Role)
-	}
-	roles, _ := s.ListRoles(ctx)
-	if roles["gwen"] != RoleAdmin {
-		t.Fatalf("ListRoles: %v", roles)
+	if err != nil || got == nil || got.Username != "gwen" || got.CreatedAt.IsZero() {
+		t.Fatalf("GetSession: %+v %v", got, err)
 	}
 
 	// Expired sessions read as missing and are purged.
-	_ = s.CreateSession(ctx, Session{Token: "old", Username: "gwen", Role: RoleAdmin, ExpiresAt: time.Now().Add(-time.Minute)})
+	_ = s.CreateSession(ctx, Session{Token: "old", Username: "gwen", ExpiresAt: time.Now().Add(-time.Minute)})
 	if got, _ := s.GetSession(ctx, "old"); got != nil {
 		t.Fatal("expired session returned")
 	}
 	if got, _ := s.GetSession(ctx, "missing"); got != nil {
 		t.Fatal("missing session returned")
 	}
+	_ = s.CreateSession(ctx, Session{Token: "old2", Username: "gwen", ExpiresAt: time.Now().Add(-time.Minute)})
+	if n, err := s.PurgeExpiredSessions(ctx); err != nil || n != 1 {
+		t.Fatalf("PurgeExpiredSessions n=%d err=%v", n, err)
+	}
 
-	if err := s.DeleteRole(ctx, "gwen"); err != nil {
+	if err := s.DeleteSession(ctx, "tok"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.GetSession(ctx, "tok"); got != nil {
-		t.Fatal("DeleteRole should drop sessions")
-	}
-}
-
-func TestInvites(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	inv := Invite{Code: "abc", Role: RoleViewer, CreatedBy: "admin", ExpiresAt: time.Now().Add(time.Hour)}
-	if err := s.CreateInvite(ctx, inv); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.GetInvite(ctx, "abc")
-	if err != nil || got == nil || got.Used() || got.Expired(time.Now()) {
-		t.Fatalf("GetInvite: %+v %v", got, err)
-	}
-	if err := s.UseInvite(ctx, "abc", "newbie"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UseInvite(ctx, "abc", "again"); !errors.Is(err, ErrInviteUnavailable) {
-		t.Fatalf("second redemption should fail, got %v", err)
-	}
-	got, _ = s.GetInvite(ctx, "abc")
-	if !got.Used() || got.UsedBy != "newbie" {
-		t.Fatalf("invite not marked used: %+v", got)
-	}
-	// Expired invites cannot be redeemed.
-	_ = s.CreateInvite(ctx, Invite{Code: "exp", Role: RoleViewer, CreatedBy: "admin", ExpiresAt: time.Now().Add(-time.Second)})
-	if err := s.UseInvite(ctx, "exp", "x"); !errors.Is(err, ErrInviteUnavailable) {
-		t.Fatalf("expired redemption should fail, got %v", err)
-	}
-	list, _ := s.ListInvites(ctx)
-	if len(list) != 2 {
-		t.Fatalf("ListInvites len=%d", len(list))
-	}
-	if err := s.DeleteInvite(ctx, "exp"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.DeleteInvite(ctx, "exp"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("double delete: %v", err)
-	}
-}
-
-func TestRequests(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	r := &Request{MediaType: "movie", TmdbID: 603, Title: "The Matrix", Year: 1999, RequestedBy: "gwen"}
-	if err := s.CreateRequest(ctx, r); err != nil {
-		t.Fatal(err)
-	}
-	if r.ID == 0 || r.Status != RequestPending {
-		t.Fatalf("CreateRequest: %+v", r)
-	}
-	dup, _ := s.FindOpenRequest(ctx, "movie", 603, 0)
-	if dup == nil || dup.ID != r.ID {
-		t.Fatalf("FindOpenRequest miss: %+v", dup)
-	}
-	if err := s.UpdateRequestStatus(ctx, r.ID, RequestApproved, "admin", "", 42); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := s.GetRequest(ctx, r.ID)
-	if got.Status != RequestApproved || got.ArrID != 42 || got.DecidedBy != "admin" {
-		t.Fatalf("after approve: %+v", got)
-	}
-	n, err := s.MarkRequestsAvailable(ctx, "radarr", 42)
-	if err != nil || n != 1 {
-		t.Fatalf("MarkRequestsAvailable n=%d err=%v", n, err)
-	}
-	if dup, _ := s.FindOpenRequest(ctx, "movie", 603, 0); dup != nil {
-		t.Fatal("available request should not count as open")
-	}
-	mine, _ := s.ListRequests(ctx, "gwen")
-	all, _ := s.ListRequests(ctx, "")
-	none, _ := s.ListRequests(ctx, "someone")
-	if len(mine) != 1 || len(all) != 1 || len(none) != 0 {
-		t.Fatalf("ListRequests mine=%d all=%d none=%d", len(mine), len(all), len(none))
-	}
-	if _, err := s.GetRequest(ctx, 999); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetRequest missing: %v", err)
+		t.Fatal("DeleteSession left the row behind")
 	}
 }
 
@@ -204,17 +104,17 @@ func TestJobs(t *testing.T) {
 func TestSettings(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	if !s.BoolSetting(ctx, SettingValidationEnabled) || s.BoolSetting(ctx, SettingAutoApprove) {
+	if !s.BoolSetting(ctx, SettingValidationEnabled) || !s.BoolSetting(ctx, SettingAutoBlocklist) {
 		t.Fatal("defaults wrong")
 	}
-	if err := s.SetSetting(ctx, SettingAutoApprove, "true"); err != nil {
+	if err := s.SetSetting(ctx, SettingValidationEnabled, "false"); err != nil {
 		t.Fatal(err)
 	}
-	if !s.BoolSetting(ctx, SettingAutoApprove) {
+	if s.BoolSetting(ctx, SettingValidationEnabled) {
 		t.Fatal("SetSetting not applied")
 	}
 	all, _ := s.AllSettings(ctx)
-	if all[SettingAutoApprove] != "true" || all[SettingAutoBlocklist] != "true" {
+	if all[SettingValidationEnabled] != "false" || all[SettingAutoBlocklist] != "true" {
 		t.Fatalf("AllSettings: %v", all)
 	}
 	_ = s.SetSetting(ctx, SettingAutoBlocklist, "garbage")
@@ -240,4 +140,60 @@ func TestOpenCreatesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = s2.Close()
+}
+
+// A database from the multi-user rescope (schema 1) loses its roles, invites
+// and requests tables and its sessions, and keeps jobs and settings.
+func TestMigrateFromV1(t *testing.T) {
+	path := t.TempDir() + "/pelicula.db"
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := s.DB().ExecContext(ctx, `
+		DROP TABLE sessions;
+		CREATE TABLE sessions (token TEXT PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL,
+		  jellyfin_user_id TEXT NOT NULL DEFAULT '', jellyfin_token TEXT NOT NULL DEFAULT '',
+		  expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+		INSERT INTO sessions VALUES ('t', 'gwen', 'admin', '', '', '2999-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		CREATE TABLE roles (username TEXT PRIMARY KEY, role TEXT NOT NULL, updated_at TEXT NOT NULL);
+		CREATE TABLE invites (code TEXT PRIMARY KEY);
+		CREATE TABLE requests (id INTEGER PRIMARY KEY);
+		INSERT INTO settings VALUES ('auto_approve_requests', 'true'), ('validation_enabled', 'false');
+		INSERT INTO jobs (arr_type, arr_id, title, path, status, created_at)
+		  VALUES ('radarr', 1, 'Heat', '/media/movies/heat.mkv', 'passed', '2026-01-01T00:00:00Z');
+		PRAGMA user_version = 1;`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen v1 database: %v", err)
+	}
+	defer s.Close()
+	for _, table := range []string{"roles", "invites", "requests"} {
+		var n int
+		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil || n != 0 {
+			t.Errorf("table %s still exists (n=%d err=%v)", table, n, err)
+		}
+	}
+	if got, _ := s.GetSession(ctx, "t"); got != nil {
+		t.Error("old session survived the migration")
+	}
+	if err := s.CreateSession(ctx, Session{Token: "n", Username: "gwen", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("insert into migrated sessions: %v", err)
+	}
+	all, _ := s.AllSettings(ctx)
+	if _, ok := all["auto_approve_requests"]; ok || all[SettingValidationEnabled] != "false" {
+		t.Errorf("settings after migration: %v", all)
+	}
+	if jobs, _ := s.ListJobs(ctx, 10); len(jobs) != 1 || jobs[0].Title != "Heat" {
+		t.Errorf("jobs after migration: %+v", jobs)
+	}
+	var v int
+	if err := s.DB().QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", v, err)
+	}
 }

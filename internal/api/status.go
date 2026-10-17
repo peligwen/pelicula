@@ -36,12 +36,11 @@ type statusSnapshot struct {
 }
 
 type statusResponse struct {
-	Services        []serviceStatus `json:"services"`
-	VPN             vpnInfo         `json:"vpn"`
-	Wired           bool            `json:"wired"`
-	Version         string          `json:"version"`
-	PendingRequests int             `json:"pending_requests"`
-	QueuedJobs      int             `json:"queued_jobs"`
+	Services   []serviceStatus `json:"services"`
+	VPN        vpnInfo         `json:"vpn"`
+	Wired      bool            `json:"wired"`
+	Version    string          `json:"version"`
+	QueuedJobs int             `json:"queued_jobs"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -51,11 +50,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		VPN:      snap.VPN,
 		Wired:    s.wired(),
 		Version:  s.Cfg.Version,
-	}
-	if sess := s.user(r); sess != nil && sess.Role.AtLeast(store.RoleManager) {
-		if n, err := s.Store.CountRequests(r.Context(), store.RequestPending); err == nil {
-			resp.PendingRequests = n
-		}
 	}
 	if n, err := s.Store.CountJobs(r.Context(), store.JobQueued); err == nil {
 		resp.QueuedJobs = n
@@ -80,18 +74,14 @@ func (s *Server) statusSnapshot(ctx context.Context) statusSnapshot {
 	return s.statusSnap
 }
 
-type pinger interface {
-	Ping(ctx context.Context) error
-}
-
 // probe pings every service and, with the VPN on, asks gluetun for the tunnel
 // state, all in parallel.
 func (s *Server) probe(ctx context.Context) statusSnapshot {
-	// A nil ArrClient/QBTClient/JellyfinClient converts to a nil pinger, which
-	// is reported as down rather than dereferenced.
+	// A nil ArrClient/QBTClient/Pinger converts to a nil Pinger, which is
+	// reported as down rather than dereferenced.
 	type target struct {
 		name, path string
-		client     pinger
+		client     Pinger
 	}
 	targets := []target{
 		{"sonarr", "/sonarr/", s.Sonarr},

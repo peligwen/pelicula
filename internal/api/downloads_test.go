@@ -24,19 +24,19 @@ func withQBT(e *env) *fakeQBT {
 
 func TestDownloadsWithoutVPN(t *testing.T) {
 	e := newEnv(t)
-	rec := e.do(viewer, "GET", "/api/downloads", nil)
+	rec := e.do(admin, "GET", "/api/downloads", nil)
 	wantStatus(t, rec, 200)
 	want := `{"downloads":[],"transfer":{"dl_speed":0,"up_speed":0},"vpn":false}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s, want %s", rec.Body, want)
 	}
-	wantStatus(t, e.do(manager, "POST", "/api/downloads/"+hashA+"/pause", nil), 503)
+	wantStatus(t, e.do(admin, "POST", "/api/downloads/"+hashA+"/pause", nil), 503)
 }
 
 func TestListDownloads(t *testing.T) {
 	e := newEnv(t)
 	withQBT(e)
-	rec := e.do(viewer, "GET", "/api/downloads", nil)
+	rec := e.do(admin, "GET", "/api/downloads", nil)
 	wantStatus(t, rec, 200)
 	got := decode(t, rec)
 	if got["vpn"] != true {
@@ -68,12 +68,12 @@ func TestListDownloadsErrors(t *testing.T) {
 	e := newEnv(t)
 	q := withQBT(e)
 	q.listErr = errors.New("down")
-	wantStatus(t, e.do(viewer, "GET", "/api/downloads", nil), 502)
+	wantStatus(t, e.do(admin, "GET", "/api/downloads", nil), 502)
 
 	// Transfer info is cosmetic: a failure there does not fail the list.
 	q.listErr = nil
 	q.transfer = nil
-	rec := e.do(viewer, "GET", "/api/downloads", nil)
+	rec := e.do(admin, "GET", "/api/downloads", nil)
 	wantStatus(t, rec, 200)
 	if tr := decode(t, rec)["transfer"].(map[string]any); tr["dl_speed"] != float64(0) {
 		t.Errorf("transfer = %v", tr)
@@ -83,15 +83,15 @@ func TestListDownloadsErrors(t *testing.T) {
 func TestPauseResume(t *testing.T) {
 	e := newEnv(t)
 	q := withQBT(e)
-	wantStatus(t, e.do(manager, "POST", "/api/downloads/"+hashA+"/pause", nil), 204)
-	wantStatus(t, e.do(manager, "POST", "/api/downloads/"+hashB+"/resume", nil), 204)
+	wantStatus(t, e.do(admin, "POST", "/api/downloads/"+hashA+"/pause", nil), 204)
+	wantStatus(t, e.do(admin, "POST", "/api/downloads/"+hashB+"/resume", nil), 204)
 	if len(q.stopped) != 1 || q.stopped[0] != hashA || len(q.started) != 1 || q.started[0] != hashB {
 		t.Fatalf("stopped=%v started=%v", q.stopped, q.started)
 	}
 
 	// qBittorrent treats these as selectors for every torrent; never forward them.
 	for _, bad := range []string{"all", "ALL", "abc%7Cdef", "zzzz"} {
-		if got := e.do(manager, "POST", "/api/downloads/"+bad+"/pause", nil).Code; got != 400 {
+		if got := e.do(admin, "POST", "/api/downloads/"+bad+"/pause", nil).Code; got != 400 {
 			t.Errorf("pause %q = %d, want 400", bad, got)
 		}
 	}

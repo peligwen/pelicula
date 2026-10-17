@@ -272,18 +272,9 @@ func decodeResult(t *testing.T, j *store.Job) Result {
 
 // ---- pass path ------------------------------------------------------------
 
-func TestWorkerPassMarksRequestAvailableAndRefreshesOnce(t *testing.T) {
+func TestWorkerPassRefreshesOnce(t *testing.T) {
 	e := newEnv(t)
 	e.w.RefreshDebounce = 600 * time.Millisecond
-	ctx := context.Background()
-
-	req := &store.Request{MediaType: "movie", TmdbID: 1, Title: "Heat", RequestedBy: "ann"}
-	if err := e.st.CreateRequest(ctx, req); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.st.UpdateRequestStatus(ctx, req.ID, store.RequestApproved, "bob", "", 42); err != nil {
-		t.Fatal(err)
-	}
 
 	id1 := e.enqueue(store.Job{ArrType: "radarr", ArrID: 42, Title: "Heat", Path: e.media("heat.mkv"), Size: 100 * mb})
 	id2 := e.enqueue(store.Job{ArrType: "radarr", ArrID: 43, Title: "Ronin", Path: e.media("ronin.mkv"), Size: 100 * mb})
@@ -299,14 +290,6 @@ func TestWorkerPassMarksRequestAvailableAndRefreshesOnce(t *testing.T) {
 	if j1.Error != "" {
 		t.Errorf("error = %q", j1.Error)
 	}
-	got, err := e.st.GetRequest(ctx, req.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != store.RequestAvailable {
-		t.Errorf("request status = %s, want available", got.Status)
-	}
-
 	waitFor(t, func() bool { return e.jf.count() >= 1 }, "jellyfin refresh")
 	time.Sleep(time.Second) // well past a second debounce window
 	if n := e.jf.count(); n != 1 {

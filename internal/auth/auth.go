@@ -1,18 +1,18 @@
-// Package auth is Pelicula's session and role layer.
+// Package auth is Pelicula's login and session layer.
 //
-// Jellyfin is the identity provider: passwords are only ever checked by
-// Jellyfin. Pelicula stores a role per username, a session per login, and
-// invites for registration (all in package store). This package wires those
-// into HTTP: login/logout/me/check, invite-based registration, invite
-// management, the Guard middleware, and CSRF protection.
+// Jellyfin is the identity provider and the dashboard is for its
+// administrator: passwords are only ever checked by Jellyfin, and a login
+// succeeds only when Jellyfin reports the user as an administrator. Other
+// Jellyfin users never sign in here; they use Jellyfin itself. Pelicula keeps
+// a cookie session per login (package store) and this package wires that
+// into HTTP: login/logout/me/check, the Guard middleware, and CSRF
+// protection.
 //
 // # Talking to Jellyfin
 //
-// The package never imports the Jellyfin client. It declares the three small
-// interfaces it needs (Identity, UserCreator, UserAdmin) and the integrator
-// passes anything that satisfies them. UserCreator and UserAdmin match
-// (*jellyfin.Admin).Token and (*jellyfin.Client).CreateUser as written in the
-// build contract. Identity needs a thin adapter because Go has no covariant
+// The package never imports the Jellyfin client. It declares the one small
+// interface it needs (Identity) and the integrator passes anything that
+// satisfies it. Identity needs a thin adapter because Go has no covariant
 // return types; IdentityFunc keeps it to a few lines:
 //
 //	auth.IdentityFunc(func(ctx context.Context, user, pass string) (*auth.LoginResult, error) {
@@ -20,7 +20,7 @@
 //		if err != nil {
 //			return nil, err
 //		}
-//		return &auth.LoginResult{Token: r.Token, UserID: r.UserID, Username: r.Username, IsAdmin: r.IsAdmin}, nil
+//		return &auth.LoginResult{Username: r.Username, IsAdmin: r.IsAdmin}, nil
 //	})
 //
 // # Error classification
@@ -32,11 +32,6 @@
 // error, including timeouts and refused connections, is "Jellyfin unavailable"
 // (HTTP 503).
 //
-// An error from UserAdmin.CreateUser is "username taken" (HTTP 409) when
-// errors.Is(err, ErrUserExists) or its message contains the standalone number
-// 400 or 409 (Jellyfin answers 400 for a duplicate name). Any other error, and
-// any error from UserCreator.Token, is HTTP 503.
-//
 // Login attempts are rate limited by nginx, not here.
 package auth
 
@@ -46,8 +41,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"strings"
-	"sync"
 	"time"
 
 	"pelicula/internal/store"
@@ -58,22 +51,14 @@ const CookieName = "pelicula_session"
 
 const defaultSessionTTL = 30 * 24 * time.Hour
 
-// Sentinel errors an Identity or UserAdmin may wrap to be classified without
-// relying on message matching. See the package comment.
-var (
-	ErrBadCredentials = errors.New("auth: bad credentials")
-	ErrUserExists     = errors.New("auth: user already exists")
-)
+// ErrBadCredentials may be wrapped by an Identity to be classified as a bad
+// login without relying on message matching. See the package comment.
+var ErrBadCredentials = errors.New("auth: bad credentials")
 
-var (
-	badCredsRE = regexp.MustCompile(`(?i)\b401\b|unauthorized`)
-	conflictRE = regexp.MustCompile(`\b(400|409)\b`)
-)
+var badCredsRE = regexp.MustCompile(`(?i)\b401\b|unauthorized`)
 
 // LoginResult is what Jellyfin tells us about a user who just authenticated.
 type LoginResult struct {
-	Token    string // Jellyfin access token for the user
-	UserID   string
 	Username string // canonical name as Jellyfin stores it
 	IsAdmin  bool
 }
@@ -91,24 +76,10 @@ func (f IdentityFunc) AuthenticateByName(ctx context.Context, username, password
 	return f(ctx, username, password)
 }
 
-// UserCreator hands out a Jellyfin admin token (cached and refreshed by the
-// implementation).
-type UserCreator interface {
-	Token(ctx context.Context) (string, error)
-}
-
-// UserAdmin creates Jellyfin users with an admin token and returns the new
-// user's ID.
-type UserAdmin interface {
-	CreateUser(ctx context.Context, token, name, password string) (string, error)
-}
-
 // Deps are the Auth dependencies.
 type Deps struct {
 	Store      *store.Store
-	Jellyfin   Identity      // login
-	Admin      UserCreator   // admin token, used when redeeming an invite
-	Users      UserAdmin     // user creation, used when redeeming an invite
+	Jellyfin   Identity
 	SessionTTL time.Duration // default 30 days
 	Log        *slog.Logger
 }
@@ -117,26 +88,13 @@ type Deps struct {
 type Auth struct {
 	store *store.Store
 	jf    Identity
-	admin UserCreator
-	users UserAdmin
 	ttl   time.Duration
 	log   *slog.Logger
-
-	// regMu serialises invite redemption so the check-invite, create-user,
-	// use-invite sequence cannot create two Jellyfin users for one invite.
-	regMu sync.Mutex
 }
 
 // New builds an Auth. SessionTTL defaults to 30 days, Log to slog.Default().
 func New(d Deps) *Auth {
-	a := &Auth{
-		store: d.Store,
-		jf:    d.Jellyfin,
-		admin: d.Admin,
-		users: d.Users,
-		ttl:   d.SessionTTL,
-		log:   d.Log,
-	}
+	a := &Auth{store: d.Store, jf: d.Jellyfin, ttl: d.SessionTTL, log: d.Log}
 	if a.ttl <= 0 {
 		a.ttl = defaultSessionTTL
 	}
@@ -146,19 +104,12 @@ func New(d Deps) *Auth {
 	return a
 }
 
-// Routes registers the auth, registration and invite routes on mux.
+// Routes registers the auth routes on mux.
 func (a *Auth) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/auth/me", a.handleMe)
 	mux.HandleFunc("GET /api/auth/check", a.handleCheck)
-
-	mux.HandleFunc("GET /api/register/{code}", a.handleRegisterCheck)
-	mux.HandleFunc("POST /api/register", a.handleRegister)
-
-	mux.Handle("GET /api/invites", a.GuardFunc(store.RoleAdmin, a.handleInviteList))
-	mux.Handle("POST /api/invites", a.GuardFunc(store.RoleAdmin, a.handleInviteCreate))
-	mux.Handle("DELETE /api/invites/{code}", a.GuardFunc(store.RoleAdmin, a.handleInviteDelete))
 }
 
 type sessionKey struct{}
@@ -170,11 +121,10 @@ func SessionFrom(ctx context.Context) *store.Session {
 	return s
 }
 
-// Guard requires a valid session whose role is at least min. It answers 401
-// {"error":"unauthorized"} without a session and 403 {"error":"forbidden"}
-// with too low a role, and otherwise stores the session in the request context
-// (see SessionFrom).
-func (a *Auth) Guard(min store.Role, h http.Handler) http.Handler {
+// Guard requires a valid session. It answers 401 {"error":"unauthorized"}
+// without one and otherwise stores the session in the request context (see
+// SessionFrom).
+func (a *Auth) Guard(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, err := a.sessionFor(r)
 		if err != nil {
@@ -186,17 +136,13 @@ func (a *Auth) Guard(min store.Role, h http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		if !sess.Role.AtLeast(min) {
-			writeError(w, http.StatusForbidden, "forbidden")
-			return
-		}
 		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, sess)))
 	})
 }
 
 // GuardFunc is Guard for a HandlerFunc.
-func (a *Auth) GuardFunc(min store.Role, h http.HandlerFunc) http.Handler {
-	return a.Guard(min, h)
+func (a *Auth) GuardFunc(h http.HandlerFunc) http.Handler {
+	return a.Guard(h)
 }
 
 // sessionFor returns the live session named by the request cookie, or nil.
@@ -210,8 +156,4 @@ func (a *Auth) sessionFor(r *http.Request) (*store.Session, error) {
 
 func isBadCredentials(err error) bool {
 	return errors.Is(err, ErrBadCredentials) || badCredsRE.MatchString(err.Error())
-}
-
-func isConflict(err error) bool {
-	return errors.Is(err, ErrUserExists) || conflictRE.MatchString(strings.ToLower(err.Error()))
 }

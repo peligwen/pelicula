@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,41 +11,25 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"pelicula/internal/config"
 	"pelicula/internal/store"
 )
 
-// ── fake Guard: role and user come from request headers ──────────────────────
-
-type ctxKey struct{}
+// ── fake Guard: the user comes from a request header ─────────────────────────
 
 // headerGuard stands in for auth.Auth. A request is signed in when it carries
-// X-Test-User and X-Test-Role; the guard enforces the minimum role the same
-// way auth.Guard does (401 without a session, 403 below the minimum).
+// X-Test-User; anything else is 401, the same as auth.Guard.
 type headerGuard struct{}
 
-func (headerGuard) Guard(min store.Role, h http.Handler) http.Handler {
+func (headerGuard) Guard(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := r.Header.Get("X-Test-User")
-		role, ok := store.ParseRole(r.Header.Get("X-Test-Role"))
-		if user == "" || !ok {
+		if r.Header.Get("X-Test-User") == "" {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		if !role.AtLeast(min) {
-			writeError(w, http.StatusForbidden, "forbidden")
-			return
-		}
-		sess := &store.Session{Username: user, Role: role}
-		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess)))
+		h.ServeHTTP(w, r)
 	})
-}
-
-func testSession(ctx context.Context) *store.Session {
-	s, _ := ctx.Value(ctxKey{}).(*store.Session)
-	return s
 }
 
 // ── fake upstreams ───────────────────────────────────────────────────────────
@@ -194,30 +177,10 @@ func (q *fakeQBT) DeleteTorrent(_ context.Context, h string, files bool) error {
 }
 
 type fakeJellyfin struct {
-	mu      sync.Mutex
-	users   []JellyfinUser
 	pingErr error
-	token   string // token the fake expects
-	deleted []string
 }
 
 func (j *fakeJellyfin) Ping(context.Context) error { return j.pingErr }
-func (j *fakeJellyfin) ListUsers(_ context.Context, token string) ([]JellyfinUser, error) {
-	if j.token != "" && token != j.token {
-		return nil, errors.New("unauthorized")
-	}
-	return j.users, nil
-}
-func (j *fakeJellyfin) DeleteUser(_ context.Context, _, id string) error {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.deleted = append(j.deleted, id)
-	return nil
-}
-
-type fakeToken struct{ tok string }
-
-func (f fakeToken) Token(context.Context) (string, error) { return f.tok, nil }
 
 type fakeGluetun struct {
 	pingErr error
@@ -261,7 +224,7 @@ func newEnv(t *testing.T) *env {
 		store:    st,
 		sonarr:   &fakeArr{},
 		radarr:   &fakeArr{},
-		jellyfin: &fakeJellyfin{token: "admin-token"},
+		jellyfin: &fakeJellyfin{},
 	}
 	e.srv = &Server{
 		Cfg: config.Config{
@@ -273,11 +236,9 @@ func newEnv(t *testing.T) *env {
 		},
 		Store:    st,
 		Auth:     headerGuard{},
-		Session:  testSession,
 		Sonarr:   e.sonarr,
 		Radarr:   e.radarr,
 		Jellyfin: e.jellyfin,
-		JFAdmin:  fakeToken{"admin-token"},
 		Wired:    func() bool { return true },
 		Kick:     func() { e.kicks++ },
 		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -289,15 +250,11 @@ func newEnv(t *testing.T) *env {
 
 type who struct {
 	user string
-	role store.Role
 }
 
 var (
-	anon    = who{}
-	viewer  = who{"vera", store.RoleViewer}
-	viewer2 = who{"victor", store.RoleViewer}
-	manager = who{"mona", store.RoleManager}
-	admin   = who{"adam", store.RoleAdmin}
+	anon  = who{}
+	admin = who{"adam"}
 )
 
 // do sends a request through the mux as w. body may be nil, a string (sent
@@ -319,7 +276,6 @@ func (e *env) do(w who, method, path string, body any) *httptest.ResponseRecorde
 	req := httptest.NewRequest(method, path, rd)
 	if w.user != "" {
 		req.Header.Set("X-Test-User", w.user)
-		req.Header.Set("X-Test-Role", string(w.role))
 	}
 	rec := httptest.NewRecorder()
 	e.mux.ServeHTTP(rec, req)
@@ -380,43 +336,27 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-func TestRoutesRequireRole(t *testing.T) {
+func TestRoutesRequireSession(t *testing.T) {
 	e := newEnv(t)
-	cases := []struct {
-		method, path string
-		min          store.Role
-	}{
-		{"GET", "/api/status", store.RoleViewer},
-		{"GET", "/api/search?q=x", store.RoleViewer},
-		{"POST", "/api/search/add", store.RoleManager},
-		{"GET", "/api/requests", store.RoleViewer},
-		{"POST", "/api/requests/1/approve", store.RoleManager},
-		{"POST", "/api/requests/1/decline", store.RoleManager},
-		{"GET", "/api/downloads", store.RoleViewer},
-		{"POST", "/api/downloads/abc/pause", store.RoleManager},
-		{"POST", "/api/downloads/abc/resume", store.RoleManager},
-		{"DELETE", "/api/downloads/abc", store.RoleAdmin},
-		{"GET", "/api/jobs", store.RoleViewer},
-		{"POST", "/api/jobs/1/retry", store.RoleManager},
-		{"GET", "/api/settings", store.RoleAdmin},
-		{"PUT", "/api/settings", store.RoleAdmin},
-		{"GET", "/api/users", store.RoleAdmin},
-		{"PUT", "/api/users/bob/role", store.RoleAdmin},
-		{"DELETE", "/api/users/bob", store.RoleAdmin},
+	cases := []struct{ method, path string }{
+		{"GET", "/api/status"},
+		{"GET", "/api/search?q=x"},
+		{"POST", "/api/search/add"},
+		{"GET", "/api/downloads"},
+		{"POST", "/api/downloads/abc/pause"},
+		{"POST", "/api/downloads/abc/resume"},
+		{"DELETE", "/api/downloads/abc"},
+		{"GET", "/api/jobs"},
+		{"POST", "/api/jobs/1/retry"},
+		{"GET", "/api/settings"},
+		{"PUT", "/api/settings"},
 	}
-	roles := []who{viewer, manager, admin}
 	for _, c := range cases {
 		if got := e.do(anon, c.method, c.path, nil).Code; got != 401 {
 			t.Errorf("%s %s anonymous = %d, want 401", c.method, c.path, got)
 		}
-		for _, w := range roles {
-			code := e.do(w, c.method, c.path, nil).Code
-			if w.role.AtLeast(c.min) && code == 403 {
-				t.Errorf("%s %s as %s = 403, want allowed", c.method, c.path, w.role)
-			}
-			if !w.role.AtLeast(c.min) && code != 403 {
-				t.Errorf("%s %s as %s = %d, want 403", c.method, c.path, w.role, code)
-			}
+		if got := e.do(admin, c.method, c.path, nil).Code; got == 401 || got == 403 {
+			t.Errorf("%s %s signed in = %d, want allowed", c.method, c.path, got)
 		}
 	}
 }
@@ -432,5 +372,3 @@ func TestNilAuthFailsClosed(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }
-
-func farFuture() time.Time { return time.Now().Add(24 * time.Hour) }

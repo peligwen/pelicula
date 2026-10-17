@@ -6,8 +6,8 @@ import (
 	"sync"
 )
 
-// Admin caches the Jellyfin administrator's token so server-side calls (user
-// management, library refresh) do not log in every time. It logs in as
+// Admin caches the Jellyfin administrator's token so server-side calls
+// (library setup and refresh) do not log in every time. It logs in as
 // DeviceServer, a device of its own, so dashboard logins by the same
 // administrator (DeviceDashboard) do not revoke the cached token.
 type Admin struct {

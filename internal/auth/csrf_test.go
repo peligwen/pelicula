@@ -56,7 +56,7 @@ func TestCSRFWrapsAuthRoutes(t *testing.T) {
 	e := newEnv(t)
 	h := CSRF(e.h)
 
-	body := `{"username":"bob","password":"bob-pass"}`
+	body := `{"username":"alice","password":"alice-pass"}`
 	post := func(origin string) int {
 		req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(body))
 		req.Host = "pelicula.lan:7354"

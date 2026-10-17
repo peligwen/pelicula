@@ -28,7 +28,7 @@ func TestSearchInterleavesAndNormalizes(t *testing.T) {
 		`{"title":"Dune Docs","year":2000,"tvdbId":2,"id":0,"statistics":{"episodeFileCount":0}}`,
 	)
 
-	rec := e.do(viewer, "GET", "/api/search?q=dune", nil)
+	rec := e.do(admin, "GET", "/api/search?q=dune", nil)
 	wantStatus(t, rec, 200)
 	res := results(t, decode(t, rec))
 
@@ -72,7 +72,7 @@ func TestSearchCapsAtForty(t *testing.T) {
 		e.radarr.movieLookup = append(e.radarr.movieLookup, map[string]any{"title": fmt.Sprintf("M%d", i)})
 		e.sonarr.seriesList = append(e.sonarr.seriesList, map[string]any{"title": fmt.Sprintf("S%d", i)})
 	}
-	res := results(t, decode(t, e.do(viewer, "GET", "/api/search?q=x", nil)))
+	res := results(t, decode(t, e.do(admin, "GET", "/api/search?q=x", nil)))
 	if len(res) != 40 {
 		t.Fatalf("len = %d, want 40", len(res))
 	}
@@ -84,12 +84,12 @@ func TestSearchCapsAtForty(t *testing.T) {
 func TestSearchValidationAndPartialFailure(t *testing.T) {
 	e := newEnv(t)
 	for _, q := range []string{"/api/search", "/api/search?q=", "/api/search?q=%20%20"} {
-		wantStatus(t, e.do(viewer, "GET", q, nil), 400)
+		wantStatus(t, e.do(admin, "GET", q, nil), 400)
 	}
 
 	e.radarr.lookupErr = errors.New("radarr down")
 	e.sonarr.seriesList = list(t, `{"title":"Only Series","tvdbId":5}`)
-	rec := e.do(viewer, "GET", "/api/search?q=x", nil)
+	rec := e.do(admin, "GET", "/api/search?q=x", nil)
 	wantStatus(t, rec, 200)
 	res := results(t, decode(t, rec))
 	if len(res) != 1 || res[0]["title"] != "Only Series" {
@@ -97,12 +97,12 @@ func TestSearchValidationAndPartialFailure(t *testing.T) {
 	}
 
 	e.sonarr.lookupErr = errors.New("sonarr down")
-	wantStatus(t, e.do(viewer, "GET", "/api/search?q=x", nil), 502)
+	wantStatus(t, e.do(admin, "GET", "/api/search?q=x", nil), 502)
 }
 
 func TestSearchEmptyResultsIsArray(t *testing.T) {
 	e := newEnv(t)
-	rec := e.do(viewer, "GET", "/api/search?q=nothing", nil)
+	rec := e.do(admin, "GET", "/api/search?q=nothing", nil)
 	wantStatus(t, rec, 200)
 	if got := rec.Body.String(); got != "{\"results\":[]}\n" {
 		t.Fatalf("body = %q", got)
@@ -115,7 +115,7 @@ func TestSearchAddMovie(t *testing.T) {
 	e.radarr.profiles = list(t, `{"id":4,"name":"HD"}`, `{"id":9,"name":"4K"}`)
 	e.radarr.addResp = jm(t, `{"id":42,"title":"Dune"}`)
 
-	rec := e.do(manager, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 438631})
+	rec := e.do(admin, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 438631})
 	wantStatus(t, rec, 200)
 	if got := decode(t, rec); got["arr_id"] != float64(42) {
 		t.Fatalf("response = %v", got)
@@ -148,7 +148,7 @@ func TestSearchAddSeries(t *testing.T) {
 	e.sonarr.profiles = list(t, `{"id":2}`)
 	e.sonarr.addResp = jm(t, `{"id":11}`)
 
-	rec := e.do(manager, "POST", "/api/search/add", map[string]any{"type": "series", "tvdb_id": 371980})
+	rec := e.do(admin, "POST", "/api/search/add", map[string]any{"type": "series", "tvdb_id": 371980})
 	wantStatus(t, rec, 200)
 	if decode(t, rec)["arr_id"] != float64(11) {
 		t.Fatalf("body = %s", rec.Body)
@@ -173,7 +173,7 @@ func TestSearchAddAlreadyInLibraryTriggersSearch(t *testing.T) {
 	e.radarr.byTmdb = list(t, `{"title":"Dune","year":2021,"id":17}`)
 	e.sonarr.seriesList = list(t, `{"title":"Severance","id":5}`)
 
-	rec := e.do(manager, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1})
+	rec := e.do(admin, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1})
 	wantStatus(t, rec, 200)
 	if decode(t, rec)["arr_id"] != float64(17) {
 		t.Fatalf("body = %s", rec.Body)
@@ -188,7 +188,7 @@ func TestSearchAddAlreadyInLibraryTriggersSearch(t *testing.T) {
 		t.Errorf("movieIds = %v", e.radarr.commands[0]["movieIds"])
 	}
 
-	rec = e.do(manager, "POST", "/api/search/add", map[string]any{"type": "series", "tvdb_id": 9})
+	rec = e.do(admin, "POST", "/api/search/add", map[string]any{"type": "series", "tvdb_id": 9})
 	wantStatus(t, rec, 200)
 	if len(e.sonarr.addedSer) != 0 {
 		t.Fatal("must not re-add a series that is already in the library")
@@ -214,21 +214,21 @@ func TestSearchAddErrors(t *testing.T) {
 		{"series not found", map[string]any{"type": "series", "tvdb_id": 1}, 404},
 	}
 	for _, c := range cases {
-		if got := e.do(manager, "POST", "/api/search/add", c.body).Code; got != c.want {
+		if got := e.do(admin, "POST", "/api/search/add", c.body).Code; got != c.want {
 			t.Errorf("%s: status = %d, want %d", c.name, got, c.want)
 		}
 	}
 
 	// Radarr answers but has no quality profiles.
 	e.radarr.byTmdb = list(t, `{"title":"X","id":0}`)
-	wantStatus(t, e.do(manager, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1}), 502)
+	wantStatus(t, e.do(admin, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1}), 502)
 
 	// Add returns no id.
 	e.radarr.profiles = list(t, `{"id":1}`)
 	e.radarr.addResp = map[string]any{}
-	wantStatus(t, e.do(manager, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1}), 502)
+	wantStatus(t, e.do(admin, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1}), 502)
 
 	// Upstream lookup failure.
 	e.radarr.lookupErr = errors.New("boom")
-	wantStatus(t, e.do(manager, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1}), 502)
+	wantStatus(t, e.do(admin, "POST", "/api/search/add", map[string]any{"type": "movie", "tmdb_id": 1}), 502)
 }

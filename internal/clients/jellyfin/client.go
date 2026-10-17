@@ -4,8 +4,8 @@
 // plain API key, and tokens differ per call (an end user's login, the admin's
 // cached token), so the token is a per-call argument instead of client state.
 // The device id in that header is client state, see DeviceDashboard and
-// DeviceServer. This package deliberately does not retry: login and
-// user-management calls are not safe to repeat blindly.
+// DeviceServer. This package deliberately does not retry: login and the
+// startup wizard are not safe to repeat blindly.
 package jellyfin
 
 import (
@@ -225,4 +225,13 @@ func (c *Client) StartupWizardCompleted(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("jellyfin: parse system info: %w", err)
 	}
 	return info.StartupWizardCompleted, nil
+}
+
+// wrap prefixes err with what was being attempted; errors.As/Is still see
+// through it. A nil err stays nil.
+func wrap(what string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("jellyfin: %s: %w", what, err)
 }

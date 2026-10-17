@@ -1,7 +1,7 @@
 // Package store is the single SQLite database behind the server. It holds
-// only what no other service in the stack already owns: who may do what
-// (roles, sessions, invites), what viewers asked for (requests), what the
-// pipeline did with each import (jobs), and a handful of runtime settings.
+// only what no other service in the stack already owns: the dashboard's
+// cookie sessions, what the pipeline did with each import (jobs), and a
+// handful of runtime settings.
 //
 // Radarr, Sonarr, qBittorrent and Jellyfin remain the source of truth for the
 // catalog, downloads and users; the API reads through to them.
@@ -18,40 +18,6 @@ import (
 
 	_ "modernc.org/sqlite"
 )
-
-// Role is a Pelicula permission level. Jellyfin owns identity; this is the
-// only authorization concept Pelicula adds on top.
-type Role string
-
-const (
-	RoleViewer  Role = "viewer"  // search, request, see own requests and jobs
-	RoleManager Role = "manager" // plus add directly, approve requests, manage downloads
-	RoleAdmin   Role = "admin"   // plus settings, invites, roles
-)
-
-// ParseRole validates a role string.
-func ParseRole(s string) (Role, bool) {
-	switch Role(s) {
-	case RoleViewer, RoleManager, RoleAdmin:
-		return Role(s), true
-	}
-	return "", false
-}
-
-func (r Role) rank() int {
-	switch r {
-	case RoleViewer:
-		return 1
-	case RoleManager:
-		return 2
-	case RoleAdmin:
-		return 3
-	}
-	return 0
-}
-
-// AtLeast reports whether r grants at least min.
-func (r Role) AtLeast(min Role) bool { return r.rank() >= min.rank() }
 
 // Store wraps the database. All methods are safe for concurrent use.
 type Store struct {
@@ -104,7 +70,7 @@ func (s *Store) DB() *sql.DB { return s.db }
 // ErrNotFound is returned by lookups that expect a row.
 var ErrNotFound = errors.New("not found")
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 func (s *Store) migrate(ctx context.Context) error {
 	var v int
@@ -119,10 +85,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	if v < 1 {
-		if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
-			return fmt.Errorf("store: migrate v1: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("store: migrate: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 		return err
@@ -130,49 +94,22 @@ func (s *Store) migrate(ctx context.Context) error {
 	return tx.Commit()
 }
 
-const schemaV1 = `
-CREATE TABLE IF NOT EXISTS roles (
-  username   TEXT PRIMARY KEY,
-  role       TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-  token            TEXT PRIMARY KEY,
-  username         TEXT NOT NULL,
-  role             TEXT NOT NULL,
-  jellyfin_user_id TEXT NOT NULL DEFAULT '',
-  jellyfin_token   TEXT NOT NULL DEFAULT '',
-  expires_at       TEXT NOT NULL,
-  created_at       TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS sessions_username ON sessions(username);
-CREATE TABLE IF NOT EXISTS invites (
-  code       TEXT PRIMARY KEY,
-  role       TEXT NOT NULL,
-  created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL,
+// schema brings any database below schemaVersion up to date in one step.
+// Version 1 (the unreleased multi-user rescope) had roles, invites and
+// requests tables, a role column on sessions and an auto-approve setting.
+// Version 2 drops all of that: an old file loses its sessions, so everyone
+// signs in again, and keeps its job history and settings.
+const schema = `
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS invites;
+DROP TABLE IF EXISTS requests;
+DROP TABLE IF EXISTS sessions;
+CREATE TABLE sessions (
+  token      TEXT PRIMARY KEY,
+  username   TEXT NOT NULL,
   expires_at TEXT NOT NULL,
-  used_by    TEXT NOT NULL DEFAULT '',
-  used_at    TEXT
+  created_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS requests (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  media_type   TEXT NOT NULL,
-  tmdb_id      INTEGER NOT NULL DEFAULT 0,
-  tvdb_id      INTEGER NOT NULL DEFAULT 0,
-  title        TEXT NOT NULL,
-  year         INTEGER NOT NULL DEFAULT 0,
-  poster       TEXT NOT NULL DEFAULT '',
-  requested_by TEXT NOT NULL,
-  status       TEXT NOT NULL,
-  arr_id       INTEGER NOT NULL DEFAULT 0,
-  decided_by   TEXT NOT NULL DEFAULT '',
-  note         TEXT NOT NULL DEFAULT '',
-  created_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS requests_user ON requests(requested_by);
-CREATE INDEX IF NOT EXISTS requests_status ON requests(status);
 CREATE TABLE IF NOT EXISTS jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   arr_type    TEXT NOT NULL,
@@ -196,6 +133,7 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+DELETE FROM settings WHERE key = 'auto_approve_requests';
 `
 
 // ── time helpers ─────────────────────────────────────────────────────────────
