@@ -1,4 +1,4 @@
-/* Shared helpers for the dashboard and the register page.
+/* Shared helpers for the dashboard.
  * No framework, no inline handlers (the CSP forbids inline script). */
 (function (root) {
   'use strict';
