@@ -31,7 +31,7 @@ const (
 	jobTimeout    = 2 * time.Minute
 
 	rateLimitRetries = 4
-	rateLimitBackoff = 7 * time.Second // the limit is 10 requests a minute: one every 6s
+	rateLimitBackoff = 7 * time.Second // the login limit is 10 requests a minute: one every 6s
 )
 
 // ── API shapes (decoded locally so the test stays a black-box check of the
@@ -45,16 +45,6 @@ type searchResult struct {
 	TmdbID    int    `json:"tmdb_id"`
 	TvdbID    int    `json:"tvdb_id"`
 	InLibrary bool   `json:"in_library"`
-}
-
-type request struct {
-	ID          int64  `json:"id"`
-	MediaType   string `json:"media_type"`
-	Title       string `json:"title"`
-	RequestedBy string `json:"requested_by"`
-	Status      string `json:"status"`
-	ArrID       int    `json:"arr_id"`
-	DecidedBy   string `json:"decided_by"`
 }
 
 type job struct {
@@ -74,9 +64,8 @@ type jobResult struct {
 	Reason    string `json:"reason"`
 }
 
-type userRole struct {
+type user struct {
 	Username string `json:"username"`
-	Role     string `json:"role"`
 }
 
 // ── stack: the docker compose project under test ────────────────────────────
@@ -340,9 +329,9 @@ func (c *apiClient) do(t *testing.T, method, path string, body any, header map[s
 	}
 	for attempt := 0; ; attempt++ {
 		status, data := c.once(t, method, path, payload, header)
-		// nginx limits login, register and the invite lookup to 10 requests a
-		// minute per IP and answers 429; the server itself never does. Wait
-		// out the bucket instead of failing on a limit this test can hit.
+		// nginx limits login to 10 requests a minute per IP and answers 429;
+		// the server itself never does. Wait out the bucket instead of
+		// failing on a limit this test can hit.
 		if status != http.StatusTooManyRequests || attempt >= rateLimitRetries {
 			return status, data
 		}
@@ -429,17 +418,11 @@ func TestStack(t *testing.T) {
 	s.waitWired(t)
 
 	admin := newAPIClient(t, s.baseURL)
-	viewer := newAPIClient(t, s.baseURL)
 	anon := newAPIClient(t, s.baseURL)
 
-	viewerName := "viewer-" + randHex(t, 3) // matches ^[A-Za-z0-9._-]{3,32}$
-	viewerPass := randHex(t, 8)
-
 	var (
-		inviteCode string
 		picked     *searchResult
-		reqID      int64
-		arrID      = 1 // movie id used by the webhook; replaced by the approved request's arr_id
+		arrID      = 1 // movie id used by the webhook; replaced by the added title's arr_id
 		movieTitle = "Integration Test Movie"
 	)
 
@@ -447,21 +430,22 @@ func TestStack(t *testing.T) {
 		anon.expectError(t, http.MethodGet, "/api/status", nil, http.StatusUnauthorized)
 		anon.expectError(t, http.MethodGet, "/api/auth/me", nil, http.StatusUnauthorized)
 		anon.expectError(t, http.MethodGet, "/api/jobs", nil, http.StatusUnauthorized)
+		anon.expectError(t, http.MethodGet, "/api/settings", nil, http.StatusUnauthorized)
 	})
 
 	step(t, "admin login", func(t *testing.T) {
 		anon.expectError(t, http.MethodPost, "/api/auth/login",
 			map[string]string{"username": s.adminUser, "password": "definitely-wrong"}, http.StatusUnauthorized)
 
-		var me userRole
+		var me user
 		admin.call(t, http.MethodPost, "/api/auth/login",
 			map[string]string{"username": s.adminUser, "password": s.adminPass}, http.StatusOK, &me)
-		if me.Username != s.adminUser || me.Role != "admin" {
-			t.Fatalf("login returned %+v, want admin %q", me, s.adminUser)
+		if me.Username != s.adminUser {
+			t.Fatalf("login returned %+v, want %q", me, s.adminUser)
 		}
 		admin.call(t, http.MethodGet, "/api/auth/me", nil, http.StatusOK, &me)
-		if me.Role != "admin" {
-			t.Fatalf("/api/auth/me role = %q, want admin", me.Role)
+		if me.Username != s.adminUser {
+			t.Fatalf("/api/auth/me = %+v", me)
 		}
 		admin.call(t, http.MethodGet, "/api/auth/check", nil, http.StatusNoContent, nil)
 
@@ -475,74 +459,17 @@ func TestStack(t *testing.T) {
 		if !st.Wired || st.VPN.Enabled {
 			t.Fatalf("/api/status wired=%v vpn.enabled=%v, want wired and no vpn", st.Wired, st.VPN.Enabled)
 		}
-	})
 
-	step(t, "admin creates an invite", func(t *testing.T) {
-		var inv struct {
-			Code string `json:"code"`
-			Role string `json:"role"`
-			Path string `json:"path"`
+		var settings struct {
+			Settings map[string]string `json:"settings"`
 		}
-		admin.call(t, http.MethodPost, "/api/invites",
-			map[string]any{"role": "viewer", "expires_hours": 1}, http.StatusCreated, &inv)
-		if inv.Code == "" || inv.Role != "viewer" || inv.Path != "/register?code="+inv.Code {
-			t.Fatalf("invite = %+v", inv)
-		}
-		inviteCode = inv.Code
-
-		var list struct {
-			Invites []struct {
-				Code string `json:"code"`
-			} `json:"invites"`
-		}
-		admin.call(t, http.MethodGet, "/api/invites", nil, http.StatusOK, &list)
-		found := false
-		for _, i := range list.Invites {
-			found = found || i.Code == inviteCode
-		}
-		if !found {
-			t.Fatalf("invite %q missing from GET /api/invites", inviteCode)
+		admin.call(t, http.MethodGet, "/api/settings", nil, http.StatusOK, &settings)
+		if settings.Settings["validation_enabled"] != "true" {
+			t.Fatalf("/api/settings = %+v, want validation_enabled true", settings.Settings)
 		}
 	})
 
-	step(t, "invite validates", func(t *testing.T) {
-		var v struct {
-			Valid bool   `json:"valid"`
-			Role  string `json:"role"`
-		}
-		anon.call(t, http.MethodGet, "/api/register/"+url.PathEscape(inviteCode), nil, http.StatusOK, &v)
-		if !v.Valid || v.Role != "viewer" {
-			t.Fatalf("register/%s = %+v, want valid viewer", inviteCode, v)
-		}
-		anon.call(t, http.MethodGet, "/api/register/not-a-real-code", nil, http.StatusOK, &v)
-		if v.Valid {
-			t.Fatalf("unknown invite reported valid")
-		}
-	})
-
-	step(t, "viewer registers", func(t *testing.T) {
-		var me userRole
-		viewer.call(t, http.MethodPost, "/api/register",
-			map[string]string{"code": inviteCode, "username": viewerName, "password": viewerPass},
-			http.StatusCreated, &me)
-		if me.Username != viewerName || me.Role != "viewer" {
-			t.Fatalf("register returned %+v, want viewer %q", me, viewerName)
-		}
-		// Registration signs the new user in.
-		viewer.call(t, http.MethodGet, "/api/auth/me", nil, http.StatusOK, &me)
-		if me.Username != viewerName {
-			t.Fatalf("/api/auth/me = %+v", me)
-		}
-		// Role limits.
-		viewer.expectError(t, http.MethodGet, "/api/settings", nil, http.StatusForbidden)
-		viewer.expectError(t, http.MethodGet, "/api/invites", nil, http.StatusForbidden)
-		// Single use.
-		anon.expectError(t, http.MethodPost, "/api/register",
-			map[string]string{"code": inviteCode, "username": viewerName + "x", "password": viewerPass},
-			http.StatusGone)
-	})
-
-	step(t, "viewer searches", func(t *testing.T) {
+	step(t, "search", func(t *testing.T) {
 		// Search needs Radarr/Sonarr to reach their metadata service. CI without
 		// internet cannot, so skip (not fail) unless explicitly required.
 		unavailable := func(format string, args ...any) {
@@ -551,7 +478,7 @@ func TestStack(t *testing.T) {
 			}
 			t.Skipf(format, args...)
 		}
-		status, data := viewer.do(t, http.MethodGet, "/api/search?q=matrix", nil, nil)
+		status, data := admin.do(t, http.MethodGet, "/api/search?q=matrix", nil, nil)
 		if status != http.StatusOK {
 			unavailable("search unavailable (status %d): %s", status, strings.TrimSpace(string(data)))
 		}
@@ -572,60 +499,47 @@ func TestStack(t *testing.T) {
 			}
 		}
 		if picked == nil {
-			unavailable("no requestable movie among %d results", len(res.Results))
+			unavailable("no addable movie among %d results", len(res.Results))
 		}
 		t.Logf("picked %q (%d) tmdb=%d", picked.Title, picked.Year, picked.TmdbID)
 		movieTitle = picked.Title
 	})
 
-	step(t, "viewer requests", func(t *testing.T) {
+	step(t, "add to radarr", func(t *testing.T) {
 		if picked == nil {
-			t.Skip("no search result to request")
+			t.Skip("no search result to add")
 		}
-		body := map[string]any{
-			"type": "movie", "tmdb_id": picked.TmdbID, "tvdb_id": picked.TvdbID,
-			"title": picked.Title, "year": picked.Year, "poster": picked.Poster,
+		body := map[string]any{"type": "movie", "tmdb_id": picked.TmdbID}
+		var added struct {
+			ArrID int `json:"arr_id"`
 		}
-		var r request
-		viewer.call(t, http.MethodPost, "/api/requests", body, http.StatusCreated, &r)
-		if r.ID == 0 || r.Status != "pending" || r.RequestedBy != viewerName {
-			t.Fatalf("request = %+v, want pending by %q", r, viewerName)
+		admin.call(t, http.MethodPost, "/api/search/add", body, http.StatusOK, &added)
+		if added.ArrID == 0 {
+			t.Fatalf("add returned %+v, want an arr_id", added)
 		}
-		reqID = r.ID
+		arrID = added.ArrID
 
-		viewer.expectError(t, http.MethodPost, "/api/requests", body, http.StatusConflict)
-		viewer.expectError(t, http.MethodPost, fmt.Sprintf("/api/requests/%d/approve", reqID), nil, http.StatusForbidden)
-	})
-
-	step(t, "admin approves", func(t *testing.T) {
-		if reqID == 0 {
-			t.Skip("no request to approve")
+		// Adding a title that is already in the library re-searches it and
+		// answers with the same id instead of failing.
+		var again struct {
+			ArrID int `json:"arr_id"`
 		}
-		var r request
-		admin.call(t, http.MethodPost, fmt.Sprintf("/api/requests/%d/approve", reqID), nil, http.StatusOK, &r)
-		if r.Status != "approved" {
-			t.Fatalf("approve returned %+v", r)
+		admin.call(t, http.MethodPost, "/api/search/add", body, http.StatusOK, &again)
+		if again.ArrID != arrID {
+			t.Fatalf("second add returned arr_id %d, want %d", again.ArrID, arrID)
 		}
 
-		var list struct {
-			Requests []request `json:"requests"`
+		// The search now reports it as in the library.
+		var res struct {
+			Results []searchResult `json:"results"`
 		}
-		for who, c := range map[string]*apiClient{"admin": admin, "viewer": viewer} {
-			c.call(t, http.MethodGet, "/api/requests", nil, http.StatusOK, &list)
-			var got *request
-			for i := range list.Requests {
-				if list.Requests[i].ID == reqID {
-					got = &list.Requests[i]
-				}
+		admin.call(t, http.MethodGet, "/api/search?q="+url.QueryEscape(picked.Title), nil, http.StatusOK, &res)
+		for _, r := range res.Results {
+			if r.Type == "movie" && r.TmdbID == picked.TmdbID && !r.InLibrary {
+				t.Fatalf("%q still not in_library after add: %+v", r.Title, r)
 			}
-			if got == nil {
-				t.Fatalf("%s: request %d missing from GET /api/requests", who, reqID)
-			}
-			if got.Status != "approved" || got.ArrID == 0 {
-				t.Fatalf("%s: request = %+v, want approved with arr_id", who, *got)
-			}
-			arrID = got.ArrID
 		}
+		anon.expectError(t, http.MethodPost, "/api/search/add", body, http.StatusUnauthorized)
 	})
 
 	step(t, "import webhook creates a job", func(t *testing.T) {
@@ -707,6 +621,11 @@ func TestStack(t *testing.T) {
 		t.Logf("job %d finished %s: error=%q result=%s", final.ID, final.Status, final.Error, final.Result)
 		if final.Status == "failed" && final.Error == "" && res.Reason == "" {
 			t.Fatalf("job failed without a reason: %+v", *final)
+		}
+
+		// A failed job can be queued again from the dashboard.
+		if final.Status == "failed" {
+			admin.call(t, http.MethodPost, fmt.Sprintf("/api/jobs/%d/retry", final.ID), nil, http.StatusNoContent, nil)
 		}
 	})
 

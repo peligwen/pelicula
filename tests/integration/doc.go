@@ -14,14 +14,16 @@
 // CONFIG_DIR, LIBRARY_DIR and WORK_DIR folders, and always tears the stack
 // down with `docker compose down -v --remove-orphans`.
 //
-// The test does not run the pelicula CLI, so it writes the minimum service
-// seeds itself (the *arr UrlBase and Jellyfin BaseUrl that the CLI normally
-// seeds). Keep that in sync with cmd/pelicula/seed.go.
+// The service configs are seeded by running `pelicula seed` from the CLI,
+// exactly as `pelicula up` does, so the test never carries its own copy.
+//
+// It walks the administrator's loop: login, search, add a title, the *arr
+// import webhook through to a job row, retry, logout.
 //
 // Optional environment variables:
 //
-//	PELICULA_E2E_REQUIRE_SEARCH=1  fail instead of skipping the search,
-//	                               request and approve steps when the
-//	                               Radarr/Sonarr lookup is unavailable
-//	                               (for example no internet to TMDB)
+//	PELICULA_E2E_REQUIRE_SEARCH=1  fail instead of skipping the search and
+//	                               add steps when the Radarr/Sonarr lookup
+//	                               is unavailable (for example no internet
+//	                               to TMDB)
 package integration

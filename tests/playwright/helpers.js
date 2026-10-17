@@ -1,6 +1,6 @@
 // Shared helpers for the Pelicula specs. Not a spec itself (lives outside specs/).
 //
-// Most setup goes through the HTTP API instead of the UI: it is faster, and it
+// Setup goes through the HTTP API instead of the UI: it is faster, and it
 // keeps the number of logins low enough to stay under nginx's login rate limit
 // (10 requests per minute per IP). Each spec drives the UI only for what it is
 // actually testing.
@@ -57,53 +57,6 @@ async function browserContextFor(browser, apiCtx) {
   return browser.newContext({ baseURL: BASE_URL, storageState });
 }
 
-// Creates a viewer through the invite API. Returns { username, password, api },
-// where api is a signed-in API context for that viewer.
-async function createViewer(adminApi) {
-  const inv = await postJSON(adminApi, '/api/invites', { role: 'viewer', expires_hours: 1 });
-  if (inv.status() !== 201) {
-    throw new Error(`create invite failed: ${inv.status()} ${await inv.text()}`);
-  }
-  const { code } = await inv.json();
-
-  const username = uniqueUsername('pw');
-  const password = uniquePassword();
-  const api = await newAPI();
-  const reg = await postJSON(api, '/api/register', { code, username, password });
-  if (reg.status() !== 201) {
-    throw new Error(`register failed: ${reg.status()} ${await reg.text()}`);
-  }
-  return { username, password, api };
-}
-
-// Best-effort removal of a user created by a spec (Jellyfin account + role).
-async function deleteUser(adminApi, username) {
-  try {
-    await adminApi.delete(`/api/users/${encodeURIComponent(username)}`);
-  } catch (_) {
-    // the stack may already be gone; nothing to clean up then
-  }
-}
-
-// ^[A-Za-z0-9._-]{3,32}$
-function uniqueUsername(prefix) {
-  return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function uniquePassword() {
-  return `pw-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
-}
-
-// Text of an element that may be an <input>/<textarea> (value) or any other
-// element (text content).
-async function valueOrText(locator) {
-  return locator.evaluate((el) =>
-    el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
-      ? el.value
-      : (el.textContent || '').trim(),
-  );
-}
-
 module.exports = {
   BASE_URL,
   ADMIN_USER,
@@ -112,9 +65,4 @@ module.exports = {
   newAPI,
   adminAPI,
   browserContextFor,
-  createViewer,
-  deleteUser,
-  uniqueUsername,
-  uniquePassword,
-  valueOrText,
 };

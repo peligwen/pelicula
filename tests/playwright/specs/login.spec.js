@@ -24,8 +24,7 @@ test.describe('login', () => {
 
     await expect(page.getByTestId('login-username')).toBeHidden();
     await expect(page.getByTestId('tab-search')).toBeVisible();
-    await expect(page.getByTestId('tab-requests')).toBeVisible();
     await expect(page.getByTestId('tab-jobs')).toBeVisible();
-    await expect(page.getByTestId('tab-settings')).toBeVisible(); // admin only
+    await expect(page.getByTestId('tab-settings')).toBeVisible();
   });
 });
